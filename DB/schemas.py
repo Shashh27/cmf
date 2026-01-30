@@ -106,6 +106,7 @@ class PartUpdate(BaseModel):
 
 class Part(PartBase):
     id: int
+    type_name: Optional[str] = None
 
     class Config:
         from_attributes = True

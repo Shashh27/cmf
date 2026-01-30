@@ -78,18 +78,18 @@ async def startup_event():
     print("=" * 60)
 
 
-# Include all routers
-app.include_router(products_router)
-app.include_router(assemblies_router)
-app.include_router(part_types_router)
-app.include_router(parts_router)
-app.include_router(operations_router)
-app.include_router(process_plans_router)
-app.include_router(documents_router)
-app.include_router(tools_router)
-app.include_router(customers_router)
-app.include_router(orders_router)
-app.include_router(customer_documents_router)
+# Include all routers with api/v1 prefix
+app.include_router(products_router, prefix="/api/v1")
+app.include_router(assemblies_router, prefix="/api/v1")
+app.include_router(part_types_router, prefix="/api/v1")
+app.include_router(parts_router, prefix="/api/v1")
+app.include_router(operations_router, prefix="/api/v1")
+app.include_router(process_plans_router, prefix="/api/v1")
+app.include_router(documents_router, prefix="/api/v1")
+app.include_router(tools_router, prefix="/api/v1")
+app.include_router(customers_router, prefix="/api/v1")
+app.include_router(orders_router, prefix="/api/v1")
+app.include_router(customer_documents_router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -136,17 +136,17 @@ def system_info():
         },
         "supported_file_types": ["pdf", "docx", "csv", "xlsx", "doc", "xls", "txt"],
         "endpoints": {
-            "products": "/products",
-            "assemblies": "/assemblies",
-            "part_types": "/part-types",
-            "parts": "/parts",
-            "operations": "/operations",
-            "process_plans": "/process-plans",
-            "documents": "/documents",
-            "tools": "/tools",
-            "customers": "/customers",
-            "orders": "/orders",
-            "customer_documents": "/customer-documents"
+            "products": "/api/v1/products",
+            "assemblies": "/api/v1/assemblies",
+            "part_types": "/api/v1/part-types",
+            "parts": "/api/v1/parts",
+            "operations": "/api/v1/operations",
+            "process_plans": "/api/v1/process-plans",
+            "documents": "/api/v1/documents",
+            "tools": "/api/v1/tools",
+            "customers": "/api/v1/customers",
+            "orders": "/api/v1/orders",
+            "customer_documents": "/api/v1/customer-documents"
         }
     }
 

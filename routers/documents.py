@@ -4,6 +4,7 @@ from typing import List, Optional
 import os
 from datetime import datetime
 import io
+import mimetypes
 
 from DB.database import get_db
 from DB.models import Document as DocumentModel
@@ -27,6 +28,109 @@ def get_file_extension(filename: str) -> str:
 def is_allowed_file(filename: str) -> bool:
     """Check if file extension is allowed"""
     return get_file_extension(filename) in ALLOWED_EXTENSIONS
+
+
+def detect_file_type_from_content(file_content: bytes) -> str:
+    """Detect file type from file content (magic bytes)"""
+    if not file_content:
+        return 'application/octet-stream'
+    
+    # PDF files start with %PDF-
+    if file_content.startswith(b'%PDF-'):
+        return 'application/pdf'
+    
+    # PNG files start with PNG signature
+    if file_content.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    
+    # JPEG files start with FF D8 FF
+    if file_content.startswith(b'\xFF\xD8\xFF'):
+        return 'image/jpeg'
+    
+    # GIF files start with GIF87a or GIF89a
+    if file_content.startswith(b'GIF87a') or file_content.startswith(b'GIF89a'):
+        return 'image/gif'
+    
+    # BMP files start with BM
+    if file_content.startswith(b'BM'):
+        return 'image/bmp'
+    
+    # SVG files start with <svg
+    if file_content.startswith(b'<svg') or b'<svg' in file_content[:100]:
+        return 'image/svg+xml'
+    
+    # WebP files start with RIFF....WEBP
+    if (file_content.startswith(b'RIFF') and 
+        len(file_content) > 12 and 
+        file_content[8:12] == b'WEBP'):
+        return 'image/webp'
+    
+    # DOCX files are ZIP archives with specific structure
+    if (file_content.startswith(b'PK\x03\x04') and 
+        b'word/' in file_content[:1000]):
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    
+    # DOC files start with D0 CF 11 E0 (OLE header)
+    if file_content.startswith(b'\xD0\xCF\x11\xE0'):
+        return 'application/msword'
+    
+    # XLSX files are ZIP archives with specific structure
+    if (file_content.startswith(b'PK\x03\x04') and 
+        b'xl/' in file_content[:1000]):
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    
+    # XLS files start with D0 CF 11 E0 (OLE header) but different from DOC
+    if (file_content.startswith(b'\xD0\xCF\x11\xE0') and 
+        b'Workbook' in file_content[:2000]):
+        return 'application/vnd.ms-excel'
+    
+    # CSV files - check if content looks like comma-separated values
+    try:
+        text_content = file_content[:1000].decode('utf-8')
+        lines = text_content.split('\n')
+        if len(lines) > 1 and ',' in lines[0]:
+            return 'text/csv'
+    except UnicodeDecodeError:
+        pass
+    
+    # TXT files - check if content is plain text
+    try:
+        file_content[:1000].decode('utf-8')
+        return 'text/plain'
+    except UnicodeDecodeError:
+        pass
+    
+    return 'application/octet-stream'
+
+
+def get_content_type_from_detection(file_content: bytes, filename: str = None) -> str:
+    """Get content type by detecting from file content first, then fallback to extension"""
+    # Try to detect from content first
+    detected_type = detect_file_type_from_content(file_content)
+    if detected_type != 'application/octet-stream':
+        return detected_type
+    
+    # Fallback to extension-based detection
+    if filename:
+        return get_content_type(filename)
+    
+    return 'application/octet-stream'
+
+
+def get_file_type_category(content_type: str) -> str:
+    """Get file type category (pdf, image, document, spreadsheet, text, other)"""
+    if content_type == 'application/pdf':
+        return 'pdf'
+    elif content_type.startswith('image/'):
+        return 'image'
+    elif content_type in ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
+        return 'document'
+    elif content_type in ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv']:
+        return 'spreadsheet'
+    elif content_type == 'text/plain':
+        return 'text'
+    else:
+        return 'other'
 
 
 def get_content_type(filename: str) -> str:
@@ -85,8 +189,8 @@ async def create_document(
         file_content = await file.read()
         file_stream = io.BytesIO(file_content)
 
-        # Determine content type
-        content_type = get_content_type(file.filename)
+        # Determine content type using content detection first
+        content_type = get_content_type_from_detection(file_content, file.filename)
 
         # Upload to MinIO
         document_url = minio_client.upload_file(
@@ -146,6 +250,49 @@ def get_document(document_id: int, db: Session = Depends(get_db)):
     return document
 
 
+@router.get("/{document_id}/preview")
+async def preview_document(document_id: int, db: Session = Depends(get_db)):
+    """Preview document file from MinIO (inline display)"""
+    from fastapi.responses import StreamingResponse
+
+    # Get document from database
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with id {document_id} not found"
+        )
+
+    try:
+        # Extract object name from URL
+        # URL format: http://172.18.7.91:9000/cmf/documents/part_1/...
+        minio_client = get_minio_client()
+        object_name = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+
+        # Download from MinIO
+        file_data = minio_client.download_file(object_name)
+
+        # Determine content type using content detection first
+        detected_content_type = get_content_type_from_detection(file_data, document.document_name)
+        file_extension = get_file_extension(document.document_name)
+        filename = f"{document.document_name}{file_extension}"
+
+        # Return file as streaming response for inline preview
+        return StreamingResponse(
+            io.BytesIO(file_data),
+            media_type=detected_content_type,
+            headers={
+                "Content-Disposition": f"inline; filename={filename}"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to preview document: {str(e)}"
+        )
+
+
 @router.get("/{document_id}/download")
 async def download_document(document_id: int, db: Session = Depends(get_db)):
     """Download document file from MinIO"""
@@ -168,15 +315,15 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
         # Download from MinIO
         file_data = minio_client.download_file(object_name)
 
-        # Determine content type and filename
+        # Determine content type using content detection first
+        detected_content_type = get_content_type_from_detection(file_data, document.document_name)
         file_extension = get_file_extension(document.document_name)
-        content_type = get_content_type(document.document_name)
         filename = f"{document.document_name}{file_extension}"
 
         # Return file as streaming response
         return StreamingResponse(
             io.BytesIO(file_data),
-            media_type=content_type,
+            media_type=detected_content_type,
             headers={
                 "Content-Disposition": f"attachment; filename={filename}"
             }

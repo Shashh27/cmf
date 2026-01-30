@@ -10,9 +10,10 @@ from DB.models import (
     Operation as OperationModel,
     ProcessPlan as ProcessPlanModel,
     Document as DocumentModel,
-    ToolWithPart as ToolWithPartModel
+    ToolWithPart as ToolWithPartModel,
+    PartType as PartTypeModel
 )
-from DB.schemas import Product, ProductCreate, ProductUpdate, ProductHierarchicalData, PartDetails, AssemblyDetails
+from DB.schemas import Product, ProductCreate, ProductUpdate, ProductHierarchicalData, PartDetails, AssemblyDetails, Part as PartSchema
 
 router = APIRouter(
     prefix="/products",
@@ -166,8 +167,25 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
         for op in part_operations:
             part_process_plans.extend(process_plans_by_operation.get(op.id, []))
         
+        # Get the part type
+        part_type = db.query(PartTypeModel).filter(PartTypeModel.id == part.type_id).first()
+        
+        # Create a new Part model with the type_name included
+        part_dict = {
+            'id': part.id,
+            'part_name': part.part_name,
+            'part_number': part.part_number,
+            'type_id': part.type_id,
+            'raw_material_id': part.raw_material_id,
+            'assembly_id': part.assembly_id,
+            'product_id': part.product_id,
+            'type_name': part_type.type_name if part_type else None
+        }
+        
+        part_with_type = PartSchema(**part_dict)
+        
         return PartDetails(
-            part=part,
+            part=part_with_type,
             operations=part_operations,
             process_plans=part_process_plans,
             documents=documents_by_part.get(part.id, []),
