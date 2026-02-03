@@ -11,7 +11,6 @@ import {
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import OrderModal from "../OMS Components/OrderModal";
-import CustomerModal from "../OMS Components/CustomerModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import CompanyDetails from "../OMS Components/CompanyDetails";
 import { useToast } from "../components/ui/toast";
@@ -21,7 +20,6 @@ const OMS = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [orderModalOpen, setOrderModalOpen] = useState(false);
-  const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
@@ -81,13 +79,6 @@ const OMS = () => {
     }
   };
 
-  const handleCustomerCreated = (customer) => {
-    setCustomerModalOpen(false);
-    if (customer) {
-      addToast(`Customer "${customer.company_name}" created successfully!`);
-    }
-  };
-
   const handleDocumentUploaded = (document) => {
     setDocumentModalOpen(false);
     if (document) {
@@ -113,9 +104,7 @@ const OMS = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Order Management System</h1>
         <div className="flex space-x-2">
-          <Button onClick={() => setCustomerModalOpen(true)}>
-            New Customer
-          </Button>
+          
           <Button onClick={handleCreateOrder}>
             New Order
           </Button>
@@ -172,8 +161,7 @@ const OMS = () => {
         </Table>
       </div>
 
-      {/* Company Details Section */}
-      <CompanyDetails />
+      
 
       {/* Modals */}
       <OrderModal
@@ -181,12 +169,6 @@ const OMS = () => {
         onClose={() => setOrderModalOpen(false)}
         onOrderCreated={handleOrderCreated}
         editingOrder={editingOrder}
-      />
-      
-      <CustomerModal
-        isOpen={customerModalOpen}
-        onClose={() => setCustomerModalOpen(false)}
-        onCustomerCreated={handleCustomerCreated}
       />
       
       <DocumentModal

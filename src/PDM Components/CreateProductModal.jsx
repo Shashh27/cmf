@@ -12,7 +12,9 @@ const CreateProductModal = ({
   createType, 
   selectedProduct,
   parentAssembly,
-  onProductCreated 
+  onProductCreated,
+  mode = 'create', // 'create' or 'edit'
+  editingItem = null
 }) => {
   const [formData, setFormData] = useState({
     product_number: '',
@@ -30,14 +32,47 @@ const CreateProductModal = ({
   const [loading, setLoading] = useState(false);
   const [partTypes, setPartTypes] = useState([]);
 
-  // Update form data when selectedProduct or parentAssembly changes
+  // Update form data when selectedProduct, parentAssembly, mode, or editingItem changes
   useEffect(() => {
-    setFormData(prev => ({
-      ...prev,
-      product_id: selectedProduct?.id || '',
-      assembly_id: parentAssembly?.id || null
-    }));
-  }, [selectedProduct, parentAssembly]);
+    if (mode === 'edit' && editingItem) {
+      // Pre-fill form based on what we're editing
+      if (createType === 'product') {
+        setFormData(prev => ({
+          ...prev,
+          product_number: editingItem.product_number || '',
+          product_name: editingItem.product_name || '',
+          product_version: editingItem.product_version || prev.product_version,
+          product_id: editingItem.id,
+          assembly_id: null
+        }));
+      } else if (createType === 'assembly') {
+        setFormData(prev => ({
+          ...prev,
+          assembly_number: editingItem.assembly_number || '',
+          assembly_name: editingItem.assembly_name || '',
+          product_id: editingItem.product_id || selectedProduct?.id || '',
+          assembly_id: editingItem.parent_id || null
+        }));
+      } else if (createType === 'part') {
+        setFormData(prev => ({
+          ...prev,
+          part_number: editingItem.part_number || '',
+          part_name: editingItem.part_name || '',
+          type_id: editingItem.type_id || prev.type_id,
+          raw_material_id: editingItem.raw_material_id ?? prev.raw_material_id,
+          assembly_id: editingItem.assembly_id || parentAssembly?.id || null,
+          product_id: editingItem.product_id || selectedProduct?.id || ''
+        }));
+      }
+    } else {
+      // Default behavior for create mode
+      setFormData(prev => ({
+        ...prev,
+        product_id: selectedProduct?.id || '',
+        assembly_id: parentAssembly?.id || null
+      }));
+    }
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType]);
 
   // Fetch part types when component mounts
   useEffect(() => {
@@ -64,34 +99,31 @@ const CreateProductModal = ({
       let url, method, payload;
 
       if (createType === 'product') {
-        // Create new product
-        url = `${API_BASE_URL}/products/`;
-        method = 'POST';
+        url = `${API_BASE_URL}/products${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
+        method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
         payload = {
           product_number: formData.product_number,
           product_name: formData.product_name,
           product_version: formData.product_version
         };
       } else if (createType === 'assembly') {
-        // Create new assembly
-        url = `${API_BASE_URL}/assemblies/`;
-        method = 'POST';
+        url = `${API_BASE_URL}/assemblies${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
+        method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
         payload = {
           assembly_number: formData.assembly_number,
           assembly_name: formData.assembly_name,
           product_id: formData.product_id,
-          parent_id: parentAssembly?.id || null
+          parent_id: parentAssembly?.id || editingItem?.parent_id || null
         };
       } else if (createType === 'part') {
-        // Create new part
-        url = `${API_BASE_URL}/parts/`;
-        method = 'POST';
+        url = `${API_BASE_URL}/parts${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
+        method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
         payload = {
           part_number: formData.part_number,
           part_name: formData.part_name,
           type_id: formData.type_id,
           raw_material_id: formData.raw_material_id,
-          assembly_id: parentAssembly?.id || null,
+          assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
           product_id: formData.product_id
         };
       }
@@ -106,7 +138,7 @@ const CreateProductModal = ({
 
       if (response.ok) {
         const result = await response.json();
-        onProductCreated(result, createType);
+        onProductCreated(result, createType, mode === 'edit' ? 'edit' : 'create');
         onHide();
         // Reset form
         setFormData({
@@ -146,7 +178,8 @@ const CreateProductModal = ({
       <Card className="w-full max-w-md">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
           <CardTitle className="text-lg">
-            Create New {createType === 'product' ? 'Product' : createType === 'assembly' ? 'Assembly' : 'Part'}
+            {mode === 'edit' ? 'Edit' : 'Create New'}{" "}
+            {createType === 'product' ? 'Product' : createType === 'assembly' ? 'Assembly' : 'Part'}
           </CardTitle>
           <Button variant="ghost" size="sm" onClick={onHide}>
             <X className="h-4 w-4" />
@@ -271,7 +304,19 @@ const CreateProductModal = ({
                 Cancel
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? 'Creating...' : `Create ${createType === 'product' ? 'Product' : createType === 'assembly' ? 'Assembly' : 'Part'}`}
+                {loading
+                  ? mode === 'edit'
+                    ? 'Saving...'
+                    : 'Creating...'
+                  : mode === 'edit'
+                    ? 'Save Changes'
+                    : `Create ${
+                        createType === 'product'
+                          ? 'Product'
+                          : createType === 'assembly'
+                            ? 'Assembly'
+                            : 'Part'
+                      }`}
               </Button>
             </div>
           </form>
