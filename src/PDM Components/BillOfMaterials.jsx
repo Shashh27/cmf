@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, ChevronDown, ChevronRight, Plus, Layers, Wrench, Settings, FileText, ClipboardList } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, Plus, Layers, Wrench, Settings, FileText, ClipboardList, Pencil, Trash2 } from "lucide-react";
 import { API_BASE_URL } from "../Config/auth";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -22,6 +22,8 @@ const BillOfMaterials = ({ onItemSelected }) => {
   const [createType, setCreateType] = useState(''); // 'product', 'assembly', or 'part'
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [parentAssembly, setParentAssembly] = useState(null);
+  const [editMode, setEditMode] = useState(false); // false = create, true = edit
+  const [editingItem, setEditingItem] = useState(null); // currently edited product/assembly/part
   const [selectedPart, setSelectedPart] = useState(null);
   const [showPartActionModal, setShowPartActionModal] = useState(false);
   const [partActionType, setPartActionType] = useState(''); // 'operation', 'document', 'process_plan'
@@ -110,6 +112,8 @@ const BillOfMaterials = ({ onItemSelected }) => {
     setCreateType('product');
     setSelectedProduct(null);
     setParentAssembly(null);
+    setEditMode(false);
+    setEditingItem(null);
     setShowCreateModal(true);
   };
 
@@ -117,6 +121,8 @@ const BillOfMaterials = ({ onItemSelected }) => {
     setSelectedProduct(product);
     setParentAssembly(null);
     setCreateType('assembly');
+    setEditMode(false);
+    setEditingItem(null);
     setShowCreateModal(true);
   };
 
@@ -124,6 +130,8 @@ const BillOfMaterials = ({ onItemSelected }) => {
     setSelectedProduct(product);
     setParentAssembly(assembly);
     setCreateType('part');
+    setEditMode(false);
+    setEditingItem(null);
     setShowCreateModal(true);
   };
 
@@ -132,6 +140,8 @@ const BillOfMaterials = ({ onItemSelected }) => {
     setSelectedProduct({ id: assembly.product_id });
     setParentAssembly(assembly);
     setCreateType('assembly');
+    setEditMode(false);
+    setEditingItem(null);
     setShowCreateModal(true);
   };
 
@@ -164,17 +174,120 @@ const BillOfMaterials = ({ onItemSelected }) => {
     }
   };
 
-  const handleProductCreated = (newItem, type) => {
-    // Refresh the relevant data based on what was created
+  const handleProductCreated = (newItem, type, action = 'create') => {
+    // Refresh the relevant data based on what was created or edited
     if (type === 'product') {
       fetchProducts();
-      addToast(`Product "${newItem.product_name}" created successfully!`);
+      addToast(
+        `Product "${newItem.product_name}" ${action === 'edit' ? 'updated' : 'created'} successfully!`
+      );
     } else if (type === 'assembly') {
       fetchAssemblies();
-      addToast(`Assembly "${newItem.assembly_name}" created successfully!`);
+      // assemblies can affect parts tree as well
+      fetchParts();
+      addToast(
+        `Assembly "${newItem.assembly_name}" ${action === 'edit' ? 'updated' : 'created'} successfully!`
+      );
     } else if (type === 'part') {
       fetchParts();
-      addToast(`Part "${newItem.part_name}" created successfully!`);
+      addToast(
+        `Part "${newItem.part_name}" ${action === 'edit' ? 'updated' : 'created'} successfully!`
+      );
+    }
+  };
+
+  // Edit handlers
+  const handleEditProduct = (product) => {
+    setCreateType('product');
+    setSelectedProduct(product);
+    setParentAssembly(null);
+    setEditMode(true);
+    setEditingItem(product);
+    setShowCreateModal(true);
+  };
+
+  const handleEditAssembly = (assembly) => {
+    const productForAssembly = products.find(p => p.id === assembly.product_id) || null;
+    setCreateType('assembly');
+    setSelectedProduct(productForAssembly);
+    setParentAssembly(null);
+    setEditMode(true);
+    setEditingItem(assembly);
+    setShowCreateModal(true);
+  };
+
+  const handleEditPart = (part) => {
+    const productForPart = products.find(p => p.id === part.product_id) || null;
+    const assemblyForPart = assemblies.find(a => a.id === part.assembly_id) || null;
+    setCreateType('part');
+    setSelectedProduct(productForPart);
+    setParentAssembly(assemblyForPart);
+    setEditMode(true);
+    setEditingItem(part);
+    setShowCreateModal(true);
+  };
+
+  // Delete handlers
+  const handleDeleteProduct = async (product) => {
+    if (!window.confirm(`Delete product "${product.product_name}"? This cannot be undone.`)) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/products/${product.id}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        addToast(`Product "${product.product_name}" deleted successfully.`);
+        await fetchProducts();
+        await fetchAssemblies();
+        await fetchParts();
+      } else {
+        console.error('Failed to delete product');
+        addToast(`Failed to delete product "${product.product_name}".`);
+      }
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      addToast(`Error deleting product "${product.product_name}".`);
+    }
+  };
+
+  const handleDeleteAssembly = async (assembly) => {
+    if (!window.confirm(`Delete assembly "${assembly.assembly_name}"? This cannot be undone.`)) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/assemblies/${assembly.id}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        addToast(`Assembly "${assembly.assembly_name}" deleted successfully.`);
+        await fetchAssemblies();
+        await fetchParts();
+      } else {
+        console.error('Failed to delete assembly');
+        addToast(`Failed to delete assembly "${assembly.assembly_name}".`);
+      }
+    } catch (error) {
+      console.error('Error deleting assembly:', error);
+      addToast(`Error deleting assembly "${assembly.assembly_name}".`);
+    }
+  };
+
+  const handleDeletePart = async (part) => {
+    if (!window.confirm(`Delete part "${part.part_name}"? This cannot be undone.`)) return;
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/parts/${part.id}`, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        addToast(`Part "${part.part_name}" deleted successfully.`);
+        await fetchParts();
+      } else {
+        console.error('Failed to delete part');
+        addToast(`Failed to delete part "${part.part_name}".`);
+      }
+    } catch (error) {
+      console.error('Error deleting part:', error);
+      addToast(`Error deleting part "${part.part_name}".`);
     }
   };
 
@@ -251,6 +364,28 @@ const BillOfMaterials = ({ onItemSelected }) => {
             >
               <ClipboardList className="h-3 w-3" />
             </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleEditPart(part);
+              }}
+              title="Edit Part"
+            >
+              <Pencil className="h-3 w-3 text-muted-foreground" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeletePart(part);
+              }}
+              title="Delete Part"
+            >
+              <Trash2 className="h-3 w-3 text-red-500" />
+            </Button>
           </div>
         </div>
       </div>
@@ -307,6 +442,28 @@ const BillOfMaterials = ({ onItemSelected }) => {
               title="Create Part"
             >
               <Wrench className="h-3 w-3" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleEditAssembly(assembly);
+              }}
+              title="Edit Assembly"
+            >
+              <Pencil className="h-3 w-3 text-blue-900" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteAssembly(assembly);
+              }}
+              title="Delete Assembly"
+            >
+              <Trash2 className="h-3 w-3 text-red-500" />
             </Button>
           </div>
         </div>
@@ -374,6 +531,28 @@ const BillOfMaterials = ({ onItemSelected }) => {
               title="Create Part"
             >
               <Wrench className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleEditProduct(product);
+              }}
+              title="Edit Product"
+            >
+              <Pencil className="h-4 w-4 text-muted-foreground" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteProduct(product);
+              }}
+              title="Delete Product"
+            >
+              <Trash2 className="h-4 w-4 text-red-500" />
             </Button>
           </div>
         </div>
@@ -467,10 +646,14 @@ const BillOfMaterials = ({ onItemSelected }) => {
           onHide={() => {
             setShowCreateModal(false);
             setParentAssembly(null);
+            setEditingItem(null);
+            setEditMode(false);
           }}
           createType={createType}
           selectedProduct={selectedProduct}
           parentAssembly={parentAssembly}
+          mode={editMode ? 'edit' : 'create'}
+          editingItem={editingItem}
           onProductCreated={handleProductCreated}
         />
         

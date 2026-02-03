@@ -113,9 +113,7 @@ const OMS = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Order Management System</h1>
         <div className="flex space-x-2">
-          <Button onClick={() => setCustomerModalOpen(true)}>
-            New Customer
-          </Button>
+          
           <Button onClick={handleCreateOrder}>
             New Order
           </Button>
@@ -172,8 +170,7 @@ const OMS = () => {
         </Table>
       </div>
 
-      {/* Company Details Section */}
-      <CompanyDetails />
+ 
 
       {/* Modals */}
       <OrderModal
