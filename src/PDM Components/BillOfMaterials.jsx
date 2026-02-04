@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Search, ChevronDown, ChevronRight, Plus, Layers, Wrench, Settings, FileText, ClipboardList, Pencil, Trash2 } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, Plus, Layers, Wrench, Settings, FileText, ClipboardList, Pencil, Trash2, Package, Box } from "lucide-react";
 import { API_BASE_URL } from "../Config/auth";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -59,8 +59,11 @@ const BillOfMaterials = ({ onItemSelected }) => {
     }
   };
 
-  const fetchProductHierarchy = async (productId) => {
-    if (hierarchicalData[productId]) return hierarchicalData[productId];
+  const fetchProductHierarchy = async (productId, forceRefresh = false) => {
+    // Only use cached data if not forcing refresh
+    if (!forceRefresh && hierarchicalData[productId]) {
+      return hierarchicalData[productId];
+    }
     
     try {
       const response = await fetch(`${API_BASE_URL}/products/${productId}/hierarchical`);
@@ -170,9 +173,9 @@ const BillOfMaterials = ({ onItemSelected }) => {
     }
   };
 
-  const handleProductCreated = (newItem, type, action = 'create') => {
+  const handleProductCreated = async (newItem, type, action = 'create') => {
     // Refresh the products list to get the latest data
-    fetchProducts();
+    await fetchProducts();
     
     // Show appropriate success message
     if (type === 'product') {
@@ -180,24 +183,39 @@ const BillOfMaterials = ({ onItemSelected }) => {
         `Product "${newItem.product_name}" ${action === 'edit' ? 'updated' : 'created'} successfully!`
       );
     } else if (type === 'assembly') {
-      // Clear the hierarchical data cache for the parent product to force a refresh
+      // Force refresh the hierarchical data for the parent product
       if (newItem.product_id) {
-        setHierarchicalData(prev => {
-          const newData = {...prev};
-          delete newData[newItem.product_id];
-          return newData;
-        });
+        // Fetch fresh data with force refresh
+        await fetchProductHierarchy(newItem.product_id, true);
+        
+        // Keep the product expanded after creating assembly
+        setExpandedItems(prev => ({
+          ...prev,
+          [newItem.product_id]: true
+        }));
       }
       addToast(
         `Assembly "${newItem.assembly_name}" ${action === 'edit' ? 'updated' : 'created'} successfully!`
       );
     } else if (type === 'part') {
-      // Clear the hierarchical data cache for the parent product to force a refresh
+      // Force refresh the hierarchical data for the parent product
       if (newItem.product_id) {
-        setHierarchicalData(prev => {
-          const newData = {...prev};
-          delete newData[newItem.product_id];
-          return newData;
+        // Fetch fresh data with force refresh
+        await fetchProductHierarchy(newItem.product_id, true);
+        
+        // Keep the product and assembly (if applicable) expanded after creating part
+        setExpandedItems(prev => {
+          const newExpanded = {
+            ...prev,
+            [newItem.product_id]: true
+          };
+          
+          // If the part is under an assembly, keep that assembly expanded too
+          if (newItem.assembly_id) {
+            newExpanded[newItem.assembly_id] = true;
+          }
+          
+          return newExpanded;
         });
       }
       addToast(
@@ -228,7 +246,25 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
   const handleEditPart = (part) => {
     const productForPart = products.find(p => p.id === part.product_id) || null;
-    const assemblyForPart = assemblies.find(a => a.id === part.assembly_id) || null;
+    
+    // Find the assembly for the part if it exists
+    let assemblyForPart = null;
+    if (part.assembly_id && hierarchicalData[part.product_id]) {
+      const findAssembly = (assemblies) => {
+        for (const assembly of assemblies) {
+          if (assembly.id === part.assembly_id) {
+            return assembly;
+          }
+          if (assembly.child_assemblies) {
+            const found = findAssembly(assembly.child_assemblies);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      assemblyForPart = findAssembly(hierarchicalData[part.product_id].assemblies || []);
+    }
+    
     setCreateType('part');
     setSelectedProduct(productForPart);
     setParentAssembly(assemblyForPart);
@@ -248,8 +284,18 @@ const BillOfMaterials = ({ onItemSelected }) => {
       if (response.ok) {
         addToast(`Product "${product.product_name}" deleted successfully.`);
         await fetchProducts();
-        await fetchAssemblies();
-        await fetchParts();
+        
+        // Remove from hierarchical data and expanded items
+        setHierarchicalData(prev => {
+          const newData = { ...prev };
+          delete newData[product.id];
+          return newData;
+        });
+        setExpandedItems(prev => {
+          const newExpanded = { ...prev };
+          delete newExpanded[product.id];
+          return newExpanded;
+        });
       } else {
         console.error('Failed to delete product');
         addToast(`Failed to delete product "${product.product_name}".`);
@@ -269,8 +315,24 @@ const BillOfMaterials = ({ onItemSelected }) => {
       });
       if (response.ok) {
         addToast(`Assembly "${assembly.assembly_name}" deleted successfully.`);
-        await fetchAssemblies();
-        await fetchParts();
+        
+        // Refresh the hierarchical data for the product with force refresh
+        if (assembly.product_id) {
+          await fetchProductHierarchy(assembly.product_id, true);
+          
+          // Keep the product expanded
+          setExpandedItems(prev => ({
+            ...prev,
+            [assembly.product_id]: true
+          }));
+        }
+        
+        // Remove the assembly from expanded items
+        setExpandedItems(prev => {
+          const newExpanded = { ...prev };
+          delete newExpanded[assembly.id];
+          return newExpanded;
+        });
       } else {
         console.error('Failed to delete assembly');
         addToast(`Failed to delete assembly "${assembly.assembly_name}".`);
@@ -290,7 +352,25 @@ const BillOfMaterials = ({ onItemSelected }) => {
       });
       if (response.ok) {
         addToast(`Part "${part.part_name}" deleted successfully.`);
-        await fetchParts();
+        
+        // Refresh the hierarchical data for the product with force refresh
+        if (part.product_id) {
+          await fetchProductHierarchy(part.product_id, true);
+          
+          // Keep the product and assembly (if applicable) expanded
+          setExpandedItems(prev => {
+            const newExpanded = {
+              ...prev,
+              [part.product_id]: true
+            };
+            
+            if (part.assembly_id) {
+              newExpanded[part.assembly_id] = true;
+            }
+            
+            return newExpanded;
+          });
+        }
       } else {
         console.error('Failed to delete part');
         addToast(`Failed to delete part "${part.part_name}".`);
@@ -415,7 +495,7 @@ const BillOfMaterials = ({ onItemSelected }) => {
           <div className="flex items-center space-x-2">
             <span className="font-medium text-sm">{part.part_name}</span>
             <div className="flex items-center space-x-1 ml-2">
-              <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
+              <Box className="h-3.5 w-3.5 text-gray-500" />
               <span className="text-xs font-medium text-gray-600">Part</span>
             </div>
           </div>
@@ -507,8 +587,14 @@ const BillOfMaterials = ({ onItemSelected }) => {
             )}
             <span className="font-medium">{assembly.assembly_name}</span>
             <div className="flex items-center space-x-1 ml-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span className="text-xs font-medium text-green-600">{assembly.parent_id ? 'Sub-Assembly' : 'Assembly'}</span>
+              {assembly.parent_id ? (
+                <Layers className="h-3.5 w-3.5 text-green-500" />
+              ) : (
+                <Package className="h-3.5 w-3.5 text-blue-500" />
+              )}
+              <span className={`text-xs font-medium ${assembly.parent_id ? 'text-green-600' : 'text-blue-600'}`}>
+                {assembly.parent_id ? 'Sub-Assembly' : 'Assembly'}
+              </span>
             </div>
           </div>
           <div className="flex items-center space-x-1">
@@ -598,8 +684,8 @@ const BillOfMaterials = ({ onItemSelected }) => {
             )}
             <span className="font-bold">{product.product_name}</span>
             <div className="flex items-center space-x-1 ml-2">
-              <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-              <span className="text-xs font-medium text-blue-600">Product</span>
+              <Package className="h-4 w-4 text-purple-500" />
+              <span className="text-xs font-medium text-purple-600">Product</span>
             </div>
           </div>
           <div className="flex items-center space-x-1">

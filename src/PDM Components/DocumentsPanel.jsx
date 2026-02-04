@@ -41,101 +41,73 @@ const DocumentsPanel = ({ selectedItem }) => {
         return;
       }
 
-      // Fetch documents
-      const documentsResponse = await fetch(`${API_BASE_URL}/documents/part/${selectedItem.id}`);
-      if (documentsResponse.ok) {
-        const documentsData = await documentsResponse.json();
-        setDocuments(documentsData);
-      } else {
-        setDocuments([]);
-      }
-
-      // For operations and process plans, we need to get them from the hierarchical data
-      // First, try to find which product this part belongs to
-      const partsResponse = await fetch(`${API_BASE_URL}/parts/`);
-      if (partsResponse.ok) {
-        const allParts = await partsResponse.json();
-        const currentPart = allParts.find(p => p.id === selectedItem.id);
-        
-        if (currentPart && currentPart.product_id) {
-          // Get hierarchical data for the product
-          const hierarchicalResponse = await fetch(`${API_BASE_URL}/products/${currentPart.product_id}/hierarchical`);
-          if (hierarchicalResponse.ok) {
-            const hierarchicalData = await hierarchicalResponse.json();
-            
-            // Find this part in the hierarchical data
-            let foundOperations = [];
-            let foundProcessPlans = {};
-            
-            // Search in direct parts
-            if (hierarchicalData.direct_parts) {
-              const directPart = hierarchicalData.direct_parts.find(p => p.part && p.part.id === selectedItem.id);
-              if (directPart) {
-                foundOperations = directPart.operations || [];
-                // Convert process plans array to object with operation_id as key
-                if (directPart.process_plans) {
-                  directPart.process_plans.forEach(plan => {
-                    if (plan.operation_id) {
-                      foundProcessPlans[plan.operation_id] = plan;
-                    }
-                  });
-                }
+      // Get hierarchical data from the selected part's product
+      if (selectedItem.product_id) {
+        const hierarchicalResponse = await fetch(`${API_BASE_URL}/products/${selectedItem.product_id}/hierarchical`);
+        if (hierarchicalResponse.ok) {
+          const hierarchicalData = await hierarchicalResponse.json();
+          
+          let foundDocuments = [];
+          let foundOperations = [];
+          let foundProcessPlans = {};
+          
+          // Search in direct parts first
+          if (hierarchicalData.direct_parts) {
+            const directPart = hierarchicalData.direct_parts.find(p => p.part && p.part.id === selectedItem.id);
+            if (directPart) {
+              foundDocuments = directPart.documents || [];
+              foundOperations = directPart.operations || [];
+              
+              // Convert process plans array to object with operation_id as key
+              if (directPart.process_plans) {
+                directPart.process_plans.forEach(plan => {
+                  if (plan.operation_id) {
+                    foundProcessPlans[plan.operation_id] = plan;
+                  }
+                });
               }
             }
-            
-            // Search in assemblies if not found in direct parts
-            if (foundOperations.length === 0 && hierarchicalData.assemblies) {
-              const searchInAssemblies = (assemblies) => {
-                for (const assembly of assemblies) {
-                  // Check parts in current assembly
-                  if (assembly.parts) {
-                    const part = assembly.parts.find(p => p.part && p.part.id === selectedItem.id);
-                    if (part) {
-                      foundOperations = part.operations || [];
-                      if (part.process_plans) {
-                        part.process_plans.forEach(plan => {
-                          if (plan.operation_id) {
-                            foundProcessPlans[plan.operation_id] = plan;
-                          }
-                        });
-                      }
-                      return true;
+          }
+          
+          // Search in assemblies if not found in direct parts
+          if (foundOperations.length === 0 && hierarchicalData.assemblies) {
+            const searchInAssemblies = (assemblies) => {
+              for (const assembly of assemblies) {
+                // Check parts in current assembly
+                if (assembly.parts) {
+                  const part = assembly.parts.find(p => p.part && p.part.id === selectedItem.id);
+                  if (part) {
+                    foundDocuments = part.documents || [];
+                    foundOperations = part.operations || [];
+                    if (part.process_plans) {
+                      part.process_plans.forEach(plan => {
+                        if (plan.operation_id) {
+                          foundProcessPlans[plan.operation_id] = plan;
+                        }
+                      });
                     }
-                  }
-                  
-                  // Recursively search in subassemblies
-                  if (assembly.subassemblies && assembly.subassemblies.length > 0) {
-                    if (searchInAssemblies(assembly.subassemblies)) {
-                      return true;
-                    }
+                    return true; // Found the part, stop searching
                   }
                 }
-                return false;
-              };
-              
-              searchInAssemblies(hierarchicalData.assemblies);
-            }
+                
+                // Recursively search in subassemblies
+                if (assembly.subassemblies && assembly.subassemblies.length > 0) {
+                  if (searchInAssemblies(assembly.subassemblies)) {
+                    return true; // Found in subassembly, stop searching
+                  }
+                }
+              }
+              return false; // Not found in this branch
+            };
             
-            console.log("Found operations:", foundOperations);
-            console.log("Found process plans:", foundProcessPlans);
-            
-            setOperations(foundOperations);
-            setProcessPlans(foundProcessPlans);
-          } else {
-            // Fallback to separate endpoints
-            const operationsResponse = await fetch(`${API_BASE_URL}/operations/`);
-            if (operationsResponse.ok) {
-              const allOperations = await operationsResponse.json();
-              const partOperations = allOperations.filter(op => op.part_id === selectedItem.id);
-              setOperations(partOperations);
-            }
-            
-            // Initialize empty process plans object
-            setProcessPlans({});
+            searchInAssemblies(hierarchicalData.assemblies);
           }
+          
+          setDocuments(foundDocuments);
+          setOperations(foundOperations);
+          setProcessPlans(foundProcessPlans);
         }
       }
-
     } catch (error) {
       console.error("Error fetching data:", error);
       setDocuments([]);
