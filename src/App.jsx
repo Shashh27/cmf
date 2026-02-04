@@ -12,6 +12,7 @@ function App() {
         <Routes>
           <Route path="/" element={<OMS />} />
           <Route path="/oms" element={<OMS />} />
+          <Route path="/oms/product/:productId" element={<OMS />} />
           <Route path="/pdm" element={<PDM />} />
           <Route path="/pps" element={<PPS />} />
           <Route path="/configuration" element={<Configuration />} />

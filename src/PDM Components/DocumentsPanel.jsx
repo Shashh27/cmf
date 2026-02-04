@@ -36,7 +36,7 @@ const DocumentsPanel = ({ selectedItem }) => {
       if (!selectedItem || selectedItem.itemType !== 'part') {
         setDocuments([]);
         setOperations([]);
-        setProcessPlans([]);
+        setProcessPlans({});
         setLoading(false);
         return;
       }
@@ -65,29 +65,55 @@ const DocumentsPanel = ({ selectedItem }) => {
             
             // Find this part in the hierarchical data
             let foundOperations = [];
-            let foundProcessPlans = [];
+            let foundProcessPlans = {};
             
             // Search in direct parts
             if (hierarchicalData.direct_parts) {
               const directPart = hierarchicalData.direct_parts.find(p => p.part && p.part.id === selectedItem.id);
               if (directPart) {
                 foundOperations = directPart.operations || [];
-                foundProcessPlans = directPart.process_plans || [];
+                // Convert process plans array to object with operation_id as key
+                if (directPart.process_plans) {
+                  directPart.process_plans.forEach(plan => {
+                    if (plan.operation_id) {
+                      foundProcessPlans[plan.operation_id] = plan;
+                    }
+                  });
+                }
               }
             }
             
             // Search in assemblies if not found in direct parts
             if (foundOperations.length === 0 && hierarchicalData.assemblies) {
-              for (const assembly of hierarchicalData.assemblies) {
-                if (assembly.parts) {
-                  const assemblyPart = assembly.parts.find(p => p.part && p.part.id === selectedItem.id);
-                  if (assemblyPart) {
-                    foundOperations = assemblyPart.operations || [];
-                    foundProcessPlans = assemblyPart.process_plans || [];
-                    break;
+              const searchInAssemblies = (assemblies) => {
+                for (const assembly of assemblies) {
+                  // Check parts in current assembly
+                  if (assembly.parts) {
+                    const part = assembly.parts.find(p => p.part && p.part.id === selectedItem.id);
+                    if (part) {
+                      foundOperations = part.operations || [];
+                      if (part.process_plans) {
+                        part.process_plans.forEach(plan => {
+                          if (plan.operation_id) {
+                            foundProcessPlans[plan.operation_id] = plan;
+                          }
+                        });
+                      }
+                      return true;
+                    }
+                  }
+                  
+                  // Recursively search in subassemblies
+                  if (assembly.subassemblies && assembly.subassemblies.length > 0) {
+                    if (searchInAssemblies(assembly.subassemblies)) {
+                      return true;
+                    }
                   }
                 }
-              }
+                return false;
+              };
+              
+              searchInAssemblies(hierarchicalData.assemblies);
             }
             
             console.log("Found operations:", foundOperations);
@@ -104,7 +130,8 @@ const DocumentsPanel = ({ selectedItem }) => {
               setOperations(partOperations);
             }
             
-            setProcessPlans([]); // Process plans are only in hierarchical data
+            // Initialize empty process plans object
+            setProcessPlans({});
           }
         }
       }
