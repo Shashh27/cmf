@@ -1,30 +1,34 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../../lib/utils";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 const Sidebar = () => {
   const location = useLocation();
+  const isOmsActive = location.pathname.startsWith("/oms");
+  const [omsExpanded, setOmsExpanded] = useState(isOmsActive);
+
+  useEffect(() => {
+    if (isOmsActive) setOmsExpanded(true);
+  }, [isOmsActive]);
+
+  const omsIcon = (
+    <svg
+      className="w-5 h-5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+      />
+    </svg>
+  );
 
   const menuItems = [
-    {
-      title: "OMS",
-      path: "/oms",
-      icon: (
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-          />
-        </svg>
-      ),
-    },
     {
       title: "PDM",
       path: "/pdm",
@@ -96,6 +100,46 @@ const Sidebar = () => {
         <h1 className="text-2xl font-bold text-gray-900">CMFD MES</h1>
       </div>
       <nav className="mt-6">
+        {/* OMS with sub-menus */}
+        <div className="border-b border-gray-100">
+          <button
+            onClick={() => setOmsExpanded(!omsExpanded)}
+            className={cn(
+              "flex items-center w-full px-6 py-3 text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200",
+              isOmsActive && "bg-gray-100 text-gray-900"
+            )}
+          >
+            {omsIcon}
+            <span className="ml-3 font-medium flex-1 text-left">OMS</span>
+            {omsExpanded ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </button>
+          {omsExpanded && (
+            <div className="bg-gray-50/50">
+              <Link
+                to="/oms/oms"
+                className={cn(
+                  "flex items-center px-6 py-2.5 pl-14 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200",
+                  location.pathname === "/oms/oms" && "bg-gray-100 text-gray-900 font-medium"
+                )}
+              >
+                Orders
+              </Link>
+              <Link
+                to="/oms/rawmaterials"
+                className={cn(
+                  "flex items-center px-6 py-2.5 pl-14 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200",
+                  location.pathname === "/oms/rawmaterials" && "bg-gray-100 text-gray-900 font-medium"
+                )}
+              >
+                Raw Materials
+              </Link>
+            </div>
+          )}
+        </div>
         {menuItems.map((item) => (
           <Link
             key={item.path}
