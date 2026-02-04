@@ -19,20 +19,47 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
     product_id: "",
     quantity: "",
     due_date: "",
-    priority: "Medium",
+    priority: "0",
     supervisor_id: "",
     status: "Pending",
   });
   const [customers, setCustomers] = useState([]);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
 
   useEffect(() => {
     fetchCustomers();
-    if (editingOrder) {
-      setFormData(editingOrder);
+    fetchProducts();
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      if (editingOrder) {
+        setFormData({
+          ...editingOrder,
+          customer_id: editingOrder.customer_id?.toString() ?? "",
+          product_id: editingOrder.product_id?.toString() ?? "",
+          quantity: editingOrder.quantity?.toString() ?? "",
+          due_date: editingOrder.due_date ? editingOrder.due_date.split("T")[0] : "",
+          priority: editingOrder.priority?.toString() ?? "0",
+          supervisor_id: editingOrder.supervisor_id?.toString() ?? "",
+        });
+      } else {
+        setFormData({
+          sale_order_number: "",
+          customer_id: "",
+          product_id: "",
+          quantity: "",
+          due_date: "",
+          priority: "0",
+          supervisor_id: "",
+          status: "Pending",
+        });
+        setDocuments([]);
+      }
     }
-  }, [editingOrder]);
+  }, [isOpen, editingOrder]);
 
   const fetchCustomers = async () => {
     try {
@@ -43,6 +70,18 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
       }
     } catch (error) {
       console.error("Error fetching customers:", error);
+    }
+  };
+
+  const fetchProducts = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/products/`);
+      if (response.ok) {
+        const data = await response.json();
+        setProducts(data);
+      }
+    } catch (error) {
+      console.error("Error fetching products:", error);
     }
   };
 
@@ -66,6 +105,9 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
           ...formData,
           quantity: parseInt(formData.quantity),
           customer_id: parseInt(formData.customer_id),
+          product_id: parseInt(formData.product_id),
+          priority: parseInt(formData.priority) || 0,
+          supervisor_id: parseInt(formData.supervisor_id) || 0,
         }),
       });
 
@@ -96,7 +138,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
       product_id: "",
       quantity: "",
       due_date: "",
-      priority: "Medium",
+      priority: "0",
       supervisor_id: "",
       status: "Pending",
     });
@@ -141,8 +183,12 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
+      <DialogContent 
+        className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto"
+        onInteractOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader className="border-b pb-4">
           <DialogTitle className="text-xl font-semibold text-gray-900">
             {editingOrder ? "Edit Order" : "Create New Order"}
@@ -191,18 +237,25 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
             
             <div className="space-y-2">
               <label htmlFor="product_id" className="text-sm font-medium text-gray-700">
-                Product ID *
+                Product *
               </label>
-              <Input
-                id="product_id"
+              <Select
                 value={formData.product_id}
-                onChange={(e) =>
-                  setFormData({ ...formData, product_id: e.target.value })
+                onValueChange={(value) =>
+                  setFormData({ ...formData, product_id: value })
                 }
-                placeholder="Enter product ID"
-                className="w-full"
-                required
-              />
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select product" />
+                </SelectTrigger>
+                <SelectContent>
+                  {products.map((product) => (
+                    <SelectItem key={product.id} value={product.id.toString()}>
+                      {product.product_name || product.product_number || `Product ${product.id}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             
             <div className="space-y-2">
@@ -241,21 +294,16 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
               <label htmlFor="priority" className="text-sm font-medium text-gray-700">
                 Priority
               </label>
-              <Select
+              <Input
+                id="priority"
+                type="number"
                 value={formData.priority}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, priority: value })
+                onChange={(e) =>
+                  setFormData({ ...formData, priority: e.target.value })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Low">Low</SelectItem>
-                  <SelectItem value="Medium">Medium</SelectItem>
-                  <SelectItem value="High">High</SelectItem>
-                </SelectContent>
-              </Select>
+                placeholder="Enter priority"
+                className="w-full"
+              />
             </div>
             
             <div className="space-y-2">

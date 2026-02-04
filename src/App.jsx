@@ -3,6 +3,7 @@ import Layout from "./components/Layout";
 import OMS from "./Pages/OMS";
 import PDM from "./Pages/PDM";
 import PPS from "./Pages/PPS";
+import Configuration from "./Pages/Configuration";
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
           <Route path="/oms" element={<OMS />} />
           <Route path="/pdm" element={<PDM />} />
           <Route path="/pps" element={<PPS />} />
+          <Route path="/configuration" element={<Configuration />} />
         </Routes>
       </Layout>
     </Router>
