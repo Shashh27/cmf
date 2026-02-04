@@ -78,7 +78,7 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_product(product_id: int, db: Session = Depends(get_db)):
-    """Delete a product"""
+    """Delete a product and all its assemblies and parts (recursive cascade deletion)"""
     db_product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
     if not db_product:
         raise HTTPException(
@@ -86,11 +86,39 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
             detail=f"Product with id {product_id} not found"
         )
 
+    def delete_assembly_recursive(assembly_id_to_delete):
+        """Recursively delete assembly and all its children"""
+        # First, find all child assemblies
+        child_assemblies = db.query(AssemblyModel).filter(AssemblyModel.parent_id == assembly_id_to_delete).all()
+        
+        # Recursively delete all child assemblies
+        for child_assembly in child_assemblies:
+            delete_assembly_recursive(child_assembly.id)
+        
+        # Delete all parts that belong to this assembly
+        parts_under_assembly = db.query(PartModel).filter(PartModel.assembly_id == assembly_id_to_delete).all()
+        for part in parts_under_assembly:
+            db.delete(part)
+        
+        # Delete the assembly itself
+        assembly_to_delete = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id_to_delete).first()
+        if assembly_to_delete:
+            db.delete(assembly_to_delete)
+
+    # First, delete all parts that belong to this product directly
+    parts_direct = db.query(PartModel).filter(PartModel.product_id == product_id).all()
+    for part in parts_direct:
+        db.delete(part)
+    
+    # Then, delete all assemblies that belong to this product (recursively)
+    root_assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).all()
+    for assembly in root_assemblies:
+        delete_assembly_recursive(assembly.id)
+    
+    # Finally, delete the product
     db.delete(db_product)
     db.commit()
     return None
-
-
 
 
 @router.get("/{product_id}/hierarchical", response_model=ProductHierarchicalData)

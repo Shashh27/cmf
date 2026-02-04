@@ -1,6 +1,7 @@
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime, time
+from typing_extensions import Self
 
 
 # =======================
@@ -35,7 +36,7 @@ class Product(ProductBase):
 class AssemblyBase(BaseModel):
     assembly_name: str
     assembly_number: str
-    product_id: int
+    product_id: Optional[int] = None
     parent_id: Optional[int] = None
 
 
@@ -88,7 +89,7 @@ class PartBase(BaseModel):
     type_id: int
     raw_material_id: Optional[int] = None
     assembly_id: Optional[int] = None
-    product_id: int
+    product_id: Optional[int] = None
 
 
 class PartCreate(PartBase):
@@ -107,6 +108,7 @@ class PartUpdate(BaseModel):
 class Part(PartBase):
     id: int
     type_name: Optional[str] = None
+    raw_material_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -372,6 +374,16 @@ class OrderUpdate(BaseModel):
 
 class Order(OrderBase):
     id: int
+    company_name: Optional[str] = None
+    product_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class OrderWithCustomerAndProduct(Order):
+    company_name: Optional[str] = None
+    product_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -409,5 +421,151 @@ class CustomerDocument(CustomerDocumentBase):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Raw Material Schemas
+# =======================
+class RawMaterialBase(BaseModel):
+    material_name: str
+    material_specification: Optional[str] = None
+    mass: Optional[float] = None
+    density: Optional[float] = None
+    volume: Optional[float] = None
+    stock_type: Optional[str] = None
+    quantity: Optional[int] = None
+    stock_dimensions: Optional[str] = None
+    status: Optional[str] = None
+
+
+class RawMaterialCreate(RawMaterialBase):
+    pass
+
+
+class RawMaterialUpdate(BaseModel):
+    material_name: Optional[str] = None
+    material_specification: Optional[str] = None
+    mass: Optional[float] = None
+    density: Optional[float] = None
+    volume: Optional[float] = None
+    stock_type: Optional[str] = None
+    quantity: Optional[int] = None
+    stock_dimensions: Optional[str] = None
+    status: Optional[str] = None
+
+
+class RawMaterial(RawMaterialBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Order Parts Raw Material Linked Schemas
+# =======================
+class OrderPartsRawMaterialLinkedBase(BaseModel):
+    raw_material_id: int
+    part_id: int
+    order_id: int
+
+
+class OrderPartsRawMaterialLinkedCreate(OrderPartsRawMaterialLinkedBase):
+    pass
+
+
+class OrderPartsRawMaterialLinkedUpdate(BaseModel):
+    raw_material_id: Optional[int] = None
+    part_id: Optional[int] = None
+    order_id: Optional[int] = None
+
+
+class OrderPartsRawMaterialLinked(OrderPartsRawMaterialLinkedBase):
+    id: int
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
+    material_name: Optional[str] = None
+    part_name: Optional[str] = None
+    sale_order_number: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Work Center Schemas
+# =======================
+class WorkCenterBase(BaseModel):
+    code: str
+    work_center_name: str
+    description: Optional[str] = None
+    is_schedulable: bool = True
+
+
+class WorkCenterCreate(WorkCenterBase):
+    pass
+
+
+class WorkCenterUpdate(BaseModel):
+    code: Optional[str] = None
+    work_center_name: Optional[str] = None
+    description: Optional[str] = None
+    is_schedulable: Optional[bool] = None
+
+
+class WorkCenter(WorkCenterBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Machine Schemas
+# =======================
+class MachineBase(BaseModel):
+    work_center_id: int
+    type: str
+    make: Optional[str] = None
+    model: Optional[str] = None
+    year_of_installation: Optional[int] = None
+    cnc_controller: Optional[str] = None
+    cnc_controller_service: Optional[str] = None
+    remarks: Optional[str] = None
+    calibration_date: Optional[datetime] = None
+    calibration_due_date: Optional[datetime] = None
+
+
+class MachineCreate(MachineBase):
+    pass
+
+
+class MachineUpdate(BaseModel):
+    work_center_id: Optional[int] = None
+    type: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    year_of_installation: Optional[int] = None
+    cnc_controller: Optional[str] = None
+    cnc_controller_service: Optional[str] = None
+    remarks: Optional[str] = None
+    calibration_date: Optional[datetime] = None
+    calibration_due_date: Optional[datetime] = None
+
+
+class Machine(MachineBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class MachineWithWorkCenter(Machine):
+    work_center: WorkCenter
 
 

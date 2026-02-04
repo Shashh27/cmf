@@ -9,6 +9,10 @@ from .tools import router as tools_router
 from .customers import router as customers_router
 from .orders import router as orders_router
 from .customer_documents import router as customer_documents_router
+from .rawmaterials import router as rawmaterials_router
+from .workcenter import router as workcenter_router
+from .machines import router as machines_router
+from .order_parts_raw_material_linked import router as order_parts_raw_material_linked_router
 
 __all__ = [
     "products_router",
@@ -21,5 +25,9 @@ __all__ = [
     "tools_router",
     "customers_router",
     "orders_router",
-    "customer_documents_router"
+    "customer_documents_router",
+    "rawmaterials_router",
+    "workcenter_router",
+    "machines_router",
+    "order_parts_raw_material_linked_router"
 ]

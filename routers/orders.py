@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from DB.database import get_db
-from DB.models import Order, Customer
-from DB.schemas import Order as OrderResponse, OrderCreate, OrderUpdate, OrderWithCustomer
+from DB.models import Order, Customer, Product
+from DB.schemas import Order as OrderResponse, OrderCreate, OrderUpdate, OrderWithCustomer, OrderWithCustomerAndProduct
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -23,11 +23,36 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     db.refresh(db_order)
     return db_order
 
-@router.get("/", response_model=List[OrderResponse])
+@router.get("/", response_model=List[OrderWithCustomerAndProduct])
 def get_orders(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all orders"""
+    """Get all orders with company_name and product_name"""
     orders = db.query(Order).offset(skip).limit(limit).all()
-    return orders
+    result = []
+    for order in orders:
+        # Get customer name
+        customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
+        company_name = customer.company_name if customer else None
+        
+        # Get product name
+        product = db.query(Product).filter(Product.id == order.product_id).first()
+        product_name = product.product_name if product else None
+        
+        # Create order dict with additional fields
+        order_dict = {
+            "id": order.id,
+            "sale_order_number": order.sale_order_number,
+            "customer_id": order.customer_id,
+            "product_id": order.product_id,
+            "quantity": order.quantity,
+            "due_date": order.due_date,
+            "priority": order.priority,
+            "supervisor_id": order.supervisor_id,
+            "status": order.status,
+            "company_name": company_name,
+            "product_name": product_name
+        }
+        result.append(order_dict)
+    return result
 
 @router.get("/with-customers", response_model=List[OrderWithCustomer])
 def get_orders_with_customers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
@@ -60,13 +85,36 @@ def get_orders_with_customers(skip: int = 0, limit: int = 100, db: Session = Dep
         result.append(order_dict)
     return result
 
-@router.get("/{order_id}", response_model=OrderResponse)
+@router.get("/{order_id}", response_model=OrderWithCustomerAndProduct)
 def get_order(order_id: int, db: Session = Depends(get_db)):
-    """Get a specific order by ID"""
+    """Get a specific order by ID with company_name and product_name"""
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    return order
+    
+    # Get customer name
+    customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
+    company_name = customer.company_name if customer else None
+    
+    # Get product name
+    product = db.query(Product).filter(Product.id == order.product_id).first()
+    product_name = product.product_name if product else None
+    
+    # Create order dict with additional fields
+    order_dict = {
+        "id": order.id,
+        "sale_order_number": order.sale_order_number,
+        "customer_id": order.customer_id,
+        "product_id": order.product_id,
+        "quantity": order.quantity,
+        "due_date": order.due_date,
+        "priority": order.priority,
+        "supervisor_id": order.supervisor_id,
+        "status": order.status,
+        "company_name": company_name,
+        "product_name": product_name
+    }
+    return order_dict
 
 @router.get("/customer/{customer_id}", response_model=List[OrderResponse])
 def get_orders_by_customer(customer_id: int, db: Session = Depends(get_db)):
@@ -74,9 +122,9 @@ def get_orders_by_customer(customer_id: int, db: Session = Depends(get_db)):
     orders = db.query(Order).filter(Order.customer_id == customer_id).all()
     return orders
 
-@router.put("/{order_id}", response_model=OrderResponse)
+@router.put("/{order_id}", response_model=OrderWithCustomerAndProduct)
 def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends(get_db)):
-    """Update an order"""
+    """Update an order and return with company_name and product_name"""
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -87,13 +135,42 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
     
+    # Check if product exists if product_id is being updated
+    if order_update.product_id is not None:
+        product = db.query(Product).filter(Product.id == order_update.product_id).first()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+    
     update_data = order_update.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(order, field, value)
     
     db.commit()
     db.refresh(order)
-    return order
+    
+    # Get customer name
+    customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
+    company_name = customer.company_name if customer else None
+    
+    # Get product name
+    product = db.query(Product).filter(Product.id == order.product_id).first()
+    product_name = product.product_name if product else None
+    
+    # Create order dict with additional fields
+    order_dict = {
+        "id": order.id,
+        "sale_order_number": order.sale_order_number,
+        "customer_id": order.customer_id,
+        "product_id": order.product_id,
+        "quantity": order.quantity,
+        "due_date": order.due_date,
+        "priority": order.priority,
+        "supervisor_id": order.supervisor_id,
+        "status": order.status,
+        "company_name": company_name,
+        "product_name": product_name
+    }
+    return order_dict
 
 @router.delete("/{order_id}")
 def delete_order(order_id: int, db: Session = Depends(get_db)):

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import Assembly as AssemblyModel
+from DB.models import Assembly as AssemblyModel, Part as PartModel
 from DB.schemas import Assembly, AssemblyCreate, AssemblyUpdate
 
 router = APIRouter(
@@ -76,7 +76,7 @@ def update_assembly(assembly_id: int, assembly: AssemblyUpdate, db: Session = De
 
 @router.delete("/{assembly_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
-    """Delete an assembly"""
+    """Delete an assembly and all its parts and sub-assemblies (recursive cascade deletion)"""
     db_assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
     if not db_assembly:
         raise HTTPException(
@@ -84,6 +84,27 @@ def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
             detail=f"Assembly with id {assembly_id} not found"
         )
 
-    db.delete(db_assembly)
+    def delete_assembly_recursive(assembly_id_to_delete):
+        """Recursively delete assembly and all its children"""
+        # First, find all child assemblies
+        child_assemblies = db.query(AssemblyModel).filter(AssemblyModel.parent_id == assembly_id_to_delete).all()
+        
+        # Recursively delete all child assemblies
+        for child_assembly in child_assemblies:
+            delete_assembly_recursive(child_assembly.id)
+        
+        # Delete all parts that belong to this assembly
+        parts_under_assembly = db.query(PartModel).filter(PartModel.assembly_id == assembly_id_to_delete).all()
+        for part in parts_under_assembly:
+            db.delete(part)
+        
+        # Delete the assembly itself
+        assembly_to_delete = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id_to_delete).first()
+        if assembly_to_delete:
+            db.delete(assembly_to_delete)
+    
+    # Start the recursive deletion
+    delete_assembly_recursive(assembly_id)
+    
     db.commit()
     return None

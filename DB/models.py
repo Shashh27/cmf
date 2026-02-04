@@ -5,7 +5,10 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     TIMESTAMP,
-    TIME
+    TIME,
+    Boolean,
+    Float,
+    func
 )
 from sqlalchemy.orm import relationship, declarative_base
 
@@ -25,6 +28,7 @@ class Product(Base):
 
     assemblies = relationship("Assembly", back_populates="product")
     parts = relationship("Part", back_populates="product")
+    orders = relationship("Order", back_populates="product")
 
 
 # =======================
@@ -69,11 +73,12 @@ class Part(Base):
     part_number = Column(String, unique=True, nullable=False)
 
     type_id = Column(Integer, ForeignKey("part_types.id"))
-    raw_material_id = Column(Integer)
+    raw_material_id = Column(Integer, ForeignKey("raw_materials.id"))
     assembly_id = Column(Integer, ForeignKey("assemblies.id"), nullable=True)
     product_id = Column(Integer, ForeignKey("products.id"))
 
     type = relationship("PartType", back_populates="parts")
+    raw_material = relationship("RawMaterial")
     assembly = relationship("Assembly", back_populates="parts")
     product = relationship("Product", back_populates="parts")
 
@@ -174,7 +179,7 @@ class Order(Base):
     id = Column(Integer, primary_key=True, index=True)
     sale_order_number = Column(String, nullable=False)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
-    product_id = Column(Integer, nullable=False)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     due_date = Column(TIMESTAMP, nullable=False)
     priority = Column(Integer, nullable=False)
@@ -182,6 +187,7 @@ class Order(Base):
     status = Column(String, nullable=False)
 
     customer = relationship("Customer", back_populates="orders")
+    product = relationship("Product", back_populates="orders")
     customer_documents = relationship("CustomerDocument", back_populates="order")
 
 
@@ -199,3 +205,75 @@ class CustomerDocument(Base):
     document_version = Column(String, nullable=False)
 
     order = relationship("Order", back_populates="customer_documents")
+
+
+# =======================
+# Raw Materials
+# =======================
+class RawMaterial(Base):
+    __tablename__ = "raw_materials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    material_name = Column(String, nullable=False)
+    material_specification = Column(String)
+    mass = Column(Float)
+    density = Column(Float)
+    volume = Column(Float)
+    stock_type = Column(String)
+    quantity = Column(Integer)
+    stock_dimensions = Column(String)
+    status = Column(String)
+
+
+# =======================
+# Order Parts Raw Material Linked
+# =======================
+class OrderPartsRawMaterialLinked(Base):
+    __tablename__ = "order_parts_raw_material_linked"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    raw_material_id = Column(Integer, ForeignKey("raw_materials.id"), nullable=False)
+    part_id = Column(Integer, ForeignKey("parts.id"), nullable=False)
+    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+    # Relationships
+    raw_material = relationship("RawMaterial")
+    part = relationship("Part")
+    order = relationship("Order")
+
+
+# =======================
+# Work Center
+# =======================
+class WorkCenter(Base):
+    __tablename__ = "work_centers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String, nullable=False)
+    work_center_name = Column(String, nullable=False)
+    description = Column(String)
+    is_schedulable = Column(Boolean, default=True)
+
+    machines = relationship("Machine", back_populates="work_center")
+
+
+# =======================
+# Machine
+# =======================
+class Machine(Base):
+    __tablename__ = "machines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    work_center_id = Column(Integer, ForeignKey("work_centers.id"), nullable=False)
+    type = Column(String, nullable=False)
+    make = Column(String)
+    model = Column(String)
+    year_of_installation = Column(Integer)
+    cnc_controller = Column(String)
+    cnc_controller_service = Column(String)
+    remarks = Column(String)
+    calibration_date = Column(TIMESTAMP)
+    calibration_due_date = Column(TIMESTAMP)
+
+    work_center = relationship("WorkCenter", back_populates="machines")
