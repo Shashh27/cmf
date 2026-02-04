@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { X, Plus } from "lucide-react";
 import { API_BASE_URL } from "../Config/auth";
 import { Button } from "../components/ui/button";
@@ -31,6 +31,7 @@ const CreateProductModal = ({
   });
   const [loading, setLoading] = useState(false);
   const [partTypes, setPartTypes] = useState([]);
+  const hasFetchedPartTypes = useRef(false);
 
   // Update form data when selectedProduct, parentAssembly, mode, or editingItem changes
   useEffect(() => {
@@ -76,7 +77,18 @@ const CreateProductModal = ({
 
   // Fetch part types when component mounts
   useEffect(() => {
-    fetchPartTypes();
+    if (hasFetchedPartTypes.current) return;
+    
+    const fetchPartTypesData = async () => {
+      hasFetchedPartTypes.current = true;
+      try {
+        await fetchPartTypes();
+      } catch (error) {
+        console.error('Error fetching part types:', error);
+      }
+    };
+
+    fetchPartTypesData();
   }, []);
 
   const fetchPartTypes = async () => {

@@ -12,7 +12,7 @@ import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { FileText, Upload, X } from "lucide-react";
 
-const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
+const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, products }) => {
   const [formData, setFormData] = useState({
     sale_order_number: "",
     customer_id: "",
@@ -23,15 +23,9 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
     supervisor_id: "",
     status: "Pending",
   });
-  const [customers, setCustomers] = useState([]);
-  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
 
-  useEffect(() => {
-    fetchCustomers();
-    fetchProducts();
-  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -61,29 +55,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
     }
   }, [isOpen, editingOrder]);
 
-  const fetchCustomers = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/customers/`);
-      if (response.ok) {
-        const data = await response.json();
-        setCustomers(data);
-      }
-    } catch (error) {
-      console.error("Error fetching customers:", error);
-    }
-  };
-
-  const fetchProducts = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/products/`);
-      if (response.ok) {
-        const data = await response.json();
-        setProducts(data);
-      }
-    } catch (error) {
-      console.error("Error fetching products:", error);
-    }
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();

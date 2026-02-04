@@ -20,6 +20,13 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import {
   ChevronDown,
   ChevronRight,
   Package,
@@ -491,7 +498,7 @@ const RawMaterials = () => {
 
     if (isManyParts && isManyMaterials) {
       window.alert(
-        "Linking many parts to many raw materials is not allowed."
+        "Adding many parts to many raw materials is not allowed."
       );
       return;
     }
@@ -514,13 +521,13 @@ const RawMaterials = () => {
       );
 
       if (response.ok) {
-        window.alert("Linking successful.");
+        window.alert("Raw Materials added Successfully.");
       } else {
-        window.alert("Linking failed. Please check your selections and try again.");
+        window.alert("Adding failed. Please check your selections and try again.");
       }
     } catch (error) {
-      console.error("Error linking parts and raw materials:", error);
-      window.alert("Error while linking. Please try again.");
+      console.error("Error Adding parts and raw materials:", error);
+      window.alert("Error while Adding. Please try again.");
     } finally {
       setLinking(false);
     }
@@ -671,7 +678,11 @@ const RawMaterials = () => {
           if (!open) closeRawMaterialModal();
         }}
       >
-        <DialogContent className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
+        <DialogContent
+          className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto"
+          onInteractOutside={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="text-xl font-semibold text-gray-900">
               {editingRawMaterial ? "Edit Raw Material" : "Add Raw Material"}
@@ -782,12 +793,25 @@ const RawMaterials = () => {
                 <label className="text-sm font-medium text-gray-700">
                   Status
                 </label>
-                <Input
+                <Select
                   value={rawMaterialForm.status}
-                  onChange={(e) =>
-                    handleRawMaterialChange("status", e.target.value)
+                  onValueChange={(value) =>
+                    handleRawMaterialChange("status", value)
                   }
-                />
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="purchase request">
+                      Purchase Request
+                    </SelectItem>
+                    <SelectItem value="purchase order">
+                      Purchase Order
+                    </SelectItem>
+                    <SelectItem value="available">Available</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter className="border-t pt-4">

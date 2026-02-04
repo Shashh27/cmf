@@ -12,36 +12,23 @@ import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { FileText } from "lucide-react";
 
-const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId }) => {
+const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders }) => {
   const [formData, setFormData] = useState({
     file: null,
     document_type: "",
     document_version: "1.0",
   });
-  const [orders, setOrders] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(orderId || "");
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
 
   useEffect(() => {
-    fetchOrders();
     if (orderId) {
       setSelectedOrderId(orderId);
       fetchDocuments(orderId);
     }
   }, [orderId]);
 
-  const fetchOrders = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/orders/`);
-      if (response.ok) {
-        const data = await response.json();
-        setOrders(data);
-      }
-    } catch (error) {
-      console.error("Error fetching orders:", error);
-    }
-  };
 
   const fetchDocuments = async (orderId) => {
     try {

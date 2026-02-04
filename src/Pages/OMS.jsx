@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { API_BASE_URL } from "../Config/auth";
 import {
   Table,
@@ -13,9 +14,12 @@ import { Button } from "../components/ui/button";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import CompanyDetails from "../OMS Components/CompanyDetails";
+import ProductBOMView from "../OMS Components/ProductBOMView";
 import { useToast } from "../components/ui/toast";
 
 const OMS = () => {
+  const navigate = useNavigate();
+  const { productId } = useParams();
   const { addToast, ToastContainer } = useToast();
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -25,11 +29,29 @@ const OMS = () => {
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const hasFetchedData = useRef(false);
 
   useEffect(() => {
-    fetchOrders();
-    fetchCustomers();
-    fetchProducts();
+    if (hasFetchedData.current) return;
+    
+    const fetchData = async () => {
+      hasFetchedData.current = true;
+      setLoading(true);
+      try {
+        await Promise.all([
+          fetchOrders(),
+          fetchCustomers(), 
+          fetchProducts()
+        ]);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
   }, []);
 
   const fetchCustomers = async () => {
@@ -69,8 +91,6 @@ const OMS = () => {
     } catch (error) {
       console.error("Error fetching orders:", error);
       setOrders([]);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -152,6 +172,14 @@ const OMS = () => {
     setDocumentModalOpen(true);
   };
 
+  const handleViewBOM = (productId) => {
+    navigate(`/oms/product/${productId}`);
+  };
+
+  const handleBackToOrders = () => {
+    navigate('/oms');
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -160,12 +188,20 @@ const OMS = () => {
     );
   }
 
+  if (productId) {
+    return (
+      <ProductBOMView 
+        productId={productId}
+        onBackToOrders={handleBackToOrders}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Order Management System</h1>
         <div className="flex space-x-2">
-          
           <Button onClick={handleCreateOrder}>
             New Order
           </Button>
@@ -196,7 +232,14 @@ const OMS = () => {
                 <TableCell className="border-r border-gray-200 font-medium">{index + 1}</TableCell>
                 <TableCell className="border-r border-gray-200">{order.sale_order_number}</TableCell>
                 <TableCell className="border-r border-gray-200">{getCustomerName(order.customer_id)}</TableCell>
-                <TableCell className="border-r border-gray-200">{getProductName(order.product_id)}</TableCell>
+                <TableCell className="border-r border-gray-200">
+                  <button 
+                    onClick={() => handleViewBOM(order.product_id)}
+                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                  >
+                    {getProductName(order.product_id)}
+                  </button>
+                </TableCell>
                 <TableCell className="border-r border-gray-200">{order.quantity}</TableCell>
                 <TableCell className="border-r border-gray-200">{formatDate(order.due_date)}</TableCell>
                 <TableCell className="border-r border-gray-200">{order.priority ?? "-"}</TableCell>
@@ -210,19 +253,23 @@ const OMS = () => {
                     >
                       Edit
                     </Button>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="text-blue-600 hover:text-blue-800"
+                      onClick={() => {
+                        setSelectedOrderId(order.id);
+                        setDocumentModalOpen(true);
+                      }}
+                    >
+                      Documents
+                    </Button>
                     <Button
                       size="sm"
                       variant="destructive"
                       onClick={() => handleDeleteOrder(order)}
                     >
                       Delete
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleOpenDocuments(order.id)}
-                    >
-                      Documents
                     </Button>
                   </div>
                 </TableCell>
@@ -240,6 +287,8 @@ const OMS = () => {
         onClose={() => setOrderModalOpen(false)}
         onOrderCreated={handleOrderCreated}
         editingOrder={editingOrder}
+        customers={customers}
+        products={products}
       />
       
       <DocumentModal
@@ -247,6 +296,7 @@ const OMS = () => {
         onClose={() => setDocumentModalOpen(false)}
         onDocumentUploaded={handleDocumentUploaded}
         orderId={selectedOrderId}
+        orders={orders}
       />
       
       <ToastContainer />

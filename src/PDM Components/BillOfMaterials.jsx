@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Search, ChevronDown, ChevronRight, Plus, Layers, Wrench, Settings, FileText, ClipboardList, Pencil, Trash2 } from "lucide-react";
 import { API_BASE_URL } from "../Config/auth";
 import { Input } from "../components/ui/input";
@@ -12,8 +12,6 @@ import { useToast } from "../components/ui/toast";
 const BillOfMaterials = ({ onItemSelected }) => {
   const { addToast, ToastContainer } = useToast();
   const [products, setProducts] = useState([]);
-  const [assemblies, setAssemblies] = useState([]);
-  const [parts, setParts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
@@ -27,11 +25,24 @@ const BillOfMaterials = ({ onItemSelected }) => {
   const [selectedPart, setSelectedPart] = useState(null);
   const [showPartActionModal, setShowPartActionModal] = useState(false);
   const [partActionType, setPartActionType] = useState(''); // 'operation', 'document', 'process_plan'
+  const hasFetchedData = useRef(false);
 
   useEffect(() => {
-    fetchProducts();
-    fetchAssemblies();
-    fetchParts();
+    if (hasFetchedData.current) return;
+    
+    const fetchData = async () => {
+      hasFetchedData.current = true;
+      setLoading(true);
+      try {
+        await fetchProducts();
+      } catch (error) {
+        console.error('Error fetching BOM data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
   }, []);
 
   const fetchProducts = async () => {
@@ -45,66 +56,45 @@ const BillOfMaterials = ({ onItemSelected }) => {
       }
     } catch (error) {
       console.error('Error fetching products:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchAssemblies = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/assemblies/`);
-      if (response.ok) {
-        const data = await response.json();
-        setAssemblies(data);
-      } else {
-        console.error('Failed to fetch assemblies:', response.statusText);
-      }
-    } catch (error) {
-      console.error('Error fetching assemblies:', error);
-    }
-  };
-
-  const fetchParts = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/parts/`);
-      if (response.ok) {
-        const data = await response.json();
-        setParts(data);
-      } else {
-        console.error('Failed to fetch parts:', response.statusText);
-      }
-    } catch (error) {
-      console.error('Error fetching parts:', error);
     }
   };
 
   const fetchProductHierarchy = async (productId) => {
-    if (hierarchicalData[productId]) return;
+    if (hierarchicalData[productId]) return hierarchicalData[productId];
     
     try {
       const response = await fetch(`${API_BASE_URL}/products/${productId}/hierarchical`);
       if (response.ok) {
         const data = await response.json();
+        
+        // Transform the data to match our component's expected structure
+        const transformedData = {
+          ...data,
+          parts: data.direct_parts?.map(item => item.part) || [],
+          assemblies: data.assemblies?.map(assembly => ({
+            ...assembly.assembly,
+            parts: assembly.parts?.map(part => part.part) || [],
+            child_assemblies: transformSubassemblies(assembly.subassemblies || [])
+          })) || []
+        };
+        
         setHierarchicalData(prev => ({
           ...prev,
-          [productId]: data
+          [productId]: transformedData
         }));
+        
+        return transformedData;
       }
     } catch (error) {
       console.error("Error fetching product hierarchy:", error);
     }
   };
 
-  const toggleExpand = async (itemId, type) => {
+  const toggleExpand = (itemId, type) => {
     setExpandedItems(prev => ({
       ...prev,
       [itemId]: !prev[itemId]
     }));
-
-    // If expanding a product, fetch its hierarchical data
-    if (type === 'product' && !expandedItems[itemId]) {
-      await fetchProductHierarchy(itemId);
-    }
   };
 
   const handleCreateProduct = () => {
@@ -126,12 +116,18 @@ const BillOfMaterials = ({ onItemSelected }) => {
     setShowCreateModal(true);
   };
 
-  const handleCreatePart = (product, assembly = null) => {
+  const handleCreatePart = async (product, assembly = null) => {
     setSelectedProduct(product);
     setParentAssembly(assembly);
     setCreateType('part');
     setEditMode(false);
     setEditingItem(null);
+    
+    // Make sure we have the hierarchical data before showing the modal
+    if (!hierarchicalData[product.id]) {
+      await fetchProductHierarchy(product.id);
+    }
+    
     setShowCreateModal(true);
   };
 
@@ -175,21 +171,35 @@ const BillOfMaterials = ({ onItemSelected }) => {
   };
 
   const handleProductCreated = (newItem, type, action = 'create') => {
-    // Refresh the relevant data based on what was created or edited
+    // Refresh the products list to get the latest data
+    fetchProducts();
+    
+    // Show appropriate success message
     if (type === 'product') {
-      fetchProducts();
       addToast(
         `Product "${newItem.product_name}" ${action === 'edit' ? 'updated' : 'created'} successfully!`
       );
     } else if (type === 'assembly') {
-      fetchAssemblies();
-      // assemblies can affect parts tree as well
-      fetchParts();
+      // Clear the hierarchical data cache for the parent product to force a refresh
+      if (newItem.product_id) {
+        setHierarchicalData(prev => {
+          const newData = {...prev};
+          delete newData[newItem.product_id];
+          return newData;
+        });
+      }
       addToast(
         `Assembly "${newItem.assembly_name}" ${action === 'edit' ? 'updated' : 'created'} successfully!`
       );
     } else if (type === 'part') {
-      fetchParts();
+      // Clear the hierarchical data cache for the parent product to force a refresh
+      if (newItem.product_id) {
+        setHierarchicalData(prev => {
+          const newData = {...prev};
+          delete newData[newItem.product_id];
+          return newData;
+        });
+      }
       addToast(
         `Part "${newItem.part_name}" ${action === 'edit' ? 'updated' : 'created'} successfully!`
       );
@@ -291,27 +301,104 @@ const BillOfMaterials = ({ onItemSelected }) => {
     }
   };
 
-  const handleItemClick = (item, type) => {
+  const handleItemClick = async (item, type) => {
     onItemSelected({ ...item, itemType: type });
     if (type === 'product') {
       setSelectedProduct(item);
+      // Only fetch hierarchical data when a product is clicked
+      if (!hierarchicalData[item.id]) {
+        await fetchProductHierarchy(item.id);
+      }
     }
   };
 
-  const getChildAssemblies = (productId) => {
-    return assemblies.filter(assembly => assembly.product_id === productId && !assembly.parent_id);
+  // Helper to transform subassemblies recursively
+  const transformSubassemblies = (subassemblies) => {
+    return subassemblies.map(sub => ({
+      ...sub.assembly,
+      parts: sub.parts?.map(part => part.part) || [],
+      child_assemblies: transformSubassemblies(sub.subassemblies || [])
+    }));
   };
 
-  const getNestedAssemblies = (parentId) => {
-    return assemblies.filter(assembly => assembly.parent_id === parentId);
+  const getChildAssemblies = (productId) => {
+    const productHierarchy = hierarchicalData[productId];
+    if (!productHierarchy) return [];
+    return productHierarchy.assemblies || [];
+  };
+
+  const getNestedAssemblies = (assemblyId) => {
+    // Search through all products' hierarchical data to find the assembly's children
+    for (const productId in hierarchicalData) {
+      const product = hierarchicalData[productId];
+      if (product.assemblies) {
+        for (const assembly of product.assemblies) {
+          if (assembly.id === assemblyId) {
+            return assembly.child_assemblies || [];
+          }
+          // Check nested assemblies recursively
+          const findNested = (parent) => {
+            if (parent.child_assemblies) {
+              for (const child of parent.child_assemblies) {
+                if (child.id === assemblyId) {
+                  return child.child_assemblies || [];
+                }
+                const result = findNested(child);
+                if (result) return result;
+              }
+            }
+            return null;
+          };
+          const nestedResult = findNested(assembly);
+          if (nestedResult) return nestedResult;
+        }
+      }
+    }
+    return [];
   };
 
   const getPartsForAssembly = (assemblyId) => {
-    return parts.filter(part => part.assembly_id === assemblyId);
+    // Search through all products' hierarchical data to find the assembly's parts
+    for (const productId in hierarchicalData) {
+      const product = hierarchicalData[productId];
+      
+      // Check direct parts first
+      if (product.parts) {
+        const directPart = product.parts.find(part => part.id === assemblyId);
+        if (directPart) return [directPart];
+      }
+      
+      // Then check assemblies
+      if (product.assemblies) {
+        for (const assembly of product.assemblies) {
+          if (assembly.id === assemblyId) {
+            return assembly.parts || [];
+          }
+          // Check nested assemblies recursively
+          const findInNested = (parent) => {
+            if (parent.child_assemblies) {
+              for (const child of parent.child_assemblies) {
+                if (child.id === assemblyId) {
+                  return child.parts || [];
+                }
+                const result = findInNested(child);
+                if (result.length > 0) return result;
+              }
+            }
+            return [];
+          };
+          const parts = findInNested(assembly);
+          if (parts.length > 0) return parts;
+        }
+      }
+    }
+    return [];
   };
 
   const getDirectParts = (productId) => {
-    return parts.filter(part => part.product_id === productId && !part.assembly_id);
+    const productHierarchy = hierarchicalData[productId];
+    if (!productHierarchy) return [];
+    return productHierarchy.parts || [];
   };
 
   const renderPartInTree = (part, level = 0) => {
@@ -326,9 +413,11 @@ const BillOfMaterials = ({ onItemSelected }) => {
           onClick={() => handleItemClick(part, 'part')}
         >
           <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-muted rounded-full"></div>
-            <span className="font-medium text-foreground text-sm">{part.part_number}</span>
-            <span className="text-muted-foreground text-sm">{part.part_name}</span>
+            <span className="font-medium text-sm">{part.part_name}</span>
+            <div className="flex items-center space-x-1 ml-2">
+              <div className="w-2 h-2 bg-gray-500 rounded-full"></div>
+              <span className="text-xs font-medium text-gray-600">Part</span>
+            </div>
           </div>
           <div className="flex items-center space-x-1">
             <Button 
@@ -416,9 +505,11 @@ const BillOfMaterials = ({ onItemSelected }) => {
                 {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
               </span>
             )}
-            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-            <span className="font-medium text-blue-900">{assembly.assembly_number}</span>
-            <span className="text-blue-700">{assembly.assembly_name}</span>
+            <span className="font-medium">{assembly.assembly_name}</span>
+            <div className="flex items-center space-x-1 ml-2">
+              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span className="text-xs font-medium text-green-600">{assembly.parent_id ? 'Sub-Assembly' : 'Assembly'}</span>
+            </div>
           </div>
           <div className="flex items-center space-x-1">
             <Button 
@@ -482,9 +573,9 @@ const BillOfMaterials = ({ onItemSelected }) => {
   };
 
   const renderProductTree = (product) => {
-    const childAssemblies = getChildAssemblies(product.id);
-    const directParts = getDirectParts(product.id);
     const productHierarchy = hierarchicalData[product.id];
+    const childAssemblies = productHierarchy?.assemblies || [];
+    const directParts = productHierarchy?.parts || [];
     const isExpanded = expandedItems[product.id];
 
     return (
@@ -505,9 +596,11 @@ const BillOfMaterials = ({ onItemSelected }) => {
                 {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
               </span>
             )}
-            <div className="w-3 h-3 bg-muted-foreground rounded-full"></div>
-            <span className="font-bold text-foreground">{product.product_number}</span>
-            <span className="text-muted-foreground font-medium">{product.product_name}</span>
+            <span className="font-bold">{product.product_name}</span>
+            <div className="flex items-center space-x-1 ml-2">
+              <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+              <span className="text-xs font-medium text-blue-600">Product</span>
+            </div>
           </div>
           <div className="flex items-center space-x-1">
             <Button 
