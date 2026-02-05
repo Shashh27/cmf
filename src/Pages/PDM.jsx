@@ -12,7 +12,7 @@ const PDM = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex overflow-hidden bg-background">
+    <div className="flex-1 flex overflow-hidden bg-background">
       {/* Bill of Materials - Left Sidebar */}
       <BillOfMaterials onItemSelected={handleItemSelected} />
       
@@ -27,7 +27,7 @@ const PDM = () => {
         </div>
         
         {/* DocumentsPanel - Bottom Right with scroll */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
           <DocumentsPanel selectedItem={selectedItem} />
         </div>
       </div>

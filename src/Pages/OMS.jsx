@@ -13,7 +13,6 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
-import CompanyDetails from "../OMS Components/CompanyDetails";
 import ProductBOMView from "../OMS Components/ProductBOMView";
 import { useToast } from "../components/ui/toast";
 
@@ -182,8 +181,8 @@ const OMS = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-lg">Loading orders...</div>
+      <div className="flex items-center justify-center h-48">
+        <div className="text-base">Loading orders...</div>
       </div>
     );
   }
@@ -198,9 +197,9 @@ const OMS = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Order Management System</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Order Management System</h1>
         <div className="flex space-x-2">
           <Button onClick={handleCreateOrder}>
             New Order
@@ -208,66 +207,68 @@ const OMS = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow border border-gray-200">
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200">
         <Table>
           <TableHeader>
-            <TableRow className="bg-gray-50 border-b-2 border-gray-200">
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">SL NO</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">SALE ORDER</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CUSTOMER</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">PRODUCT</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">QUANTITY</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">DUE DATE</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">PRIORITY</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">STATUS</TableHead>
-              <TableHead className="font-semibold text-gray-900">ACTIONS</TableHead>
+            <TableRow className="bg-gray-50 border-b border-gray-200">
+              <TableHead className="font-semibold text-gray-900 text-sm border-r border-gray-200 px-3 py-2">SL NO</TableHead>
+              <TableHead className="font-semibold text-gray-900 text-sm border-r border-gray-200 px-3 py-2">SALE ORDER</TableHead>
+              <TableHead className="font-semibold text-gray-900 text-sm border-r border-gray-200 px-3 py-2">CUSTOMER</TableHead>
+              <TableHead className="font-semibold text-gray-900 text-sm border-r border-gray-200 px-3 py-2">PRODUCT</TableHead>
+              <TableHead className="font-semibold text-gray-900 text-sm border-r border-gray-200 px-3 py-2">QUANTITY</TableHead>
+              <TableHead className="font-semibold text-gray-900 text-sm border-r border-gray-200 px-3 py-2">DUE DATE</TableHead>
+              <TableHead className="font-semibold text-gray-900 text-sm border-r border-gray-200 px-3 py-2">PRIORITY</TableHead>
+              <TableHead className="font-semibold text-gray-900 text-sm border-r border-gray-200 px-3 py-2">STATUS</TableHead>
+              <TableHead className="font-semibold text-gray-900 text-sm px-3 py-2">ACTIONS</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {orders.map((order, index) => (
               <TableRow 
                 key={order.id} 
-                className="border-b border-gray-200 hover:bg-blue-50 transition-colors"
+                className="border-b border-gray-100 hover:bg-blue-50 transition-colors"
               >
-                <TableCell className="border-r border-gray-200 font-medium">{index + 1}</TableCell>
-                <TableCell className="border-r border-gray-200">{order.sale_order_number}</TableCell>
-                <TableCell className="border-r border-gray-200">{getCustomerName(order.customer_id)}</TableCell>
-                <TableCell className="border-r border-gray-200">
+                <TableCell className="border-r border-gray-100 font-medium text-sm px-3 py-2">{index + 1}</TableCell>
+                <TableCell className="border-r border-gray-100 text-sm px-3 py-2">{order.sale_order_number}</TableCell>
+                <TableCell className="border-r border-gray-100 text-sm px-3 py-2">{getCustomerName(order.customer_id)}</TableCell>
+                <TableCell className="border-r border-gray-100 text-sm px-3 py-2">
                   <button 
                     onClick={() => handleViewBOM(order.product_id)}
-                    className="text-blue-600 hover:text-blue-800 hover:underline"
+                    className="text-blue-600 hover:text-blue-800 hover:underline text-sm"
                   >
                     {getProductName(order.product_id)}
                   </button>
                 </TableCell>
-                <TableCell className="border-r border-gray-200">{order.quantity}</TableCell>
-                <TableCell className="border-r border-gray-200">{formatDate(order.due_date)}</TableCell>
-                <TableCell className="border-r border-gray-200">{order.priority ?? "-"}</TableCell>
-                <TableCell className="border-r border-gray-200">{getStatusBadge(order.status)}</TableCell>
-                <TableCell>
-                  <div className="flex space-x-2">
+                <TableCell className="border-r border-gray-100 text-sm px-3 py-2">{order.quantity}</TableCell>
+                <TableCell className="border-r border-gray-100 text-sm px-3 py-2">{formatDate(order.due_date)}</TableCell>
+                <TableCell className="border-r border-gray-100 text-sm px-3 py-2">{order.priority ?? "-"}</TableCell>
+                <TableCell className="border-r border-gray-100 text-sm px-3 py-2">{getStatusBadge(order.status)}</TableCell>
+                <TableCell className="text-sm px-3 py-2">
+                  <div className="flex space-x-1">
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => handleEditOrder(order)}
+                      className="h-7 px-2 text-xs"
                     >
                       Edit
                     </Button>
                     <Button 
                       size="sm" 
                       variant="ghost" 
-                      className="text-blue-600 hover:text-blue-800"
+                      className="text-blue-600 hover:text-blue-800 h-7 px-2 text-xs"
                       onClick={() => {
                         setSelectedOrderId(order.id);
                         setDocumentModalOpen(true);
                       }}
                     >
-                      Documents
+                      Docs
                     </Button>
                     <Button
                       size="sm"
                       variant="destructive"
                       onClick={() => handleDeleteOrder(order)}
+                      className="h-7 px-2 text-xs"
                     >
                       Delete
                     </Button>

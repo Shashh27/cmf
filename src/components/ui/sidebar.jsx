@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../../lib/utils";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import cmtisLogo from "../../assets/cmtis.png";
 
 const Sidebar = () => {
   const location = useLocation();
@@ -95,35 +96,39 @@ const Sidebar = () => {
   ];
 
   return (
-    <div className="w-64 bg-white text-gray-900 h-screen fixed left-0 top-0 z-50 shadow-xl border-r border-gray-200">
-      <div className="p-6 border-b border-gray-200">
-        <h1 className="text-2xl font-bold text-gray-900">CMFD MES</h1>
+    <div className="w-56 bg-blue-50 text-gray-800 h-screen fixed left-0 top-0 z-50 shadow-lg">
+      <div className="p-3 border-b border-blue-100 flex items-center justify-center">
+        <img 
+          src={cmtisLogo} 
+          alt="CMTIS Logo" 
+          className="h-10 w-auto"
+        />
       </div>
-      <nav className="mt-6">
+      <nav className="mt-4">
         {/* OMS with sub-menus */}
-        <div className="border-b border-gray-100">
+        <div className="px-2 py-1">
           <button
             onClick={() => setOmsExpanded(!omsExpanded)}
             className={cn(
-              "flex items-center w-full px-6 py-3 text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200",
-              isOmsActive && "bg-gray-100 text-gray-900"
+              "flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-blue-100 hover:text-blue-800 transition-colors duration-200 rounded-md",
+              isOmsActive && "bg-blue-100 text-blue-800 font-medium"
             )}
           >
-            {omsIcon}
-            <span className="ml-3 font-medium flex-1 text-left">OMS</span>
+            {React.cloneElement(omsIcon, { className: 'w-5 h-5 text-blue-600' })}
+            <span className="ml-2.5 font-medium flex-1 text-left">OMS</span>
             {omsExpanded ? (
-              <ChevronDown className="w-4 h-4" />
+              <ChevronDown className="w-4 h-4 text-blue-600" />
             ) : (
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-4 h-4 text-blue-600" />
             )}
           </button>
           {omsExpanded && (
-            <div className="bg-gray-50/50">
+            <div className="ml-6 mt-1 space-y-1">
               <Link
-                to="/oms/oms"
+                to="/oms/orders"
                 className={cn(
-                  "flex items-center px-6 py-2.5 pl-14 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200",
-                  location.pathname === "/oms/oms" && "bg-gray-100 text-gray-900 font-medium"
+                  "flex items-center px-4 py-2 text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-800 transition-colors duration-200 rounded-md",
+                  location.pathname.startsWith("/oms/orders") && "bg-blue-50 text-blue-800 font-medium"
                 )}
               >
                 Orders
@@ -131,8 +136,8 @@ const Sidebar = () => {
               <Link
                 to="/oms/rawmaterials"
                 className={cn(
-                  "flex items-center px-6 py-2.5 pl-14 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200",
-                  location.pathname === "/oms/rawmaterials" && "bg-gray-100 text-gray-900 font-medium"
+                  "flex items-center px-4 py-2 text-sm text-gray-600 hover:bg-blue-50 hover:text-blue-800 transition-colors duration-200 rounded-md",
+                  location.pathname === "/oms/rawmaterials" && "bg-blue-50 text-blue-800 font-medium"
                 )}
               >
                 Raw Materials
@@ -140,19 +145,21 @@ const Sidebar = () => {
             </div>
           )}
         </div>
-        {menuItems.map((item) => (
-          <Link
-            key={item.path}
-            to={item.path}
-            className={cn(
-              "flex items-center px-6 py-3 text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition-colors duration-200",
-              location.pathname === item.path && "bg-gray-100 text-gray-900 "
-            )}
-          >
-            {item.icon}
-            <span className="ml-3 font-medium">{item.title}</span>
-          </Link>
-        ))}
+        <div className="px-2 py-1">
+          {menuItems.map((item) => (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={cn(
+                "flex items-center w-full px-3 py-2 text-sm text-gray-700 hover:bg-blue-100 hover:text-blue-800 transition-colors duration-200 rounded-md mb-1",
+                location.pathname === item.path && "bg-blue-100 text-blue-800 font-medium"
+              )}
+            >
+              {React.cloneElement(item.icon, { className: 'w-5 h-5 text-blue-600' })}
+              <span className="ml-2.5 font-medium">{item.title}</span>
+            </Link>
+          ))}
+        </div>
       </nav>
     </div>
   );

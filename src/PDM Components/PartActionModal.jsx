@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, Upload } from "lucide-react";
+import { X, Upload, Plus, Trash2 } from "lucide-react";
 import { API_BASE_URL } from "../Config/auth";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -34,11 +34,16 @@ const PartActionModal = ({
   });
   const [loading, setLoading] = useState(false);
   const [operations, setOperations] = useState([]);
+  const [itemsList, setItemsList] = useState([]);
 
   // Fetch operations for process plan dropdown
   useEffect(() => {
     if (show && actionType === 'process_plan' && selectedPart) {
       fetchOperationsForPart();
+    }
+    // Add one default item when modal opens
+    if (show && itemsList.length === 0) {
+      addNewItem();
     }
   }, [show, actionType, selectedPart]);
 
@@ -69,81 +74,83 @@ const PartActionModal = ({
     setLoading(true);
 
     try {
-      let url, method, payload;
-
-      if (actionType === 'operation') {
-        // Create new operation
-        url = `${API_BASE_URL}/operations/`;
-        method = 'POST';
-        payload = {
-          operation_number: formData.operation_number,
-          operation_name: formData.operation_name,
-          setup_time: formData.setup_time || null,
-          cycle_time: formData.cycle_time || null,
-          workcenter_id: formData.workcenter_id ? parseInt(formData.workcenter_id) : null,
-          part_id: selectedPart.id
-        };
-      } else if (actionType === 'document') {
-        // Create new document (requires file upload)
-        if (!formData.file) {
-          alert('Please select a file to upload');
-          setLoading(false);
-          return;
-        }
-
-        const formDataObj = new FormData();
-        formDataObj.append('file', formData.file);
-        formDataObj.append('document_name', formData.document_name);
-        formDataObj.append('document_type', formData.document_type);
-        formDataObj.append('document_version', formData.document_version);
-        formDataObj.append('part_id', selectedPart.id.toString());
-
-        const response = await fetch(`${API_BASE_URL}/documents/`, {
-          method: 'POST',
-          body: formDataObj,
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          onActionCreated(result, 'document');
-          onHide();
-          resetForm();
-        } else {
-          console.error('Error creating document');
-        }
-        setLoading(false);
-        return;
-      } else if (actionType === 'process_plan') {
-        // Create new process plan
-        url = `${API_BASE_URL}/process-plans/`;
-        method = 'POST';
-        payload = {
-          operation_id: parseInt(formData.operation_id),
-          work_instructions: formData.work_instructions,
-          notes: formData.notes
-        };
-      }
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        onActionCreated(result, actionType);
-        onHide();
-        resetForm();
-      } else {
-        console.error('Error creating item');
-      }
+      // Handle multiple items creation
+      await handleMultipleItemsCreation();
     } catch (error) {
       console.error('Error:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMultipleItemsCreation = async () => {
+    const results = [];
+    
+    for (const item of itemsList) {
+      try {
+        if (actionType === 'operation') {
+          const payload = {
+            operation_number: item.operation_number,
+            operation_name: item.operation_name,
+            setup_time: item.setup_time || null,
+            cycle_time: item.cycle_time || null,
+            workcenter_id: item.workcenter_id ? parseInt(item.workcenter_id) : null,
+            part_id: selectedPart.id
+          };
+          
+          const response = await fetch(`${API_BASE_URL}/operations/`, {
+            method: 'POST',
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          
+          if (response.ok) {
+            results.push(await response.json());
+          }
+        } else if (actionType === 'document') {
+          if (!item.file) continue;
+          
+          const formDataObj = new FormData();
+          formDataObj.append('file', item.file);
+          formDataObj.append('document_name', item.document_name);
+          formDataObj.append('document_type', item.document_type);
+          formDataObj.append('document_version', item.document_version);
+          formDataObj.append('part_id', selectedPart.id.toString());
+          
+          const response = await fetch(`${API_BASE_URL}/documents/`, {
+            method: 'POST',
+            body: formDataObj,
+          });
+          
+          if (response.ok) {
+            results.push(await response.json());
+          }
+        } else if (actionType === 'process_plan') {
+          const payload = {
+            operation_id: parseInt(item.operation_id),
+            work_instructions: item.work_instructions,
+            notes: item.notes
+          };
+          
+          const response = await fetch(`${API_BASE_URL}/process-plans/`, {
+            method: 'POST',
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          
+          if (response.ok) {
+            results.push(await response.json());
+          }
+        }
+      } catch (error) {
+        console.error(`Error creating item:`, error);
+      }
+    }
+    
+    if (results.length > 0) {
+      onActionCreated(results[0], actionType); // Notify with first result
+      onHide();
+      resetForm();
     }
   };
 
@@ -176,16 +183,47 @@ const PartActionModal = ({
       work_instructions: '',
       notes: ''
     });
+    setItemsList([]);
+  };
+
+  const addNewItem = () => {
+    const newItem = actionType === 'operation' 
+      ? { operation_number: '', operation_name: '', setup_time: '', cycle_time: '', workcenter_id: '' }
+      : actionType === 'document'
+      ? { document_name: '', document_type: '', document_version: '1.0', file: null }
+      : { operation_id: '', work_instructions: '', notes: '' };
+    
+    setItemsList([...itemsList, newItem]);
+  };
+
+  const updateItem = (index, field, value) => {
+    const updatedItems = [...itemsList];
+    updatedItems[index] = { ...updatedItems[index], [field]: value };
+    setItemsList(updatedItems);
+  };
+
+  const removeItem = (index) => {
+    setItemsList(itemsList.filter((_, i) => i !== index));
+  };
+
+  const getItemTemplate = () => {
+    if (actionType === 'operation') {
+      return { operation_number: '', operation_name: '', setup_time: '', cycle_time: '', workcenter_id: '' };
+    } else if (actionType === 'document') {
+      return { document_name: '', document_type: '', document_version: '1.0', file: null };
+    } else {
+      return { operation_id: '', work_instructions: '', notes: '' };
+    }
   };
 
   if (!show) return null;
 
   const getActionTitle = () => {
     switch (actionType) {
-      case 'operation': return 'Create New Operation';
-      case 'document': return 'Create New Document';
-      case 'process_plan': return 'Create New Process Plan';
-      default: return 'Create New Item';
+      case 'operation': return 'Create Operations';
+      case 'document': return 'Create Documents';
+      case 'process_plan': return 'Create Process Plans';
+      default: return 'Create Items';
     }
   };
 
@@ -207,147 +245,182 @@ const PartActionModal = ({
               </Badge>
             </div>
 
-            {actionType === 'operation' && (
-              <>
-                <div>
-                  <label className="text-sm font-medium">Operation Number</label>
-                  <Input
-                    type="text"
-                    value={formData.operation_number}
-                    onChange={(e) => handleInputChange('operation_number', e.target.value)}
-                    placeholder="e.g., OP-001"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Operation Name</label>
-                  <Input
-                    type="text"
-                    value={formData.operation_name}
-                    onChange={(e) => handleInputChange('operation_name', e.target.value)}
-                    placeholder="e.g., Cutting Operation"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Setup Time (HH:MM:SS)</label>
-                  <Input
-                    type="text"
-                    value={formData.setup_time}
-                    onChange={(e) => handleInputChange('setup_time', e.target.value)}
-                    placeholder="e.g., 00:30:00"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Cycle Time (HH:MM:SS)</label>
-                  <Input
-                    type="text"
-                    value={formData.cycle_time}
-                    onChange={(e) => handleInputChange('cycle_time', e.target.value)}
-                    placeholder="e.g., 00:05:00"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Workcenter ID</label>
-                  <Input
-                    type="number"
-                    value={formData.workcenter_id}
-                    onChange={(e) => handleInputChange('workcenter_id', e.target.value)}
-                    placeholder="e.g., 1"
-                  />
-                </div>
-              </>
-            )}
+            {/* Items list - always shows at least one item */}
+            <div className="space-y-4 max-h-96 overflow-y-auto">
+              {itemsList.map((item, index) => (
+                <div key={index} className="border rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-medium">{actionType === 'operation' ? 'Operation' : actionType === 'document' ? 'Document' : 'Process Plan'} {index + 1}</h4>
+                    {itemsList.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeItem(index)}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                    
+                    {actionType === 'operation' && (
+                      <>
+                        <div>
+                          <label className="text-xs font-medium">Operation Number</label>
+                          <Input
+                            type="text"
+                            value={item.operation_number}
+                            onChange={(e) => updateItem(index, 'operation_number', e.target.value)}
+                            placeholder="e.g., OP-001"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Operation Name</label>
+                          <Input
+                            type="text"
+                            value={item.operation_name}
+                            onChange={(e) => updateItem(index, 'operation_name', e.target.value)}
+                            placeholder="e.g., Cutting Operation"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Setup Time</label>
+                          <Input
+                            type="text"
+                            value={item.setup_time}
+                            onChange={(e) => updateItem(index, 'setup_time', e.target.value)}
+                            placeholder="e.g., 00:30:00"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Cycle Time</label>
+                          <Input
+                            type="text"
+                            value={item.cycle_time}
+                            onChange={(e) => updateItem(index, 'cycle_time', e.target.value)}
+                            placeholder="e.g., 00:05:00"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Workcenter ID</label>
+                          <Input
+                            type="number"
+                            value={item.workcenter_id}
+                            onChange={(e) => updateItem(index, 'workcenter_id', e.target.value)}
+                            placeholder="e.g., 1"
+                          />
+                        </div>
+                      </>
+                    )}
+                    
+                    {actionType === 'document' && (
+                      <>
+                        <div>
+                          <label className="text-xs font-medium">Document Name</label>
+                          <Input
+                            type="text"
+                            value={item.document_name}
+                            onChange={(e) => updateItem(index, 'document_name', e.target.value)}
+                            placeholder="e.g., Technical Drawing"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Document Type</label>
+                          <Input
+                            type="text"
+                            value={item.document_type}
+                            onChange={(e) => updateItem(index, 'document_type', e.target.value)}
+                            placeholder="e.g., 2D Drawing"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Document Version</label>
+                          <Input
+                            type="text"
+                            value={item.document_version}
+                            onChange={(e) => updateItem(index, 'document_version', e.target.value)}
+                            placeholder="e.g., 1.0"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Upload File</label>
+                          <Input
+                            type="file"
+                            onChange={(e) => updateItem(index, 'file', e.target.files[0])}
+                            accept=".pdf,.docx,.csv,.xlsx,.doc,.xls,.txt"
+                            required
+                          />
+                        </div>
+                      </>
+                    )}
+                    
+                    {actionType === 'process_plan' && (
+                      <>
+                        <div>
+                          <label className="text-xs font-medium">Operation</label>
+                          <select
+                            value={item.operation_id}
+                            onChange={(e) => updateItem(index, 'operation_id', e.target.value)}
+                            className="w-full p-2 border border-border rounded-md bg-background text-sm"
+                            required
+                          >
+                            <option value="">Select an operation</option>
+                            {operations.map(op => (
+                              <option key={op.id} value={op.id}>
+                                {op.operation_number} - {op.operation_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Work Instructions</label>
+                          <textarea
+                            value={item.work_instructions}
+                            onChange={(e) => updateItem(index, 'work_instructions', e.target.value)}
+                            placeholder="Enter work instructions..."
+                            className="w-full p-2 border border-border rounded-md bg-background min-h-[80px] text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium">Notes</label>
+                          <textarea
+                            value={item.notes}
+                            onChange={(e) => updateItem(index, 'notes', e.target.value)}
+                            placeholder="Enter additional notes..."
+                            className="w-full p-2 border border-border rounded-md bg-background min-h-[60px] text-sm"
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+            </div>
 
-            {actionType === 'document' && (
-              <>
-                <div>
-                  <label className="text-sm font-medium">Document Name</label>
-                  <Input
-                    type="text"
-                    value={formData.document_name}
-                    onChange={(e) => handleInputChange('document_name', e.target.value)}
-                    placeholder="e.g., Technical Drawing"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Document Type</label>
-                  <Input
-                    type="text"
-                    value={formData.document_type}
-                    onChange={(e) => handleInputChange('document_type', e.target.value)}
-                    placeholder="e.g., 2D Drawing"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Document Version</label>
-                  <Input
-                    type="text"
-                    value={formData.document_version}
-                    onChange={(e) => handleInputChange('document_version', e.target.value)}
-                    placeholder="e.g., 1.0"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Upload File</label>
-                  <Input
-                    type="file"
-                    onChange={handleFileChange}
-                    accept=".pdf,.docx,.csv,.xlsx,.doc,.xls,.txt"
-                    required
-                  />
-                </div>
-              </>
-            )}
-
-            {actionType === 'process_plan' && (
-              <>
-                <div>
-                  <label className="text-sm font-medium">Operation</label>
-                  <select
-                    value={formData.operation_id}
-                    onChange={(e) => handleInputChange('operation_id', e.target.value)}
-                    className="w-full p-2 border border-border rounded-md bg-background"
-                    required
-                  >
-                    <option value="">Select an operation</option>
-                    {operations.map(op => (
-                      <option key={op.id} value={op.id}>
-                        {op.operation_number} - {op.operation_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Work Instructions</label>
-                  <textarea
-                    value={formData.work_instructions}
-                    onChange={(e) => handleInputChange('work_instructions', e.target.value)}
-                    placeholder="Enter work instructions..."
-                    className="w-full p-2 border border-border rounded-md bg-background min-h-[100px]"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Notes</label>
-                  <textarea
-                    value={formData.notes}
-                    onChange={(e) => handleInputChange('notes', e.target.value)}
-                    placeholder="Enter additional notes..."
-                    className="w-full p-2 border border-border rounded-md bg-background min-h-[80px]"
-                  />
-                </div>
-              </>
-            )}
+            {/* Add another button at bottom */}
+            <div className="flex justify-center mb-4">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addNewItem()}
+              >
+                <Plus className="h-3 w-3 mr-1" />
+                Add Another {actionType === 'operation' ? 'Operation' : actionType === 'document' ? 'Document' : 'Process Plan'}
+              </Button>
+            </div>
 
             <div className="flex justify-end space-x-2 pt-4">
               <Button type="button" variant="outline" onClick={onHide}>
                 Cancel
               </Button>
               <Button type="submit" disabled={loading}>
-                {loading ? 'Creating...' : `Create ${actionType === 'process_plan' ? 'Process Plan' : actionType.charAt(0).toUpperCase() + actionType.slice(1)}`}
+                {loading ? 'Creating...' : `Create ${actionType === 'process_plan' ? 'Process Plans' : actionType.charAt(0).toUpperCase() + actionType.slice(1) + 's'}`}
               </Button>
             </div>
           </form>

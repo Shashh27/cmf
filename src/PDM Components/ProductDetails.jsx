@@ -4,82 +4,77 @@ import { Card, CardContent, CardTitle } from "../components/ui/card";
 import { cn } from "../lib/utils";
 
 const ProductDetails = ({ selectedItem }) => {
-
   if (!selectedItem) {
     return (
-      <div className="flex-1 flex flex-col bg-muted/30">
-        <Card className="border-0 rounded-none shadow-none">
-          <CardContent className="p-6">
-            <div className="text-center text-muted-foreground">
-              Select an item to view details
-            </div>
+      <div className="flex-1 flex flex-col bg-muted/20">
+        <Card className="border-0 rounded-none shadow-none h-full flex items-center justify-center">
+          <CardContent className="text-center text-sm text-muted-foreground">
+            Select an item to view details
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  const { itemType } = selectedItem;
   const item = selectedItem;
-  const itemNumber = selectedItem.itemType === 'product' ? (item?.product_number || item?.id) : 
-                    selectedItem.itemType === 'assembly' ? (item?.assembly_number || item?.id) : 
-                    selectedItem.itemType === 'part' ? (item?.part_number || item?.id) : 
-                    item?.id;
-  const itemName = selectedItem.itemType === 'product' ? (item?.product_name || item?.name) : 
-                   selectedItem.itemType === 'assembly' ? (item?.assembly_name || item?.name) : 
-                   selectedItem.itemType === 'part' ? (item?.part_name || item?.name) : 
-                   item?.name;
+  
+  const getItemNumber = () => {
+    switch(itemType) {
+      case 'product': return item?.product_number || item?.id;
+      case 'assembly': return item?.assembly_number || item?.id;
+      case 'part': return item?.part_number || item?.id;
+      default: return item?.id;
+    }
+  };
+  
+  const getItemName = () => {
+    switch(itemType) {
+      case 'product': return item?.product_name || item?.name;
+      case 'assembly': return item?.assembly_name || item?.name;
+      case 'part': return item?.part_name || item?.name;
+      default: return item?.name;
+    }
+  };
+
+  const itemNumber = getItemNumber();
+  const itemName = getItemName();
 
   return (
-    <div className="flex-1 flex flex-col bg-muted/30">
-      {/* Top Part - Item Details */}
+    <div className="flex-1 flex flex-col bg-muted/20">
       <Card className="border-0 rounded-none shadow-none">
-        <CardContent className="p-6 pt-10">
-          <div className="grid grid-cols-2 gap-8">
-            {/* Left Column - Part Details */}
-            <div className="space-y-4">
+        <CardContent className="p-4">
+          <div className="grid grid-cols-2 gap-6">
+            <div className="space-y-3">
               <div>
-                <CardTitle className="text-2xl mb-2">{itemName || 'Unknown Item'}</CardTitle>
-                <div className="flex items-center space-x-4">
-                  <span className="text-sm font-medium text-muted-foreground">{itemNumber || 'N/A'}</span>
-                  {item?.product_version && (
-                    <span className="text-sm text-muted-foreground">Rev {item.product_version}</span>
-                  )}
+                <CardTitle className="text-lg font-medium mb-1">{itemName || 'Unknown Item'}</CardTitle>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>{itemNumber || 'N/A'}</span>
+                  {item?.product_version && <span>• Rev {item.product_version}</span>}
                 </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-y-2 text-sm">
-                <div className="font-medium text-muted-foreground">Type</div>
-                <div className="flex items-center space-x-2">
-                  <span className="text-foreground capitalize">
-                    {selectedItem?.itemType || 'Unknown'}
-                    {item?.type_name && (
-                      <span 
-                        className={cn(
-                          'ml-2 text-xs px-2 py-0.5 rounded-full',
-                          item.type_name.toLowerCase() === 'make' 
-                            ? 'bg-green-100 text-green-800' 
-                            : item.type_name.toLowerCase() === 'buy' 
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-gray-100 text-gray-800'
-                        )}
-                      >
-                        {item.type_name}
-                      </span>
-                    )}
-                  </span>
+              <div className="grid grid-cols-[60px_1fr] gap-x-3 gap-y-1.5 text-sm">
+                <div className="text-muted-foreground">Type</div>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium capitalize">{itemType || 'Unknown'}</span>
+                  {item?.type_name && (
+                    <span className={cn('text-[9px] px-1.5 py-0.5 rounded font-semibold', item.type_name.toLowerCase() === 'make' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700')}>
+                      {item.type_name.toUpperCase()}
+                    </span>
+                  )}
                 </div>
                 
-                <div className="font-medium text-muted-foreground">ID</div>
-                <div className="text-foreground">{item?.id || 'N/A'}</div>
+                <div className="text-muted-foreground">ID</div>
+                <div className="font-mono text-xs">{item?.id || 'N/A'}</div>
               </div>
             </div>
 
-            {/* 3D Model Placeholder */}
-            <div className="bg-muted/50 rounded-lg p-4 flex flex-col items-center justify-center border-2 border-dashed border-border">
-              <Box className="h-16 w-16 text-muted-foreground mb-3" />
-              <p className="text-sm font-medium text-muted-foreground mb-1">3D Model Viewer</p>
-              <p className="text-xs text-muted-foreground text-center">STEP file viewer will be displayed here</p>
-              <p className="text-xs text-muted-foreground mt-2">{itemNumber || 'N/A'}</p>
+            <div className="bg-muted/50 rounded p-6 flex flex-col items-center justify-center border-2 border-dashed border-border">
+              <Box className="h-12 w-12 text-muted-foreground mb-2" strokeWidth={1.5} />
+              <p className="text-xs font-medium text-muted-foreground mb-1">3D Model Viewer</p>
+              <p className="text-[10px] text-muted-foreground text-center">STEP file viewer will be displayed here</p>
+              <p className="text-[10px] text-muted-foreground mt-2 font-mono">{itemNumber || 'N/A'}</p>
             </div>
           </div>
         </CardContent>

@@ -156,19 +156,19 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
       <DialogContent 
-        className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto"
+        className="sm:max-w-[450px] max-h-[80vh] overflow-y-auto"
         onInteractOutside={(e) => e.preventDefault()}
         onPointerDownOutside={(e) => e.preventDefault()}
       >
-        <DialogHeader className="border-b pb-4">
-          <DialogTitle className="text-xl font-semibold text-gray-900">
+        <DialogHeader className="border-b pb-3">
+          <DialogTitle className="text-lg font-semibold text-gray-900">
             {editingOrder ? "Edit Order" : "Create New Order"}
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-6 py-6">
-            <div className="space-y-2">
-              <label htmlFor="sale_order_number" className="text-sm font-medium text-gray-700">
+          <div className="grid gap-4 py-4">
+            <div className="space-y-1.5">
+              <label htmlFor="sale_order_number" className="text-xs font-medium text-gray-700">
                 Sale Order Number *
               </label>
               <Input
@@ -178,13 +178,13 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                   setFormData({ ...formData, sale_order_number: e.target.value })
                 }
                 placeholder="Enter sale order number"
-                className="w-full"
+                className="h-9 text-sm"
                 required
               />
             </div>
             
-            <div className="space-y-2">
-              <label htmlFor="customer_id" className="text-sm font-medium text-gray-700">
+            <div className="space-y-1.5">
+              <label htmlFor="customer_id" className="text-xs font-medium text-gray-700">
                 Customer *
               </label>
               <Select
@@ -193,7 +193,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                   setFormData({ ...formData, customer_id: value })
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="h-9 text-sm">
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
                 <SelectContent>
@@ -229,56 +229,82 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
               </Select>
             </div>
             
-            <div className="space-y-2">
-              <label htmlFor="quantity" className="text-sm font-medium text-gray-700">
-                Quantity *
-              </label>
-              <Input
-                id="quantity"
-                type="number"
-                value={formData.quantity}
-                onChange={(e) =>
-                  setFormData({ ...formData, quantity: e.target.value })
-                }
-                placeholder="Enter quantity"
-                className="w-full"
-                required
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="quantity" className="text-xs font-medium text-gray-700">
+                  Quantity *
+                </label>
+                <Input
+                  id="quantity"
+                  type="number"
+                  value={formData.quantity}
+                  onChange={(e) =>
+                    setFormData({ ...formData, quantity: e.target.value })
+                  }
+                  placeholder="Qty"
+                  className="h-9 text-sm"
+                  required
+                />
+              </div>
+              
+              <div className="space-y-1.5">
+                <label htmlFor="priority" className="text-xs font-medium text-gray-700">
+                  Priority
+                </label>
+                <Input
+                  id="priority"
+                  type="number"
+                  value={formData.priority}
+                  onChange={(e) =>
+                    setFormData({ ...formData, priority: e.target.value })
+                  }
+                  placeholder="Priority"
+                  className="h-9 text-sm"
+                />
+              </div>
             </div>
             
-            <div className="space-y-2">
-              <label htmlFor="due_date" className="text-sm font-medium text-gray-700">
-                Due Date
-              </label>
-              <Input
-                id="due_date"
-                type="date"
-                value={formData.due_date}
-                onChange={(e) =>
-                  setFormData({ ...formData, due_date: e.target.value })
-                }
-                className="w-full"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label htmlFor="due_date" className="text-xs font-medium text-gray-700">
+                  Due Date
+                </label>
+                <Input
+                  id="due_date"
+                  type="date"
+                  value={formData.due_date}
+                  onChange={(e) =>
+                    setFormData({ ...formData, due_date: e.target.value })
+                  }
+                  className="h-9 text-sm"
+                />
+              </div>
+              
+              <div className="space-y-1.5">
+                <label htmlFor="status" className="text-xs font-medium text-gray-700">
+                  Status
+                </label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) =>
+                    setFormData({ ...formData, status: value })
+                  }
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Pending">Pending</SelectItem>
+                    <SelectItem value="Shipped">Shipped</SelectItem>
+                    <SelectItem value="Delivered">Delivered</SelectItem>
+                    <SelectItem value="Cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             
-            <div className="space-y-2">
-              <label htmlFor="priority" className="text-sm font-medium text-gray-700">
-                Priority
-              </label>
-              <Input
-                id="priority"
-                type="number"
-                value={formData.priority}
-                onChange={(e) =>
-                  setFormData({ ...formData, priority: e.target.value })
-                }
-                placeholder="Enter priority"
-                className="w-full"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="supervisor_id" className="text-sm font-medium text-gray-700">
+            <div className="space-y-1.5">
+              <label htmlFor="supervisor_id" className="text-xs font-medium text-gray-700">
                 Supervisor ID
               </label>
               <Input
@@ -288,115 +314,95 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                   setFormData({ ...formData, supervisor_id: e.target.value })
                 }
                 placeholder="Enter supervisor ID"
-                className="w-full"
+                className="h-9 text-sm"
               />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="status" className="text-sm font-medium text-gray-700">
-                Status
-              </label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, status: value })
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Pending">Pending</SelectItem>
-                  <SelectItem value="Shipped">Shipped</SelectItem>
-                  <SelectItem value="Delivered">Delivered</SelectItem>
-                  <SelectItem value="Cancelled">Cancelled</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             {/* Document Upload Section - Only for new orders */}
             {!editingOrder && (
-              <div className="border-t pt-6">
-                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-4">
-                  <FileText className="h-5 w-5" />
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2 mb-3">
+                  <FileText className="h-4 w-4" />
                   Documents (Optional)
                 </h3>
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {documents.length === 0 ? (
-                    <div className="text-center py-6 border-2 border-dashed border-gray-300 rounded-lg">
-                      <Upload className="mx-auto h-8 w-8 text-gray-400 mb-2" />
-                      <p className="text-sm text-gray-600 mb-3">No documents added yet</p>
+                    <div className="text-center py-4 border-2 border-dashed border-gray-300 rounded-md">
+                      <Upload className="mx-auto h-6 w-6 text-gray-400 mb-1" />
+                      <p className="text-xs text-gray-600 mb-2">No documents added yet</p>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         onClick={handleDocumentAdd}
+                        className="h-7 text-xs"
                       >
-                        Add First Document
+                        Add Document
                       </Button>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {documents.map((doc, index) => (
-                        <div key={index} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                          <div className="flex items-start justify-between mb-3">
-                            <h4 className="font-medium text-gray-900">Document {index + 1}</h4>
+                        <div key={index} className="bg-gray-50 p-3 rounded-md border border-gray-200">
+                          <div className="flex items-start justify-between mb-2">
+                            <h4 className="text-sm font-medium text-gray-900">Document {index + 1}</h4>
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
                               onClick={() => handleDocumentRemove(index)}
+                              className="h-6 w-6 p-0"
                             >
-                              <X className="h-4 w-4" />
+                              <X className="h-3 w-3" />
                             </Button>
                           </div>
                           
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-gray-700">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-gray-700">
                                 File *
                               </label>
                               <Input
                                 type="file"
                                 onChange={(e) => handleDocumentChange(index, 'file', e.target.files[0])}
-                                className="w-full"
+                                className="h-8 text-xs"
                               />
                             </div>
                             
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-gray-700">
-                                Document Name *
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-gray-700">
+                                Name *
                               </label>
                               <Input
                                 value={doc.document_name}
                                 onChange={(e) => handleDocumentChange(index, 'document_name', e.target.value)}
-                                placeholder="Enter document name"
-                                className="w-full"
+                                placeholder="Document name"
+                                className="h-8 text-xs"
                               />
                             </div>
                             
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-gray-700">
-                                Document Type *
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-gray-700">
+                                Type *
                               </label>
                               <Input
                                 value={doc.document_type}
                                 onChange={(e) => handleDocumentChange(index, 'document_type', e.target.value)}
-                                placeholder="e.g., Invoice, Purchase Order"
-                                className="w-full"
+                                placeholder="e.g., Invoice"
+                                className="h-8 text-xs"
                               />
                             </div>
                             
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-gray-700">
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-gray-700">
                                 Version *
                               </label>
                               <Input
                                 value={doc.document_version}
                                 onChange={(e) => handleDocumentChange(index, 'document_version', e.target.value)}
                                 placeholder="1.0"
-                                className="w-full"
+                                className="h-8 text-xs"
                               />
                             </div>
                           </div>
@@ -408,7 +414,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                         variant="outline"
                         size="sm"
                         onClick={handleDocumentAdd}
-                        className="w-full"
+                        className="w-full h-7 text-xs"
                       >
                         Add Another Document
                       </Button>
@@ -418,11 +424,11 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
               </div>
             )}
           </div>
-          <DialogFooter className="border-t pt-4">
-            <Button type="button" variant="outline" onClick={handleClose}>
+          <DialogFooter className="border-t pt-3">
+            <Button type="button" variant="outline" onClick={handleClose} className="h-8 text-sm">
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading} className="h-8 text-sm">
               {loading ? "Saving..." : editingOrder ? "Update" : "Create"}
             </Button>
           </DialogFooter>

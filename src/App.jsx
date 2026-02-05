@@ -11,9 +11,9 @@ function App() {
     <Router>
       <Layout>
         <Routes>
-          <Route path="/" element={<Navigate to="/oms/oms" replace />} />
-          <Route path="/oms" element={<Navigate to="/oms/oms" replace />} />
-          <Route path="/oms/oms" element={<OMS />} />
+          <Route path="/" element={<Navigate to="/oms/orders" replace />} />
+          <Route path="/oms" element={<Navigate to="/oms/orders" replace />} />
+          <Route path="/oms/orders" element={<OMS />} />
           <Route path="/oms/product/:productId" element={<OMS />} />
           <Route path="/oms/rawmaterials" element={<RawMaterials />} />
           <Route path="/pdm" element={<PDM />} />

@@ -154,30 +154,30 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
       <DialogContent 
-        className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto"
+        className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto"
         onInteractOutside={(e) => e.preventDefault()}
         onPointerDownOutside={(e) => e.preventDefault()}
       >
-        <DialogHeader className="border-b pb-4">
-          <DialogTitle className="text-xl font-semibold text-gray-900">
+        <DialogHeader className="border-b pb-3">
+          <DialogTitle className="text-lg font-semibold text-gray-900">
             Document Management
           </DialogTitle>
         </DialogHeader>
         
-        <div className="space-y-6 py-4">
+        <div className="space-y-4 py-3">
           {/* Upload Form */}
-          <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
-            <h3 className="text-lg font-semibold mb-4 text-gray-900">Upload Document</h3>
-            <form onSubmit={handleUpload} className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="order" className="text-sm font-medium text-gray-700">
+          <div className="bg-gray-50 rounded-md p-4 border border-gray-200">
+            <h3 className="text-sm font-semibold mb-3 text-gray-900">Upload Document</h3>
+            <form onSubmit={handleUpload} className="space-y-3">
+              <div className="space-y-1.5">
+                <label htmlFor="order" className="text-xs font-medium text-gray-700">
                   Order *
                 </label>
                 {orderId ? (
                   <Input
                     value={orders.find(order => order.id.toString() === orderId)?.sale_order_number || `Order ${orderId}`}
                     disabled
-                    className="w-full bg-gray-100"
+                    className="h-9 text-sm bg-gray-100"
                   />
                 ) : (
                   <Select
@@ -187,7 +187,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                       fetchDocuments(value);
                     }}
                   >
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="h-9 text-sm">
                       <SelectValue placeholder="Select order" />
                     </SelectTrigger>
                     <SelectContent>
@@ -201,51 +201,53 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                 )}
               </div>
               
-              <div className="space-y-2">
-                <label htmlFor="file" className="text-sm font-medium text-gray-700">
+              <div className="space-y-1.5">
+                <label htmlFor="file" className="text-xs font-medium text-gray-700">
                   File *
                 </label>
                 <Input
                   id="file"
                   type="file"
                   onChange={handleFileChange}
-                  className="w-full"
+                  className="h-9 text-sm"
                   required
                 />
               </div>
               
-              <div className="space-y-2">
-                <label htmlFor="document_type" className="text-sm font-medium text-gray-700">
-                  Document Type
-                </label>
-                <Input
-                  id="document_type"
-                  value={formData.document_type}
-                  onChange={(e) =>
-                    setFormData({ ...formData, document_type: e.target.value })
-                  }
-                  className="w-full"
-                  placeholder="e.g., Invoice, Purchase Order, etc."
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label htmlFor="document_type" className="text-xs font-medium text-gray-700">
+                    Document Type
+                  </label>
+                  <Input
+                    id="document_type"
+                    value={formData.document_type}
+                    onChange={(e) =>
+                      setFormData({ ...formData, document_type: e.target.value })
+                    }
+                    className="h-9 text-sm"
+                    placeholder="e.g., Invoice"
+                  />
+                </div>
+                
+                <div className="space-y-1.5">
+                  <label htmlFor="document_version" className="text-xs font-medium text-gray-700">
+                    Version
+                  </label>
+                  <Input
+                    id="document_version"
+                    value={formData.document_version}
+                    onChange={(e) =>
+                      setFormData({ ...formData, document_version: e.target.value })
+                    }
+                    className="h-9 text-sm"
+                  />
+                </div>
               </div>
               
-              <div className="space-y-2">
-                <label htmlFor="document_version" className="text-sm font-medium text-gray-700">
-                  Version
-                </label>
-                <Input
-                  id="document_version"
-                  value={formData.document_version}
-                  onChange={(e) =>
-                    setFormData({ ...formData, document_version: e.target.value })
-                  }
-                  className="w-full"
-                />
-              </div>
-              
-              <div className="flex justify-end pt-2">
-                <Button type="submit" disabled={loading}>
-                  {loading ? "Uploading..." : "Upload Document"}
+              <div className="flex justify-end pt-1">
+                <Button type="submit" disabled={loading} className="h-8 text-xs">
+                  {loading ? "Uploading..." : "Upload"}
                 </Button>
               </div>
             </form>
@@ -253,38 +255,39 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
           {/* Documents List */}
           {selectedOrderId && (
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <h3 className="text-lg font-semibold mb-3 text-gray-900">
+            <div className="bg-gray-50 rounded-md p-3 border border-gray-200">
+              <h3 className="text-sm font-semibold mb-2 text-gray-900">
                 Documents for Order {selectedOrderId}
               </h3>
               {documents.length === 0 ? (
-                <div className="text-center py-6 text-gray-500">
-                  <FileText className="mx-auto h-10 w-10 text-gray-400 mb-2" />
-                  <p>No documents found for this order.</p>
+                <div className="text-center py-4 text-gray-500">
+                  <FileText className="mx-auto h-8 w-8 text-gray-400 mb-1" />
+                  <p className="text-xs">No documents found for this order.</p>
                 </div>
               ) : (
                 <div className="space-y-2">
                   {documents.map((doc) => (
                     <div
                       key={doc.id}
-                      className="bg-white p-3 rounded border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
+                      className="bg-white p-2.5 rounded border border-gray-200 hover:shadow-sm transition-shadow"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-gray-900 truncate">{doc.document_name}</p>
-                          <div className="text-sm text-gray-600 flex items-center gap-3 mt-1">
+                          <p className="font-medium text-gray-900 text-sm truncate">{doc.document_name}</p>
+                          <div className="text-xs text-gray-600 flex items-center gap-2 mt-0.5">
                             <span>Type: <span className="font-medium">{doc.document_type}</span></span>
-                            <span>Version: <span className="font-medium">{doc.document_version}</span></span>
+                            <span>Ver: <span className="font-medium">{doc.document_version}</span></span>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 mt-0.5">
                             {new Date(doc.uploaded_at).toLocaleDateString()}
                           </p>
                         </div>
-                        <div className="flex space-x-2 ml-3 flex-shrink-0">
+                        <div className="flex space-x-1 ml-2 flex-shrink-0">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleDownload(doc.id, doc.document_name)}
+                            className="h-7 px-2 text-xs"
                           >
                             Download
                           </Button>
@@ -292,6 +295,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                             size="sm"
                             variant="destructive"
                             onClick={() => handleDelete(doc.id)}
+                            className="h-7 px-2 text-xs"
                           >
                             Delete
                           </Button>
@@ -305,8 +309,8 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
           )}
         </div>
 
-        <DialogFooter className="border-t pt-4">
-          <Button type="button" variant="outline" onClick={handleClose}>
+        <DialogFooter className="border-t pt-3">
+          <Button type="button" variant="outline" onClick={handleClose} className="h-8 text-xs">
             Close
           </Button>
         </DialogFooter>
