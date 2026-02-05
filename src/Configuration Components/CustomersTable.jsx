@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "../components/ui/table";
 import { Button } from "../components/ui/button";
+import { Pencil, Trash2, Plus } from "lucide-react";
 import CustomerModal from "../OMS Components/CustomerModal";
 import { useToast } from "../components/ui/toast";
 
@@ -97,74 +98,76 @@ const CustomersTable = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900">Customers</h2>
-        <Button
-          onClick={handleCreateCustomer}
-          className="bg-gray-900 hover:bg-gray-800"
-        >
-          New Customer
-        </Button>
-      </div>
+      <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-gray-900">Customers</h2>
+          <Button
+            onClick={handleCreateCustomer}
+            className="flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            New Customer
+          </Button>
+        </div>
 
-      <div className="bg-white rounded-lg shadow border border-gray-200">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-gray-50 border-b-2 border-gray-200">
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">SL NO</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">COMPANY NAME</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">ADDRESS</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">BRANCH</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">EMAIL</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CONTACT NUMBER</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CONTACT PERSON</TableHead>
-              <TableHead className="font-semibold text-gray-900">ACTIONS</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {customers.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                  No customers found
-                </TableCell>
+        <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-b border-gray-300">
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">SL NO</TableHead>
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">COMPANY NAME</TableHead>
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">ADDRESS</TableHead>
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">BRANCH</TableHead>
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">EMAIL</TableHead>
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">CONTACT NUMBER</TableHead>
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">CONTACT PERSON</TableHead>
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 text-center whitespace-nowrap px-4 py-3">ACTIONS</TableHead>
               </TableRow>
-            ) : (
-              customers.map((customer, index) => (
-                <TableRow 
-                  key={customer.id}
-                  className="border-b border-gray-200 hover:bg-blue-50 transition-colors"
-                >
-                  <TableCell className="border-r border-gray-200">{index + 1}</TableCell>
-                  <TableCell className="border-r border-gray-200 font-medium">{customer.company_name}</TableCell>
-                  <TableCell className="border-r border-gray-200">{customer.address}</TableCell>
-                  <TableCell className="border-r border-gray-200">{customer.branch || "-"}</TableCell>
-                  <TableCell className="border-r border-gray-200">{customer.email}</TableCell>
-                  <TableCell className="border-r border-gray-200">{customer.contact_number}</TableCell>
-                  <TableCell className="border-r border-gray-200">{customer.contact_person}</TableCell>
-                  <TableCell>
-                    <div className="flex space-x-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEditCustomer(customer)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDeleteCustomer(customer.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        Delete
-                      </Button>
-                    </div>
+            </TableHeader>
+            <TableBody>
+              {customers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+                    No customers found
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : (
+                customers.map((customer, index) => (
+                  <TableRow 
+                    key={customer.id}
+                    className="border-b border-gray-300 hover:bg-gray-50 transition-colors"
+                  >
+                    <TableCell className="border-r border-gray-300 text-center px-4 py-3">{index + 1}</TableCell>
+                    <TableCell className="border-r border-gray-300 text-center font-medium px-4 py-3">{customer.company_name}</TableCell>
+                    <TableCell className="border-r border-gray-300 text-center px-4 py-3">{customer.address}</TableCell>
+                    <TableCell className="border-r border-gray-300 text-center px-4 py-3">{customer.branch || "-"}</TableCell>
+                    <TableCell className="border-r border-gray-300 text-center px-4 py-3">{customer.email}</TableCell>
+                    <TableCell className="border-r border-gray-300 text-center px-4 py-3">{customer.contact_number}</TableCell>
+                    <TableCell className="border-r border-gray-300 text-center px-4 py-3">{customer.contact_person}</TableCell>
+                    <TableCell className="text-center px-4 py-3">
+                      <div className="flex items-center justify-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEditCustomer(customer)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteCustomer(customer.id)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       {customerModalOpen && (

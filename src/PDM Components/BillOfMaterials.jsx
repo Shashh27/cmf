@@ -248,11 +248,10 @@ const BillOfMaterials = ({ onItemSelected }) => {
       if (response.ok) {
         addToast(`Product "${product.product_name}" deleted successfully.`);
         await fetchProducts();
-        await fetchAssemblies();
-        await fetchParts();
       } else {
+        const data = await response.json();
         console.error('Failed to delete product');
-        addToast(`Failed to delete product "${product.product_name}".`);
+        addToast(data.detail || `Failed to delete product "${product.product_name}".`);
       }
     } catch (error) {
       console.error('Error deleting product:', error);
@@ -269,11 +268,24 @@ const BillOfMaterials = ({ onItemSelected }) => {
       });
       if (response.ok) {
         addToast(`Assembly "${assembly.assembly_name}" deleted successfully.`);
-        await fetchAssemblies();
-        await fetchParts();
+        // Refresh hierarchy if product_id is available
+        if (assembly.product_id) {
+            setHierarchicalData(prev => {
+                const newData = {...prev};
+                delete newData[assembly.product_id];
+                return newData;
+            });
+            // If the product is expanded, this will cause a re-fetch when the user interacts, 
+            // or we could explicitly fetch if we want immediate update. 
+            // For now, clearing cache is consistent with creation logic.
+            if (expandedItems[assembly.product_id]) {
+                fetchProductHierarchy(assembly.product_id);
+            }
+        }
       } else {
+        const data = await response.json();
         console.error('Failed to delete assembly');
-        addToast(`Failed to delete assembly "${assembly.assembly_name}".`);
+        addToast(data.detail || `Failed to delete assembly "${assembly.assembly_name}".`);
       }
     } catch (error) {
       console.error('Error deleting assembly:', error);
@@ -290,10 +302,21 @@ const BillOfMaterials = ({ onItemSelected }) => {
       });
       if (response.ok) {
         addToast(`Part "${part.part_name}" deleted successfully.`);
-        await fetchParts();
+        // Refresh hierarchy if product_id is available
+        if (part.product_id) {
+            setHierarchicalData(prev => {
+                const newData = {...prev};
+                delete newData[part.product_id];
+                return newData;
+            });
+            if (expandedItems[part.product_id]) {
+                fetchProductHierarchy(part.product_id);
+            }
+        }
       } else {
+        const data = await response.json();
         console.error('Failed to delete part');
-        addToast(`Failed to delete part "${part.part_name}".`);
+        addToast(data.detail || `Failed to delete part "${part.part_name}".`);
       }
     } catch (error) {
       console.error('Error deleting part:', error);

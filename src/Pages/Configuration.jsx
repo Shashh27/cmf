@@ -8,12 +8,20 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import WorkCenterModal from "../Configuration Components/WorkCenterModal";
 import Machines from "../Configuration Components/Machines";
 import CustomersTable from "../Configuration Components/CustomersTable";
 import { useToast } from "../components/ui/toast";
+
+import {
+  Pencil,
+  Trash2,
+  Plus,
+  Eye
+} from "lucide-react";
 
 const Configuration = () => {
   const { addToast, ToastContainer } = useToast();
@@ -94,95 +102,111 @@ const Configuration = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Work Center</h1>
-        <Button
-          onClick={() => {
-            setEditingWorkCenter(null);
-            setWorkCenterModalOpen(true);
-          }}
-          className="bg-gray-900 hover:bg-gray-800"
-        >
-          Add Work Center
-        </Button>
-      </div>
+      <h1 className="text-3xl font-bold text-gray-900">Configuration</h1>
 
-      {loading ? (
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <p className="mt-2 text-gray-600">Loading work centers...</p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg shadow border border-gray-200">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-gray-50 border-b-2 border-gray-200">
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">SL NO</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CODE</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">WORK CENTER NAME</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">DESCRIPTION</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">IS SCHEDULABLE</TableHead>
-                <TableHead className="font-semibold text-gray-900">ACTIONS</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {workCenters.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-gray-500">
-                    No work centers found
-                  </TableCell>
-                </TableRow>
-              ) : (
-                workCenters.map((workCenter, index) => (
-                  <TableRow 
-                    key={workCenter.id}
-                    className="border-b border-gray-200 hover:bg-blue-50 transition-colors"
-                  >
-                    <TableCell className="border-r border-gray-200">{index + 1}</TableCell>
-                    <TableCell className="border-r border-gray-200 font-medium">{workCenter.code}</TableCell>
-                    <TableCell className="border-r border-gray-200">{workCenter.work_center_name}</TableCell>
-                    <TableCell className="border-r border-gray-200">{workCenter.description || "-"}</TableCell>
-                    <TableCell className="border-r border-gray-200">
-                      <Badge variant={workCenter.is_schedulable ? "default" : "secondary"}>
-                        {workCenter.is_schedulable ? "Yes" : "No"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleViewMachines(workCenter)}
-                        >
-                          View
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEdit(workCenter)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDelete(workCenter.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      <Tabs defaultValue="work-center" className="w-full">
+        <TabsList>
+          <TabsTrigger value="work-center">Work Center</TabsTrigger>
+          <TabsTrigger value="customers">Customers</TabsTrigger>
+        </TabsList>
 
-      {/* Customers Section */}
-      <CustomersTable />
+        <TabsContent value="work-center">
+          <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-gray-900">Work Center</h2>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditingWorkCenter(null);
+                  setWorkCenterModalOpen(true);
+                }}
+                className="flex items-center gap-2"
+              >
+                <Plus className="h-4 w-4" />
+                Add Work Center
+              </Button>
+            </div>
+
+            {loading ? (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <p className="mt-2 text-gray-600">Loading work centers...</p>
+              </div>
+            ) : (
+              <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-b border-gray-300">
+                      <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">SL NO</TableHead>
+                      <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">CODE</TableHead>
+                      <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">WORK CENTER NAME</TableHead>
+                      <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">DESCRIPTION</TableHead>
+                      <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">IS SCHEDULABLE</TableHead>
+                      <TableHead className="font-semibold text-gray-900 bg-gray-50 text-center whitespace-nowrap px-4 py-3">ACTIONS</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {workCenters.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                          No work centers found
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      workCenters.map((workCenter, index) => (
+                        <TableRow 
+                          key={workCenter.id}
+                          className="border-b border-gray-300 hover:bg-gray-50 transition-colors"
+                        >
+                          <TableCell className="border-r border-gray-300 text-center px-4 py-3">{index + 1}</TableCell>
+                          <TableCell className="border-r border-gray-300 text-center font-medium px-4 py-3">{workCenter.code}</TableCell>
+                          <TableCell className="border-r border-gray-300 text-center px-4 py-3">{workCenter.work_center_name}</TableCell>
+                          <TableCell className="border-r border-gray-300 text-center px-4 py-3">{workCenter.description || "-"}</TableCell>
+                          <TableCell className="border-r border-gray-300 text-center px-4 py-3">
+                            <Badge variant={workCenter.is_schedulable ? "default" : "secondary"}>
+                              {workCenter.is_schedulable ? "Yes" : "No"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-center px-4 py-3">
+                            <div className="flex items-center justify-center gap-2">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleViewMachines(workCenter)}
+                                title="View Machines"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEdit(workCenter)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDelete(workCenter.id)}
+                              >
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="customers">
+          <CustomersTable />
+        </TabsContent>
+      </Tabs>
 
       {workCenterModalOpen && (
         <WorkCenterModal

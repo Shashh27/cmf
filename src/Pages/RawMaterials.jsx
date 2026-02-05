@@ -9,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
@@ -533,143 +534,170 @@ const RawMaterials = () => {
     }
   };
 
+  const renderMaterialsTable = ({ showSelection = false, showActions = false } = {}) => (
+    <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-gray-900">Raw Materials</h2>
+        {showActions && (
+          <Button
+            size="sm"
+            onClick={openCreateRawMaterial}
+            className="flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Add Raw Material
+          </Button>
+        )}
+      </div>
+      <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
+        <Table>
+          <TableHeader>
+            <TableRow className="border-b border-gray-300">
+              {showSelection && (
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                    checked={
+                      rawMaterials.length > 0 &&
+                      rawMaterials.every((m) => selectedRawMaterialIds[m.id])
+                    }
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      const next = {};
+                      if (checked) {
+                        rawMaterials.forEach((m) => {
+                          next[m.id] = true;
+                        });
+                      }
+                      setSelectedRawMaterialIds(next);
+                    }}
+                  />
+                </TableHead>
+              )}
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">SL NO</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">MATERIAL NAME</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">SPECIFICATION</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">MASS</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">DENSITY</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">VOLUME</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">STOCK TYPE</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">QUANTITY</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">DIMENSIONS</TableHead>
+              <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">STATUS</TableHead>
+              {showActions && (
+                <TableHead className="font-semibold text-gray-900 bg-gray-50 text-center whitespace-nowrap px-4 py-3">ACTIONS</TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rawMaterials.length > 0 ? (
+              rawMaterials.map((material, index) => (
+                <TableRow
+                  key={material.id ?? index}
+                  className="border-b border-gray-300 hover:bg-gray-50 transition-colors"
+                >
+                  {showSelection && (
+                    <TableCell className="border-r border-gray-300 text-center px-4 py-3">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                        checked={!!selectedRawMaterialIds[material.id]}
+                        onChange={() =>
+                          setSelectedRawMaterialIds((prev) => ({
+                            ...prev,
+                            [material.id]: !prev[material.id],
+                          }))
+                        }
+                      />
+                    </TableCell>
+                  )}
+                  <TableCell className="border-r border-gray-300 text-center font-medium px-4 py-3">{index + 1}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.material_name || "-"}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.material_specification || "-"}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.mass || "-"}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.density || "-"}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.volume || "-"}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.stock_type || "-"}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.quantity || "-"}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.stock_dimensions || "-"}</TableCell>
+                  <TableCell className="border-r border-gray-300 text-center px-4 py-3">
+                    <Badge variant={material.status ? "secondary" : "outline"}>
+                      {material.status || "-"}
+                    </Badge>
+                  </TableCell>
+                  {showActions && (
+                    <TableCell className="text-center px-4 py-3">
+                      <div className="flex items-center justify-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEditRawMaterial(material)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteRawMaterial(material)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={showSelection && showActions ? 13 : (showSelection || showActions ? 12 : 11)} className="py-12 text-center text-gray-500">
+                  No raw materials found
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-gray-900">Raw Materials</h1>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left side - Orders tree */}
-        <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900">Orders</h2>
-          </div>
-          <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
-            {renderOrderTree()}
-          </div>
-        </div>
+      <Tabs defaultValue="raw-materials" className="w-full">
+        <TabsList>
+          <TabsTrigger value="raw-materials">Raw Materials</TabsTrigger>
+          <TabsTrigger value="linking">Raw Materials Linking</TabsTrigger>
+        </TabsList>
 
-        {/* Right side - Raw Materials table */}
-        <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900">Raw Materials</h2>
-            <Button
-              size="sm"
-              onClick={openCreateRawMaterial}
-              className="flex items-center gap-2"
-            >
-              <Plus className="h-4 w-4" />
-              Add Raw Material
+        <TabsContent value="raw-materials">
+          {renderMaterialsTable({ showSelection: false, showActions: true })}
+        </TabsContent>
+
+        <TabsContent value="linking">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+            {/* Left side - Orders tree */}
+            <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-xl font-semibold text-gray-900">Orders</h2>
+              </div>
+              <div className="overflow-y-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
+                {renderOrderTree()}
+              </div>
+            </div>
+
+            {/* Right side - Raw Materials table */}
+            {renderMaterialsTable({ showSelection: true, showActions: false })}
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={handleSubmitLinks} className="mt-2" disabled={linking}>
+              {linking ? "Submitting..." : "Submit"}
             </Button>
           </div>
-          <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 280px)" }}>
-            <Table>
-              <TableHeader>
-                <TableRow className="border-b border-gray-300">
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-gray-300 cursor-pointer"
-                      checked={
-                        rawMaterials.length > 0 &&
-                        rawMaterials.every((m) => selectedRawMaterialIds[m.id])
-                      }
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        const next = {};
-                        if (checked) {
-                          rawMaterials.forEach((m) => {
-                            next[m.id] = true;
-                          });
-                        }
-                        setSelectedRawMaterialIds(next);
-                      }}
-                    />
-                  </TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">SL NO</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">MATERIAL NAME</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">SPECIFICATION</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">MASS</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">DENSITY</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">VOLUME</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">STOCK TYPE</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">QUANTITY</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">DIMENSIONS</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 border-r border-gray-300 text-center whitespace-nowrap px-4 py-3">STATUS</TableHead>
-                  <TableHead className="font-semibold text-gray-900 bg-gray-50 text-center whitespace-nowrap px-4 py-3">ACTIONS</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rawMaterials.length > 0 ? (
-                  rawMaterials.map((material, index) => (
-                    <TableRow
-                      key={material.id ?? index}
-                      className="border-b border-gray-300 hover:bg-gray-50 transition-colors"
-                    >
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-gray-300 cursor-pointer"
-                          checked={!!selectedRawMaterialIds[material.id]}
-                          onChange={() =>
-                            setSelectedRawMaterialIds((prev) => ({
-                              ...prev,
-                              [material.id]: !prev[material.id],
-                            }))
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="border-r border-gray-300 text-center font-medium px-4 py-3">{index + 1}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.material_name || "-"}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.material_specification || "-"}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.mass || "-"}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.density || "-"}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.volume || "-"}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.stock_type || "-"}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.quantity || "-"}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">{material.stock_dimensions || "-"}</TableCell>
-                      <TableCell className="border-r border-gray-300 text-center px-4 py-3">
-                        <Badge variant={material.status ? "secondary" : "outline"}>
-                          {material.status || "-"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-center px-4 py-3">
-                        <div className="flex items-center justify-center gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEditRawMaterial(material)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeleteRawMaterial(material)}
-                          >
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={12} className="py-12 text-center text-gray-500">
-                      No raw materials found
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex justify-end">
-        <Button onClick={handleSubmitLinks} className="mt-2" disabled={linking}>
-          {linking ? "Submitting..." : "Submit"}
-        </Button>
-      </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Raw Material Modal */}
       <Dialog

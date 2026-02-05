@@ -152,7 +152,8 @@ const OMS = () => {
         fetchOrders();
         addToast(`Order "${order.sale_order_number}" deleted successfully!`);
       } else {
-        addToast("Failed to delete order", "error");
+        const data = await response.json();
+        addToast(data.detail || "Failed to delete order", "error");
       }
     } catch (error) {
       console.error("Error deleting order:", error);
