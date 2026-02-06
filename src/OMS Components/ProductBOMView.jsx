@@ -1,13 +1,24 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
-import { ChevronDown, ChevronRight, ArrowLeft, Package, Layers, Box } from "lucide-react";
+import { Button, Typography, Table, Space, Spin, Empty, Modal, Select, message, Tag, Card } from "antd";
+import { 
+  CaretDownOutlined, 
+  CaretRightOutlined, 
+  ArrowLeftOutlined, 
+  AppstoreOutlined, 
+  BlockOutlined, 
+  CodeSandboxOutlined,
+  EyeOutlined,
+  DownloadOutlined,
+  FileTextOutlined
+} from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
-import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { cn } from "../lib/utils";
+
+const { Title, Text } = Typography;
+const { Option } = Select;
 
 const ScrollArea = ({ className, children }) => (
-  <div className={cn("overflow-auto", className)}>{children}</div>
+  <div className={className}>{children}</div>
 );
 
 const ProductBOMView = ({ onBackToOrders }) => {
@@ -19,121 +30,89 @@ const ProductBOMView = ({ onBackToOrders }) => {
   const [loading, setLoading] = useState(false);
   const [bomView, setBomView] = useState('mbom');
   const [expandedOperations, setExpandedOperations] = useState({});
+  const [documentModal, setDocumentModal] = useState({ isOpen: false, url: null, name: null });
   const hasFetchedData = useRef(false);
 
   useEffect(() => {
     if (hasFetchedData.current || !productId) return;
+    hasFetchedData.current = true;
     
-    const fetchData = async () => {
-      hasFetchedData.current = true;
-      try {
-        await Promise.all([
-          fetchProductDetails(),
-          fetchBOMData()
-        ]);
-      } catch (error) {
-        console.error('Error fetching BOM data:', error);
-      }
-    };
-
-    fetchData();
+    Promise.all([
+      fetch(`${API_BASE_URL}/products/${productId}`).then(r => r.ok && r.json().then(setProduct)),
+      fetchBOMData()
+    ]).catch(console.error);
   }, [productId]);
 
-  const fetchProductDetails = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/products/${productId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setProduct(data);
-      }
-    } catch (error) {
-      console.error("Error fetching product details:", error);
-    }
-  };
-
-  const processSubassemblies = (subassemblies) => {
-    if (!subassemblies || !Array.isArray(subassemblies)) return [];
-    
-    return subassemblies.flatMap(subassembly => {
-      const subassemblyData = {
-        id: subassembly.assembly?.id,
-        name: subassembly.assembly?.assembly_name,
-        part_number: subassembly.assembly?.assembly_number,
-        type: 'assembly',
-        components: [
-          ...(subassembly.parts?.map(part => ({
-            id: part.part.id,
-            name: part.part.part_name,
-            part_number: part.part.part_number,
-            type: part.part.type_name || 'part',
-            operations: part.operations,
-            process_plans: part.process_plans,
-            documents: part.documents,
-            tools: part.tools
-          })) || []),
-          ...processSubassemblies(subassembly.subassemblies || [])
-        ]
-      };
-      return [subassemblyData];
-    });
-  };
+  const processSubassemblies = (subassemblies) => 
+    subassemblies?.flatMap(sub => [{
+      id: sub.assembly?.id,
+      name: sub.assembly?.assembly_name,
+      part_number: sub.assembly?.assembly_number,
+      type: 'assembly',
+      components: [
+        ...(sub.parts?.map(p => ({
+          id: p.part.id,
+          name: p.part.part_name,
+          part_number: p.part.part_number,
+          type: p.part.type_name || 'part',
+          operations: p.operations,
+          process_plans: p.process_plans,
+          documents: p.documents,
+          tools: p.tools
+        })) || []),
+        ...processSubassemblies(sub.subassemblies || [])
+      ]
+    }]) || [];
 
   const fetchBOMData = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/products/${productId}/hierarchical`);
+      if (!response.ok) return setBomData(null);
       
-      if (response.ok) {
-        const data = await response.json();
-        
-        const processedAssemblies = data.assemblies?.flatMap(assembly => {
-          const assemblyData = {
-            id: assembly.assembly?.id,
-            name: assembly.assembly?.assembly_name,
-            part_number: assembly.assembly?.assembly_number,
-            type: 'assembly',
-            components: [
-              ...(assembly.parts?.map(part => ({
-                id: part.part.id,
-                name: part.part.part_name,
-                part_number: part.part.part_number,
-                type: part.part.type_name || 'part',
-                operations: part.operations,
-                process_plans: part.process_plans,
-                documents: part.documents,
-                tools: part.tools
-              })) || []),
-              ...processSubassemblies(assembly.subassemblies || [])
-            ]
-          };
-          return assemblyData;
-        }) || [];
+      const data = await response.json();
+      const processedAssemblies = data.assemblies?.flatMap(asm => ({
+        id: asm.assembly?.id,
+        name: asm.assembly?.assembly_name,
+        part_number: asm.assembly?.assembly_number,
+        type: 'assembly',
+        components: [
+          ...(asm.parts?.map(p => ({
+            id: p.part.id,
+            name: p.part.part_name,
+            part_number: p.part.part_number,
+            type: p.part.type_name || 'part',
+            operations: p.operations,
+            process_plans: p.process_plans,
+            documents: p.documents,
+            tools: p.tools
+          })) || []),
+          ...processSubassemblies(asm.subassemblies || [])
+        ]
+      })) || [];
 
-        const transformedData = {
-          id: data.product.id,
-          name: data.product.product_name,
-          part_number: data.product.product_number,
-          type: 'product',
-          components: [
-            ...(data.direct_parts?.map(part => ({
-              id: part.part.id,
-              name: part.part.part_name,
-              part_number: part.part.part_number,
-              type: part.part.type_name || 'part',
-              operations: part.operations,
-              process_plans: part.process_plans,
-              documents: part.documents,
-              tools: part.tools
-            })) || []),
-            ...processedAssemblies
-          ]
-        };
+      const transformedData = {
+        id: data.product.id,
+        name: data.product.product_name,
+        part_number: data.product.product_number,
+        type: 'product',
+        components: [
+          ...(data.direct_parts?.map(p => ({
+            id: p.part.id,
+            name: p.part.part_name,
+            part_number: p.part.part_number,
+            type: p.part.type_name || 'part',
+            operations: p.operations,
+            process_plans: p.process_plans,
+            documents: p.documents,
+            tools: p.tools
+          })) || []),
+          ...processedAssemblies
+        ]
+      };
 
-        setBomData(transformedData);
-        setExpandedItems({ [transformedData.id]: true });
-        setSelectedItem(transformedData);
-      } else {
-        setBomData(null);
-      }
+      setBomData(transformedData);
+      setExpandedItems({ [transformedData.id]: true });
+      setSelectedItem(transformedData);
     } catch (error) {
       console.error("Error fetching hierarchical BOM data:", error);
       setBomData(null);
@@ -142,162 +121,108 @@ const ProductBOMView = ({ onBackToOrders }) => {
     }
   };
 
-  const toggleExpand = (itemId) => {
-    setExpandedItems(prev => ({ ...prev, [itemId]: !prev[itemId] }));
-  };
-
-  const toggleOperationExpand = (operationId) => {
-    setExpandedOperations(prev => ({ ...prev, [operationId]: !prev[operationId] }));
-  };
-
-  const handleItemClick = (item) => {
-    console.log("Selected Item:", item); // Debug log
-    setSelectedItem(item);
-  };
+  const toggleExpand = (itemId) => setExpandedItems(prev => ({ ...prev, [itemId]: !prev[itemId] }));
+  const toggleOperationExpand = (opId) => setExpandedOperations(prev => ({ ...prev, [opId]: !prev[opId] }));
 
   const getTypeIcon = (type) => {
-    switch(type?.toLowerCase()) {
-      case 'product':
-        return <Package className="h-4 w-4 text-purple-600" />;
-      case 'assembly':
-        return <Layers className="h-4 w-4 text-blue-600" />;
-      case 'part':
-      case 'make':
-        return <Box className="h-4 w-4 text-green-600" />;
-      default:
-        return <Box className="h-4 w-4 text-gray-600" />;
-    }
+    const icons = {
+      product: <AppstoreOutlined style={{ color: '#722ed1' }} />,
+      assembly: <BlockOutlined style={{ color: '#1890ff' }} />,
+      part: <CodeSandboxOutlined style={{ color: '#52c41a' }} />,
+      make: <CodeSandboxOutlined style={{ color: '#52c41a' }} />
+    };
+    return icons[type?.toLowerCase()] || <CodeSandboxOutlined style={{ color: '#8c8c8c' }} />;
   };
 
-  const handleViewDocument = (url, name) => {
-    if (url) window.open(url, '_blank', 'noopener,noreferrer');
-    else alert('Document URL is not available');
-  };
-
-  const handleDownloadDocument = async (url, name) => {
-    if (!url) {
-      alert('Document URL is not available');
+  const handleDocumentAction = async (url, name, action = 'view') => {
+    if (!url) return message.error('Document URL is not available');
+    
+    if (action === 'view') {
+      setDocumentModal({ isOpen: true, url, name });
       return;
     }
-    
+
     try {
-      // Create a temporary anchor element
       const link = document.createElement('a');
-      
-      // If the URL is a data URL or a blob URL, we can use it directly
       if (url.startsWith('data:') || url.startsWith('blob:')) {
         link.href = url;
       } else {
-        // For regular URLs, we'll need to fetch the file first
         const response = await fetch(url, {
           method: 'GET',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-          },
-          credentials: 'include' // Include cookies if needed
+          headers: { 'Content-Type': 'application/octet-stream' },
+          credentials: 'include'
         });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const blob = await response.blob();
-        const blobUrl = window.URL.createObjectURL(blob);
-        link.href = blobUrl;
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        link.href = window.URL.createObjectURL(await response.blob());
       }
-      
-      // Set the download attribute with a proper filename
-      const fileName = name || 'document';
-      link.download = fileName.includes('.') ? fileName : `${fileName}.pdf`; // Default to .pdf if no extension
-      
-      // Append to body, trigger click, and remove
+      link.download = name?.includes('.') ? name : `${name || 'document'}.pdf`;
       document.body.appendChild(link);
       link.click();
-      
-      // Cleanup
       setTimeout(() => {
         document.body.removeChild(link);
-        if (link.href.startsWith('blob:')) {
-          window.URL.revokeObjectURL(link.href);
-        }
+        if (link.href.startsWith('blob:')) window.URL.revokeObjectURL(link.href);
       }, 100);
-      
     } catch (error) {
       console.error('Download error:', error);
-      // Fallback to opening in a new tab if download fails
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
 
   const renderBOMItem = (item, level = 0) => {
     if (!item) return null;
-    
-    const hasChildren = item.components && item.components.length > 0;
+    const hasChildren = item.components?.length > 0;
     const isExpanded = expandedItems[item.id];
     const isSelected = selectedItem?.id === item.id;
     
     return (
       <div key={item.id}>
         <div 
-          className={cn(
-            "flex items-center gap-2 py-2.5 px-3 rounded-md transition-all cursor-pointer group",
-            "hover:bg-blue-50 border-l-2",
-            isSelected 
-              ? "bg-blue-50 border-l-blue-500 shadow-sm" 
-              : "border-l-transparent hover:border-l-blue-300"
-          )}
-          style={{ marginLeft: `${level * 24}px` }}
-          onClick={() => handleItemClick(item)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            marginLeft: `${level * 20}px`,
+            borderLeft: `2px solid ${isSelected ? '#1890ff' : 'transparent'}`,
+            backgroundColor: isSelected ? '#e6f7ff' : 'transparent',
+          }}
+          onClick={() => setSelectedItem(item)}
+          onMouseEnter={(e) => {
+            if (!isSelected) e.currentTarget.style.backgroundColor = '#f0f8ff';
+          }}
+          onMouseLeave={(e) => {
+            if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+          }}
         >
-          {/* Expand/Collapse Icon */}
-          <div className="flex-shrink-0">
+          <div style={{ flexShrink: 0 }}>
             {hasChildren ? (
-              <button 
-                onClick={(e) => { 
-                  e.stopPropagation(); 
-                  toggleExpand(item.id); 
-                }}
-                className="p-0.5 hover:bg-gray-200 rounded transition-colors"
-              >
-                {isExpanded ? (
-                  <ChevronDown className="h-4 w-4 text-gray-600" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-gray-600" />
-                )}
-              </button>
-            ) : (
-              <div className="w-5" />
-            )}
+              <Button 
+                type="text" 
+                size="small" 
+                icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                onClick={(e) => { e.stopPropagation(); toggleExpand(item.id); }}
+                style={{ padding: '2px' }}
+              />
+            ) : <div style={{ width: '16px' }} />}
           </div>
-
-          {/* Type Icon */}
-          <div className="flex-shrink-0">
-            {getTypeIcon(item.type)}
-          </div>
-
-          {/* Item Name */}
-          <div className="flex-1 min-w-0">
-            <span className={cn(
-              "text-sm font-medium truncate block",
-              isSelected ? "text-blue-900" : "text-gray-900"
-            )}>
+        <div style={{ flexShrink: 0 }}>{getTypeIcon(item.type)}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Text 
+              style={{ 
+                fontSize: '12px', 
+                fontWeight: 'medium',
+                color: isSelected ? '#1890ff' : '#262626'
+              }}
+              ellipsis={{ tooltip: item.name }}
+            >
               {item.name}
-            </span>
+            </Text>
           </div>
-
-          {/* Component Count (if has children) */}
-          {hasChildren && (
-            <div className="flex-shrink-0">
-              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                {item.components.length}
-              </span>
-            </div>
-          )}
         </div>
-        
-        {/* Children */}
         {hasChildren && isExpanded && (
-          <div className="mt-1">
+          <div style={{ marginTop: '2px' }}>
             {item.components.map(child => renderBOMItem(child, level + 1))}
           </div>
         )}
@@ -305,220 +230,225 @@ const ProductBOMView = ({ onBackToOrders }) => {
     );
   };
 
+  const DocumentTable = ({ documents }) => {
+    const columns = [
+      {
+        title: 'Type',
+        dataIndex: 'document_type',
+        key: 'document_type',
+        width: 120,
+        render: (type) => (
+          <Space>
+            <FileTextOutlined style={{ color: '#8c8c8c' }} />
+            <Text style={{ fontSize: '12px' }}>{type || 'Document'}</Text>
+          </Space>
+        ),
+      },
+      {
+        title: 'Name',
+        dataIndex: 'document_name',
+        key: 'document_name',
+        render: (name) => (
+          <Text style={{ fontSize: '12px', fontWeight: 'medium' }}>
+            {name || 'Untitled'}
+          </Text>
+        ),
+      },
+      {
+        title: 'Actions',
+        key: 'actions',
+        width: 120,
+        render: (_, record) => (
+          <Space size="small">
+            <Button 
+              type="text" 
+              size="small" 
+              icon={<EyeOutlined />}
+              onClick={() => handleDocumentAction(record.document_url, record.document_name, 'view')}
+              title="View"
+            />
+            <Button 
+              type="text" 
+              size="small" 
+              icon={<DownloadOutlined />}
+              onClick={() => handleDocumentAction(record.document_url, record.document_name, 'download')}
+              title="Download"
+            />
+          </Space>
+        ),
+      },
+      {
+        title: 'Version',
+        dataIndex: 'version',
+        key: 'version',
+        width: 100,
+        render: (version, record) => (
+          <Select 
+            size="small" 
+            value={version || '1.0'} 
+            style={{ width: '100%' }}
+          >
+            <Option value="1.0">1.0</Option>
+            {record.versions?.map((v, i) => (
+              <Option key={i} value={v}>{v}</Option>
+            ))}
+          </Select>
+        ),
+      },
+    ];
+
+    return (
+      <Table
+        columns={columns}
+        dataSource={documents}
+        rowKey="id"
+        size="small"
+        pagination={false}
+        scroll={{ y: 300 }}
+      />
+    );
+  };
+
+  const OperationsTable = ({ operations, processPlans }) => {
+    const columns = [
+      {
+        title: 'Op #',
+        key: 'operation_number',
+        width: 80,
+        render: (_, record, index) => {
+          const plan = processPlans?.find(pp => pp.operation_id === record.id);
+          const isExpanded = expandedOperations[record.id];
+          return (
+            <Space>
+              {plan && (
+                <Button 
+                  type="text" 
+                  size="small" 
+                  icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                  onClick={() => toggleOperationExpand(record.id)}
+                />
+              )}
+              <Text style={{ fontSize: '12px', fontWeight: 'medium' }}>
+                {record.operation_number || index + 1}
+              </Text>
+            </Space>
+          );
+        },
+      },
+      {
+        title: 'Name',
+        dataIndex: 'operation_name',
+        key: 'operation_name',
+        render: (name) => <Text style={{ fontSize: '12px' }}>{name}</Text>,
+      },
+      {
+        title: 'Setup',
+        key: 'setup_time',
+        width: 100,
+        render: (_, record) => {
+          const plan = processPlans?.find(pp => pp.operation_id === record.id);
+          return <Text style={{ fontSize: '12px' }}>{plan?.setup_time || '00:00:00'}</Text>;
+        },
+      },
+      {
+        title: 'Cycle',
+        key: 'cycle_time',
+        width: 100,
+        render: (_, record) => {
+          const plan = processPlans?.find(pp => pp.operation_id === record.id);
+          return <Text style={{ fontSize: '12px' }}>{plan?.cycle_time || '00:00:00'}</Text>;
+        },
+      },
+      {
+        title: 'Workcenter',
+        key: 'workcenter',
+        width: 120,
+        render: (_, record) => {
+          const plan = processPlans?.find(pp => pp.operation_id === record.id);
+          return <Text style={{ fontSize: '12px' }}>{plan?.workcenter || 'N/A'}</Text>;
+        },
+      },
+    ];
+
+    const expandedRowRender = (record) => {
+      const plan = processPlans?.find(pp => pp.operation_id === record.id);
+      if (!plan) return null;
+      return (
+        <div className="p-3 bg-gray-50 rounded text-xs">
+           <p><strong>Description:</strong> {plan.description || 'No description available'}</p>
+           <p><strong>Resources:</strong> {plan.resources || 'None'}</p>
+        </div>
+      );
+    };
+
+    return (
+      <Table
+        columns={columns}
+        dataSource={operations}
+        rowKey="id"
+        size="small"
+        pagination={false}
+        expandable={{
+          expandedRowRender,
+          expandedRowKeys: Object.keys(expandedOperations).filter(k => expandedOperations[k]).map(k => isNaN(Number(k)) ? k : Number(k)),
+          expandIconColumnIndex: -1
+        }}
+      />
+    );
+  };
+
+  const EmptyState = ({ message }) => (
+    <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+      <BlockOutlined className="text-2xl mb-2" />
+      <p className="text-sm">{message}</p>
+    </div>
+  );
+
   const renderDetailsPanel = () => {
-    if (!selectedItem) {
-      return (
-        <div className="text-center py-12">
-          <p className="text-gray-500">Select a part to view details</p>
-        </div>
-      );
-    }
+    if (!selectedItem) return <EmptyState message="Select an item to view details" />;
+    
+    // Check if the selected item is a part (not a product or assembly)
+    // We treat anything that isn't explicitly a product or assembly as a part/component
+    // This covers 'part', 'make', 'buy', 'component', etc.
+    const isPart = selectedItem.type !== 'product' && selectedItem.type !== 'assembly';
 
-    // Check if it's a part (including type_name variations)
-    const isPart = selectedItem.type?.toLowerCase() === 'part' || 
-                    selectedItem.type?.toLowerCase() === 'make' ||
-                    selectedItem.type?.toLowerCase() === 'buy';
+    if (!isPart) return <div className="text-center py-8"><p className="text-xs text-gray-400">Select a part to view {bomView === 'ebom' ? 'documents' : 'operations'}</p></div>;
 
-    if (!isPart) {
-      // Don't show any details for products, assemblies, or sub-assemblies
-      return (
-        <div className="text-center py-12">
-          <p className="text-gray-400">Select a part to view {bomView === 'ebom' ? 'documents' : 'operations'}</p>
-        </div>
-      );
-    }
-
-    // eBOM View for Parts
     if (bomView === 'ebom') {
       return (
-        <div className="space-y-4">
-
-          {/* Documents Section */}
-          <div>
-            <h3 className="text-lg font-semibold mb-3">
-              Documents ({selectedItem.documents?.length || 0})
-            </h3>
-            
-            {selectedItem.documents?.length > 0 ? (
-              <div className="border rounded-lg overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-gray-100 border-b">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Document Type</th>
-                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Document Name</th>
-                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Actions</th>
-                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Version</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedItem.documents.map((doc, idx) => (
-                      <tr key={doc.id || idx} className="border-b hover:bg-gray-50">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            <span>{doc.document_type || 'Document'}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 font-medium">{doc.document_name || 'Untitled'}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex space-x-2">
-                            <button 
-                              onClick={() => handleViewDocument(doc.document_url, doc.document_name)}
-                              className="p-1.5 rounded-full hover:bg-gray-200 text-gray-600 hover:text-gray-800"
-                              title="View"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                              </svg>
-                            </button>
-                            <button 
-                              onClick={() => handleDownloadDocument(doc.document_url, doc.document_name)}
-                              className="p-1.5 rounded-full hover:bg-gray-200 text-gray-600 hover:text-gray-800"
-                              title="Download"
-                            >
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
-                            </button>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <select 
-                            className="w-full bg-white border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                            value={doc.version || '1.0'}
-                            onChange={(e) => {}}
-                            style={{
-                              WebkitAppearance: 'none',
-                              MozAppearance: 'none',
-                              textIndent: '1px',
-                              textOverflow: ''
-                            }}
-                          >
-                            <option value="1.0">1.0</option>
-                            {doc.versions?.map((v, i) => (
-                              <option key={i} value={v}>{v}</option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
-                <p className="text-sm text-gray-500">No documents available for this part</p>
-              </div>
-            )}
-          </div>
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold mb-2">Documents ({selectedItem.documents?.length || 0})</h3>
+          {selectedItem.documents?.length > 0 ? (
+            <DocumentTable documents={selectedItem.documents} />
+          ) : (
+            <EmptyState message="No documents available for this part" />
+          )}
         </div>
       );
     }
 
-    // mBOM View for Parts
     return (
-      <div className="space-y-4">
-
-        {/* Operations Section */}
-        <div>
-          <h3 className="text-lg font-semibold mb-2">
-            Operations ({selectedItem.operations?.length || 0})
-          </h3>
-          <p className="text-sm text-gray-500 mb-4">Click on an operation to view process plan details</p>
-
-          {selectedItem.operations?.length > 0 ? (
-            <div className="border rounded-lg overflow-hidden">
-              <table className="w-full">
-                <thead className="bg-gray-100 border-b">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Operation #</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Operation Name</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Setup Time</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Cycle Time</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Workcenter</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedItem.operations.map((op, idx) => {
-                    const plan = selectedItem.process_plans?.find(pp => pp.operation_id === op.id);
-                    const isExpanded = expandedOperations[op.id];
-                    
-                    return (
-                      <React.Fragment key={op.id}>
-                        <tr 
-                          className="border-b hover:bg-gray-50 cursor-pointer"
-                          onClick={() => toggleOperationExpand(op.id)}
-                        >
-                          <td className="px-4 py-3">
-                            <div className="flex items-center">
-                              {plan ? (
-                                isExpanded ? <ChevronDown size={16} className="mr-2" /> : <ChevronRight size={16} className="mr-2" />
-                              ) : (
-                                <span className="w-4 mr-2"></span>
-                              )}
-                              <span className="font-medium">{op.operation_number || idx + 1}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">{op.operation_name}</td>
-                          <td className="px-4 py-3">{plan?.setup_time || '00:00:00'}</td>
-                          <td className="px-4 py-3">{plan?.cycle_time || '00:00:00'}</td>
-                          <td className="px-4 py-3">{plan?.workcenter || 'N/A'}</td>
-                        </tr>
-                        
-                        {isExpanded && plan && (
-                          <tr className="bg-gray-50">
-                            <td colSpan="5" className="px-4 py-4">
-                              <div className="pl-8 space-y-3">
-                                <div>
-                                  <h4 className="font-semibold text-sm mb-2">Work Instructions</h4>
-                                  <p className="text-sm text-gray-700 whitespace-pre-line">
-                                    {plan.work_instructions || 'No work instructions provided.'}
-                                  </p>
-                                </div>
-                                
-                                {plan.notes && (
-                                  <div>
-                                    <h4 className="font-semibold text-sm mb-2">Notes</h4>
-                                    <p className="text-sm text-gray-700 whitespace-pre-line">
-                                      {plan.notes}
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
-              <p className="text-sm text-gray-500">No operations defined for this part</p>
-            </div>
-          )}
-        </div>
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold mb-2">Operations ({selectedItem.operations?.length || 0})</h3>
+        <p className="text-xs text-gray-500 mb-2">Click on an operation to view process plan details</p>
+        {selectedItem.operations?.length > 0 ? (
+          <OperationsTable operations={selectedItem.operations} processPlans={selectedItem.process_plans} />
+        ) : (
+          <EmptyState message="No operations defined for this part" />
+        )}
       </div>
     );
   };
 
   if (loading) {
     return (
-      <div className="container mx-auto p-4">
-        <div className="flex items-center mb-4">
-          <Button variant="outline" size="sm" onClick={onBackToOrders} disabled>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Orders
-          </Button>
-          <h1 className="text-2xl font-semibold ml-2">Loading...</h1>
+      <div className="container mx-auto p-3">
+        <div className="flex items-center mb-3">
+          <Button type="default" size="small" disabled className="h-7 text-xs"><ArrowLeftOutlined className="h-3 w-3 mr-1" />Back</Button>
+          <h1 className="text-lg font-semibold ml-2">Loading...</h1>
         </div>
-        <div className="flex justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-r-transparent"></div>
+        <div className="flex justify-center py-8">
+          <div className="animate-spin rounded-full h-6 w-6 border-3 border-blue-600 border-r-transparent" />
         </div>
       </div>
     );
@@ -526,83 +456,86 @@ const ProductBOMView = ({ onBackToOrders }) => {
 
   if (!bomData) {
     return (
-      <div className="container mx-auto p-4">
-        <div className="flex items-center mb-4">
-          <Button variant="outline" size="sm" onClick={onBackToOrders}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Orders
-          </Button>
-          <h1 className="text-2xl font-semibold ml-2">{product?.product_name || 'Product'} BOM</h1>
+      <div className="container mx-auto p-3">
+        <div className="flex items-center mb-3">
+          <Button type="default" size="small" onClick={onBackToOrders} className="h-7 text-xs"><ArrowLeftOutlined className="h-3 w-3 mr-1" />Back</Button>
+          <h1 className="text-lg font-semibold ml-2">{product?.product_name || 'Product'} BOM</h1>
         </div>
-        <div className="bg-red-50 border-l-4 border-red-500 p-4">
-          <p className="text-red-700">Failed to load BOM data. Please try again.</p>
+        <div className="bg-red-50 border-l-4 border-red-500 p-3">
+          <p className="text-sm text-red-700">Failed to load BOM data. Please try again.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center">
-          <Button variant="outline" size="sm" onClick={onBackToOrders}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Orders
-          </Button>
-        </div>
-        
-        <h1 className="text-2xl font-bold">Product Bill of Materials</h1>
-        
-        <div className="flex items-center space-x-2">
-          <Button
-            variant={bomView === 'mbom' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setBomView('mbom')}
-          >
-            mBOM
-          </Button>
-          <Button
-            variant={bomView === 'ebom' ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setBomView('ebom')}
-          >
-            eBOM
-          </Button>
+    <div className="container mx-auto p-3">
+      <div className="flex justify-between items-center mb-3">
+        <Button type="default" size="small" onClick={onBackToOrders} className="h-7 text-xs"><ArrowLeftOutlined className="h-3 w-3 mr-1" />Back</Button>
+        <h1 className="text-lg font-bold">Product Bill of Materials</h1>
+        <div className="flex items-center space-x-1">
+          {['mbom', 'ebom'].map(view => (
+            <Button key={view} type={bomView === view ? 'primary' : 'default'} size="small" onClick={() => setBomView(view)} className="h-7 text-xs">{view.toUpperCase()}</Button>
+          ))}
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-4">
+      <div className="flex flex-col lg:flex-row gap-3">
         <div className="w-full lg:w-1/3">
-          <Card>
-            <CardHeader>
-              <CardTitle>BOM Structure</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[calc(100vh-280px)]">
-                {bomData && renderBOMItem(bomData)}
-              </ScrollArea>
-            </CardContent>
+          <Card 
+            title={<span className="text-sm font-semibold">BOM Structure</span>}
+            size="small"
+            bodyStyle={{ padding: 0 }}
+          >
+              <ScrollArea className="h-[calc(100vh-220px)]">{bomData && renderBOMItem(bomData)}</ScrollArea>
           </Card>
         </div>
 
         <div className="flex-1">
-          <Card>
-            <CardHeader className="bg-gray-50">
-              <CardTitle>{selectedItem?.name || 'Select an item'}</CardTitle>
-              {selectedItem && (
-                <p className="text-sm text-gray-600 uppercase">
-                  {selectedItem.type}
-                </p>
-              )}
-            </CardHeader>
-            <CardContent className="pt-4">
-              <ScrollArea className="h-[calc(100vh-280px)]">
-                {renderDetailsPanel()}
-              </ScrollArea>
-            </CardContent>
+          <Card
+            title={
+              <div>
+                <div className="text-sm font-semibold">{selectedItem?.name || 'Select an item'}</div>
+                {selectedItem && <div className="text-xs text-gray-600 uppercase font-normal">{selectedItem.type}</div>}
+              </div>
+            }
+            size="small"
+            headStyle={{ backgroundColor: '#f9fafb' }}
+            bodyStyle={{ paddingTop: '8px' }}
+          >
+              <ScrollArea className="h-[calc(100vh-220px)]">{renderDetailsPanel()}</ScrollArea>
           </Card>
         </div>
       </div>
+
+      {documentModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl max-h-[85vh] w-full mx-3">
+            <div className="flex items-center justify-between p-3 border-b">
+              <h3 className="text-sm font-semibold">{documentModal.name || 'Document'}</h3>
+              <button onClick={() => setDocumentModal({ isOpen: false, url: null, name: null })} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4">
+              <div className="h-[70vh]">
+                {documentModal.url ? (
+                  <iframe src={documentModal.url} className="w-full h-full border-0 rounded" title={documentModal.name || 'Document'} />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-gray-500">Document URL is not available</div>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end p-4 border-t">
+              <button onClick={() => setDocumentModal({ isOpen: false, url: null, name: null })} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

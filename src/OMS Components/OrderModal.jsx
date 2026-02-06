@@ -1,28 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE_URL } from "../Config/auth";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "../components/ui/dialog";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { FileText, Upload, X } from "lucide-react";
+import { Modal, Form, Input, Select, Button, Upload, Typography, Space, Row, Col } from "antd";
+import { FileTextOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
+import { message } from "antd";
+
+const { Title } = Typography;
+const { Option } = Select;
 
 const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, products }) => {
-  const [formData, setFormData] = useState({
-    sale_order_number: "",
-    customer_id: "",
-    product_id: "",
-    quantity: "",
-    due_date: "",
-    priority: "0",
-    supervisor_id: "",
-    status: "Pending",
-  });
+  const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
 
@@ -30,7 +16,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   useEffect(() => {
     if (isOpen) {
       if (editingOrder) {
-        setFormData({
+        form.setFieldsValue({
           ...editingOrder,
           customer_id: editingOrder.customer_id?.toString() ?? "",
           product_id: editingOrder.product_id?.toString() ?? "",
@@ -40,24 +26,18 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           supervisor_id: editingOrder.supervisor_id?.toString() ?? "",
         });
       } else {
-        setFormData({
-          sale_order_number: "",
-          customer_id: "",
-          product_id: "",
-          quantity: "",
-          due_date: "",
-          priority: "0",
-          supervisor_id: "",
+        form.resetFields();
+        form.setFieldsValue({
           status: "Pending",
+          priority: "0",
         });
         setDocuments([]);
       }
     }
-  }, [isOpen, editingOrder]);
+  }, [isOpen, editingOrder, form]);
 
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (values) => {
     setLoading(true);
 
     try {
@@ -73,12 +53,12 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ...formData,
-          quantity: parseInt(formData.quantity),
-          customer_id: parseInt(formData.customer_id),
-          product_id: parseInt(formData.product_id),
-          priority: parseInt(formData.priority) || 0,
-          supervisor_id: parseInt(formData.supervisor_id) || 0,
+          ...values,
+          quantity: parseInt(values.quantity),
+          customer_id: parseInt(values.customer_id),
+          product_id: parseInt(values.product_id),
+          priority: parseInt(values.priority) || 0,
+          supervisor_id: parseInt(values.supervisor_id) || 0,
         }),
       });
 
@@ -93,26 +73,18 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         onOrderCreated(result);
         handleClose();
       } else {
-        console.error("Failed to save order:", response.statusText);
+        message.error("Failed to save order");
       }
     } catch (error) {
       console.error("Error saving order:", error);
+      message.error("Error saving order");
     } finally {
       setLoading(false);
     }
   };
 
   const handleClose = () => {
-    setFormData({
-      sale_order_number: "",
-      customer_id: "",
-      product_id: "",
-      quantity: "",
-      due_date: "",
-      priority: "0",
-      supervisor_id: "",
-      status: "Pending",
-    });
+    form.resetFields();
     setDocuments([]);
     onClose();
   };
@@ -154,281 +126,206 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) handleClose(); }}>
-      <DialogContent 
-        className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto"
-        onInteractOutside={(e) => e.preventDefault()}
-        onPointerDownOutside={(e) => e.preventDefault()}
+    <Modal
+      open={isOpen}
+      onCancel={handleClose}
+      footer={null}
+      width={600}
+      title={
+        <Title level={4} style={{ margin: 0 }}>
+          {editingOrder ? "Edit Order" : "Create New Order"}
+        </Title>
+      }
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={handleSubmit}
+        style={{ maxHeight: '70vh', overflowY: 'auto' }}
       >
-        <DialogHeader className="border-b pb-4">
-          <DialogTitle className="text-xl font-semibold text-gray-900">
-            {editingOrder ? "Edit Order" : "Create New Order"}
-          </DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-6 py-6">
-            <div className="space-y-2">
-              <label htmlFor="sale_order_number" className="text-sm font-medium text-gray-700">
-                Sale Order Number *
-              </label>
-              <Input
-                id="sale_order_number"
-                value={formData.sale_order_number}
-                onChange={(e) =>
-                  setFormData({ ...formData, sale_order_number: e.target.value })
-                }
-                placeholder="Enter sale order number"
-                className="w-full"
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="customer_id" className="text-sm font-medium text-gray-700">
-                Customer *
-              </label>
-              <Select
-                value={formData.customer_id}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, customer_id: value })
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select customer" />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map((customer) => (
-                    <SelectItem key={customer.id} value={customer.id.toString()}>
-                      {customer.company_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
+        <Form.Item
+          name="sale_order_number"
+          label="Sale Order Number"
+          rules={[{ required: true, message: 'Please enter sale order number' }]}
+        >
+          <Input placeholder="Enter sale order number" />
+        </Form.Item>
+        
+        <Form.Item
+          name="customer_id"
+          label="Customer"
+          rules={[{ required: true, message: 'Please select a customer' }]}
+        >
+          <Select placeholder="Select customer">
+            {customers.map((customer) => (
+              <Option key={customer.id} value={customer.id.toString()}>
+                {customer.company_name}
+              </Option>
+            ))}
+          </Select>
+        </Form.Item>
+        
+        <Form.Item
+          name="product_id"
+          label="Product"
+          rules={[{ required: true, message: 'Please select a product' }]}
+        >
+          <Select placeholder="Select product">
+            {products.map((product) => (
+              <Option key={product.id} value={product.id.toString()}>
+                {product.product_name || product.product_number || `Product ${product.id}`}
+              </Option>
+            ))}
+          </Select>
+        </Form.Item>
+        
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item
+              name="quantity"
+              label="Quantity"
+              rules={[{ required: true, message: 'Please enter quantity' }]}
+            >
+              <Input type="number" placeholder="Qty" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              name="priority"
+              label="Priority"
+            >
+              <Input type="number" placeholder="Priority" />
+            </Form.Item>
+          </Col>
+        </Row>
+        
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item
+              name="due_date"
+              label="Due Date"
+            >
+              <Input type="date" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              name="status"
+              label="Status"
+            >
+              <Select>
+                <Option value="Pending">Pending</Option>
+                <Option value="Shipped">Shipped</Option>
+                <Option value="Delivered">Delivered</Option>
+                <Option value="Cancelled">Cancelled</Option>
               </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="product_id" className="text-sm font-medium text-gray-700">
-                Product *
-              </label>
-              <Select
-                value={formData.product_id}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, product_id: value })
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select product" />
-                </SelectTrigger>
-                <SelectContent>
-                  {products.map((product) => (
-                    <SelectItem key={product.id} value={product.id.toString()}>
-                      {product.product_name || product.product_number || `Product ${product.id}`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="quantity" className="text-sm font-medium text-gray-700">
-                Quantity *
-              </label>
-              <Input
-                id="quantity"
-                type="number"
-                value={formData.quantity}
-                onChange={(e) =>
-                  setFormData({ ...formData, quantity: e.target.value })
-                }
-                placeholder="Enter quantity"
-                className="w-full"
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="due_date" className="text-sm font-medium text-gray-700">
-                Due Date
-              </label>
-              <Input
-                id="due_date"
-                type="date"
-                value={formData.due_date}
-                onChange={(e) =>
-                  setFormData({ ...formData, due_date: e.target.value })
-                }
-                className="w-full"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="priority" className="text-sm font-medium text-gray-700">
-                Priority
-              </label>
-              <Input
-                id="priority"
-                type="number"
-                value={formData.priority}
-                onChange={(e) =>
-                  setFormData({ ...formData, priority: e.target.value })
-                }
-                placeholder="Enter priority"
-                className="w-full"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="supervisor_id" className="text-sm font-medium text-gray-700">
-                Supervisor ID
-              </label>
-              <Input
-                id="supervisor_id"
-                value={formData.supervisor_id}
-                onChange={(e) =>
-                  setFormData({ ...formData, supervisor_id: e.target.value })
-                }
-                placeholder="Enter supervisor ID"
-                className="w-full"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="status" className="text-sm font-medium text-gray-700">
-                Status
-              </label>
-              <Select
-                value={formData.status}
-                onValueChange={(value) =>
-                  setFormData({ ...formData, status: value })
-                }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Pending">Pending</SelectItem>
-                  <SelectItem value="Shipped">Shipped</SelectItem>
-                  <SelectItem value="Delivered">Delivered</SelectItem>
-                  <SelectItem value="Cancelled">Cancelled</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            </Form.Item>
+          </Col>
+        </Row>
+        
+        <Form.Item
+          name="supervisor_id"
+          label="Supervisor ID"
+        >
+          <Input placeholder="Enter supervisor ID" />
+        </Form.Item>
 
-            {/* Document Upload Section - Only for new orders */}
-            {!editingOrder && (
-              <div className="border-t pt-6">
-                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-4">
-                  <FileText className="h-5 w-5" />
-                  Documents (Optional)
-                </h3>
+        {/* Document Upload Section - Only for new orders */}
+        {!editingOrder && (
+          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: '16px' }}>
+            <Title level={5} style={{ marginBottom: '16px' }}>
+              <FileTextOutlined /> Documents (Optional)
+            </Title>
 
-                <div className="space-y-4">
-                  {documents.length === 0 ? (
-                    <div className="text-center py-6 border-2 border-dashed border-gray-300 rounded-lg">
-                      <Upload className="mx-auto h-8 w-8 text-gray-400 mb-2" />
-                      <p className="text-sm text-gray-600 mb-3">No documents added yet</p>
+            {documents.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '24px', border: '2px dashed #d9d9d9', borderRadius: '6px' }}>
+                <UploadOutlined style={{ fontSize: '24px', color: '#bfbfbf', marginBottom: '8px' }} />
+                <p style={{ color: '#8c8c8c', marginBottom: '16px' }}>No documents added yet</p>
+                <Button
+                  icon={<UploadOutlined />}
+                  onClick={handleDocumentAdd}
+                >
+                  Add Document
+                </Button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {documents.map((doc, index) => (
+                  <div key={index} style={{ padding: '16px', backgroundColor: '#fafafa', border: '1px solid #d9d9d9', borderRadius: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <Title level={5} style={{ margin: 0 }}>Document {index + 1}</Title>
                       <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleDocumentAdd}
-                      >
-                        Add First Document
-                      </Button>
+                        type="text"
+                        icon={<CloseOutlined />}
+                        onClick={() => handleDocumentRemove(index)}
+                        size="small"
+                      />
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {documents.map((doc, index) => (
-                        <div key={index} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                          <div className="flex items-start justify-between mb-3">
-                            <h4 className="font-medium text-gray-900">Document {index + 1}</h4>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDocumentRemove(index)}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-gray-700">
-                                File *
-                              </label>
-                              <Input
-                                type="file"
-                                onChange={(e) => handleDocumentChange(index, 'file', e.target.files[0])}
-                                className="w-full"
-                              />
-                            </div>
-                            
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-gray-700">
-                                Document Name *
-                              </label>
-                              <Input
-                                value={doc.document_name}
-                                onChange={(e) => handleDocumentChange(index, 'document_name', e.target.value)}
-                                placeholder="Enter document name"
-                                className="w-full"
-                              />
-                            </div>
-                            
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-gray-700">
-                                Document Type *
-                              </label>
-                              <Input
-                                value={doc.document_type}
-                                onChange={(e) => handleDocumentChange(index, 'document_type', e.target.value)}
-                                placeholder="e.g., Invoice, Purchase Order"
-                                className="w-full"
-                              />
-                            </div>
-                            
-                            <div className="space-y-2">
-                              <label className="text-sm font-medium text-gray-700">
-                                Version *
-                              </label>
-                              <Input
-                                value={doc.document_version}
-                                onChange={(e) => handleDocumentChange(index, 'document_version', e.target.value)}
-                                placeholder="1.0"
-                                className="w-full"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={handleDocumentAdd}
-                        className="w-full"
-                      >
-                        Add Another Document
-                      </Button>
-                    </div>
-                  )}
-                </div>
+                    
+                    <Row gutter={8}>
+                      <Col span={12}>
+                        <Form.Item label="File" style={{ marginBottom: '8px' }}>
+                          <Input
+                            type="file"
+                            onChange={(e) => handleDocumentChange(index, 'file', e.target.files[0])}
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item label="Name" style={{ marginBottom: '8px' }}>
+                          <Input
+                            value={doc.document_name}
+                            onChange={(e) => handleDocumentChange(index, 'document_name', e.target.value)}
+                            placeholder="Document name"
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item label="Type" style={{ marginBottom: '8px' }}>
+                          <Input
+                            value={doc.document_type}
+                            onChange={(e) => handleDocumentChange(index, 'document_type', e.target.value)}
+                            placeholder="e.g., Invoice"
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={12}>
+                        <Form.Item label="Version" style={{ marginBottom: '8px' }}>
+                          <Input
+                            value={doc.document_version}
+                            onChange={(e) => handleDocumentChange(index, 'document_version', e.target.value)}
+                            placeholder="1.0"
+                          />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  </div>
+                ))}
+                
+                <Button
+                  icon={<UploadOutlined />}
+                  onClick={handleDocumentAdd}
+                  style={{ width: '100%' }}
+                >
+                  Add Another Document
+                </Button>
               </div>
             )}
           </div>
-          <DialogFooter className="border-t pt-4">
-            <Button type="button" variant="outline" onClick={handleClose}>
+        )}
+        
+        <div style={{ textAlign: 'right', marginTop: '24px', borderTop: '1px solid #f0f0f0', paddingTop: '16px' }}>
+          <Space>
+            <Button onClick={handleClose}>
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? "Saving..." : editingOrder ? "Update" : "Create"}
+            <Button type="primary" htmlType="submit" loading={loading}>
+              {editingOrder ? "Update" : "Create"}
             </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          </Space>
+        </div>
+      </Form>
+    </Modal>
   );
 };
 

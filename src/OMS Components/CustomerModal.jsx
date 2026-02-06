@@ -1,34 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE_URL } from "../Config/auth";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "../components/ui/dialog";
-import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
+import { Modal, Form, Input, Button, Typography, message } from "antd";
+
+const { Title } = Typography;
 
 const CustomerModal = ({ isOpen, onClose, onCustomerCreated, editingCustomer }) => {
-  const [formData, setFormData] = useState({
-    company_name: "",
-    address: "",
-    branch: "",
-    email: "",
-    contact_number: "",
-    contact_person: "",
-  });
+  const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (editingCustomer) {
-      setFormData(editingCustomer);
+      form.setFieldsValue(editingCustomer);
     }
-  }, [editingCustomer]);
+  }, [editingCustomer, form]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (values) => {
     setLoading(true);
 
     try {
@@ -43,152 +29,108 @@ const CustomerModal = ({ isOpen, onClose, onCustomerCreated, editingCustomer }) 
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(values),
       });
 
       if (response.ok) {
         const result = await response.json();
         onCustomerCreated(result);
         handleClose();
+        message.success(`Customer ${editingCustomer ? 'updated' : 'created'} successfully`);
       } else {
-        console.error("Failed to save customer:", response.statusText);
+        message.error("Failed to save customer");
       }
     } catch (error) {
       console.error("Error saving customer:", error);
+      message.error("Error saving customer");
     } finally {
       setLoading(false);
     }
   };
 
   const handleClose = () => {
-    setFormData({
-      company_name: "",
-      address: "",
-      branch: "",
-      email: "",
-      contact_number: "",
-      contact_person: "",
-    });
+    form.resetFields();
     onClose();
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader className="border-b pb-4">
-          <DialogTitle className="text-xl font-semibold text-gray-900">
-            {editingCustomer ? "Edit Customer" : "Create New Customer"}
-          </DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-6 py-6">
-            <div className="space-y-2">
-              <label htmlFor="company_name" className="text-sm font-medium text-gray-700">
-                Company Name *
-              </label>
-              <Input
-                id="company_name"
-                value={formData.company_name}
-                onChange={(e) =>
-                  setFormData({ ...formData, company_name: e.target.value })
-                }
-                placeholder="Enter company name"
-                className="w-full"
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="address" className="text-sm font-medium text-gray-700">
-                Address *
-              </label>
-              <Input
-                id="address"
-                value={formData.address}
-                onChange={(e) =>
-                  setFormData({ ...formData, address: e.target.value })
-                }
-                placeholder="Enter complete address"
-                className="w-full"
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="branch" className="text-sm font-medium text-gray-700">
-                Branch
-              </label>
-              <Input
-                id="branch"
-                value={formData.branch}
-                onChange={(e) =>
-                  setFormData({ ...formData, branch: e.target.value })
-                }
-                placeholder="Enter branch name"
-                className="w-full"
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="email" className="text-sm font-medium text-gray-700">
-                Email *
-              </label>
-              <Input
-                id="email"
-                type="email"
-                value={formData.email}
-                onChange={(e) =>
-                  setFormData({ ...formData, email: e.target.value })
-                }
-                placeholder="company@example.com"
-                className="w-full"
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="contact_number" className="text-sm font-medium text-gray-700">
-                Contact Number *
-              </label>
-              <Input
-                id="contact_number"
-                value={formData.contact_number}
-                onChange={(e) =>
-                  setFormData({ ...formData, contact_number: e.target.value })
-                }
-                placeholder="+1 (555) 123-4567"
-                className="w-full"
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <label htmlFor="contact_person" className="text-sm font-medium text-gray-700">
-                Contact Person *
-              </label>
-              <Input
-                id="contact_person"
-                value={formData.contact_person}
-                onChange={(e) =>
-                  setFormData({ ...formData, contact_person: e.target.value })
-                }
-                placeholder="Full name of contact person"
-                className="w-full"
-                required
-              />
-            </div>
-          </div>
-          <DialogFooter className="border-t pt-4">
-            <Button type="button" variant="outline" onClick={handleClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? "Saving..." : editingCustomer ? "Update" : "Create"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <Modal
+      open={isOpen}
+      onCancel={handleClose}
+      footer={null}
+      width={600}
+      title={
+        <Title level={4} style={{ margin: 0 }}>
+          {editingCustomer ? "Edit Customer" : "Create New Customer"}
+        </Title>
+      }
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={handleSubmit}
+        style={{ padding: '24px' }}
+      >
+        <Form.Item
+          name="company_name"
+          label="Company Name"
+          rules={[{ required: true, message: 'Please enter company name' }]}
+        >
+          <Input placeholder="Enter company name" />
+        </Form.Item>
+        
+        <Form.Item
+          name="address"
+          label="Address"
+          rules={[{ required: true, message: 'Please enter address' }]}
+        >
+          <Input placeholder="Enter complete address" />
+        </Form.Item>
+        
+        <Form.Item
+          name="branch"
+          label="Branch"
+        >
+          <Input placeholder="Enter branch name" />
+        </Form.Item>
+        
+        <Form.Item
+          name="email"
+          label="Email"
+          rules={[
+            { required: true, message: 'Please enter email' },
+            { type: 'email', message: 'Please enter a valid email' }
+          ]}
+        >
+          <Input type="email" placeholder="company@example.com" />
+        </Form.Item>
+        
+        <Form.Item
+          name="contact_number"
+          label="Contact Number"
+          rules={[{ required: true, message: 'Please enter contact number' }]}
+        >
+          <Input placeholder="+1 (555) 123-4567" />
+        </Form.Item>
+        
+        <Form.Item
+          name="contact_person"
+          label="Contact Person"
+          rules={[{ required: true, message: 'Please enter contact person' }]}
+        >
+          <Input placeholder="Full name of contact person" />
+        </Form.Item>
+        
+        <div style={{ textAlign: 'right', marginTop: '24px' }}>
+          <Button onClick={handleClose} style={{ marginRight: '8px' }}>
+            Cancel
+          </Button>
+          <Button type="primary" htmlType="submit" loading={loading}>
+            {loading ? "Saving..." : editingCustomer ? "Update" : "Create"}
+          </Button>
+        </div>
+      </Form>
+    </Modal>
   );
 };
 

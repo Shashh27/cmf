@@ -1,8 +1,10 @@
 import React, { useState } from "react";
+import { Layout } from "antd";
 import BillOfMaterials from "../PDM Components/BillOfMaterials";
 import ProductDetails from "../PDM Components/ProductDetails";
 import DocumentsPanel from "../PDM Components/DocumentsPanel";
-import { cn } from "../lib/utils";
+
+const { Sider, Content } = Layout;
 
 const PDM = () => {
   const [selectedItem, setSelectedItem] = useState(null);
@@ -12,26 +14,25 @@ const PDM = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex overflow-hidden bg-background">
+    <Layout style={{ height: "100vh", overflow: "hidden" }}>
       {/* Bill of Materials - Left Sidebar */}
-      <BillOfMaterials onItemSelected={handleItemSelected} />
+      <Sider width="33%" theme="light" style={{ borderRight: "1px solid #f0f0f0", overflow: 'auto' }}>
+        <BillOfMaterials onItemSelected={handleItemSelected} />
+      </Sider>
       
       {/* Right Side Container */}
-      <div className={cn(
-        "flex-1 flex flex-col overflow-hidden",
-        "bg-muted/30"
-      )}>
+      <Content style={{ display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: '#f5f5f5' }}>
         {/* ProductDetails - Top Right */}
-        <div className="flex-shrink-0">
+        <div style={{ flexShrink: 0 }}>
           <ProductDetails selectedItem={selectedItem} />
         </div>
         
         {/* DocumentsPanel - Bottom Right with scroll */}
-        <div className="flex-1 overflow-hidden">
+        <div style={{ flex: 1, overflowY: "auto" }}>
           <DocumentsPanel selectedItem={selectedItem} />
         </div>
-      </div>
-    </div>
+      </Content>
+    </Layout>
   );
 };
 

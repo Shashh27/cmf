@@ -1,26 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { API_BASE_URL } from "../Config/auth";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import { Badge } from "../components/ui/badge";
-import { Button } from "../components/ui/button";
+import { Table, Badge, Button, message, Spin, Typography, Space } from "antd";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
-import CompanyDetails from "../OMS Components/CompanyDetails";
 import ProductBOMView from "../OMS Components/ProductBOMView";
-import { useToast } from "../components/ui/toast";
 
 const OMS = () => {
   const navigate = useNavigate();
   const { productId } = useParams();
-  const { addToast, ToastContainer } = useToast();
+  const [messageApi, contextHolder] = message.useMessage();
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
@@ -111,18 +100,15 @@ const OMS = () => {
   };
 
   const getStatusBadge = (status) => {
-    const variants = {
-      Pending: "warning",
-      Shipped: "info", 
-      Delivered: "success",
-      Cancelled: "destructive",
+    const statusConfig = {
+      Pending: { color: "orange", text: "Pending" },
+      Shipped: { color: "blue", text: "Shipped" },
+      Delivered: { color: "green", text: "Delivered" },
+      Cancelled: { color: "red", text: "Cancelled" },
     };
 
-    return (
-      <Badge variant={variants[status] || "secondary"}>
-        {status}
-      </Badge>
-    );
+    const config = statusConfig[status] || { color: "default", text: status };
+    return <Badge color={config.color} text={config.text} />;
   };
 
   const handleCreateOrder = () => {
@@ -140,7 +126,7 @@ const OMS = () => {
     setOrderModalOpen(false);
     setEditingOrder(null);
     if (order) {
-      addToast(`Order "${order.sale_order_number}" created successfully!`);
+      messageApi.success(`Order "${order.sale_order_number}" created successfully!`);
     }
   };
 
@@ -150,21 +136,21 @@ const OMS = () => {
       const response = await fetch(`${API_BASE_URL}/orders/${order.id}/`, { method: "DELETE" });
       if (response.ok) {
         fetchOrders();
-        addToast(`Order "${order.sale_order_number}" deleted successfully!`);
+        messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
       } else {
         const data = await response.json();
-        addToast(data.detail || "Failed to delete order", "error");
+        messageApi.error(data.detail || "Failed to delete order");
       }
     } catch (error) {
       console.error("Error deleting order:", error);
-      addToast("Failed to delete order", "error");
+      messageApi.error("Failed to delete order");
     }
   };
 
   const handleDocumentUploaded = (document) => {
     setDocumentModalOpen(false);
     if (document) {
-      addToast(`Document "${document.document_name}" uploaded successfully!`);
+      messageApi.success(`Document "${document.document_name}" uploaded successfully!`);
     }
   };
 
@@ -183,8 +169,8 @@ const OMS = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-lg">Loading orders...</div>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
+        <Spin size="large" tip="Loading orders..." />
       </div>
     );
   }
@@ -198,90 +184,120 @@ const OMS = () => {
     );
   }
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Order Management System</h1>
-        <div className="flex space-x-2">
-          <Button onClick={handleCreateOrder}>
-            New Order
+  const columns = [
+    {
+      title: "SL NO",
+      dataIndex: "serial",
+      key: "serial",
+      width: 80,
+      render: (_, __, index) => index + 1,
+    },
+    {
+      title: "SALE ORDER",
+      dataIndex: "sale_order_number",
+      key: "sale_order_number",
+    },
+    {
+      title: "CUSTOMER",
+      dataIndex: "customer_id",
+      key: "customer_id",
+      render: (customerId) => getCustomerName(customerId),
+    },
+    {
+      title: "PRODUCT",
+      dataIndex: "product_id",
+      key: "product_id",
+      render: (productId, record) => (
+        <Button 
+          type="link" 
+          onClick={() => handleViewBOM(productId)}
+          style={{ padding: 0 }}
+        >
+          {getProductName(productId)}
+        </Button>
+      ),
+    },
+    {
+      title: "QUANTITY",
+      dataIndex: "quantity",
+      key: "quantity",
+    },
+    {
+      title: "DUE DATE",
+      dataIndex: "due_date",
+      key: "due_date",
+      render: (date) => formatDate(date),
+    },
+    {
+      title: "PRIORITY",
+      dataIndex: "priority",
+      key: "priority",
+      render: (priority) => priority ?? "-",
+    },
+    {
+      title: "STATUS",
+      dataIndex: "status",
+      key: "status",
+      render: (status) => getStatusBadge(status),
+    },
+    {
+      title: "ACTIONS",
+      key: "actions",
+      render: (_, record) => (
+        <Space size="small">
+          <Button
+            size="small"
+            onClick={() => handleEditOrder(record)}
+          >
+            Edit
           </Button>
-        </div>
+          <Button 
+            size="small" 
+            type="default"
+            onClick={() => {
+              setSelectedOrderId(record.id);
+              setDocumentModalOpen(true);
+            }}
+          >
+            Docs
+          </Button>
+          <Button
+            size="small"
+            danger
+            onClick={() => handleDeleteOrder(record)}
+          >
+            Delete
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <div style={{ padding: '24px' }}>
+      {contextHolder}
+      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography.Title level={2} style={{ margin: 0 }}>Order Management System</Typography.Title>
+        <Button type="primary" onClick={handleCreateOrder}>
+          New Order
+        </Button>
       </div>
 
-      <div className="bg-white rounded-lg shadow border border-gray-200">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-gray-50 border-b-2 border-gray-200">
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">SL NO</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">SALE ORDER</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CUSTOMER</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">PRODUCT</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">QUANTITY</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">DUE DATE</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">PRIORITY</TableHead>
-              <TableHead className="font-semibold text-gray-900 border-r border-gray-200">STATUS</TableHead>
-              <TableHead className="font-semibold text-gray-900">ACTIONS</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {orders.map((order, index) => (
-              <TableRow 
-                key={order.id} 
-                className="border-b border-gray-200 hover:bg-blue-50 transition-colors"
-              >
-                <TableCell className="border-r border-gray-200 font-medium">{index + 1}</TableCell>
-                <TableCell className="border-r border-gray-200">{order.sale_order_number}</TableCell>
-                <TableCell className="border-r border-gray-200">{getCustomerName(order.customer_id)}</TableCell>
-                <TableCell className="border-r border-gray-200">
-                  <button 
-                    onClick={() => handleViewBOM(order.product_id)}
-                    className="text-blue-600 hover:text-blue-800 hover:underline"
-                  >
-                    {getProductName(order.product_id)}
-                  </button>
-                </TableCell>
-                <TableCell className="border-r border-gray-200">{order.quantity}</TableCell>
-                <TableCell className="border-r border-gray-200">{formatDate(order.due_date)}</TableCell>
-                <TableCell className="border-r border-gray-200">{order.priority ?? "-"}</TableCell>
-                <TableCell className="border-r border-gray-200">{getStatusBadge(order.status)}</TableCell>
-                <TableCell>
-                  <div className="flex space-x-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleEditOrder(order)}
-                    >
-                      Edit
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
-                      className="text-blue-600 hover:text-blue-800"
-                      onClick={() => {
-                        setSelectedOrderId(order.id);
-                        setDocumentModalOpen(true);
-                      }}
-                    >
-                      Documents
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => handleDeleteOrder(order)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <Table
+        columns={columns}
+        dataSource={orders}
+        rowKey="id"
+        pagination={{
+          pageSize: 10,
+          showSizeChanger: true,
+          showQuickJumper: true,
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+        }}
+        bordered
+        size="middle"
+      />
 
       
-
       {/* Modals */}
       <OrderModal
         isOpen={orderModalOpen}
@@ -299,8 +315,6 @@ const OMS = () => {
         orderId={selectedOrderId}
         orders={orders}
       />
-      
-      <ToastContainer />
     </div>
   );
 };

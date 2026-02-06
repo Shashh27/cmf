@@ -1,17 +1,22 @@
 import React from "react";
+import { Layout } from "antd";
 import Sidebar from "./ui/sidebar";
+import Navbar from "./ui/Navbar";
 
-const Layout = ({ children }) => {
+const { Content } = Layout;
+
+const AppLayout = ({ children }) => {
   return (
-    <div className="flex">
+    <Layout hasSider>
       <Sidebar />
-      <div className="flex-1 ml-64">
-        <main className="p-6">
+      <Layout style={{ marginLeft: 224, minHeight: '100vh' }}>
+        <Navbar />
+        <Content style={{ margin: '80px 24px 24px', overflow: 'initial' }}>
           {children}
-        </main>
-      </div>
-    </div>
+        </Content>
+      </Layout>
+    </Layout>
   );
 };
 
-export default Layout;
+export default AppLayout;

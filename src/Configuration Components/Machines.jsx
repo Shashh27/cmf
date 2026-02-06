@@ -1,19 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE_URL } from "../Config/auth.js";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table";
-import { Button } from "../components/ui/button";
-import { useToast } from "../components/ui/toast";
+import { Table, Button, message, Popconfirm, Space, Card, Tooltip } from "antd";
+import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import MachineModal from "../Configuration Components/MachineModal";
 
 const Machines = ({ workCenter, onBack }) => {
-  const { addToast, ToastContainer } = useToast();
   const [machines, setMachines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [machineModalOpen, setMachineModalOpen] = useState(false);
@@ -60,146 +51,177 @@ const Machines = ({ workCenter, onBack }) => {
   };
 
   const handleDeleteMachine = async (id) => {
-    if (window.confirm("Are you sure you want to delete this machine?")) {
-      try {
-        const response = await fetch(`${API_BASE_URL}/machines/${id}`, {
-          method: "DELETE",
-        });
-        if (response.ok) {
-          addToast("Machine deleted successfully", "success");
-          fetchMachines();
-        } else {
-          addToast("Failed to delete machine", "error");
-        }
-      } catch (error) {
-        console.error("Error deleting machine:", error);
-        addToast("Error deleting machine", "error");
+    try {
+      const response = await fetch(`${API_BASE_URL}/machines/${id}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        message.success("Machine deleted successfully");
+        fetchMachines();
+      } else {
+        message.error("Failed to delete machine");
       }
+    } catch (error) {
+      console.error("Error deleting machine:", error);
+      message.error("Error deleting machine");
     }
   };
 
   const handleMachineSaved = () => {
     setMachineModalOpen(false);
     fetchMachines();
-    addToast(
+    message.success(
       editingMachine 
         ? "Machine updated successfully" 
-        : "Machine created successfully", 
-      "success"
+        : "Machine created successfully"
     );
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <Button
-            variant="outline"
-            onClick={onBack}
-            className="flex items-center space-x-2"
-          >
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+  const columns = [
+    {
+      title: 'SL NO',
+      key: 'index',
+      render: (text, record, index) => index + 1,
+      width: 80,
+      align: 'center',
+    },
+    {
+      title: 'TYPE',
+      dataIndex: 'type',
+      key: 'type',
+      align: 'center',
+      render: (text) => text || "-",
+    },
+    {
+      title: 'MAKE',
+      dataIndex: 'make',
+      key: 'make',
+      align: 'center',
+      render: (text) => text || "-",
+    },
+    {
+      title: 'MODEL',
+      dataIndex: 'model',
+      key: 'model',
+      align: 'center',
+      render: (text) => text || "-",
+    },
+    {
+      title: 'YEAR',
+      dataIndex: 'year_of_installation',
+      key: 'year_of_installation',
+      align: 'center',
+      render: (text) => text || "-",
+    },
+    {
+      title: 'CNC CONTROLLER',
+      dataIndex: 'cnc_controller',
+      key: 'cnc_controller',
+      align: 'center',
+      render: (text) => text || "-",
+    },
+    {
+      title: 'SERVICE',
+      dataIndex: 'cnc_controller_service',
+      key: 'cnc_controller_service',
+      align: 'center',
+      render: (text) => text || "-",
+    },
+    {
+      title: 'REMARKS',
+      dataIndex: 'remarks',
+      key: 'remarks',
+      align: 'center',
+      render: (text) => text || "-",
+    },
+    {
+      title: 'CALIBRATION DATE',
+      dataIndex: 'calibration_date',
+      key: 'calibration_date',
+      align: 'center',
+      render: (text) => formatDate(text),
+    },
+    {
+      title: 'DUE DATE',
+      dataIndex: 'calibration_due_date',
+      key: 'calibration_due_date',
+      align: 'center',
+      render: (text) => formatDate(text),
+    },
+    {
+      title: 'ACTIONS',
+      key: 'actions',
+      align: 'center',
+      fixed: 'right',
+      render: (_, record) => (
+        <Space>
+          <Tooltip title="Edit">
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => handleEditMachine(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Delete">
+            <Popconfirm
+              title="Delete Machine"
+              description="Are you sure you want to delete this machine?"
+              onConfirm={() => handleDeleteMachine(record.id)}
+              okText="Yes"
+              cancelText="No"
+              okButtonProps={{ danger: true }}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M15 19l-7-7 7-7"
+              <Button
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
               />
-            </svg>
-           
-          </Button>
+            </Popconfirm>
+          </Tooltip>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <Card 
+      title={
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <Button 
+            icon={<ArrowLeftOutlined />} 
+            onClick={onBack}
+            type="text"
+          />
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Machines</h1>
-            <p className="text-gray-600 mt-1">
-              Work Center: <span className="font-medium">{workCenter?.work_center_name}</span>
-            </p>
+            <span>Machines</span>
+            <span style={{ marginLeft: '12px', fontSize: '14px', fontWeight: 'normal', color: '#666' }}>
+              Work Center: <strong>{workCenter?.work_center_name}</strong>
+            </span>
           </div>
         </div>
+      }
+      extra={
         <Button
+          type="primary"
+          icon={<PlusOutlined />}
           onClick={handleAddMachine}
-          className="bg-gray-900 hover:bg-gray-800"
         >
           Add Machine
         </Button>
-      </div>
-
-      {loading ? (
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <p className="mt-2 text-gray-600">Loading machines...</p>
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg shadow border border-gray-200">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-gray-50 border-b-2 border-gray-200">
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">SL NO</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">TYPE</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">MAKE</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">MODEL</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">YEAR OF INSTALLATION</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CNC CONTROLLER</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CNC CONTROLLER SERVICE</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">REMARKS</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CALIBRATION DATE</TableHead>
-                <TableHead className="font-semibold text-gray-900 border-r border-gray-200">CALIBRATION DUE DATE</TableHead>
-                <TableHead className="font-semibold text-gray-900">ACTIONS</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {machines.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={11} className="text-center py-8 text-gray-500">
-                    No machines found for this work center
-                  </TableCell>
-                </TableRow>
-              ) : (
-                machines.map((machine, index) => (
-                  <TableRow 
-                    key={machine.id}
-                    className="border-b border-gray-200 hover:bg-blue-50 transition-colors"
-                  >
-                    <TableCell className="border-r border-gray-200">{index + 1}</TableCell>
-                    <TableCell className="border-r border-gray-200 font-medium">{machine.type || "-"}</TableCell>
-                    <TableCell className="border-r border-gray-200">{machine.make || "-"}</TableCell>
-                    <TableCell className="border-r border-gray-200">{machine.model || "-"}</TableCell>
-                    <TableCell className="border-r border-gray-200">{machine.year_of_installation || "-"}</TableCell>
-                    <TableCell className="border-r border-gray-200">{machine.cnc_controller || "-"}</TableCell>
-                    <TableCell className="border-r border-gray-200">{machine.cnc_controller_service || "-"}</TableCell>
-                    <TableCell className="border-r border-gray-200">{machine.remarks || "-"}</TableCell>
-                    <TableCell className="border-r border-gray-200">{formatDate(machine.calibration_date)}</TableCell>
-                    <TableCell className="border-r border-gray-200">{formatDate(machine.calibration_due_date)}</TableCell>
-                    <TableCell>
-                      <div className="flex space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEditMachine(machine)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDeleteMachine(machine.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      }
+      bordered={false}
+      className="shadow-sm"
+    >
+      <Table
+        columns={columns}
+        dataSource={machines}
+        rowKey="id"
+        loading={loading}
+        pagination={{ pageSize: 10 }}
+        bordered
+        size="middle"
+        scroll={{ x: 1500 }}
+      />
 
       {machineModalOpen && (
         <MachineModal
@@ -210,9 +232,7 @@ const Machines = ({ workCenter, onBack }) => {
           onSave={handleMachineSaved}
         />
       )}
-
-      <ToastContainer />
-    </div>
+    </Card>
   );
 };
 
