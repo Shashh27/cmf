@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import ProcessPlan as ProcessPlanModel
-from DB.schemas import ProcessPlan, ProcessPlanCreate, ProcessPlanUpdate
+from DB.models.oms import ProcessPlan as ProcessPlanModel
+from DB.schemas.oms import ProcessPlan, ProcessPlanCreate, ProcessPlanUpdate
 
 router = APIRouter(
     prefix="/process-plans",

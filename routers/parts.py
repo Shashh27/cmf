@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import Part as PartModel, RawMaterial, PartType
-from DB.schemas import Part, PartCreate, PartUpdate
+from DB.models.oms import Part as PartModel, PartType
+from DB.models.inventory import RawMaterial
+from DB.schemas.oms import Part, PartCreate, PartUpdate
 
 router = APIRouter(
     prefix="/parts",

@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import Assembly as AssemblyModel, Part as PartModel
-from DB.schemas import Assembly, AssemblyCreate, AssemblyUpdate
+from DB.models.oms import Assembly as AssemblyModel, Part as PartModel
+from DB.schemas.oms import Assembly, AssemblyCreate, AssemblyUpdate
 
 router = APIRouter(
     prefix="/assemblies",

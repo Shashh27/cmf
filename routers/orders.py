@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from DB.database import get_db
-from DB.models import Order, Customer, Product
-from DB.schemas import Order as OrderResponse, OrderCreate, OrderUpdate, OrderWithCustomer, OrderWithCustomerAndProduct
+from DB.models.oms import Order, Product, OrderDocument
+from DB.models.configuration import Customer
+from DB.schemas.oms import Order as OrderResponse, OrderCreate, OrderUpdate, OrderWithCustomer, OrderWithCustomerAndProduct
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -178,6 +179,15 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Check if order has related customer documents
+    related_documents = db.query(OrderDocument).filter(OrderDocument.order_id == order_id).all()
+    if related_documents:
+        document_names = [doc.document_name for doc in related_documents]
+        raise HTTPException(
+            status_code=400,
+            detail=f"This order cannot be deleted because it has related documents: {', '.join(document_names)}. Please delete the documents first."
+        )
     
     db.delete(order)
     db.commit()

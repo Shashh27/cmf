@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import (
+from DB.models.oms import (
     Product as ProductModel, 
     Assembly as AssemblyModel, 
     Part as PartModel,
@@ -11,9 +11,10 @@ from DB.models import (
     ProcessPlan as ProcessPlanModel,
     Document as DocumentModel,
     ToolWithPart as ToolWithPartModel,
-    PartType as PartTypeModel
+    PartType as PartTypeModel,
+    Order as OrderModel
 )
-from DB.schemas import Product, ProductCreate, ProductUpdate, ProductHierarchicalData, PartDetails, AssemblyDetails, Part as PartSchema
+from DB.schemas.oms import Product, ProductCreate, ProductUpdate, ProductHierarchicalData, PartDetails, AssemblyDetails, Part as PartSchema
 
 router = APIRouter(
     prefix="/products",
@@ -84,6 +85,15 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with id {product_id} not found"
+        )
+    
+    # Check if product is used in orders table
+    related_orders = db.query(OrderModel).filter(OrderModel.product_id == product_id).all()
+    if related_orders:
+        order_numbers = [order.sale_order_number for order in related_orders]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"This product cannot be deleted because it is linked to existing orders: {', '.join(order_numbers)}. Please remove or update the related orders first."
         )
 
     def delete_assembly_recursive(assembly_id_to_delete):

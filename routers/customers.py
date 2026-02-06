@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 from DB.database import get_db
-from DB.models import Customer
-from DB.schemas import Customer as CustomerResponse, CustomerCreate, CustomerUpdate
+from DB.models.configuration import Customer
+from DB.schemas.configuration import Customer as CustomerResponse, CustomerCreate, CustomerUpdate
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 

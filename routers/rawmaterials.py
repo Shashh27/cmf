@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import RawMaterial as RawMaterialModel
-from DB.schemas import RawMaterial, RawMaterialCreate, RawMaterialUpdate
+from DB.models.inventory import RawMaterial as RawMaterialModel
+from DB.models.oms import OrderPartsRawMaterialLinked
+from DB.schemas.inventory import RawMaterial, RawMaterialCreate, RawMaterialUpdate
 
 router = APIRouter(
     prefix="/rawmaterials",
@@ -68,6 +69,20 @@ def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Raw material with id {raw_material_id} not found"
+        )
+    
+    # Check if raw material is used in order_parts_raw_material_linked table
+    related_linkages = db.query(OrderPartsRawMaterialLinked).filter(OrderPartsRawMaterialLinked.raw_material_id == raw_material_id).all()
+    if related_linkages:
+        # Get order numbers for related linkages
+        order_ids = [linkage.order_id for linkage in related_linkages]
+        from DB.models import Order
+        orders = db.query(Order).filter(Order.id.in_(order_ids)).all()
+        order_numbers = [order.sale_order_number for order in orders]
+        
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"This rawmaterial cannot be deleted because it is linked to existing orders: {', '.join(order_numbers)}. Please remove or update the related orders first."
         )
 
     db.delete(db_raw_material)

@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import Operation as OperationModel
-from DB.schemas import Operation, OperationCreate, OperationUpdate
+from DB.models.oms import Operation as OperationModel
+from DB.schemas.oms import Operation, OperationCreate, OperationUpdate
 
 router = APIRouter(
     prefix="/operations",

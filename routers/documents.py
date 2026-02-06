@@ -7,8 +7,8 @@ import io
 import mimetypes
 
 from DB.database import get_db
-from DB.models import Document as DocumentModel
-from DB.schemas import Document, DocumentUpdate
+from DB.models.oms import Document as DocumentModel
+from DB.schemas.oms import Document, DocumentUpdate
 from DB.minio_client import get_minio_client
 
 router = APIRouter(

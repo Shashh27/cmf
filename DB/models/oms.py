@@ -10,9 +10,8 @@ from sqlalchemy import (
     Float,
     func
 )
-from sqlalchemy.orm import relationship, declarative_base
-
-Base = declarative_base()
+from sqlalchemy.orm import relationship
+from ..database import Base
 
 
 # =======================
@@ -20,6 +19,7 @@ Base = declarative_base()
 # =======================
 class Product(Base):
     __tablename__ = "products"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
     product_name = Column(String, nullable=False)
@@ -36,13 +36,14 @@ class Product(Base):
 # =======================
 class Assembly(Base):
     __tablename__ = "assemblies"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
     assembly_name = Column(String, nullable=False)
     assembly_number = Column(String, nullable=False)
 
-    product_id = Column(Integer, ForeignKey("products.id"))
-    parent_id = Column(Integer, ForeignKey("assemblies.id"), nullable=True)
+    product_id = Column(Integer, ForeignKey("oms.products.id"))
+    parent_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
 
     product = relationship("Product", back_populates="assemblies")
     parts = relationship("Part", back_populates="assembly")
@@ -55,6 +56,7 @@ class Assembly(Base):
 # =======================
 class PartType(Base):
     __tablename__ = "part_types"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
     type_name = Column(String, nullable=False)
@@ -67,15 +69,16 @@ class PartType(Base):
 # =======================
 class Part(Base):
     __tablename__ = "parts"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
     part_name = Column(String, nullable=False)
     part_number = Column(String, unique=True, nullable=False)
 
-    type_id = Column(Integer, ForeignKey("part_types.id"))
-    raw_material_id = Column(Integer, ForeignKey("raw_materials.id"))
-    assembly_id = Column(Integer, ForeignKey("assemblies.id"), nullable=True)
-    product_id = Column(Integer, ForeignKey("products.id"))
+    type_id = Column(Integer, ForeignKey("oms.part_types.id"))
+    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"))
+    assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
+    product_id = Column(Integer, ForeignKey("oms.products.id"))
 
     type = relationship("PartType", back_populates="parts")
     raw_material = relationship("RawMaterial")
@@ -85,13 +88,14 @@ class Part(Base):
     operations = relationship("Operation", back_populates="part")
     documents = relationship("Document", back_populates="part")
     tools = relationship("ToolWithPart", back_populates="part")
-
+    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="part")
 
 # =======================
 # Operation
 # =======================
 class Operation(Base):
     __tablename__ = "operations"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
     operation_number = Column(String, nullable=False)
@@ -101,10 +105,11 @@ class Operation(Base):
     cycle_time = Column(TIME)
     workcenter_id = Column(Integer)
 
-    part_id = Column(Integer, ForeignKey("parts.id"))
+    part_id = Column(Integer, ForeignKey("oms.parts.id"))
 
     part = relationship("Part", back_populates="operations")
     process_plan = relationship("ProcessPlan", back_populates="operation", uselist=False)
+    operation_documents = relationship("OperationDocument", back_populates="operation")
 
 
 # =======================
@@ -112,9 +117,10 @@ class Operation(Base):
 # =======================
 class ProcessPlan(Base):
     __tablename__ = "process_plans"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
-    operation_id = Column(Integer, ForeignKey("operations.id"))
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"))
     work_instructions = Column(Text)
     notes = Column(Text)
 
@@ -126,6 +132,7 @@ class ProcessPlan(Base):
 # =======================
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
     document_name = Column(String, nullable=False)
@@ -133,8 +140,8 @@ class Document(Base):
     document_type = Column(String, nullable=False)
     document_version = Column(String, nullable=False)
 
-    part_id = Column(Integer, ForeignKey("parts.id"))
-    parent_id = Column(Integer, ForeignKey("documents.id"), nullable=True)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"))
+    parent_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=True)
 
     part = relationship("Part", back_populates="documents")
     parent = relationship("Document", remote_side=[id])
@@ -145,29 +152,14 @@ class Document(Base):
 # =======================
 class ToolWithPart(Base):
     __tablename__ = "tools_with_part"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
     tool_id = Column(Integer, nullable=False)
-    part_id = Column(Integer, ForeignKey("parts.id"))
+    part_id = Column(Integer, ForeignKey("oms.parts.id"))
 
     part = relationship("Part", back_populates="tools")
 
-
-# =======================
-# Customer
-# =======================
-class Customer(Base):
-    __tablename__ = "customers"
-
-    id = Column(Integer, primary_key=True, index=True)
-    company_name = Column(String, nullable=False)
-    address = Column(String, nullable=False)
-    branch = Column(String, nullable=False)
-    email = Column(String, nullable=False)
-    contact_number = Column(String, nullable=False)
-    contact_person = Column(String, nullable=False)
-
-    orders = relationship("Order", back_populates="customer")
 
 
 # =======================
@@ -175,11 +167,12 @@ class Customer(Base):
 # =======================
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
     sale_order_number = Column(String, nullable=False)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
-    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("configuration.customers.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     due_date = Column(TIMESTAMP, nullable=False)
     priority = Column(Integer, nullable=False)
@@ -188,41 +181,43 @@ class Order(Base):
 
     customer = relationship("Customer", back_populates="orders")
     product = relationship("Product", back_populates="orders")
-    customer_documents = relationship("CustomerDocument", back_populates="order")
-
+    order_documents = relationship("OrderDocument", back_populates="order")
+    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order")
 
 # =======================
-# Customer Document
+# Order Document
 # =======================
-class CustomerDocument(Base):
-    __tablename__ = "customer_documents"
+class OrderDocument(Base):
+    __tablename__ = "order_documents"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     document_name = Column(String, nullable=False)
     document_url = Column(String, nullable=False)
     document_type = Column(String, nullable=False)
     document_version = Column(String, nullable=False)
 
-    order = relationship("Order", back_populates="customer_documents")
+    order = relationship("Order", back_populates="order_documents")
+
 
 
 # =======================
-# Raw Materials
+# Operation Document
 # =======================
-class RawMaterial(Base):
-    __tablename__ = "raw_materials"
+class OperationDocument(Base):
+    __tablename__ = "operation_documents"
+    __table_args__ = {'schema': 'oms'}
 
-    id = Column(Integer, primary_key=True, index=True)
-    material_name = Column(String, nullable=False)
-    material_specification = Column(String)
-    mass = Column(Float)
-    density = Column(Float)
-    volume = Column(Float)
-    stock_type = Column(String)
-    quantity = Column(Integer)
-    stock_dimensions = Column(String)
-    status = Column(String)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    document_name = Column(String, nullable=False)
+    document_url = Column(String, nullable=False)
+    document_type = Column(String, nullable=False)
+    document_version = Column(String, nullable=False)
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
+
+    # Relationships
+    operation = relationship("Operation", back_populates="operation_documents")
 
 
 # =======================
@@ -230,50 +225,15 @@ class RawMaterial(Base):
 # =======================
 class OrderPartsRawMaterialLinked(Base):
     __tablename__ = "order_parts_raw_material_linked"
+    __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    raw_material_id = Column(Integer, ForeignKey("raw_materials.id"), nullable=False)
-    part_id = Column(Integer, ForeignKey("parts.id"), nullable=False)
-    order_id = Column(Integer, ForeignKey("orders.id"), nullable=False)
+    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=False)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
 
     # Relationships
     raw_material = relationship("RawMaterial")
     part = relationship("Part")
     order = relationship("Order")
-
-
-# =======================
-# Work Center
-# =======================
-class WorkCenter(Base):
-    __tablename__ = "work_centers"
-
-    id = Column(Integer, primary_key=True, index=True)
-    code = Column(String, nullable=False)
-    work_center_name = Column(String, nullable=False)
-    description = Column(String)
-    is_schedulable = Column(Boolean, default=True)
-
-    machines = relationship("Machine", back_populates="work_center")
-
-
-# =======================
-# Machine
-# =======================
-class Machine(Base):
-    __tablename__ = "machines"
-
-    id = Column(Integer, primary_key=True, index=True)
-    work_center_id = Column(Integer, ForeignKey("work_centers.id"), nullable=False)
-    type = Column(String, nullable=False)
-    make = Column(String)
-    model = Column(String)
-    year_of_installation = Column(Integer)
-    cnc_controller = Column(String)
-    cnc_controller_service = Column(String)
-    remarks = Column(String)
-    calibration_date = Column(TIMESTAMP)
-    calibration_due_date = Column(TIMESTAMP)
-
-    work_center = relationship("WorkCenter", back_populates="machines")

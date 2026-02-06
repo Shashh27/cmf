@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import ToolWithPart as ToolWithPartModel
-from DB.schemas import ToolWithPart, ToolWithPartCreate, ToolWithPartUpdate
+from DB.models.oms import ToolWithPart as ToolWithPartModel
+from DB.schemas.oms import ToolWithPart, ToolWithPartCreate, ToolWithPartUpdate
 
 router = APIRouter(
     prefix="/tools",

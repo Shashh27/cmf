@@ -4,8 +4,9 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from DB.database import get_db
-from DB.models import OrderPartsRawMaterialLinked, RawMaterial, Part, Order
-from DB.schemas import (
+from DB.models.oms import OrderPartsRawMaterialLinked, Part, Order
+from DB.models.inventory import RawMaterial
+from DB.schemas.oms import (
     OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedResponse,
     OrderPartsRawMaterialLinkedCreate,
     OrderPartsRawMaterialLinkedUpdate,

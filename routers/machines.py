@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models import Machine as MachineModel, WorkCenter as WorkCenterModel
-from DB.schemas import Machine, MachineCreate, MachineUpdate, MachineWithWorkCenter
+from DB.models.configuration import Machine as MachineModel, WorkCenter as WorkCenterModel
+from DB.schemas.configuration import Machine, MachineCreate, MachineUpdate, MachineWithWorkCenter
 
 router = APIRouter(
     prefix="/machines",

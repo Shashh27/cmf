@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
 # Database configuration
-DATABASE_URL = "postgresql://postgres:postgres@172.18.7.91:5432/cmf_backend"
+DATABASE_URL = "postgresql://postgres:postgres@172.18.7.91:5432/CMF_DIGITIZATION"
 
 # MinIO configuration
 MINIO_ENDPOINT = "172.18.7.91:9000"  # MinIO endpoint (IP:PORT)

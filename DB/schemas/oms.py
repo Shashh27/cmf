@@ -1,7 +1,8 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from typing import Optional, List, Text
 from datetime import datetime, time
 from typing_extensions import Self
+from .configuration import Customer
 
 
 # =======================
@@ -311,36 +312,7 @@ class ProductHierarchicalData(BaseModel):
     direct_parts: List[PartDetails] = []
 
 
-# =======================
-# Customer Schemas
-# =======================
-class CustomerBase(BaseModel):
-    company_name: str
-    address: str
-    branch: str
-    email: str
-    contact_number: str
-    contact_person: str
 
-
-class CustomerCreate(CustomerBase):
-    pass
-
-
-class CustomerUpdate(BaseModel):
-    company_name: Optional[str] = None
-    address: Optional[str] = None
-    branch: Optional[str] = None
-    email: Optional[str] = None
-    contact_number: Optional[str] = None
-    contact_person: Optional[str] = None
-
-
-class Customer(CustomerBase):
-    id: int
-
-    class Config:
-        from_attributes = True
 
 
 # =======================
@@ -393,21 +365,24 @@ class OrderWithCustomer(Order):
     customer: Customer
 
 
+
+
+
 # =======================
-# Customer Document Schemas
+# Order Document Schemas
 # =======================
-class CustomerDocumentBase(BaseModel):
+class OrderDocumentBase(BaseModel):
     order_id: int
     document_name: str
     document_type: str
     document_version: str
 
 
-class CustomerDocumentCreate(CustomerDocumentBase):
+class OrderDocumentCreate(OrderDocumentBase):
     document_url: Optional[str] = None
 
 
-class CustomerDocumentUpdate(BaseModel):
+class OrderDocumentUpdate(BaseModel):
     order_id: Optional[int] = None
     document_name: Optional[str] = None
     document_type: Optional[str] = None
@@ -415,7 +390,7 @@ class CustomerDocumentUpdate(BaseModel):
     document_url: Optional[str] = None
 
 
-class CustomerDocument(CustomerDocumentBase):
+class OrderDocument(OrderDocumentBase):
     id: int
     document_url: str
 
@@ -424,38 +399,38 @@ class CustomerDocument(CustomerDocumentBase):
 
 
 # =======================
-# Raw Material Schemas
+# Operation Document Schemas
 # =======================
-class RawMaterialBase(BaseModel):
-    material_name: str
-    material_specification: Optional[str] = None
-    mass: Optional[float] = None
-    density: Optional[float] = None
-    volume: Optional[float] = None
-    stock_type: Optional[str] = None
-    quantity: Optional[int] = None
-    stock_dimensions: Optional[str] = None
-    status: Optional[str] = None
+class OperationDocumentBase(BaseModel):
+    document_name: str
+    document_url: str
+    document_type: str
+    document_version: str
+    operation_id: int
 
 
-class RawMaterialCreate(RawMaterialBase):
+class OperationDocumentCreate(OperationDocumentBase):
     pass
 
 
-class RawMaterialUpdate(BaseModel):
-    material_name: Optional[str] = None
-    material_specification: Optional[str] = None
-    mass: Optional[float] = None
-    density: Optional[float] = None
-    volume: Optional[float] = None
-    stock_type: Optional[str] = None
-    quantity: Optional[int] = None
-    stock_dimensions: Optional[str] = None
-    status: Optional[str] = None
+class OperationDocumentUpdate(BaseModel):
+    document_name: Optional[str] = None
+    document_url: Optional[str] = None
+    document_type: Optional[str] = None
+    document_version: Optional[str] = None
+    operation_id: Optional[int] = None
 
 
-class RawMaterial(RawMaterialBase):
+class OperationDocument(OperationDocumentBase):
     id: int
+
+    class Config:
+        from_attributes = True
+
+
+class OperationDocumentWithDetails(OperationDocument):
+    operation_name: Optional[str] = None
+    operation_number: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -495,77 +470,3 @@ class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
 
     class Config:
         from_attributes = True
-
-
-# =======================
-# Work Center Schemas
-# =======================
-class WorkCenterBase(BaseModel):
-    code: str
-    work_center_name: str
-    description: Optional[str] = None
-    is_schedulable: bool = True
-
-
-class WorkCenterCreate(WorkCenterBase):
-    pass
-
-
-class WorkCenterUpdate(BaseModel):
-    code: Optional[str] = None
-    work_center_name: Optional[str] = None
-    description: Optional[str] = None
-    is_schedulable: Optional[bool] = None
-
-
-class WorkCenter(WorkCenterBase):
-    id: int
-
-    class Config:
-        from_attributes = True
-
-
-# =======================
-# Machine Schemas
-# =======================
-class MachineBase(BaseModel):
-    work_center_id: int
-    type: str
-    make: Optional[str] = None
-    model: Optional[str] = None
-    year_of_installation: Optional[int] = None
-    cnc_controller: Optional[str] = None
-    cnc_controller_service: Optional[str] = None
-    remarks: Optional[str] = None
-    calibration_date: Optional[datetime] = None
-    calibration_due_date: Optional[datetime] = None
-
-
-class MachineCreate(MachineBase):
-    pass
-
-
-class MachineUpdate(BaseModel):
-    work_center_id: Optional[int] = None
-    type: Optional[str] = None
-    make: Optional[str] = None
-    model: Optional[str] = None
-    year_of_installation: Optional[int] = None
-    cnc_controller: Optional[str] = None
-    cnc_controller_service: Optional[str] = None
-    remarks: Optional[str] = None
-    calibration_date: Optional[datetime] = None
-    calibration_due_date: Optional[datetime] = None
-
-
-class Machine(MachineBase):
-    id: int
-
-    class Config:
-        from_attributes = True
-
-
-class MachineWithWorkCenter(Machine):
-    work_center: WorkCenter
-
-
