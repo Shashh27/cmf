@@ -18,6 +18,7 @@ from .configuration import (
     Machine,
     Customer
 )
+from .access_control import AccessUser
 from .inventory import (
     RawMaterial,
     ToolsList
@@ -39,6 +40,7 @@ __all__ = [
     "WorkCenter",
     "Machine",
     "Customer",
+    "AccessUser",
     "RawMaterial",
     "ToolsList",
     "Base"

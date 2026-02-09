@@ -15,6 +15,7 @@ from .machines import router as machines_router
 from .order_parts_raw_material_linked import router as order_parts_raw_material_linked_router
 from .operation_documents import router as operation_documents_router
 from .tools_list import router as tools_list_router
+from .access_control import router as access_control_router
 
 __all__ = [
     "products_router",
@@ -33,5 +34,6 @@ __all__ = [
     "machines_router",
     "order_parts_raw_material_linked_router",
     "operation_documents_router",
-    "tools_list_router"
+    "tools_list_router",
+    "access_control_router"
 ]

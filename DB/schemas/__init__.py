@@ -55,6 +55,12 @@ from .configuration import (
     CustomerCreate,
     CustomerUpdate
 )
+from .access_control import (
+    AccessUserBase,
+    AccessUserCreate,
+    AccessUserUpdate,
+    AccessUserResponse
+)
 from .inventory import (
     RawMaterial,
     RawMaterialCreate,
@@ -118,6 +124,10 @@ __all__ = [
     "Customer",
     "CustomerCreate",
     "CustomerUpdate",
+    "AccessUserBase",
+    "AccessUserCreate",
+    "AccessUserUpdate",
+    "AccessUserResponse",
     "RawMaterial",
     "RawMaterialCreate",
     "RawMaterialUpdate",
