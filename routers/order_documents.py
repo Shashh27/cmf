@@ -125,6 +125,26 @@ async def replace_order_document(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to replace document: {str(e)}")
 
+@router.delete("/{document_id}")
+def delete_order_document(document_id: int, db: Session = Depends(get_db)):
+    """Delete an order document and remove file from MinIO"""
+    db_document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
+    if not db_document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    try:
+        minio_client = get_minio_client()
+        try:
+            object_key = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+            minio_client.delete_file(object_key)
+        except Exception:
+            pass
+        db.delete(db_document)
+        db.commit()
+        return {"message": "Document deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+
 @router.put("/replace-with-metadata/{document_id}", response_model=OrderDocumentResponse)
 async def replace_order_document_with_metadata(
     document_id: int,

@@ -14,7 +14,18 @@ from DB.models.oms import (
     PartType as PartTypeModel,
     Order as OrderModel
 )
-from DB.schemas.oms import Product, ProductCreate, ProductUpdate, ProductHierarchicalData, PartDetails, AssemblyDetails, Part as PartSchema
+from DB.models.configuration import WorkCenter as WorkCenterModel
+from DB.models.inventory import RawMaterial as RawMaterialModel
+from DB.schemas.oms import (
+    Product, 
+    ProductCreate, 
+    ProductUpdate, 
+    ProductHierarchicalData, 
+    PartDetails, 
+    AssemblyDetails, 
+    Part as PartSchema,
+    Operation as OperationSchema
+)
 
 router = APIRouter(
     prefix="/products",
@@ -153,6 +164,14 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
     
     # Get all parts for this product
     all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).all()
+
+    # Get all work centers for mapping
+    all_work_centers = db.query(WorkCenterModel).all()
+    work_center_map = {wc.id: wc.work_center_name for wc in all_work_centers}
+    
+    # Get all raw materials for mapping
+    all_raw_materials = db.query(RawMaterialModel).all()
+    raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
     
     # Create mappings for easy lookup
     assembly_map = {asm.id: asm for asm in all_assemblies}
@@ -198,11 +217,26 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
     
     def create_part_details(part: PartModel) -> PartDetails:
         """Create PartDetails with all related data"""
-        part_operations = operations_by_part.get(part.id, [])
+        part_operations_models = operations_by_part.get(part.id, [])
+        
+        # Enrich operations with work_center_name
+        part_operations = []
+        for op in part_operations_models:
+            op_dict = {
+                "id": op.id,
+                "operation_number": op.operation_number,
+                "operation_name": op.operation_name,
+                "setup_time": op.setup_time,
+                "cycle_time": op.cycle_time,
+                "workcenter_id": op.workcenter_id,
+                "part_id": op.part_id,
+                "work_center_name": work_center_map.get(op.workcenter_id)
+            }
+            part_operations.append(OperationSchema(**op_dict))
         
         # Get process plans for this part's operations
         part_process_plans = []
-        for op in part_operations:
+        for op in part_operations_models:
             part_process_plans.extend(process_plans_by_operation.get(op.id, []))
         
         # Get the part type
@@ -217,7 +251,8 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
             'raw_material_id': part.raw_material_id,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
-            'type_name': part_type.type_name if part_type else None
+            'type_name': part_type.type_name if part_type else None,
+            'raw_material_name': raw_material_map.get(part.raw_material_id)
         }
         
         part_with_type = PartSchema(**part_dict)

@@ -124,6 +124,7 @@ class OperationBase(BaseModel):
     setup_time: Optional[time] = None
     cycle_time: Optional[time] = None
     workcenter_id: Optional[int] = None
+    machine_id: Optional[int] = None
     part_id: int
 
     @field_validator('setup_time', 'cycle_time', mode='before')
@@ -167,6 +168,7 @@ class OperationUpdate(BaseModel):
     setup_time: Optional[time] = None
     cycle_time: Optional[time] = None
     workcenter_id: Optional[int] = None
+    machine_id: Optional[int] = None
     part_id: Optional[int] = None
 
     @field_validator('setup_time', 'cycle_time', mode='before')
@@ -202,6 +204,7 @@ class OperationUpdate(BaseModel):
 
 class Operation(OperationBase):
     id: int
+    work_center_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -320,12 +323,12 @@ class ProductHierarchicalData(BaseModel):
 # =======================
 class OrderBase(BaseModel):
     sale_order_number: str
+    project_name: Optional[str] = None
+    order_date: Optional[datetime] = None
     customer_id: int
     product_id: int
     quantity: int
     due_date: datetime
-    priority: int
-    supervisor_id: int
     status: str
 
 
@@ -335,12 +338,12 @@ class OrderCreate(OrderBase):
 
 class OrderUpdate(BaseModel):
     sale_order_number: Optional[str] = None
+    project_name: Optional[str] = None
+    order_date: Optional[datetime] = None
     customer_id: Optional[int] = None
     product_id: Optional[int] = None
     quantity: Optional[int] = None
     due_date: Optional[datetime] = None
-    priority: Optional[int] = None
-    supervisor_id: Optional[int] = None
     status: Optional[str] = None
 
 
@@ -467,6 +470,8 @@ class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
     material_name: Optional[str] = None
     part_name: Optional[str] = None
     sale_order_number: Optional[str] = None
+    project_name: Optional[str] = None
+    material_status: Optional[str] = None
 
     class Config:
         from_attributes = True
