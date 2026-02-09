@@ -196,9 +196,9 @@ async def upload_tools_excel(
 
 
 @router.get("/", response_model=List[ToolsList])
-def get_tools(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all tools with pagination"""
-    tools = db.query(ToolsListModel).offset(skip).limit(limit).all()
+def get_tools(db: Session = Depends(get_db)):
+    """Get all tools"""
+    tools = db.query(ToolsListModel).all()
     return tools
 
 
