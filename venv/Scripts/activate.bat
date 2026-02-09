@@ -8,7 +8,11 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
+<<<<<<< HEAD
 set VIRTUAL_ENV=D:\vinod\CMF_DIGITIZATION\backend\venv
+=======
+set VIRTUAL_ENV=C:\Users\SMPM\Desktop\backend\CMFbackend\venv
+>>>>>>> db38cd2faa190b81dd7dc9fe4de7016271a4e3d4
 
 if not defined PROMPT set PROMPT=$P$G
 

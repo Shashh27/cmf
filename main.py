@@ -22,7 +22,8 @@ from routers import (
     machines_router,
     order_parts_raw_material_linked_router,
     operation_documents_router,
-    tools_list_router
+    tools_list_router,
+    access_control_router
 )
 
 # Initialize FastAPI app
@@ -98,6 +99,7 @@ app.include_router(orders_router, prefix="/api/v1")
 app.include_router(order_documents_router, prefix="/api/v1")
 app.include_router(rawmaterials_router, prefix="/api/v1")
 app.include_router(workcenter_router, prefix="/api/v1")
+app.include_router(access_control_router, prefix="/api/v1")
 app.include_router(machines_router, prefix="/api/v1")
 app.include_router(order_parts_raw_material_linked_router, prefix="/api/v1")
 app.include_router(operation_documents_router, prefix="/api/v1")
@@ -158,7 +160,7 @@ def system_info():
             "tools": "/api/v1/tools",
             "customers": "/api/v1/customers",
             "orders": "/api/v1/orders",
-            "order_documents": "/api/v1/customer-documents",
+            "order_documents": "/api/v1/order-documents",
             "raw_materials": "/api/v1/rawmaterials",
             "work_centers": "/api/v1/workcenters",
             "machines": "/api/v1/machines",
