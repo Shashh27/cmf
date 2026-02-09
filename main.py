@@ -160,7 +160,7 @@ def system_info():
             "tools": "/api/v1/tools",
             "customers": "/api/v1/customers",
             "orders": "/api/v1/orders",
-            "order_documents": "/api/v1/customer-documents",
+            "order_documents": "/api/v1/order-documents",
             "raw_materials": "/api/v1/rawmaterials",
             "work_centers": "/api/v1/workcenters",
             "machines": "/api/v1/machines",
