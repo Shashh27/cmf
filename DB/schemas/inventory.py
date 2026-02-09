@@ -81,3 +81,90 @@ class ToolsList(ToolsListBase):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Inventory Request Schemas
+# =======================
+class InventoryRequestBase(BaseModel):
+    tool_id: int
+    operator_id: int
+    project_id: int
+    part_id: int
+    quantity: int
+    admin_id: int
+    status: Optional[str] = "pending"
+
+
+class InventoryRequestCreate(InventoryRequestBase):
+    pass
+
+
+class InventoryRequestUpdate(BaseModel):
+    tool_id: Optional[int] = None
+    operator_id: Optional[int] = None
+    project_id: Optional[int] = None
+    part_id: Optional[int] = None
+    quantity: Optional[int] = None
+    admin_id: Optional[int] = None
+    status: Optional[str] = None
+
+
+class InventoryRequest(InventoryRequestBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class InventoryRequestWithDetails(InventoryRequest):
+    tool_name: Optional[str] = None
+    operator_name: Optional[str] = None
+    admin_name: Optional[str] = None
+    project_name: Optional[str] = None
+    part_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Inventory Return Request Schemas
+# =======================
+class InventoryReturnRequestBase(BaseModel):
+    requested_id: int
+    operator_id: int
+    total_requested_qty: int
+    returned_qty: int = 0
+    status: Optional[str] = "pending"
+
+
+class InventoryReturnRequestCreate(InventoryReturnRequestBase):
+    pass
+
+
+class InventoryReturnRequestUpdate(BaseModel):
+    requested_id: Optional[int] = None
+    operator_id: Optional[int] = None
+    total_requested_qty: Optional[int] = None
+    returned_qty: Optional[int] = None
+    status: Optional[str] = None
+
+
+class InventoryReturnRequest(InventoryReturnRequestBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class InventoryReturnRequestWithDetails(InventoryReturnRequest):
+    operator_name: Optional[str] = None
+    inventory_request_details: Optional[InventoryRequestWithDetails] = None
+
+    class Config:
+        from_attributes = True
