@@ -50,6 +50,7 @@ class Machine(Base):
     calibration_due_date = Column(TIMESTAMP)
 
     work_center = relationship("WorkCenter", back_populates="machines")
+    # status = relationship("MachineStatus", back_populates="machine")
 
 
 # =======================

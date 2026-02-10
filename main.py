@@ -1,29 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from DB.database import engine, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME, MINIO_SECURE
-from DB.models import Base
+from DB.models import Base, scheduling
 from DB.minio_client import init_minio_client
 
 # Import all routers
 from routers import (
-    products_router,
-    assemblies_router,
-    part_types_router,
-    parts_router,
-    operations_router,
-    process_plans_router,
-    documents_router,
-    tools_router,
-    customers_router,
-    orders_router,
-    order_documents_router,
-    rawmaterials_router,
-    workcenter_router,
-    machines_router,
-    order_parts_raw_material_linked_router,
-    operation_documents_router,
-    tools_list_router
+    machine_status, 
+    machines, 
+    shift_hours
 )
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -42,6 +29,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(machine_status.router, prefix="/api/v1")
+app.include_router(machines.router, prefix="/api/v1")
+app.include_router(shift_hours.router, prefix="/api/v1")
 
 
 @app.on_event("startup")
@@ -84,41 +76,9 @@ async def startup_event():
     print("=" * 60)
 
 
-# Include all routers with api/v1 prefix
-app.include_router(products_router, prefix="/api/v1")
-app.include_router(assemblies_router, prefix="/api/v1")
-app.include_router(part_types_router, prefix="/api/v1")
-app.include_router(parts_router, prefix="/api/v1")
-app.include_router(operations_router, prefix="/api/v1")
-app.include_router(process_plans_router, prefix="/api/v1")
-app.include_router(documents_router, prefix="/api/v1")
-app.include_router(tools_router, prefix="/api/v1")
-app.include_router(customers_router, prefix="/api/v1")
-app.include_router(orders_router, prefix="/api/v1")
-app.include_router(order_documents_router, prefix="/api/v1")
-app.include_router(rawmaterials_router, prefix="/api/v1")
-app.include_router(workcenter_router, prefix="/api/v1")
-app.include_router(machines_router, prefix="/api/v1")
-app.include_router(order_parts_raw_material_linked_router, prefix="/api/v1")
-app.include_router(operation_documents_router, prefix="/api/v1")
-app.include_router(tools_list_router, prefix="/api/v1")
 
 
-@app.get("/")
-def root():
-    """Root endpoint"""
-    return {
-        "message": "Welcome to CMF Backend API with MinIO Integration",
-        "version": "2.0.0",
-        "features": [
-            "Complete CRUD operations for all entities",
-            "Document upload to MinIO storage",
-            "File download from MinIO",
-            "Support for PDF, DOCX, CSV, XLSX files"
-        ],
-        "docs": "/docs",
-        "redoc": "/redoc"
-    }
+
 
 
 @app.get("/health")
@@ -131,42 +91,6 @@ def health_check():
     }
 
 
-@app.get("/info")
-def system_info():
-    """System information endpoint"""
-    return {
-        "api_version": "2.0.0",
-        "database": {
-            "host": "172.18.7.91",
-            "port": 5432,
-            "database": "cmf_backend"
-        },
-        "minio": {
-            "endpoint": MINIO_ENDPOINT,
-            "bucket": MINIO_BUCKET_NAME,
-            "secure": MINIO_SECURE
-        },
-        "supported_file_types": ["pdf", "docx", "csv", "xlsx", "doc", "xls", "txt"],
-        "endpoints": {
-            "products": "/api/v1/products",
-            "assemblies": "/api/v1/assemblies",
-            "part_types": "/api/v1/part-types",
-            "parts": "/api/v1/parts",
-            "operations": "/api/v1/operations",
-            "process_plans": "/api/v1/process-plans",
-            "documents": "/api/v1/documents",
-            "tools": "/api/v1/tools",
-            "customers": "/api/v1/customers",
-            "orders": "/api/v1/orders",
-            "order_documents": "/api/v1/customer-documents",
-            "raw_materials": "/api/v1/rawmaterials",
-            "work_centers": "/api/v1/workcenters",
-            "machines": "/api/v1/machines",
-            "order_parts_raw_material_linked": "/api/v1/order-parts-raw-material-linked",
-            "operation_documents": "/api/v1/operation-documents",
-            "tools_list": "/api/v1/tools-list"
-        }
-    }
 
 
 if __name__ == "__main__":

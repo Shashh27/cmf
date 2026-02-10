@@ -22,6 +22,12 @@ from .inventory import (
     RawMaterial,
     ToolsList
 )
+from .scheduling import (
+    Status,
+    MachineStatus,
+    MachineDowntime,
+    ShiftHoursConfiguration
+)
 
 __all__ = [
     "Product",
@@ -41,5 +47,9 @@ __all__ = [
     "Customer",
     "RawMaterial",
     "ToolsList",
+    "Status",
+    "MachineStatus",
+    "MachineDowntime",
+    "ShiftHoursConfiguration",
     "Base"
 ]

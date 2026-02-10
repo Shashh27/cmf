@@ -4,6 +4,7 @@ from typing import List
 
 from DB.database import get_db
 from DB.models.configuration import Machine as MachineModel, WorkCenter as WorkCenterModel
+from DB.models.scheduling import MachineStatus, Status
 from DB.schemas.configuration import Machine, MachineCreate, MachineUpdate, MachineWithWorkCenter
 
 router = APIRouter(
@@ -27,6 +28,26 @@ def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     db.add(db_machine)
     db.commit()
     db.refresh(db_machine)
+
+    # Find the "ON" status
+    on_status = db.query(Status).filter(Status.name == "ON").first()
+    if not on_status:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ON status not found in the database"
+        )
+
+    # Create initial machine status entry
+    machine_status = MachineStatus(
+        machine_id=db_machine.id,
+        status_id=on_status.id,
+        description="initial status",
+        available_from=None,
+        available_to=None
+    )
+    db.add(machine_status)
+    db.commit()
+
     return db_machine
 
 

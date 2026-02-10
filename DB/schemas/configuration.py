@@ -1,12 +1,8 @@
-from pydantic import BaseModel, field_validator
-from typing import Optional, List, Text
-from datetime import datetime, time
-from typing_extensions import Self
+from typing import Optional, List
+from pydantic import BaseModel
+from datetime import datetime
 
 
-# =======================
-# Work Center Schemas
-# =======================
 class WorkCenterBase(BaseModel):
     code: str
     work_center_name: str
@@ -32,9 +28,6 @@ class WorkCenter(WorkCenterBase):
         from_attributes = True
 
 
-# =======================
-# Machine Schemas
-# =======================
 class MachineBase(BaseModel):
     work_center_id: int
     type: str
@@ -75,10 +68,10 @@ class Machine(MachineBase):
 class MachineWithWorkCenter(Machine):
     work_center: WorkCenter
 
+    class Config:
+        from_attributes = True
 
-# =======================
-# Customer Schemas
-# =======================
+
 class CustomerBase(BaseModel):
     company_name: str
     address: str
