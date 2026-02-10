@@ -50,15 +50,19 @@ def create_shift_config(data: ShiftHoursConfigCreate, db: Session = Depends(get_
 
 
 # ---------------- GET ALL ----------------
-@router.get("/", response_model=List[ShiftHoursConfigResponse])
+@router.get("/", response_model=list[ShiftHoursConfigResponse])
 def get_all_shift_configs(db: Session = Depends(get_db)):
-    configs = db.query(ShiftHoursConfiguration).all()
+    configs = (
+        db.query(ShiftHoursConfiguration)
+        .order_by(ShiftHoursConfiguration.date.asc())   # sort by date
+        .all()
+    )
 
     return [
         ShiftHoursConfigResponse(
             id=c.id,
             date=c.date,
-            working_day=c.working_day,
+            working_day=c.working_day,        # True or False
             number_of_shifts=c.number_of_shifts
         )
         for c in configs

@@ -184,7 +184,7 @@ async def update_machine_status(
             if status_update.available_to:
                 end_time = status_update.available_to
             else:
-                end_time = datetime(1970, 1, 1)  # Placeholder for active downtime
+                end_time = datetime(2026, 1, 1)  # Placeholder for active downtime
             
             new_downtime = MachineDowntime(
                 machine_id=machine_id,
