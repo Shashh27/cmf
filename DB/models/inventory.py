@@ -67,6 +67,7 @@ class InventoryRequest(Base):
     project_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
+    purpose_of_use = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     status = Column(String, nullable=False, default="pending")  # pending, approved, rejected
@@ -93,10 +94,13 @@ class InventoryReturnRequest(Base):
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     total_requested_qty = Column(Integer, nullable=False)
     returned_qty = Column(Integer, nullable=False, default=0)
+    remarks = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
-    status = Column(String, nullable=False, default="pending")  # pending, collected, not collected
+    admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # Added admin_id
+    status = Column(String, nullable=False, default="pending")  # pending, collected
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     inventory_request = relationship("InventoryRequest", back_populates="return_requests")
-    operator = relationship("AccessUser")
+    operator = relationship("AccessUser", foreign_keys=[operator_id])
+    admin = relationship("AccessUser", foreign_keys=[admin_id])  # Added admin relationship

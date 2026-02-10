@@ -50,14 +50,6 @@ def create_inventory_request(
             detail=f"Operator with id {request_data.operator_id} not found"
         )
     
-    # Verify admin exists
-    admin = db.query(AccessUser).filter(AccessUser.id == request_data.admin_id).first()
-    if not admin:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Admin with id {request_data.admin_id} not found"
-        )
-    
     # Verify project exists
     project = db.query(Order).filter(Order.id == request_data.project_id).first()
     if not project:
@@ -74,9 +66,10 @@ def create_inventory_request(
             detail=f"Part with id {request_data.part_id} not found"
         )
     
-    # Force status to be "pending" on creation and don't set updated_at
+    # Force status to be "pending" and admin_id to be None on creation
     create_data = request_data.dict()
     create_data['status'] = 'pending'
+    create_data['admin_id'] = None  # Admin ID will be set during approval
     
     db_inventory_request = InventoryRequest(**create_data)
     db.add(db_inventory_request)
@@ -106,6 +99,7 @@ def get_all_inventory_requests(db: Session = Depends(get_db)):
             "project_id": req.project_id,
             "part_id": req.part_id,
             "quantity": req.quantity,
+            "purpose_of_use": req.purpose_of_use,
             "admin_id": req.admin_id,
             "status": req.status,
             "created_at": req.created_at,
@@ -145,6 +139,7 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
         "project_id": request.project_id,
         "part_id": request.part_id,
         "quantity": request.quantity,
+        "purpose_of_use": request.purpose_of_use,
         "admin_id": request.admin_id,
         "status": request.status,
         "created_at": request.created_at,
@@ -162,10 +157,11 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
 @router.put("/{request_id}", response_model=InventoryRequestSchema)
 def update_inventory_request(
     request_id: int, 
-    update_data_schema: InventoryRequestUpdateSchema, 
+    request_update: InventoryRequestUpdateSchema, 
     db: Session = Depends(get_db)
 ):
-    """Update an inventory request (only for admin approval/rejection)"""
+    """Update an inventory request (all columns)"""
+    # Verify request exists
     db_inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == request_id).first()
     if not db_inventory_request:
         raise HTTPException(
@@ -173,59 +169,98 @@ def update_inventory_request(
             detail=f"Inventory request with id {request_id} not found"
         )
     
-    update_data = update_data_schema.dict(exclude_unset=True)
+    update_data = request_update.dict(exclude_unset=True)
     
-    # Only allow status updates (admin approval/rejection)
+    # Remove admin_id and status from update_data - these should only be updated via status endpoint
+    if 'admin_id' in update_data:
+        del update_data['admin_id']
+    
     if 'status' in update_data:
-        new_status = update_data['status']
-        if new_status not in ['approved', 'rejected']:
+        del update_data['status']
+    
+    # Validate foreign keys if they're being updated
+    if 'tool_id' in update_data:
+        tool = db.query(ToolsList).filter(ToolsList.id == update_data['tool_id']).first()
+        if not tool:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tool with id {update_data['tool_id']} not found"
+            )
+    
+    if 'operator_id' in update_data:
+        operator = db.query(AccessUser).filter(AccessUser.id == update_data['operator_id']).first()
+        if not operator:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Operator with id {update_data['operator_id']} not found"
+            )
+    
+    if 'project_id' in update_data:
+        project = db.query(Order).filter(Order.id == update_data['project_id']).first()
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project with id {update_data['project_id']} not found"
+            )
+    
+    if 'part_id' in update_data:
+        part = db.query(Part).filter(Part.id == update_data['part_id']).first()
+        if not part:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Part with id {update_data['part_id']} not found"
+            )
+    
+    # Validate quantity if it's being updated
+    if 'quantity' in update_data:
+        if update_data['quantity'] <= 0:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Status can only be updated to 'approved' or 'rejected'"
+                detail="Quantity must be greater than 0"
             )
         
-        # If status is being updated to 'approved', check tool availability and update quantity
-        if new_status == 'approved' and db_inventory_request.status != 'approved':
+        # If request is approved, check tool availability for new quantity
+        if db_inventory_request.status == 'approved':
             tool = db.query(ToolsList).filter(ToolsList.id == db_inventory_request.tool_id).first()
-            if not tool:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Tool with id {db_inventory_request.tool_id} not found"
-                )
+            quantity_diff = update_data['quantity'] - db_inventory_request.quantity
             
-            if tool.quantity < db_inventory_request.quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Insufficient quantity. Available: {tool.quantity}, Requested: {db_inventory_request.quantity}"
-                )
+            if quantity_diff > 0:  # Increasing quantity
+                if tool.quantity < quantity_diff:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Insufficient quantity for increase. Available: {tool.quantity}, Needed: {quantity_diff}"
+                    )
+                tool.quantity -= quantity_diff
+            elif quantity_diff < 0:  # Decreasing quantity
+                tool.quantity += abs(quantity_diff)
             
-            # Reduce tool quantity
-            tool.quantity -= db_inventory_request.quantity
             db.commit()
-        
-        # If status is being updated from 'approved' to something else, restore quantity
-        elif new_status != 'approved' and db_inventory_request.status == 'approved':
-            tool = db.query(ToolsList).filter(ToolsList.id == db_inventory_request.tool_id).first()
-            if tool:
-                tool.quantity += db_inventory_request.quantity
-                db.commit()
-        
-        # Update the status - this will trigger the updated_at timestamp
-        setattr(db_inventory_request, 'status', new_status)
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only status field can be updated for inventory requests"
-        )
+    
+    # Apply all updates
+    for key, value in update_data.items():
+        setattr(db_inventory_request, key, value)
     
     db.commit()
     db.refresh(db_inventory_request)
     return db_inventory_request
 
 
-@router.post("/{request_id}/approve")
-def approve_inventory_request(request_id: int, db: Session = Depends(get_db)):
-    """Approve an inventory request (admin action)"""
+@router.put("/{request_id}/status")
+def update_inventory_request_status(
+    request_id: int, 
+    admin_id: int,  # This will come from authentication/session
+    status: str,    # "approved" or "rejected"
+    db: Session = Depends(get_db)
+):
+    """Update inventory request status (admin approval/rejection)"""
+    # Validate status
+    if status not in ['approved', 'rejected']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be either 'approved' or 'rejected'"
+        )
+    
+    # Verify request exists
     db_inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == request_id).first()
     if not db_inventory_request:
         raise HTTPException(
@@ -233,13 +268,14 @@ def approve_inventory_request(request_id: int, db: Session = Depends(get_db)):
             detail=f"Inventory request with id {request_id} not found"
         )
     
-    if db_inventory_request.status != 'pending':
+    # Verify admin exists
+    admin = db.query(AccessUser).filter(AccessUser.id == admin_id).first()
+    if not admin:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot approve request with status '{db_inventory_request.status}'"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Admin with id {admin_id} not found"
         )
     
-    # Check tool availability
     tool = db.query(ToolsList).filter(ToolsList.id == db_inventory_request.tool_id).first()
     if not tool:
         raise HTTPException(
@@ -247,43 +283,35 @@ def approve_inventory_request(request_id: int, db: Session = Depends(get_db)):
             detail=f"Tool with id {db_inventory_request.tool_id} not found"
         )
     
-    if tool.quantity < db_inventory_request.quantity:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Insufficient quantity. Available: {tool.quantity}, Requested: {db_inventory_request.quantity}"
-        )
+    # Handle inventory quantity based on status change
+    if status == 'approved':
+        # If approving (from pending or rejected)
+        if db_inventory_request.status != 'approved':
+            if tool.quantity < db_inventory_request.quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Insufficient quantity. Available: {tool.quantity}, Requested: {db_inventory_request.quantity}"
+                )
+            # Reduce tool quantity only if it wasn't already approved
+            tool.quantity -= db_inventory_request.quantity
+        # If already approved, no change to inventory (just updating admin_id)
     
-    # Update status and reduce tool quantity
-    db_inventory_request.status = 'approved'
-    tool.quantity -= db_inventory_request.quantity
+    elif status == 'rejected':
+        # If rejecting (from pending or approved)
+        if db_inventory_request.status == 'approved':
+            # Restore tool quantity if it was previously approved
+            tool.quantity += db_inventory_request.quantity
+        # If already rejected, no change to inventory
+    
+    # Update the request with admin_id, status, and updated_at will be set automatically
+    db_inventory_request.admin_id = admin_id
+    db_inventory_request.status = status
+    
     db.commit()
     db.refresh(db_inventory_request)
     
-    return {"message": "Inventory request approved successfully", "request": db_inventory_request}
-
-
-@router.post("/{request_id}/reject")
-def reject_inventory_request(request_id: int, db: Session = Depends(get_db)):
-    """Reject an inventory request (admin action)"""
-    db_inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == request_id).first()
-    if not db_inventory_request:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Inventory request with id {request_id} not found"
-        )
-    
-    if db_inventory_request.status != 'pending':
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot reject request with status '{db_inventory_request.status}'"
-        )
-    
-    # Update status (no quantity changes for rejection)
-    db_inventory_request.status = 'rejected'
-    db.commit()
-    db.refresh(db_inventory_request)
-    
-    return {"message": "Inventory request rejected successfully", "request": db_inventory_request}
+    action = "approved" if status == 'approved' else "rejected"
+    return {"message": f"Inventory request {action} successfully", "request": db_inventory_request}
 
 
 @router.delete("/{request_id}")
@@ -329,6 +357,7 @@ def get_inventory_requests_by_operator(operator_id: int, db: Session = Depends(g
             "project_id": req.project_id,
             "part_id": req.part_id,
             "quantity": req.quantity,
+            "purpose_of_use": req.purpose_of_use,
             "admin_id": req.admin_id,
             "status": req.status,
             "created_at": req.created_at,
@@ -365,6 +394,7 @@ def get_inventory_requests_by_status(status: str, db: Session = Depends(get_db))
             "project_id": req.project_id,
             "part_id": req.part_id,
             "quantity": req.quantity,
+            "purpose_of_use": req.purpose_of_use,
             "admin_id": req.admin_id,
             "status": req.status,
             "created_at": req.created_at,

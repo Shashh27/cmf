@@ -92,12 +92,17 @@ class InventoryRequestBase(BaseModel):
     project_id: int
     part_id: int
     quantity: int
-    admin_id: int
+    purpose_of_use: Optional[str] = None
     status: Optional[str] = "pending"
 
 
-class InventoryRequestCreate(InventoryRequestBase):
-    pass
+class InventoryRequestCreate(BaseModel):
+    tool_id: int
+    operator_id: int
+    project_id: int
+    part_id: int
+    quantity: int
+    purpose_of_use: Optional[str] = None
 
 
 class InventoryRequestUpdate(BaseModel):
@@ -106,8 +111,7 @@ class InventoryRequestUpdate(BaseModel):
     project_id: Optional[int] = None
     part_id: Optional[int] = None
     quantity: Optional[int] = None
-    admin_id: Optional[int] = None
-    status: Optional[str] = None
+    purpose_of_use: Optional[str] = None
 
 
 class InventoryRequest(InventoryRequestBase):
@@ -138,11 +142,18 @@ class InventoryReturnRequestBase(BaseModel):
     operator_id: int
     total_requested_qty: int
     returned_qty: int = 0
+    remarks: Optional[str] = None
+    admin_id: Optional[int] = None  # Only set by admin during status update
     status: Optional[str] = "pending"
 
 
-class InventoryReturnRequestCreate(InventoryReturnRequestBase):
-    pass
+class InventoryReturnRequestCreate(BaseModel):
+    requested_id: int
+    operator_id: int
+    total_requested_qty: int
+    returned_qty: int
+    remarks: Optional[str] = None
+    status: str = "pending"  # Can be "pending" or "collected"
 
 
 class InventoryReturnRequestUpdate(BaseModel):
@@ -150,6 +161,7 @@ class InventoryReturnRequestUpdate(BaseModel):
     operator_id: Optional[int] = None
     total_requested_qty: Optional[int] = None
     returned_qty: Optional[int] = None
+    remarks: Optional[str] = None
     status: Optional[str] = None
 
 

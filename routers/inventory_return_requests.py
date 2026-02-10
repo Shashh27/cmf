@@ -50,29 +50,51 @@ def create_inventory_return_request(
             detail=f"Operator with id {return_request.operator_id} not found"
         )
     
-    # Verify total_requested_qty matches the original request quantity
-    if return_request.total_requested_qty != inventory_request.quantity:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Total requested quantity must match the original request quantity. Original: {inventory_request.quantity}, Provided: {return_request.total_requested_qty}"
-        )
-    
-    # Check if return request already exists for this inventory request
-    existing_return = db.query(InventoryReturnRequest).filter(
+    # Get all existing return requests for this inventory request
+    existing_returns = db.query(InventoryReturnRequest).filter(
         InventoryReturnRequest.requested_id == return_request.requested_id
-    ).first()
-    if existing_return:
+    ).all()
+    
+    # Calculate total already returned
+    total_returned_so_far = sum(r.returned_qty for r in existing_returns)
+    remaining_qty = return_request.total_requested_qty - total_returned_so_far
+    
+    # Validate the new return quantity
+    if return_request.returned_qty <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Return request already exists for inventory request {return_request.requested_id}"
+            detail="Returned quantity must be greater than 0"
         )
     
-    db_return_request = InventoryReturnRequest(**return_request.dict())
+    if return_request.returned_qty > remaining_qty:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot return {return_request.returned_qty} items. Only {remaining_qty} items remaining to be returned"
+        )
+    
+    # Validate status - allow "pending" or "collected" for initial creation
+    if return_request.status not in ['pending', 'collected']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be either 'pending' or 'collected' for initial return request"
+        )
+    
+    # Create the return request
+    db_return_request = InventoryReturnRequest(
+        requested_id=return_request.requested_id,
+        operator_id=return_request.operator_id,
+        total_requested_qty=return_request.total_requested_qty,  # This will be the same for all returns of this request
+        returned_qty=return_request.returned_qty,  # This is just for this specific return
+        remarks=return_request.remarks,  # Optional remarks field
+        status=return_request.status,  # Allow pending or collected initially
+        admin_id=None  # admin_id will be set when status is updated to collected
+    )
+    
     db.add(db_return_request)
     db.commit()
     db.refresh(db_return_request)
+    
     return db_return_request
-
 
 @router.get("/", response_model=List[InventoryReturnRequestWithDetailsSchema])
 def get_all_inventory_return_requests(db: Session = Depends(get_db)):
@@ -84,6 +106,8 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
         # Get related details
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
+        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
+        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
         
         # Get inventory request details
         inventory_request_details = None
@@ -122,10 +146,12 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
             "operator_id": ret_req.operator_id,
             "total_requested_qty": ret_req.total_requested_qty,
             "returned_qty": ret_req.returned_qty,
+            "remarks": ret_req.remarks,
             "status": ret_req.status,
             "created_at": ret_req.created_at,
             "updated_at": ret_req.updated_at,
             "operator_name": operator.user_name if operator else None,
+            "admin_name": admin.user_name if admin else None,
             "inventory_request_details": inventory_request_details
         }
         result.append(InventoryReturnRequestWithDetailsSchema(**request_dict))
@@ -146,6 +172,7 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
     # Get related details
     inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == return_request.requested_id).first()
     operator = db.query(AccessUser).filter(AccessUser.id == return_request.operator_id).first()
+    admin = db.query(AccessUser).filter(AccessUser.id == return_request.admin_id).first()
     
     # Get inventory request details
     inventory_request_details = None
@@ -184,10 +211,12 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
         "operator_id": return_request.operator_id,
         "total_requested_qty": return_request.total_requested_qty,
         "returned_qty": return_request.returned_qty,
+        "remarks": return_request.remarks,
         "status": return_request.status,
         "created_at": return_request.created_at,
         "updated_at": return_request.updated_at,
         "operator_name": operator.user_name if operator else None,
+            "admin_name": admin.user_name if admin else None,
         "inventory_request_details": inventory_request_details
     }
     
@@ -223,8 +252,8 @@ def update_inventory_return_request(
                     tool.quantity += db_return_request.returned_qty
                     db.commit()
     
-    # If status is being changed from 'collected' to something else, subtract the returned quantity
-    elif 'status' in update_data and update_data['status'] != 'collected' and db_return_request.status == 'collected':
+    # If status is being changed from 'collected' to 'pending', subtract the returned quantity
+    elif 'status' in update_data and update_data['status'] == 'pending' and db_return_request.status == 'collected':
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == db_return_request.requested_id).first()
         if inventory_request:
             from DB.models.inventory import ToolsList
@@ -247,6 +276,113 @@ def update_inventory_return_request(
     db.commit()
     db.refresh(db_return_request)
     return db_return_request
+
+
+@router.put("/{return_request_id}/status")
+def update_inventory_return_request_status(
+    return_request_id: int,
+    admin_id: int,  # This will come from authentication/session
+    status: str,    # "pending" or "collected"
+    table_id: int = None,  # Additional parameter to track table ID
+    db: Session = Depends(get_db)
+):
+    """Update inventory return request status (admin action)"""
+    # Validate status
+    if status not in ['pending', 'collected']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be either 'pending' or 'collected'"
+        )
+    
+    # Verify return request exists
+    db_return_request = db.query(InventoryReturnRequest).filter(InventoryReturnRequest.id == return_request_id).first()
+    if not db_return_request:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Inventory return request with id {return_request_id} not found"
+        )
+    
+    # Verify request can be updated (pending or collected)
+    # Allow toggling between pending and collected
+    if db_return_request.status not in ['pending', 'collected'] and db_return_request.status != status:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot {status} return request with status '{db_return_request.status}'"
+        )
+    
+    # Verify admin exists
+    admin = db.query(AccessUser).filter(AccessUser.id == admin_id).first()
+    if not admin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Admin with id {admin_id} not found"
+        )
+    
+    # Get the original inventory request to find the tool
+    inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == db_return_request.requested_id).first()
+    if inventory_request:
+        from DB.models.inventory import ToolsList
+        tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
+        if tool:
+            print(f"=== STATUS UPDATE START ===")
+            print(f"DEBUG: API URL Parameter Return Request ID: {return_request_id}")
+            print(f"DEBUG: Frontend Table ID Parameter: {table_id}")
+            print(f"DEBUG: Found Return Request - Table ID: {db_return_request.id}")
+            print(f"DEBUG: Return Request Details - Operator: {db_return_request.operator_id}, Returned Qty: {db_return_request.returned_qty}")
+            print(f"DEBUG: Requested ID (Inventory Request): {db_return_request.requested_id}")
+            print(f"DEBUG: Inventory Request Tool ID: {inventory_request.tool_id}")
+            print(f"DEBUG: Tool Found - ID: {tool.id}, Name: {tool.item_description}")
+            print(f"DEBUG: Status Change: {db_return_request.status} → {status}")
+            print(f"DEBUG: Tool Quantity: {tool.quantity} → (will change by {db_return_request.returned_qty})")
+            print(f"=== STATUS UPDATE END ===")
+            
+            # Handle inventory quantity based on status change for THIS specific return request
+            if status == 'collected':
+                # If marking as collected (from pending)
+                if db_return_request.status != 'collected':
+                    # Restore tool quantity only if it wasn't already collected
+                    print(f"DEBUG: Adding {db_return_request.returned_qty} to tool quantity for Return Request {db_return_request.id}")
+                    tool.quantity += db_return_request.returned_qty
+                    print(f"DEBUG: New tool quantity after adding: {tool.quantity}")
+                # If already collected, no change to inventory (just updating admin_id)
+            
+            elif status == 'pending':
+                # If marking as pending (from collected)
+                if db_return_request.status == 'collected':
+                    # Remove tool quantity if it was previously collected
+                    if tool.quantity >= db_return_request.returned_qty:
+                        print(f"DEBUG: Subtracting {db_return_request.returned_qty} from tool quantity for Return Request {db_return_request.id}")
+                        tool.quantity -= db_return_request.returned_qty
+                        print(f"DEBUG: New tool quantity after subtracting: {tool.quantity}")
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Insufficient quantity to remove. Available: {tool.quantity}, Required: {db_return_request.returned_qty}"
+                        )
+                # If already pending, no change to inventory
+            
+            db.commit()
+            print(f"DEBUG: Final tool quantity after commit: {tool.quantity}")
+    
+    # Update the return request with admin_id, status, and updated_at will be set automatically
+    db_return_request.admin_id = admin_id
+    db_return_request.status = status
+    
+    db.commit()
+    db.refresh(db_return_request)
+    
+    # Get admin name for response
+    admin_name = None
+    if admin_id:
+        admin_user = db.query(AccessUser).filter(AccessUser.id == admin_id).first()
+        admin_name = admin_user.user_name if admin_user else None
+    
+    action = "collected" if status == 'collected' else "marked as pending"
+    return {
+        "message": f"Inventory return request {action} successfully", 
+        "request": db_return_request,
+        "admin_name": admin_name
+    }
 
 
 @router.delete("/{return_request_id}")
@@ -284,6 +420,8 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
         # Get related details
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
+        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
+        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
         
         # Get inventory request details
         inventory_request_details = None
@@ -322,10 +460,12 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
             "operator_id": ret_req.operator_id,
             "total_requested_qty": ret_req.total_requested_qty,
             "returned_qty": ret_req.returned_qty,
+            "remarks": ret_req.remarks,
             "status": ret_req.status,
             "created_at": ret_req.created_at,
             "updated_at": ret_req.updated_at,
             "operator_name": operator.user_name if operator else None,
+            "admin_name": admin.user_name if admin else None,
             "inventory_request_details": inventory_request_details
         }
         result.append(InventoryReturnRequestWithDetailsSchema(**request_dict))
@@ -343,6 +483,8 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
         # Get related details
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
+        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
+        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
         
         # Get inventory request details
         inventory_request_details = None
@@ -381,10 +523,12 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
             "operator_id": ret_req.operator_id,
             "total_requested_qty": ret_req.total_requested_qty,
             "returned_qty": ret_req.returned_qty,
+            "remarks": ret_req.remarks,
             "status": ret_req.status,
             "created_at": ret_req.created_at,
             "updated_at": ret_req.updated_at,
             "operator_name": operator.user_name if operator else None,
+            "admin_name": admin.user_name if admin else None,
             "inventory_request_details": inventory_request_details
         }
         result.append(InventoryReturnRequestWithDetailsSchema(**request_dict))
