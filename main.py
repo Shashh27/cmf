@@ -8,7 +8,8 @@ from DB.minio_client import init_minio_client
 from routers import (
     machine_status, 
     machines, 
-    shift_hours
+    shift_hours,
+    capacity_planning
 )
 
 
@@ -34,6 +35,7 @@ app.add_middleware(
 app.include_router(machine_status.router, prefix="/api/v1")
 app.include_router(machines.router, prefix="/api/v1")
 app.include_router(shift_hours.router, prefix="/api/v1")
+app.include_router(capacity_planning.router, prefix="/api/v1")
 
 
 @app.on_event("startup")

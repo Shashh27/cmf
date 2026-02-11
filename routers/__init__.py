@@ -39,5 +39,6 @@ __all__ = [
     # "tools_list_router",
     "machine_status_router",
     "machines_router",
-    "shift_hours_router"
+    "shift_hours_router",
+    "capacity_planning_router"
 ]
