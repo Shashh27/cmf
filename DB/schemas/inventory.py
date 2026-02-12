@@ -125,6 +125,7 @@ class InventoryRequest(InventoryRequestBase):
 
 class InventoryRequestWithDetails(InventoryRequest):
     tool_name: Optional[str] = None
+    tool_type: Optional[str] = None
     operator_name: Optional[str] = None
     admin_name: Optional[str] = None
     project_name: Optional[str] = None
