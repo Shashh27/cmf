@@ -80,6 +80,12 @@ const ToolRequested = ({ onReturnSuccess }) => {
     }
     return acc;
   }, {});
+  const collectedByReq = returnRequests.reduce((acc, rr) => {
+    if (rr.status === 'collected') {
+      acc[rr.requested_id] = (acc[rr.requested_id] || 0) + (rr.returned_qty || 0);
+    }
+    return acc;
+  }, {});
   const totalReturned = returnRequests.reduce((sum, rr) => {
     return rr.status === 'collected' ? sum + (rr.returned_qty || 0) : sum;
   }, 0);
@@ -87,7 +93,8 @@ const ToolRequested = ({ onReturnSuccess }) => {
     const isConsum = isConsumableType(r);
     if (r.status === 'approved' && !isConsum) {
       const pendingQty = pendingByReq[r.id] || 0;
-      const remainingWithOperator = (r.quantity || 0) - (r.total_returned_qty || 0) - pendingQty;
+      const collectedQty = collectedByReq[r.id] || 0;
+      const remainingWithOperator = (r.quantity || 0) - collectedQty - pendingQty;
       return sum + (remainingWithOperator > 0 ? remainingWithOperator : 0);
     }
     return sum;
@@ -154,9 +161,16 @@ const ToolRequested = ({ onReturnSuccess }) => {
   };
 
   const handleReturnTool = (record) => {
+    const totalReturnedAnyStatus = returnRequests
+      .filter(rr => rr.requested_id === record.id)
+      .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
+    const remaining = (record.quantity || 0) - totalReturnedAnyStatus;
+    if (remaining <= 0) {
+      message.warning('No items remaining to return');
+      return;
+    }
     setCurrentRecord(record);
-    const remaining = record.quantity - (record.total_returned_qty || 0);
-    setReturnQuantity(remaining); // Default to remaining quantity
+    setReturnQuantity(remaining);
     setRemarks('');
     setIsModalVisible(true);
   };
@@ -165,7 +179,10 @@ const ToolRequested = ({ onReturnSuccess }) => {
     if (!currentRecord) return;
 
     // Client-side validation for quantity
-    const remaining = currentRecord.quantity - (currentRecord.total_returned_qty || 0);
+    const totalReturnedAnyStatus = returnRequests
+      .filter(rr => rr.requested_id === currentRecord.id)
+      .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
+    const remaining = (currentRecord.quantity || 0) - totalReturnedAnyStatus;
     if (returnQuantity > remaining) {
       message.error(`Cannot return more than remaining quantity (${remaining})`);
       return;
@@ -311,11 +328,11 @@ const ToolRequested = ({ onReturnSuccess }) => {
       fixed: 'right',
       render: (_, record) => {
         const isConsumable = isConsumableType(record);
-        const pendingQty = returnRequests
-          .filter(rr => rr.requested_id === record.id && (rr.status === 'pending' || rr.status === 'not_collected'))
+        const totalReturnedAnyStatus = returnRequests
+          .filter(rr => rr.requested_id === record.id)
           .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
-        const remainingWithOperator = (record.quantity || 0) - (record.total_returned_qty || 0) - pendingQty;
-        const isExhausted = remainingWithOperator <= 0;
+        const remaining = (record.quantity || 0) - totalReturnedAnyStatus;
+        const isExhausted = remaining <= 0;
         
         return (
         <Button 
@@ -325,7 +342,7 @@ const ToolRequested = ({ onReturnSuccess }) => {
           onClick={() => handleReturnTool(record)}
           loading={returnLoading}
         >
-          {isExhausted ? 'Returned' : (isConsumable ? 'Consumable' : 'Return Tool')}
+          {isConsumable ? 'Consumable' : (isExhausted ? 'Returned' : 'Return Tool')}
         </Button>
       )},
     },
