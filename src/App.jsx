@@ -1,58 +1,86 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import Layout from "./components/Layout";
+import Login from "./Pages/Login";
 import OMS from "./Pages/OMS";
 import RawMaterials from "./OMS Components/RawMaterials";
 import PDM from "./Pages/PDM";
-// PPS is now a category, we might use the existing PPS page as a dashboard or redirect
-// import PPS from "./Pages/PPS"; 
 import Configuration from "./Pages/Configuration";
-import Placeholder from "./components/Placeholder";
 import Dashboard from "./Pages/Dashboard";
-import Inventory from "./Pages/Inventory";
+import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
+import OperatorDashboard from "./Pages/OperatorDashboard";
+import AssetsAvailability from "./PPS Components/AssetsAvailability";
+import CapacityPlanning from "./PPS Components/CapacityPlanning";
+import MachineScheduling from "./PPS Components/MachineScheduling";
+import LiveMonitoring from "./Product Monitoring Components/LiveMonitoring";
+import PlannedVsActual from "./Product Monitoring Components/PlannedVsActual";
+import OrderTracking from "./Product Monitoring Components/OrderTracking";
+import Maintenance from "./Product Monitoring Components/Maintenance";
+import QualityManagement from "./Quality Management Components/QualityManagement";
+import InventoryMaster from "./Pages/Inventory";
 import OverviewData from "./Pages/OverviewData";
-import Document from "./Pages/Document";
+import DocumentManagement from "./Pages/Document";
+import Notification from "./Notification Components/Notification";
+import AccessControl from "./Pages/AccessControl";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 function App() {
   return (
     <Router>
       <Layout>
         <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
           
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route element={<ProtectedRoute><Outlet /></ProtectedRoute>}>
+          {/* Admin Routes */}
+          <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="/admin/dashboard" element={<Dashboard />} />
 
-          <Route path="/oms" element={<Navigate to="/oms/orders" replace />} />
-          <Route path="/oms/orders" element={<OMS />} />
-          <Route path="/oms/product/:productId" element={<OMS />} />
-          <Route path="/oms/rawmaterials" element={<RawMaterials />} />
+          <Route path="/admin/oms" element={<Navigate to="/admin/oms/orders" replace />} />
+          <Route path="/admin/oms/orders" element={<OMS />} />
+          <Route path="/admin/oms/product/:productId" element={<OMS />} />
+          <Route path="/admin/oms/rawmaterials" element={<RawMaterials />} />
 
-          <Route path="/pdm" element={<PDM />} />
+          <Route path="/admin/pdm" element={<PDM />} />
 
-          <Route path="/pps" element={<Navigate to="/pps/assets-availability" replace />} />
-          <Route path="/pps/assets-availability" element={<Placeholder title="Assets Availability" />} />
-          <Route path="/pps/capacity-planning" element={<Placeholder title="Capacity Planning" />} />
-          <Route path="/pps/machine-scheduling" element={<Placeholder title="Machine Scheduling" />} />
+          <Route path="/admin/pps" element={<Navigate to="/admin/pps/assets-availability" replace />} />
+          <Route path="/admin/pps/assets-availability" element={<AssetsAvailability />} />
+          <Route path="/admin/pps/capacity-planning" element={<CapacityPlanning />} />
+          <Route path="/admin/pps/machine-scheduling" element={<MachineScheduling />} />
 
-          <Route path="/configuration" element={<Configuration />} />
+          <Route path="/admin/configuration" element={<Configuration />} />
 
-          <Route path="/product-monitoring" element={<Navigate to="/product-monitoring/live-monitoring" replace />} />
-          <Route path="/product-monitoring/live-monitoring" element={<Placeholder title="Live Monitoring" />} />
-          <Route path="/product-monitoring/planned-vs-actual" element={<Placeholder title="Planned vs Actual" />} />
-          <Route path="/product-monitoring/order-tracking" element={<Placeholder title="Order Tracking" />} />
-          <Route path="/product-monitoring/maintenance" element={<Placeholder title="Maintenance" />} />
+          <Route path="/admin/product-monitoring" element={<Navigate to="/admin/product-monitoring/live-monitoring" replace />} />
+          <Route path="/admin/product-monitoring/live-monitoring" element={<LiveMonitoring />} />
+          <Route path="/admin/product-monitoring/planned-vs-actual" element={<PlannedVsActual />} />
+          <Route path="/admin/product-monitoring/order-tracking" element={<OrderTracking />} />
+          <Route path="/admin/product-monitoring/maintenance" element={<Maintenance />} />
 
-          <Route path="/quality-management" element={<Placeholder title="Quality Management" />} />
+          <Route path="/admin/quality-management" element={<QualityManagement />} />
 
-          <Route path="/inventory-management" element={<Navigate to="/inventory-management/inventory-master" replace />} />
-          <Route path="/inventory-management/inventory-master" element={<Inventory />} />
-          <Route path="/inventory-management/overview-data" element={<OverviewData />} />
+          <Route path="/admin/inventory-management" element={<Navigate to="/admin/inventory-management/inventory-master" replace />} />
+          <Route path="/admin/inventory-management/inventory-master" element={<InventoryMaster />} />
+          <Route path="/admin/inventory-management/overview-data" element={<OverviewData />} />
 
-          <Route path="/document-management" element={<Document />} />
+          <Route path="/admin/document-management" element={<DocumentManagement />} />
           
-          <Route path="/notification" element={<Placeholder title="Notification" />} />
+          <Route path="/admin/notification" element={<Notification />} />
           
-          <Route path="/access-control" element={<Placeholder title="Access Control" />} />
+          <Route path="/admin/access_control" element={<AccessControl />} />
+
+          {/* Project Coordinator Routes */}
+          <Route path="/project_coordinator" element={<Navigate to="/project_coordinator/dashboard" replace />} />
+          <Route path="/project_coordinator/dashboard" element={<ProjectCoordinatorDashboard />} />
+
+          {/* Operator Routes */}
+          <Route path="/operator" element={<Navigate to="/operator/dashboard" replace />} />
+          <Route path="/operator/dashboard" element={<OperatorDashboard />} />
+          <Route path="/operator/inspection-results" element={<OperatorDashboard />} />
+          <Route path="/operator/inventory-data" element={<OperatorDashboard />} />
+          <Route path="/operator/documents" element={<OperatorDashboard />} />
+          </Route>
+
         </Routes>
       </Layout>
     </Router>
