@@ -129,8 +129,6 @@ class InventoryRequestWithDetails(InventoryRequest):
     admin_name: Optional[str] = None
     project_name: Optional[str] = None
     part_name: Optional[str] = None
-    tool_type: Optional[str] = None
-    total_returned_qty: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -152,6 +150,7 @@ class InventoryReturnRequestBase(BaseModel):
 class InventoryReturnRequestCreate(BaseModel):
     requested_id: int
     operator_id: int
+    total_requested_qty: int
     returned_qty: int
     remarks: Optional[str] = None
     status: str = "pending"  # Can be "pending" or "collected"
@@ -177,24 +176,7 @@ class InventoryReturnRequest(InventoryReturnRequestBase):
 
 class InventoryReturnRequestWithDetails(InventoryReturnRequest):
     operator_name: Optional[str] = None
-    admin_name: Optional[str] = None
     inventory_request_details: Optional[InventoryRequestWithDetails] = None
-
-    class Config:
-        from_attributes = True
-
-
-# =======================
-# Transaction History Schemas
-# =======================
-class TransactionHistoryBase(BaseModel):
-    request_id: int
-
-
-class TransactionHistoryResponse(BaseModel):
-    inventory_request: Optional[InventoryRequestWithDetails] = None
-    inventory_return_request: Optional[InventoryReturnRequestWithDetails] = None
-    all_return_requests: Optional[List[InventoryReturnRequestWithDetails]] = []
 
     class Config:
         from_attributes = True

@@ -19,6 +19,8 @@ from .access_control import router as access_control_router
 from .login import router as login_router
 from .inventory_requests import router as inventory_requests_router
 from .inventory_return_requests import router as inventory_return_requests_router
+from .inventory_requests import router as inventory_requests_router
+from .inventory_return_requests import router as inventory_return_requests_router
 
 __all__ = [
     "products_router",
@@ -38,8 +40,5 @@ __all__ = [
     "order_parts_raw_material_linked_router",
     "operation_documents_router",
     "tools_list_router",
-    "access_control_router",
-    "login_router"
-    "inventory_requests_router",
-    "inventory_return_requests_router"
+    "access_control_router"
 ]

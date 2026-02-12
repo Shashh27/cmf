@@ -1,7 +1,7 @@
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
-from datetime import datetime, timedelta, timezone
 from DB.database import get_db
 from DB.models.inventory import InventoryRequest, ToolsList
 from DB.models.access_control import AccessUser
@@ -17,9 +17,6 @@ router = APIRouter(
     prefix="/inventory-requests",
     tags=["Inventory Requests"]
 )
-
-IST = timezone(timedelta(hours=5, minutes=30))
-
 
 
 # =======================
@@ -74,8 +71,9 @@ def create_inventory_request(
     create_data = request_data.dict()
     create_data['status'] = 'pending'
     create_data['admin_id'] = None  # Admin ID will be set during approval
-    create_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
-    create_data['updated_at'] = None
+    if 'created_at' not in create_data or not create_data.get('created_at'):
+        from datetime import datetime
+        create_data['created_at'] = datetime.utcnow()
     
     db_inventory_request = InventoryRequest(**create_data)
     db.add(db_inventory_request)
@@ -114,9 +112,7 @@ def get_all_inventory_requests(db: Session = Depends(get_db)):
             "operator_name": operator.user_name if operator else None,
             "admin_name": admin.user_name if admin else None,
             "project_name": project.sale_order_number if project else None,
-            "part_name": part.part_name if part else None,
-            "tool_type": tool.type if tool else None,
-            "total_returned_qty": sum(r.returned_qty for r in req.return_requests) if req.return_requests else 0
+            "part_name": part.part_name if part else None
         }
         result.append(InventoryRequestWithDetailsSchema(**request_dict))
     
@@ -156,9 +152,7 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
         "operator_name": operator.user_name if operator else None,
         "admin_name": admin.user_name if admin else None,
         "project_name": project.sale_order_number if project else None,
-        "part_name": part.part_name if part else None,
-        "tool_type": tool.type if tool else None,
-        "total_returned_qty": sum(r.returned_qty for r in request.return_requests) if request.return_requests else 0
+        "part_name": part.part_name if part else None
     }
     
     return InventoryRequestWithDetailsSchema(**request_dict)
@@ -313,10 +307,9 @@ def update_inventory_request_status(
             tool.quantity += db_inventory_request.quantity
         # If already rejected, no change to inventory
     
-    # Update the request with admin_id, status, and updated_at
+    # Update the request with admin_id, status, and updated_at will be set automatically
     db_inventory_request.admin_id = admin_id
     db_inventory_request.status = status
-    db_inventory_request.updated_at = datetime.now(IST).replace(tzinfo=None)
     
     db.commit()
     db.refresh(db_inventory_request)

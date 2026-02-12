@@ -26,6 +26,8 @@ from routers import (
     access_control_router,
     login_router,
     inventory_requests_router,
+    inventory_return_requests_router,
+    inventory_requests_router,
     inventory_return_requests_router
 )
 

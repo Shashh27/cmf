@@ -68,10 +68,10 @@ class InventoryRequest(Base):
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     purpose_of_use = Column(Text, nullable=True)
-    created_at = Column(TIMESTAMP, nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     status = Column(String, nullable=False, default="pending")  # pending, approved, rejected
-    updated_at = Column(TIMESTAMP, nullable=True)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     tool = relationship("ToolsList")
@@ -95,10 +95,10 @@ class InventoryReturnRequest(Base):
     total_requested_qty = Column(Integer, nullable=False)
     returned_qty = Column(Integer, nullable=False, default=0)
     remarks = Column(Text, nullable=True)
-    created_at = Column(TIMESTAMP, nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
     admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # Added admin_id
     status = Column(String, nullable=False, default="pending")  # pending, collected
-    updated_at = Column(TIMESTAMP, nullable=True)
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     inventory_request = relationship("InventoryRequest", back_populates="return_requests")
