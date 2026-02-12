@@ -8,6 +8,10 @@ import PDM from "./Pages/PDM";
 // import PPS from "./Pages/PPS"; 
 import Configuration from "./Pages/Configuration";
 import Placeholder from "./components/Placeholder";
+import Dashboard from "./Pages/Dashboard";
+import Inventory from "./Pages/Inventory";
+import OverviewData from "./Pages/OverviewData";
+import Document from "./Pages/Document";
 
 function App() {
   return (
@@ -16,7 +20,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           
-          <Route path="/dashboard" element={<Placeholder title="Dashboard" />} />
+          <Route path="/dashboard" element={<Dashboard />} />
 
           <Route path="/oms" element={<Navigate to="/oms/orders" replace />} />
           <Route path="/oms/orders" element={<OMS />} />
@@ -41,10 +45,10 @@ function App() {
           <Route path="/quality-management" element={<Placeholder title="Quality Management" />} />
 
           <Route path="/inventory-management" element={<Navigate to="/inventory-management/inventory-master" replace />} />
-          <Route path="/inventory-management/inventory-master" element={<Placeholder title="Inventory Master" />} />
-          <Route path="/inventory-management/overview-data" element={<Placeholder title="Overview Data" />} />
+          <Route path="/inventory-management/inventory-master" element={<Inventory />} />
+          <Route path="/inventory-management/overview-data" element={<OverviewData />} />
 
-          <Route path="/document-management" element={<Placeholder title="Document Management" />} />
+          <Route path="/document-management" element={<Document />} />
           
           <Route path="/notification" element={<Placeholder title="Notification" />} />
           
