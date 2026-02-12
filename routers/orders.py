@@ -3,9 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from DB.database import get_db
-from DB.models.oms import Order, Product, OrderDocument
+from DB.models.oms import Order, Product, OrderDocument, Part
 from DB.models.configuration import Customer
-from DB.schemas.oms import Order as OrderResponse, OrderCreate, OrderUpdate, OrderWithCustomer, OrderWithCustomerAndProduct
+from DB.schemas.oms import Order as OrderResponse, OrderCreate, OrderUpdate, OrderWithCustomer, OrderWithCustomerAndProduct, Part as PartResponse
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -30,24 +30,19 @@ def get_orders(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     orders = db.query(Order).offset(skip).limit(limit).all()
     result = []
     for order in orders:
-        # Get customer name
         customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
         company_name = customer.company_name if customer else None
-        
-        # Get product name
         product = db.query(Product).filter(Product.id == order.product_id).first()
         product_name = product.product_name if product else None
-        
-        # Create order dict with additional fields
         order_dict = {
             "id": order.id,
             "sale_order_number": order.sale_order_number,
+            "project_name": order.project_name,
+            "order_date": order.order_date,
             "customer_id": order.customer_id,
             "product_id": order.product_id,
             "quantity": order.quantity,
             "due_date": order.due_date,
-            "priority": order.priority,
-            "supervisor_id": order.supervisor_id,
             "status": order.status,
             "company_name": company_name,
             "product_name": product_name
@@ -59,19 +54,18 @@ def get_orders(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
 def get_orders_with_customers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """Get all orders with customer information"""
     from sqlalchemy.orm import joinedload
-    
     orders = db.query(Order).options(joinedload(Order.customer)).offset(skip).limit(limit).all()
     result = []
     for order in orders:
         order_dict = {
             "id": order.id,
             "sale_order_number": order.sale_order_number,
+            "project_name": order.project_name,
+            "order_date": order.order_date,
             "customer_id": order.customer_id,
             "product_id": order.product_id,
             "quantity": order.quantity,
             "due_date": order.due_date,
-            "priority": order.priority,
-            "supervisor_id": order.supervisor_id,
             "status": order.status,
             "customer": {
                 "id": order.customer.id,
@@ -92,25 +86,19 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    # Get customer name
     customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
     company_name = customer.company_name if customer else None
-    
-    # Get product name
     product = db.query(Product).filter(Product.id == order.product_id).first()
     product_name = product.product_name if product else None
-    
-    # Create order dict with additional fields
     order_dict = {
         "id": order.id,
         "sale_order_number": order.sale_order_number,
+        "project_name": order.project_name,
+        "order_date": order.order_date,
         "customer_id": order.customer_id,
         "product_id": order.product_id,
         "quantity": order.quantity,
         "due_date": order.due_date,
-        "priority": order.priority,
-        "supervisor_id": order.supervisor_id,
         "status": order.status,
         "company_name": company_name,
         "product_name": product_name
@@ -129,44 +117,32 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    # Check if customer exists if customer_id is being updated
     if order_update.customer_id is not None:
         customer = db.query(Customer).filter(Customer.id == order_update.customer_id).first()
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
-    
-    # Check if product exists if product_id is being updated
     if order_update.product_id is not None:
         product = db.query(Product).filter(Product.id == order_update.product_id).first()
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
-    
     update_data = order_update.dict(exclude_unset=True)
     for field, value in update_data.items():
         setattr(order, field, value)
-    
     db.commit()
     db.refresh(order)
-    
-    # Get customer name
     customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
     company_name = customer.company_name if customer else None
-    
-    # Get product name
     product = db.query(Product).filter(Product.id == order.product_id).first()
     product_name = product.product_name if product else None
-    
-    # Create order dict with additional fields
     order_dict = {
         "id": order.id,
         "sale_order_number": order.sale_order_number,
+        "project_name": order.project_name,
+        "order_date": order.order_date,
         "customer_id": order.customer_id,
         "product_id": order.product_id,
         "quantity": order.quantity,
         "due_date": order.due_date,
-        "priority": order.priority,
-        "supervisor_id": order.supervisor_id,
         "status": order.status,
         "company_name": company_name,
         "product_name": product_name
@@ -192,3 +168,27 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     db.delete(order)
     db.commit()
     return {"message": "Order deleted successfully"}
+
+@router.get("/sale-order/{sale_order_number}/parts", response_model=List[PartResponse])
+def get_order_parts(sale_order_number: str, db: Session = Depends(get_db)):
+    """
+    Get all parts associated with a specific sale order.
+    1. Finds the order by sale_order_number.
+    2. Identifies the product associated with the order.
+    3. Returns all parts linked to that product.
+    """
+    # 1. Find the order
+    order = db.query(Order).filter(Order.sale_order_number == sale_order_number).first()
+    if not order:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Order with sale_order_number {sale_order_number} not found"
+        )
+    
+    # 2. Get the product_id
+    product_id = order.product_id
+    
+    # 3. Find all parts for this product
+    parts = db.query(Part).filter(Part.product_id == product_id).all()
+    
+    return parts

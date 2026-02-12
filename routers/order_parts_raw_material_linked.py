@@ -85,7 +85,9 @@ def create_bulk_linkages(request: BulkCreateRequest, db: Session = Depends(get_d
                 "created_at": db_linkage.created_at.isoformat() if db_linkage.created_at else None,
                 "material_name": raw_material.material_name,
                 "part_name": part.part_name,
-                "sale_order_number": order.sale_order_number
+                "sale_order_number": order.sale_order_number,
+                "project_name": order.project_name,
+                "material_status": raw_material.status
             }
             created_linkages.append(response_dict)
     
@@ -112,7 +114,9 @@ def get_all_linkages(skip: int = 0, limit: int = 100, db: Session = Depends(get_
             "created_at": linkage.created_at.isoformat() if linkage.created_at else None,
             "material_name": raw_material.material_name if raw_material else None,
             "part_name": part.part_name if part else None,
-            "sale_order_number": order.sale_order_number if order else None
+            "sale_order_number": order.sale_order_number if order else None,
+            "project_name": order.project_name if order else None,
+            "material_status": raw_material.status if raw_material else None
         }
         result.append(response_dict)
     
@@ -139,7 +143,9 @@ def get_linkage(linkage_id: int, db: Session = Depends(get_db)):
         "created_at": linkage.created_at.isoformat() if linkage.created_at else None,
         "material_name": raw_material.material_name if raw_material else None,
         "part_name": part.part_name if part else None,
-        "sale_order_number": order.sale_order_number if order else None
+        "sale_order_number": order.sale_order_number if order else None,
+        "project_name": order.project_name if order else None,
+        "material_status": raw_material.status if raw_material else None
     }
     return response_dict
 
@@ -168,7 +174,9 @@ def get_linkages_by_order(order_id: int, db: Session = Depends(get_db)):
             "created_at": linkage.created_at.isoformat() if linkage.created_at else None,
             "material_name": raw_material.material_name if raw_material else None,
             "part_name": part.part_name if part else None,
-            "sale_order_number": order.sale_order_number
+            "sale_order_number": order.sale_order_number,
+            "project_name": order.project_name,
+            "material_status": raw_material.status if raw_material else None
         }
         result.append(response_dict)
     
@@ -199,7 +207,9 @@ def get_linkages_by_part(part_id: int, db: Session = Depends(get_db)):
             "created_at": linkage.created_at.isoformat() if linkage.created_at else None,
             "material_name": raw_material.material_name if raw_material else None,
             "part_name": part.part_name,
-            "sale_order_number": order.sale_order_number if order else None
+            "sale_order_number": order.sale_order_number if order else None,
+            "project_name": order.project_name if order else None,
+            "material_status": raw_material.status if raw_material else None
         }
         result.append(response_dict)
     
@@ -230,7 +240,9 @@ def get_linkages_by_raw_material(raw_material_id: int, db: Session = Depends(get
             "created_at": linkage.created_at.isoformat() if linkage.created_at else None,
             "material_name": raw_material.material_name,
             "part_name": part.part_name if part else None,
-            "sale_order_number": order.sale_order_number if order else None
+            "sale_order_number": order.sale_order_number if order else None,
+            "project_name": order.project_name if order else None,
+            "material_status": raw_material.status if raw_material else None
         }
         result.append(response_dict)
     
@@ -281,7 +293,9 @@ def update_linkage(linkage_id: int, linkage_update: OrderPartsRawMaterialLinkedU
         "created_at": linkage.created_at.isoformat() if linkage.created_at else None,
         "material_name": raw_material.material_name if raw_material else None,
         "part_name": part.part_name if part else None,
-        "sale_order_number": order.sale_order_number if order else None
+        "sale_order_number": order.sale_order_number if order else None,
+        "project_name": order.project_name if order else None,
+        "material_status": raw_material.status if raw_material else None
     }
     return response_dict
 

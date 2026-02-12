@@ -104,10 +104,12 @@ class Operation(Base):
     setup_time = Column(TIME)
     cycle_time = Column(TIME)
     workcenter_id = Column(Integer)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=True)
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"))
 
     part = relationship("Part", back_populates="operations")
+    machine = relationship("DB.models.configuration.Machine")
     process_plan = relationship("ProcessPlan", back_populates="operation", uselist=False)
     operation_documents = relationship("OperationDocument", back_populates="operation")
 
@@ -171,12 +173,12 @@ class Order(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     sale_order_number = Column(String, nullable=False)
+    project_name = Column(String, nullable=True)
+    order_date = Column(TIMESTAMP, nullable=True)
     customer_id = Column(Integer, ForeignKey("configuration.customers.id"), nullable=False)
     product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     due_date = Column(TIMESTAMP, nullable=False)
-    priority = Column(Integer, nullable=False)
-    supervisor_id = Column(Integer, nullable=False)
     status = Column(String, nullable=False)
 
     customer = relationship("Customer", back_populates="orders")

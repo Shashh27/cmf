@@ -48,6 +48,7 @@ class Machine(Base):
     remarks = Column(String)
     calibration_date = Column(TIMESTAMP)
     calibration_due_date = Column(TIMESTAMP)
+    password = Column(String, nullable=False)
 
     work_center = relationship("WorkCenter", back_populates="machines")
 
