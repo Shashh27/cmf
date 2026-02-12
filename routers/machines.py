@@ -45,6 +45,22 @@ def get_machines_with_work_center(skip: int = 0, limit: int = 100, db: Session =
     return machines
 
 
+@router.get("/verify", response_model=Machine)
+def verify_machine(machine_id: int, password: str, db: Session = Depends(get_db)):
+    """Verify machine ID and password and return machine details if valid"""
+    machine = db.query(MachineModel).filter(
+        MachineModel.id == machine_id,
+        MachineModel.password == password
+    ).first()
+    
+    if not machine:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid machine ID or password"
+        )
+    return machine
+
+
 @router.get("/{machine_id}", response_model=Machine)
 def get_machine(machine_id: int, db: Session = Depends(get_db)):
     """Get a specific machine by ID"""

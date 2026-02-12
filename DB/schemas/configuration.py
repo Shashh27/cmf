@@ -46,6 +46,7 @@ class MachineBase(BaseModel):
     remarks: Optional[str] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
+    password: str
 
 
 class MachineCreate(MachineBase):
@@ -63,6 +64,7 @@ class MachineUpdate(BaseModel):
     remarks: Optional[str] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
+    password: Optional[str] = None
 
 
 class Machine(MachineBase):

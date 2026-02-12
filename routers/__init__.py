@@ -15,6 +15,12 @@ from .order_parts_raw_material_linked import router as order_parts_raw_material_
 from .operation_documents import router as operation_documents_router
 from .tools_list import router as tools_list_router
 from .access_control import router as access_control_router
+from .login import router as login_router
+from .inventory_requests import router as inventory_requests_router
+from .inventory_return_requests import router as inventory_return_requests_router
+from .inventory_requests import router as inventory_requests_router
+from .inventory_return_requests import router as inventory_return_requests_router
+from .transaction_history import router as transaction_history_router
 
 __all__ = [
     "products_router",
@@ -33,5 +39,6 @@ __all__ = [
     "order_parts_raw_material_linked_router",
     "operation_documents_router",
     "tools_list_router",
-    "access_control_router"
+    "access_control_router",
+    "transaction_history_router"
 ]

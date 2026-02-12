@@ -52,3 +52,55 @@ class ToolsList(Base):
     amount = Column(Float, nullable=True)
     ref_ledger = Column(String, nullable=True)
     type = Column(String, nullable=True)  # Changed to nullable
+
+
+# =======================
+# Inventory Requests
+# =======================
+class InventoryRequest(Base):
+    __tablename__ = "inventory_requests"
+    __table_args__ = {'schema': 'inventory'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    tool_id = Column(Integer, ForeignKey("inventory.tools_list.id"), nullable=False)
+    operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    purpose_of_use = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, nullable=False)
+    admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    status = Column(String, nullable=False, default="pending")  # pending, approved, rejected
+    updated_at = Column(TIMESTAMP, nullable=True)
+
+    # Relationships
+    tool = relationship("ToolsList")
+    operator = relationship("AccessUser", foreign_keys=[operator_id])
+    admin = relationship("AccessUser", foreign_keys=[admin_id])
+    project = relationship("Order")
+    part = relationship("Part")
+    return_requests = relationship("InventoryReturnRequest", back_populates="inventory_request")
+
+
+# =======================
+# Inventory Return Requests
+# =======================
+class InventoryReturnRequest(Base):
+    __tablename__ = "inventory_return_requests"
+    __table_args__ = {'schema': 'inventory'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    requested_id = Column(Integer, ForeignKey("inventory.inventory_requests.id"), nullable=False)
+    operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    total_requested_qty = Column(Integer, nullable=False)
+    returned_qty = Column(Integer, nullable=False, default=0)
+    remarks = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, nullable=False)
+    admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # Added admin_id
+    status = Column(String, nullable=False, default="pending")  # pending, collected
+    updated_at = Column(TIMESTAMP, nullable=True)
+
+    # Relationships
+    inventory_request = relationship("InventoryRequest", back_populates="return_requests")
+    operator = relationship("AccessUser", foreign_keys=[operator_id])
+    admin = relationship("AccessUser", foreign_keys=[admin_id])  # Added admin relationship

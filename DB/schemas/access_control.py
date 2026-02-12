@@ -28,3 +28,15 @@ class AccessUserResponse(AccessUserBase):
 
     class Config:
         from_attributes = True
+
+class LoginRequest(BaseModel):
+    user_name: str
+    password: str
+
+class LoginResponse(AccessUserBase):
+    id: int
+    createdAt: datetime
+    updatedAt: datetime
+    
+    class Config:
+        from_attributes = True
