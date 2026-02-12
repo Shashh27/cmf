@@ -9,9 +9,9 @@ const AppLayout = ({ children }) => {
   return (
     <Layout hasSider>
       <Sidebar />
-      <Layout style={{ marginLeft: 224, minHeight: '100vh' }}>
+      <Layout style={{ marginLeft: 224, height: '100vh', overflow: 'hidden' }}>
         <Navbar />
-        <Content style={{ margin: '80px 24px 24px', overflow: 'initial' }}>
+        <Content style={{ margin: '64px 12px 12px', overflow: 'hidden', height: 'calc(100vh - 76px)' }}>
           {children}
         </Content>
       </Layout>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE_URL } from "../Config/auth";
-import { Modal, Form, Input, Select, Button, Upload, Typography, Space, Row, Col } from "antd";
+import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse } from "antd";
 import { FileTextOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
 import { message } from "antd";
 
@@ -22,14 +22,12 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           product_id: editingOrder.product_id?.toString() ?? "",
           quantity: editingOrder.quantity?.toString() ?? "",
           due_date: editingOrder.due_date ? editingOrder.due_date.split("T")[0] : "",
-          priority: editingOrder.priority?.toString() ?? "0",
-          supervisor_id: editingOrder.supervisor_id?.toString() ?? "",
+          order_date: editingOrder.order_date ? editingOrder.order_date.split("T")[0] : "",
         });
       } else {
         form.resetFields();
         form.setFieldsValue({
           status: "Pending",
-          priority: "0",
         });
         setDocuments([]);
       }
@@ -42,24 +40,44 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
     try {
       const url = editingOrder 
-        ? `${API_BASE_URL}/orders/${editingOrder.id}/`
+        ? `${API_BASE_URL}/orders/${editingOrder.id}`
         : `${API_BASE_URL}/orders/`;
       
       const method = editingOrder ? 'PUT' : 'POST';
       
+      const payload = {
+        ...values,
+        quantity: parseInt(values.quantity),
+        customer_id: parseInt(values.customer_id),
+        product_id: parseInt(values.product_id),
+      };
+
+      if (values.due_date) {
+        try {
+          payload.due_date = new Date(values.due_date).toISOString();
+        } catch {
+          delete payload.due_date;
+        }
+      } else {
+        delete payload.due_date;
+      }
+
+      if (values.order_date) {
+        try {
+          payload.order_date = new Date(values.order_date).toISOString();
+        } catch {
+          delete payload.order_date;
+        }
+      } else {
+        delete payload.order_date;
+      }
+
       const response = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          ...values,
-          quantity: parseInt(values.quantity),
-          customer_id: parseInt(values.customer_id),
-          product_id: parseInt(values.product_id),
-          priority: parseInt(values.priority) || 0,
-          supervisor_id: parseInt(values.supervisor_id) || 0,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (response.ok) {
@@ -111,10 +129,10 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         uploadFormData.append("file", doc.file);
         uploadFormData.append("document_name", doc.document_name || doc.file?.name || "Document");
         uploadFormData.append("document_type", doc.document_type || "Document");
-        uploadFormData.append("document_version", doc.document_version || "1.0");
+        uploadFormData.append("document_version", "1.0"); // Hardcoded to 1.0 for new order creation
 
         try {
-          await fetch(`${API_BASE_URL}/customer-documents/upload/${orderId}`, {
+          await fetch(`${API_BASE_URL}/order-documents/upload/${orderId}`, {
             method: "POST",
             body: uploadFormData,
           });
@@ -130,199 +148,258 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       open={isOpen}
       onCancel={handleClose}
       footer={null}
-      width={600}
+      width={1100}
+      centered
       title={
-        <Title level={4} style={{ margin: 0 }}>
-          {editingOrder ? "Edit Order" : "Create New Order"}
-        </Title>
+        <div className="flex items-center gap-2">
+          <FileTextOutlined className="text-blue-500" />
+          <span className="font-bold text-gray-800">
+            {editingOrder ? "Edit Order" : "Create New Order"}
+          </span>
+        </div>
       }
     >
       <Form
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
-        style={{ maxHeight: '70vh', overflowY: 'auto' }}
+        className="mt-2"
+        requiredMark="optional"
       >
-        <Form.Item
-          name="sale_order_number"
-          label="Sale Order Number"
-          rules={[{ required: true, message: 'Please enter sale order number' }]}
-        >
-          <Input placeholder="Enter sale order number" />
-        </Form.Item>
-        
-        <Form.Item
-          name="customer_id"
-          label="Customer"
-          rules={[{ required: true, message: 'Please select a customer' }]}
-        >
-          <Select placeholder="Select customer">
-            {customers.map((customer) => (
-              <Option key={customer.id} value={customer.id.toString()}>
-                {customer.company_name}
-              </Option>
-            ))}
-          </Select>
-        </Form.Item>
-        
-        <Form.Item
-          name="product_id"
-          label="Product"
-          rules={[{ required: true, message: 'Please select a product' }]}
-        >
-          <Select placeholder="Select product">
-            {products.map((product) => (
-              <Option key={product.id} value={product.id.toString()}>
-                {product.product_name || product.product_number || `Product ${product.id}`}
-              </Option>
-            ))}
-          </Select>
-        </Form.Item>
-        
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item
-              name="quantity"
-              label="Quantity"
-              rules={[{ required: true, message: 'Please enter quantity' }]}
-            >
-              <Input type="number" placeholder="Qty" />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item
-              name="priority"
-              label="Priority"
-            >
-              <Input type="number" placeholder="Priority" />
-            </Form.Item>
-          </Col>
-        </Row>
-        
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item
-              name="due_date"
-              label="Due Date"
-            >
-              <Input type="date" />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item
-              name="status"
-              label="Status"
-            >
-              <Select>
-                <Option value="Pending">Pending</Option>
-                <Option value="Shipped">Shipped</Option>
-                <Option value="Delivered">Delivered</Option>
-                <Option value="Cancelled">Cancelled</Option>
-              </Select>
-            </Form.Item>
-          </Col>
-        </Row>
-        
-        <Form.Item
-          name="supervisor_id"
-          label="Supervisor ID"
-        >
-          <Input placeholder="Enter supervisor ID" />
-        </Form.Item>
+        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 shadow-sm">
+          <Row gutter={24}>
+            <Col span={6}>
+              <Form.Item
+                name="sale_order_number"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Project Number</span>}
+                rules={[{ required: true, message: 'Required' }]}
+                className="mb-4"
+              >
+                <Input placeholder="Enter #" className="rounded-md border-gray-300 h-10" autoComplete="off" />
+              </Form.Item>
+            </Col>
+            <Col span={9}>
+              <Form.Item
+                name="project_name"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Project Name</span>}
+                className="mb-4"
+              >
+                <Input placeholder="Enter project name" className="rounded-md border-gray-300 h-10" autoComplete="off" />
+              </Form.Item>
+            </Col>
+            <Col span={9}>
+              <Form.Item
+                name="customer_id"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Customer</span>}
+                rules={[{ required: true, message: 'Required' }]}
+                className="mb-4"
+              >
+                <Select placeholder="Select customer" className="h-10 custom-select-v2">
+                  {customers.map((customer) => (
+                    <Option key={customer.id} value={customer.id.toString()}>
+                      {customer.company_name}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
 
+          <Row gutter={24}>
+            <Col span={6}>
+              <Form.Item
+                name="product_id"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Product</span>}
+                rules={[{ required: true, message: 'Required' }]}
+                className="mb-0"
+              >
+                <Select placeholder="Select product" className="h-10">
+                  {products.map((product) => (
+                    <Option key={product.id} value={product.id.toString()}>
+                      {product.product_name || product.product_number || `Product ${product.id}`}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col span={4}>
+              <Form.Item
+                name="quantity"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Quantity</span>}
+                rules={[{ required: true, message: 'Required' }]}
+                className="mb-0"
+              >
+                <Input type="number" placeholder="Qty" className="h-10 rounded-md border-gray-300" />
+              </Form.Item>
+            </Col>
+            <Col span={5}>
+              <Form.Item
+                name="order_date"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Order Date</span>}
+                className="mb-0"
+              >
+                <Input type="date" className="h-10 rounded-md border-gray-300" />
+              </Form.Item>
+            </Col>
+            <Col span={5}>
+              <Form.Item
+                name="due_date"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Due Date</span>}
+                rules={[{ required: true, message: 'Required' }]}
+                className="mb-0"
+              >
+                <Input type="date" className="h-10 rounded-md border-gray-300" />
+              </Form.Item>
+            </Col>
+            <Col span={4}>
+              <Form.Item
+                name="status"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Status</span>}
+                className="mb-0"
+              >
+                <Select className="h-10">
+                  <Option value="Pending">Pending</Option>
+                  <Option value="Ongoing">Ongoing</Option>
+                  <Option value="Completed">Completed</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+        </div>
+        
         {/* Document Upload Section - Only for new orders */}
         {!editingOrder && (
-          <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: '16px' }}>
-            <Title level={5} style={{ marginBottom: '16px' }}>
-              <FileTextOutlined /> Documents (Optional)
-            </Title>
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-4 px-1">
+              <h4 className="text-base font-bold text-gray-800 flex items-center gap-2 m-0">
+                <FileTextOutlined className="text-blue-500" />
+                Order Documents (Optional)
+              </h4>
+              <Button
+                type="dashed"
+                icon={<UploadOutlined />}
+                onClick={handleDocumentAdd}
+                className="flex items-center gap-1"
+              >
+                Add Document
+              </Button>
+            </div>
 
             {documents.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '24px', border: '2px dashed #d9d9d9', borderRadius: '6px' }}>
-                <UploadOutlined style={{ fontSize: '24px', color: '#bfbfbf', marginBottom: '8px' }} />
-                <p style={{ color: '#8c8c8c', marginBottom: '16px' }}>No documents added yet</p>
-                <Button
-                  icon={<UploadOutlined />}
-                  onClick={handleDocumentAdd}
-                >
-                  Add Document
-                </Button>
+              <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50">
+                <UploadOutlined className="text-3xl text-gray-300 mb-2" />
+                <p className="text-gray-500 m-0">No documents added yet</p>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {documents.map((doc, index) => (
-                  <div key={index} style={{ padding: '16px', backgroundColor: '#fafafa', border: '1px solid #d9d9d9', borderRadius: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <Title level={5} style={{ margin: 0 }}>Document {index + 1}</Title>
-                      <Button
-                        type="text"
-                        icon={<CloseOutlined />}
-                        onClick={() => handleDocumentRemove(index)}
-                        size="small"
-                      />
-                    </div>
-                    
-                    <Row gutter={8}>
-                      <Col span={12}>
-                        <Form.Item label="File" style={{ marginBottom: '8px' }}>
-                          <Input
-                            type="file"
-                            onChange={(e) => handleDocumentChange(index, 'file', e.target.files[0])}
-                          />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item label="Name" style={{ marginBottom: '8px' }}>
+              <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[5%] text-center">#</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[30%]">File Selection</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[30%]">Document Name</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[20%]">Document Type</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[10%] text-center">Ver</th>
+                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[5%] text-center">Del</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {documents.map((doc, index) => (
+                      <tr key={index} className="border-b border-gray-100 last:border-0 hover:bg-blue-50/20 transition-all align-middle">
+                        <td className="px-4 py-6 text-center align-middle">
+                          <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md border border-blue-100">
+                            {index + 1}
+                          </span>
+                        </td>
+                        <td className="px-4 py-6 align-middle">
+                          <div className="relative h-10"> {/* Fixed height matching other inputs */}
+                            <input
+                              type="file"
+                              id={`file-upload-${index}`}
+                              style={{ display: 'none' }}
+                              onChange={(e) => {
+                                const file = e.target.files[0];
+                                handleDocumentChange(index, 'file', file);
+                                if (file && !doc.document_name) {
+                                  handleDocumentChange(index, 'document_name', file.name.split('.')[0]);
+                                }
+                              }}
+                            />
+                            <Button
+                              icon={<UploadOutlined />}
+                              onClick={() => document.getElementById(`file-upload-${index}`).click()}
+                              className={`h-10 rounded-md border-dashed flex items-center justify-center transition-all ${
+                                doc.file 
+                                  ? "bg-blue-50 border-blue-400 text-blue-600 font-bold" 
+                                  : "bg-gray-50 border-gray-300 text-gray-500 hover:border-blue-500 hover:text-blue-500"
+                              }`}
+                              block
+                            >
+                              {doc.file ? "Change File" : "Choose File"}
+                            </Button>
+                            {doc.file && (
+                              <div className="absolute left-0 -bottom-5 text-[10px] text-blue-600 font-medium truncate w-full px-1 italic leading-none">
+                                Selected: {doc.file.name}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-6 align-middle">
                           <Input
                             value={doc.document_name}
                             onChange={(e) => handleDocumentChange(index, 'document_name', e.target.value)}
-                            placeholder="Document name"
+                            placeholder="Enter document name"
+                            className={`text-sm h-10 rounded-md border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all placeholder:text-gray-400 ${doc.document_name ? 'bg-blue-50/10 border-blue-200 font-medium text-blue-700' : ''}`}
                           />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item label="Type" style={{ marginBottom: '8px' }}>
-                          <Input
+                        </td>
+                        <td className="px-4 py-6 align-middle">
+                          <Select
                             value={doc.document_type}
-                            onChange={(e) => handleDocumentChange(index, 'document_type', e.target.value)}
-                            placeholder="e.g., Invoice"
+                            onChange={(value) => handleDocumentChange(index, 'document_type', value)}
+                            placeholder="Select Type"
+                            className="text-sm w-full h-10 custom-select-v2"
+                            size="middle"
+                          >
+                            <Option value="Other">Other</Option>
+                      
+                          </Select>
+                        </td>
+                        <td className="px-4 py-6 text-center align-middle">
+                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1.5 rounded-md border border-gray-200">
+                            1.0
+                          </span>
+                        </td>
+                        <td className="px-4 py-6 text-center align-middle">
+                          <Button
+                            type="text"
+                            danger
+                            icon={<CloseOutlined className="text-lg" />}
+                            onClick={() => handleDocumentRemove(index)}
+                            className="hover:bg-red-50 rounded-full w-10 h-10 flex items-center justify-center transition-all hover:scale-110"
                           />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item label="Version" style={{ marginBottom: '8px' }}>
-                          <Input
-                            value={doc.document_version}
-                            onChange={(e) => handleDocumentChange(index, 'document_version', e.target.value)}
-                            placeholder="1.0"
-                          />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                  </div>
-                ))}
-                
-                <Button
-                  icon={<UploadOutlined />}
-                  onClick={handleDocumentAdd}
-                  style={{ width: '100%' }}
-                >
-                  Add Another Document
-                </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
         )}
         
-        <div style={{ textAlign: 'right', marginTop: '24px', borderTop: '1px solid #f0f0f0', paddingTop: '16px' }}>
-          <Space>
-            <Button onClick={handleClose}>
-              Cancel
-            </Button>
-            <Button type="primary" htmlType="submit" loading={loading}>
-              {editingOrder ? "Update" : "Create"}
-            </Button>
-          </Space>
+        <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
+          <Button onClick={handleClose} size="large" className="rounded-md px-8">
+            Cancel
+          </Button>
+          <Button 
+            type="primary" 
+            htmlType="submit" 
+            loading={loading} 
+            size="large"
+            className="no-hover-btn rounded-md px-10 font-semibold"
+          >
+            {editingOrder ? "Update Order" : "Create Order"}
+          </Button>
         </div>
       </Form>
     </Modal>

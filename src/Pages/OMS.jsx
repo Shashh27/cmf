@@ -1,7 +1,18 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space } from "antd";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty } from "antd";
+import { 
+  ShoppingOutlined, 
+  PlusOutlined, 
+  EditOutlined, 
+  DeleteOutlined, 
+  FileTextOutlined, 
+  AppstoreOutlined,
+  UserOutlined,
+  CalendarOutlined,
+  SearchOutlined
+} from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import ProductBOMView from "../OMS Components/ProductBOMView";
@@ -18,7 +29,6 @@ const OMS = () => {
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
-  const [selectedProduct, setSelectedProduct] = useState(null);
   const hasFetchedData = useRef(false);
 
   useEffect(() => {
@@ -101,14 +111,13 @@ const OMS = () => {
 
   const getStatusBadge = (status) => {
     const statusConfig = {
-      Pending: { color: "orange", text: "Pending" },
-      Shipped: { color: "blue", text: "Shipped" },
-      Delivered: { color: "green", text: "Delivered" },
-      Cancelled: { color: "red", text: "Cancelled" },
+      Pending: { color: "warning", text: "Pending" },
+      Ongoing: { color: "processing", text: "Ongoing" },
+      Completed: { color: "success", text: "Completed" },
     };
 
     const config = statusConfig[status] || { color: "default", text: status };
-    return <Badge color={config.color} text={config.text} />;
+    return <Tag color={config.color}>{config.text?.toUpperCase()}</Tag>;
   };
 
   const handleCreateOrder = () => {
@@ -130,21 +139,30 @@ const OMS = () => {
     }
   };
 
-  const handleDeleteOrder = async (order) => {
-    if (!window.confirm(`Are you sure you want to delete order "${order.sale_order_number}"?`)) return;
-    try {
-      const response = await fetch(`${API_BASE_URL}/orders/${order.id}/`, { method: "DELETE" });
-      if (response.ok) {
-        fetchOrders();
-        messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
-      } else {
-        const data = await response.json();
-        messageApi.error(data.detail || "Failed to delete order");
-      }
-    } catch (error) {
-      console.error("Error deleting order:", error);
-      messageApi.error("Failed to delete order");
-    }
+  const handleDeleteOrder = (order) => {
+    Modal.confirm({
+      title: "Delete Order",
+      content: `Are you sure you want to delete order "${order.sale_order_number}"?`,
+      okText: "Delete",
+      okType: "danger",
+      cancelText: "Cancel",
+      centered: true,
+      onOk: async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/orders/${order.id}`, { method: "DELETE" });
+          if (response.ok) {
+            fetchOrders();
+            messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
+          } else {
+            const data = await response.json();
+            messageApi.error(data.detail || "Failed to delete order");
+          }
+        } catch (error) {
+          console.error("Error deleting order:", error);
+          messageApi.error("Failed to delete order");
+        }
+      },
+    });
   };
 
   const handleDocumentUploaded = (document) => {
@@ -152,11 +170,6 @@ const OMS = () => {
     if (document) {
       messageApi.success(`Document "${document.document_name}" uploaded successfully!`);
     }
-  };
-
-  const handleOpenDocuments = (orderId) => {
-    setSelectedOrderId(orderId);
-    setDocumentModalOpen(true);
   };
 
   const handleViewBOM = (productId) => {
@@ -169,8 +182,11 @@ const OMS = () => {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '200px' }}>
-        <Spin size="large" tip="Loading orders..." />
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="flex flex-col items-center">
+            <Spin size="large" />
+            <p className="mt-4 text-gray-500 font-medium">Loading orders...</p>
+        </div>
       </div>
     );
   }
@@ -186,116 +202,202 @@ const OMS = () => {
 
   const columns = [
     {
-      title: "SL NO",
+      title: <span className="font-semibold text-gray-700">SL NO</span>,
       dataIndex: "serial",
       key: "serial",
       width: 80,
-      render: (_, __, index) => index + 1,
+      render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
     },
     {
-      title: "SALE ORDER",
+      title: <span className="font-semibold text-gray-700">Project Number</span>,
       dataIndex: "sale_order_number",
       key: "sale_order_number",
+      render: (text) => <span className="font-medium text-gray-800">{text}</span>,
     },
     {
-      title: "CUSTOMER",
+      title: <span className="font-semibold text-gray-700">Project Name</span>,
+      dataIndex: "project_name",
+      key: "project_name",
+      render: (text) => <span className="text-gray-600">{text}</span>,
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Customer</span>,
       dataIndex: "customer_id",
       key: "customer_id",
-      render: (customerId) => getCustomerName(customerId),
+      render: (customerId) => (
+        <Space>
+            <UserOutlined className="text-gray-400" />
+            <span className="text-gray-700">{getCustomerName(customerId)}</span>
+        </Space>
+      ),
     },
     {
-      title: "PRODUCT",
+      title: <span className="font-semibold text-gray-700">Product</span>,
       dataIndex: "product_id",
       key: "product_id",
-      render: (productId, record) => (
+      render: (productId) => (
         <Button 
           type="link" 
           onClick={() => handleViewBOM(productId)}
           style={{ padding: 0 }}
+          icon={<AppstoreOutlined />}
+          className="flex items-center gap-1"
         >
           {getProductName(productId)}
         </Button>
       ),
     },
     {
-      title: "QUANTITY",
+      title: <span className="font-semibold text-gray-700">Qty</span>,
       dataIndex: "quantity",
       key: "quantity",
+      width: 80,
+      render: (text) => <span className="font-mono text-gray-700">{text}</span>,
     },
     {
-      title: "DUE DATE",
+      title: <span className="font-semibold text-gray-700">Order Date</span>,
+      dataIndex: "order_date",
+      key: "order_date",
+      render: (date) => (
+        <Space className="text-gray-500">
+            <CalendarOutlined />
+            {formatDate(date)}
+        </Space>
+      ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Due Date</span>,
       dataIndex: "due_date",
       key: "due_date",
-      render: (date) => formatDate(date),
+      render: (date) => (
+        <Space className="text-gray-500">
+            <CalendarOutlined />
+            {formatDate(date)}
+        </Space>
+      ),
     },
     {
-      title: "PRIORITY",
-      dataIndex: "priority",
-      key: "priority",
-      render: (priority) => priority ?? "-",
-    },
-    {
-      title: "STATUS",
+      title: <span className="font-semibold text-gray-700">Status</span>,
       dataIndex: "status",
       key: "status",
       render: (status) => getStatusBadge(status),
     },
     {
-      title: "ACTIONS",
+      title: <span className="font-semibold text-gray-700">Actions</span>,
       key: "actions",
+      width: 150,
       render: (_, record) => (
         <Space size="small">
-          <Button
-            size="small"
-            onClick={() => handleEditOrder(record)}
-          >
-            Edit
-          </Button>
-          <Button 
-            size="small" 
-            type="default"
-            onClick={() => {
-              setSelectedOrderId(record.id);
-              setDocumentModalOpen(true);
-            }}
-          >
-            Docs
-          </Button>
-          <Button
-            size="small"
-            danger
-            onClick={() => handleDeleteOrder(record)}
-          >
-            Delete
-          </Button>
+          <Tooltip title="Edit Order">
+            <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                className="text-blue-500 hover:bg-blue-50"
+                onClick={() => handleEditOrder(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Documents">
+            <Button 
+                type="text"
+                size="small" 
+                icon={<FileTextOutlined />}
+                className="text-purple-500 hover:bg-purple-50"
+                onClick={() => {
+                setSelectedOrderId(record.id);
+                setDocumentModalOpen(true);
+                }}
+            />
+          </Tooltip>
+          <Tooltip title="Delete Order">
+            <Button
+                type="text"
+                size="small"
+                icon={<DeleteOutlined />}
+                className="text-red-500 hover:bg-red-50"
+                onClick={() => handleDeleteOrder(record)}
+            />
+          </Tooltip>
         </Space>
       ),
     },
   ];
 
   return (
-    <div style={{ padding: '24px' }}>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+      <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff;
+        }
+        .modern-table .ant-table-tbody > tr:hover > td {
+          background: #f0f8ff !important;
+        }
+        .modern-table .ant-table-tbody > tr > td {
+          border-bottom: 1px solid #f0f0f0;
+        }
+        .ant-card-head {
+            border-bottom: 1px solid #f0f0f0;
+            min-height: 56px;
+        }
+        .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
+          background-color: #2563eb !important;
+          color: white !important;
+          opacity: 1 !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+      `}</style>
+
       {contextHolder}
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography.Title level={2} style={{ margin: 0 }}>Order Management System</Typography.Title>
-        <Button type="primary" onClick={handleCreateOrder}>
-          New Order
-        </Button>
+      
+      {/* Header */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
+        <div className="flex items-center justify-between">
+            <div>
+                <Typography.Title level={2} style={{ margin: 0, fontSize: '24px' }} className="flex items-center gap-3 text-gray-800">
+                    <ShoppingOutlined className="text-blue-600" />
+                    Order Management
+                </Typography.Title>
+                <Typography.Text className="text-gray-500 mt-1 block">
+                    Manage sales orders, track status, and handle documents
+                </Typography.Text>
+            </div>
+            <Button 
+                type="primary" 
+                icon={<PlusOutlined />}
+                onClick={handleCreateOrder}
+                size="large"
+                style={{ backgroundColor: '#2563eb' }}
+                className="border-none shadow-md no-hover-btn"
+            >
+                New Order
+            </Button>
+        </div>
       </div>
 
-      <Table
-        columns={columns}
-        dataSource={orders}
-        rowKey="id"
-        pagination={{
-          pageSize: 10,
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-        }}
-        bordered
-        size="middle"
-      />
+      <Card 
+        className="shadow-sm rounded-xl border border-gray-100" 
+        styles={{ body: { padding: 0 } }}
+      >
+        <Table
+            columns={columns}
+            dataSource={orders}
+            rowKey="id"
+            pagination={{
+                pageSize: 10,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            }}
+            size="small"
+            bordered
+            className="modern-table"
+            locale={{ emptyText: <Empty description="No orders found" /> }}
+            scroll={{ x: 'max-content' }}
+        />
+      </Card>
 
       
       {/* Modals */}

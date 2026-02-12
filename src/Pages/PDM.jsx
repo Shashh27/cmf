@@ -28,7 +28,7 @@ const PDM = () => {
         </div>
         
         {/* DocumentsPanel - Bottom Right with scroll */}
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div style={{ flex: 1, overflow: "hidden" }}>
           <DocumentsPanel selectedItem={selectedItem} />
         </div>
       </Content>

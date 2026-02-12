@@ -15,10 +15,18 @@ import {
   SafetyCertificateOutlined,
   DashboardOutlined,
   InboxOutlined,
-  ControlOutlined
+  ControlOutlined,
+  DeploymentUnitOutlined,
+  ClusterOutlined,
+  AppstoreOutlined,
+  BlockOutlined,
+  CaretDownOutlined,
+  CaretRightOutlined
 } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
-import { Input, Button, Card, message, Modal, Tooltip, Empty, Spin } from "antd";
+import { Input, Button, Card, message, Modal, Tooltip, Empty, Spin, Tag, Typography, Space } from "antd";
+
+const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 
@@ -37,7 +45,28 @@ const BillOfMaterials = ({ onItemSelected }) => {
   const [selectedPart, setSelectedPart] = useState(null);
   const [showPartActionModal, setShowPartActionModal] = useState(false);
   const [partActionType, setPartActionType] = useState('');
+  const [activeItemId, setActiveItemId] = useState(null);
   const hasFetchedData = useRef(false);
+
+  const getTypeIcon = (type) => {
+    const icons = {
+      product: <DeploymentUnitOutlined className="text-purple-600" />,
+      assembly: <ClusterOutlined className="text-blue-500" />,
+      part: <FileTextOutlined className="text-green-500" />,
+      make: <ToolOutlined className="text-orange-500" />
+    };
+    return icons[type?.toLowerCase()] || <FileTextOutlined className="text-gray-500" />;
+  };
+
+  const getTypeColor = (type) => {
+    const colors = {
+      product: 'purple',
+      assembly: 'blue',
+      part: 'green',
+      make: 'green'
+    };
+    return colors[type?.toLowerCase()] || 'default';
+  };
 
   useEffect(() => {
     if (!hasFetchedData.current) {
@@ -93,6 +122,13 @@ const BillOfMaterials = ({ onItemSelected }) => {
     setExpandedItems(prev => ({ ...prev, [itemId]: !prev[itemId] }));
   };
 
+  const handleExpandProduct = async (product) => {
+    if (!hierarchicalData[product.id]) {
+      await fetchProductHierarchy(product.id);
+    }
+    toggleExpand(product.id);
+  };
+
   const openModal = (type, product = null, assembly = null, edit = false, item = null) => {
     setCreateType(type);
     setSelectedProduct(product);
@@ -142,8 +178,7 @@ const BillOfMaterials = ({ onItemSelected }) => {
   const handleActionCreated = (newItem, type) => {
     const messages = {
       operation: `Operation "${newItem.operation_name}" created successfully!`,
-      document: `Document "${newItem.document_name}" created successfully!`,
-      process_plan: 'Process Plan created successfully!'
+      document: `Document "${newItem.document_name}" created successfully!`
     };
     message.success(messages[type]);
   };
@@ -208,11 +243,22 @@ const BillOfMaterials = ({ onItemSelected }) => {
     });
   };
 
-  const handleItemClick = async (item, type) => {
-    onItemSelected({ ...item, itemType: type });
+  const handleItemClick = async (item, type, productId) => {
+    setActiveItemId(item.id);
+    
+    // For products, ensure hierarchy is fetched before expanding
     if (type === 'product') {
-      setSelectedProduct(item);
-      if (!hierarchicalData[item.id]) await fetchProductHierarchy(item.id);
+        if (!hierarchicalData[item.id]) {
+            await fetchProductHierarchy(item.id);
+        }
+    }
+    
+    toggleExpand(item.id); // Expand the tree node
+    
+    // Ensure item has type property for downstream consumers
+    const itemWithMeta = { ...item, itemType: type, productId };
+    if (onItemSelected) {
+      onItemSelected(itemWithMeta);
     }
   };
 
@@ -256,9 +302,6 @@ const BillOfMaterials = ({ onItemSelected }) => {
   const ActionButtons = ({ item, type }) => {
     const buttons = {
       part: [
-        { icon: SettingOutlined, onClick: () => openPartActionModal(item, 'operation'), title: "Operations" },
-        { icon: FileTextOutlined, onClick: () => openPartActionModal(item, 'document'), title: "Documents" },
-        { icon: ProfileOutlined, onClick: () => openPartActionModal(item, 'process_plan'), title: "Process Plan" },
         { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit" },
         { icon: DeleteOutlined, onClick: () => handleDelete(item, 'part'), danger: true, title: "Delete" }
       ],
@@ -293,59 +336,85 @@ const BillOfMaterials = ({ onItemSelected }) => {
     );
   };
 
-  const renderPartInTree = (part, level = 0) => (
-    <div 
-      key={part.id} 
-      className="flex items-center justify-between py-2 px-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100" 
-      style={{ paddingLeft: `${level * 16 + 12}px` }} 
-      onClick={() => handleItemClick(part, 'part')}
-    > 
-      <div className="flex items-center gap-3 flex-1 min-w-0">
-        <SettingOutlined className="h-4 w-4 text-amber-600 shrink-0" />
-        <span className="text-sm font-medium truncate flex-1">{part.part_name}</span>
-        {part.type_name && (
-          <span className={`text-xs px-2 py-0.5 rounded font-semibold ${part.type_name.toLowerCase() === 'make' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}> 
-            {part.type_name.toUpperCase()}
-          </span>
-        )}
+  const renderPartInTree = (part, level = 0) => {
+    const isSelected = activeItemId === part.id;
+    return (
+      <div 
+        key={part.id} 
+        className={`
+          flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200 mb-0.5
+          ${isSelected
+            ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-500' 
+            : 'hover:bg-gray-50 border-l-2 border-transparent'
+          }
+        `}
+        style={{ marginLeft: `${level * 12}px` }} 
+        onClick={() => handleItemClick(part, 'part')}
+      > 
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="w-5 flex justify-center">
+            {getTypeIcon(part.type_name || 'part')}
+          </div>
+          <div className="flex flex-col min-w-0">
+            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+              {part.part_name}
+            </Text>
+          </div>
+        </div>
+        <ActionButtons item={part} type="part" />
       </div>
-      <ActionButtons item={part} type="part" />
-    </div>
-  );
+    );
+  };
 
   const renderAssemblyTree = (assembly, level = 0) => {
     const childAssemblies = getNestedAssemblies(assembly.id);
     const assemblyParts = getPartsForAssembly(assembly.id);
     const isExpanded = expandedItems[assembly.id];
     const hasChildren = childAssemblies.length > 0 || assemblyParts.length > 0;
-    const isSubAssembly = !!assembly.parent_id;
+    const isSelected = activeItemId === assembly.id;
 
     return (
-      <div key={assembly.id}>
+      <div key={assembly.id} className="select-none">
         <div 
-          className="flex items-center justify-between py-2 px-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100" 
-          style={{ paddingLeft: `${level * 16 + 12}px` }} 
-          onClick={() => { toggleExpand(assembly.id); handleItemClick(assembly, 'assembly'); }}
+          className={`
+            flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200 mb-0.5
+            ${isSelected 
+              ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-500' 
+              : 'hover:bg-gray-50 border-l-2 border-transparent'
+            }
+          `}
+          style={{ marginLeft: `${level * 12}px` }} 
+          onClick={() => handleItemClick(assembly, 'assembly')}
         >
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              {hasChildren && (
-                isExpanded ? 
-                  <DownOutlined className="h-4 w-4 text-gray-400 shrink-0" /> : 
-                  <RightOutlined className="h-4 w-4 text-gray-400 shrink-0" />
-              )}
-              {isSubAssembly ? (
-                <PartitionOutlined className="h-4 w-4 text-green-600 shrink-0" />
-              ) : (
-                <CodeSandboxOutlined className="h-4 w-4 text-blue-600 shrink-0" />
-              )}
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="flex-shrink-0 w-5 flex justify-center">
+              {hasChildren ? (
+                 <Button 
+                   type="text" 
+                   size="small" 
+                   icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                   onClick={(e) => { e.stopPropagation(); toggleExpand(assembly.id); }}
+                   className="hover:bg-gray-200 rounded-md w-5 h-5 flex items-center justify-center p-0 text-gray-500 no-hover-btn"
+                 />
+              ) : <div className="w-5" />}
             </div>
-            <span className="text-sm font-medium truncate flex-1">{assembly.assembly_name}</span>
+            
+            <div className="flex-shrink-0">
+               {getTypeIcon('assembly')}
+            </div>
+
+            <div className="flex flex-col min-w-0 flex-1">
+               <div className="flex items-center gap-2">
+                  <Text className={`text-sm font-medium truncate ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                    {assembly.assembly_name}
+                  </Text>
+               </div>
+            </div>
           </div>
           <ActionButtons item={assembly} type="assembly" />
         </div>
         {isExpanded && hasChildren && (
-          <div>
+          <div className="mt-0.5">
             {assemblyParts.map(part => renderPartInTree(part, level + 1))}
             {childAssemblies.map(child => renderAssemblyTree(child, level + 1))}
           </div>
@@ -356,32 +425,55 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
   const renderProductTree = (product) => {
     const productHierarchy = hierarchicalData[product.id];
+    const hasData = !!productHierarchy;
     const childAssemblies = productHierarchy?.assemblies || [];
     const directParts = productHierarchy?.parts || [];
     const isExpanded = expandedItems[product.id];
     const hasChildren = childAssemblies.length > 0 || directParts.length > 0;
+    const showArrow = !hasData || hasChildren;
+    const isSelected = activeItemId === product.id;
 
     return (
-      <div key={product.id} className="mb-2">
+      <div key={product.id} className="select-none mb-1">
         <div 
-          className="flex items-center justify-between py-2 px-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 bg-gray-50" 
-          onClick={() => { toggleExpand(product.id); handleItemClick(product, 'product'); }}
+          className={`
+            flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200 mb-0.5
+            ${isSelected 
+              ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-500' 
+              : 'hover:bg-gray-50 border-l-2 border-transparent'
+            }
+          `}
+          onClick={() => handleItemClick(product, 'product')}
         >
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              {hasChildren && (
-                isExpanded ? 
-                  <DownOutlined className="h-4 w-4 text-gray-400 shrink-0" /> : 
-                  <RightOutlined className="h-4 w-4 text-gray-400 shrink-0" />
-              )}
-              <CodeSandboxOutlined className="h-4 w-4 text-purple-600 shrink-0" />
-            </div>
-            <span className="text-sm font-semibold truncate flex-1">{product.product_name}</span>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+             <div className="flex-shrink-0 w-5 flex justify-center">
+              {showArrow ? (
+                 <Button 
+                   type="text" 
+                   size="small" 
+                   icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                   onClick={(e) => { e.stopPropagation(); handleExpandProduct(product); }}
+                   className="hover:bg-gray-200 rounded-md w-5 h-5 flex items-center justify-center p-0 text-gray-500 no-hover-btn"
+                 />
+              ) : <div className="w-5" />}
+             </div>
+             
+             <div className="flex-shrink-0">
+                {getTypeIcon('product')}
+             </div>
+
+             <div className="flex flex-col min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                   <Text className={`text-sm font-semibold truncate ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                     {product.product_name}
+                   </Text>
+                </div>
+             </div>
           </div>
           <ActionButtons item={product} type="product" />
         </div>
         {isExpanded && hasChildren && (
-          <div>
+          <div className="mt-0.5 ml-2 border-l border-gray-100 pl-1">
             {directParts.map(part => renderPartInTree(part, 1))}
             {childAssemblies.map(assembly => renderAssemblyTree(assembly, 1))}
           </div>
@@ -405,26 +497,65 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
   return (
     <>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ padding: 16, borderBottom: '1px solid #f0f0f0', background: '#fff' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 500, margin: 0 }}>Bill of Materials</h2>
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateProduct}>
-            Product
-          </Button>
+      <style>
+        {`
+          .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
+            background-color: #2563eb !important;
+            color: white !important;
+            opacity: 1 !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+          .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+          }
+          .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+          }
+          .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+          }
+          .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+          }
+        `}
+      </style>
+      <div className="flex flex-col h-full bg-white">
+        <div className="p-4 border-b border-gray-100 bg-white">
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-blue-50 rounded-lg">
+                    <AppstoreOutlined className="text-blue-600 text-lg" />
+                </div>
+                <h2 className="text-lg font-semibold text-gray-800 m-0">Bill of Materials</h2>
+            </div>
+            <Button 
+                type="primary" 
+                size="small" 
+                icon={<PlusOutlined />} 
+                onClick={handleCreateProduct}
+                className="bg-blue-600 hover:bg-blue-500 border-none shadow-sm flex items-center no-hover-btn"
+            >
+                New Product
+            </Button>
         </div>
-        <p style={{ fontSize: 14, color: '#888', marginBottom: 12 }}>Browse and select items to preview details</p>
+        
         <Input 
-          prefix={<SearchOutlined style={{ color: '#ccc' }} />} 
-          placeholder="Search in BOM..." 
+          prefix={<SearchOutlined className="text-gray-400" />} 
+          placeholder="Search components..." 
           value={searchTerm} 
           onChange={(e) => setSearchTerm(e.target.value)} 
+          className="rounded-lg border-gray-200 hover:border-blue-400 focus:border-blue-500"
+          allowClear
         />
         </div>
         
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
           {filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
-            <Empty description={searchTerm ? 'No products match your search' : 'No products found'} style={{ marginTop: 40 }} />
+            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
+                <Empty description={searchTerm ? 'No matches found' : 'No products available'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            </div>
           )}
         </div>
       </div>

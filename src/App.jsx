@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/Layout";
 import OMS from "./Pages/OMS";
+import PartsPriority from "./OMS Components/PartsPriority";
 import RawMaterials from "./OMS Components/RawMaterials";
 import PDM from "./Pages/PDM";
 // PPS is now a category, we might use the existing PPS page as a dashboard or redirect
@@ -20,6 +21,7 @@ function App() {
 
           <Route path="/oms" element={<Navigate to="/oms/orders" replace />} />
           <Route path="/oms/orders" element={<OMS />} />
+          <Route path="/oms/parts-priority" element={<PartsPriority />} />
           <Route path="/oms/product/:productId" element={<OMS />} />
           <Route path="/oms/rawmaterials" element={<RawMaterials />} />
 

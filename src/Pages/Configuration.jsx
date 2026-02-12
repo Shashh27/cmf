@@ -176,7 +176,7 @@ const Configuration = () => {
               Add Work Center
             </Button>
           }
-          bordered={false}
+          variant="borderless"
           className="shadow-sm"
         >
           <Table

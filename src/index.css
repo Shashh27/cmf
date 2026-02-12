@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.full-height-tabs .ant-tabs-content-holder,
+.full-height-tabs .ant-tabs-content,
+.full-height-tabs .ant-tabs-tabpane {
+  height: 100%;
+}

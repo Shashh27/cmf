@@ -45,6 +45,7 @@ const Sidebar = () => {
       icon: <ShoppingCartOutlined />,
       children: [
         { key: '/oms/orders', label: <Link to="/oms/orders">Orders</Link> },
+        { key: '/oms/parts-priority', label: <Link to="/oms/parts-priority">Parts Priority</Link> },
         { key: '/oms/rawmaterials', label: <Link to="/oms/rawmaterials">Raw Materials</Link> },
       ],
     },

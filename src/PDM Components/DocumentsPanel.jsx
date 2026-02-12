@@ -1,141 +1,390 @@
-import React, { useState, useEffect, useRef } from "react";
-import { PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined, SyncOutlined } from "@ant-design/icons";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { 
+  PlusOutlined, 
+  DownloadOutlined, 
+  FileTextOutlined, 
+  EyeOutlined, 
+  SyncOutlined, 
+  ToolOutlined,
+  ClockCircleOutlined,
+  EnvironmentOutlined,
+  InfoCircleOutlined,
+  BlockOutlined,
+  AppstoreOutlined,
+  CodeSandboxOutlined,
+  DeleteOutlined,
+  InboxOutlined,
+  FileImageOutlined,
+  FilePdfOutlined,
+  FileZipOutlined,
+  FileExcelOutlined,
+  FileWordOutlined,
+  UploadOutlined,
+  EditOutlined
+} from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
-import { Card, Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal } from "antd";
+import { Card, Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Row, Col, Typography, Divider, Upload, Input, Form } from "antd";
 
 const { TabPane } = Tabs;
+const { Text, Title } = Typography;
+const { Dragger } = Upload;
+import PartActionModal from "./PartActionModal";
+import EditOperationModal from "./EditOperationModal";
+
+const OperationDocumentsList = ({ operationId, onPreview }) => {
+    const [docs, setDocs] = useState([]);
+    const [loading, setLoading] = useState(false);
+    
+    useEffect(() => {
+        let isMounted = true;
+        const controller = new AbortController();
+        
+        // Debounce the fetch to prevent double-calls in StrictMode
+        const timer = setTimeout(() => {
+            if (operationId) {
+                fetchDocs(controller.signal, isMounted);
+            }
+        }, 100);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timer);
+            controller.abort();
+        };
+    }, [operationId]);
+
+    const fetchDocs = async (signal, isMounted) => {
+        if (!isMounted) return;
+        setLoading(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/operation-documents/operation/${operationId}`, { signal });
+            if (response.ok) {
+                const data = await response.json();
+                if (isMounted) setDocs(data);
+            }
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error("Error fetching operation documents:", error);
+            }
+        } finally {
+            if (isMounted && !signal?.aborted) {
+                setLoading(false);
+            }
+        }
+    };
+
+    const columns = [
+        {
+            title: 'Type',
+            dataIndex: 'document_type',
+            key: 'document_type',
+            width: 120,
+            render: (text) => (
+                <Tag color="blue" variant="filled" className="mr-0">
+                    {text || 'DOC'}
+                </Tag>
+            )
+        },
+        {
+            title: 'Document Name',
+            dataIndex: 'document_name',
+            key: 'document_name',
+            ellipsis: true,
+            render: (text) => <span className="font-medium text-gray-800">{text}</span>
+        },
+        {
+            title: 'Version',
+            dataIndex: 'document_version',
+            key: 'document_version',
+            width: 100,
+            render: (text) => <span className="text-blue-600 font-bold text-xs">v{text || '1.0'}</span>
+        },
+        {
+            title: 'Actions',
+            key: 'actions',
+            width: 80,
+            align: 'center',
+            render: (_, doc) => (
+                <div className="flex gap-1 justify-center">
+                    <Button 
+                        size="small" 
+                        type="text" 
+                        className="text-blue-500 hover:bg-blue-50"
+                        icon={<EyeOutlined />} 
+                        onClick={() => onPreview(doc)} 
+                    />
+                    <Button 
+                        size="small" 
+                        type="text" 
+                        className="text-green-500 hover:bg-green-50"
+                        icon={<DownloadOutlined />} 
+                        onClick={() => {
+                            const downloadUrl = `${API_BASE_URL}/operation-documents/${doc.id}/download`;
+                            const link = document.createElement('a');
+                            link.href = downloadUrl;
+                            link.setAttribute('download', doc.document_name);
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                        }} 
+                    />
+                </div>
+            )
+        }
+    ];
+
+    if (loading) return <div className="p-4 flex justify-center"><Spin size="small" tip="Loading documents..." /></div>;
+    
+    if (!docs || docs.length === 0) return (
+        <div className="p-6 text-center border border-dashed border-gray-300 rounded-lg bg-gray-50">
+            <FileTextOutlined className="text-2xl text-gray-300 mb-2" />
+            <p className="text-sm text-gray-500">No documents attached to this operation</p>
+        </div>
+    );
+
+    // Group documents by root parent for display
+    const groupedDocs = docs.reduce((acc, doc) => {
+        const rootId = doc.parent_id || doc.id;
+        if (!acc[rootId]) acc[rootId] = [];
+        acc[rootId].push(doc);
+        return acc;
+    }, {});
+
+    // Get only the latest version for each root
+    const latestDocs = Object.values(groupedDocs).map(group => {
+        return [...group].sort((a, b) => parseFloat(b.document_version) - parseFloat(a.document_version))[0];
+    });
+
+    return (
+        <Table 
+            dataSource={latestDocs} 
+            columns={columns} 
+            rowKey="id" 
+            pagination={false} 
+            size="small" 
+            bordered
+            className="bg-white"
+            scroll={{ x: 'max-content' }}
+            expandable={{
+                expandedRowRender: (record) => {
+                    const group = groupedDocs[record.parent_id || record.id] || [];
+                    const versions = [...group].sort((a, b) => parseFloat(b.document_version) - parseFloat(a.document_version));
+                    
+                    return (
+                        <div className="bg-gray-50 p-2 rounded">
+                            <p className="text-xs font-medium text-gray-500 mb-2">Version History:</p>
+                            <div className="flex flex-col gap-1">
+                                {versions.map(ver => (
+                                    <div key={ver.id} className="flex justify-between items-center bg-white p-2 rounded border border-gray-100">
+                                        <div className="flex items-center gap-3">
+                                            <Tag color="blue" variant="filled" className="text-[10px] m-0">v{ver.document_version}</Tag>
+                                            <span className="text-xs text-gray-600">{ver.document_name}</span>
+                                        </div>
+                                        <div className="flex gap-1">
+                                            <Button 
+                                                size="small" 
+                                                type="text" 
+                                                icon={<EyeOutlined />} 
+                                                onClick={() => onPreview(ver)}
+                                                className="text-[10px]"
+                                            />
+                                            <Button 
+                                                size="small" 
+                                                type="text" 
+                                                icon={<DownloadOutlined />}
+                                                onClick={() => {
+                                                    const downloadUrl = `${API_BASE_URL}/operation-documents/${ver.id}/download`;
+                                                    window.open(downloadUrl, '_blank');
+                                                }}
+                                                className="text-[10px]"
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                },
+                rowExpandable: (record) => {
+                    const group = groupedDocs[record.parent_id || record.id] || [];
+                    return group.length > 1;
+                },
+            }}
+        />
+    );
+};
+
+// Auto-resize table helper component - Moved outside to prevent remounting
+const FitTable = ({ columns, dataSource, ...props }) => {
+    const containerRef = useRef(null);
+    const [scrollY, setScrollY] = useState(300);
+
+    useEffect(() => {
+        const updateHeight = () => {
+            if (containerRef.current) {
+                // Calculate available height: container height
+                const height = containerRef.current.offsetHeight;
+                // Subtract header height (~40px) if needed, but sticky header handles it. 
+                // AntD scroll.y sets the body height.
+                // If we want the whole table to fit, we need to subtract the table header (~55px).
+                if (height > 55) {
+                    setScrollY(height - 55); 
+                }
+            }
+        };
+
+        const resizeObserver = new ResizeObserver(updateHeight);
+        if (containerRef.current) {
+            resizeObserver.observe(containerRef.current);
+        }
+        
+        // Initial check
+        updateHeight();
+        // Also check on window resize as a fallback
+        window.addEventListener('resize', updateHeight);
+
+        return () => {
+            resizeObserver.disconnect();
+            window.removeEventListener('resize', updateHeight);
+        };
+    }, []);
+
+    return (
+        <div className="flex-1 overflow-hidden" ref={containerRef} style={{ minHeight: 0 }}>
+            <Table
+                columns={columns}
+                dataSource={dataSource}
+                pagination={false}
+                scroll={{ y: scrollY }}
+                {...props}
+            />
+        </div>
+    );
+};
 
 const DocumentsPanel = ({ selectedItem }) => {
   const [documents, setDocuments] = useState([]);
   const [operations, setOperations] = useState([]);
-  const [activeTab, setActiveTab] = useState('ebom');
+  const [processPlans, setProcessPlans] = useState({});
+  const [activeTab, setActiveTab] = useState('mbom');
   const [loading, setLoading] = useState(false);
   const [previewDocument, setPreviewDocument] = useState(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [replaceFileDocument, setReplaceFileDocument] = useState(null);
-  const [processPlans, setProcessPlans] = useState({});
+  const [showPartActionModal, setShowPartActionModal] = useState(false);
+  const [partActionType, setPartActionType] = useState('');
+  const [selectedOperation, setSelectedOperation] = useState(null);
+  const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
+  const [modalTab, setModalTab] = useState('details');
+  const [showAddToolForm, setShowAddToolForm] = useState(false);
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  
+  // New: Selected versions for table display
+  const [selectedVersions, setSelectedVersions] = useState({}); // { rootId: documentObject }
+  const [isEditDocModalOpen, setIsEditDocModalOpen] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [editingDoc, setEditingDoc] = useState(null);
+
+  // Group documents by root parent
+  const groupedPartDocs = useMemo(() => {
+    return documents.reduce((acc, doc) => {
+      const rootId = doc.parent_id || doc.id;
+      if (!acc[rootId]) acc[rootId] = [];
+      acc[rootId].push(doc);
+      return acc;
+    }, {});
+  }, [documents]);
+
+  // Get latest documents for each root
+  const latestPartDocs = useMemo(() => {
+    return Object.values(groupedPartDocs).map(group => {
+      return [...group].sort((a, b) => parseFloat(b.document_version) - parseFloat(a.document_version))[0];
+    });
+  }, [groupedPartDocs]);
+
+  // Update selectedVersions when latestPartDocs changes
+   useEffect(() => {
+     const updatedSelected = { ...selectedVersions };
+     let changed = false;
+     
+     latestPartDocs.forEach(doc => {
+       const rootId = doc.parent_id || doc.id;
+       if (!updatedSelected[rootId] || !groupedPartDocs[rootId]?.find(d => d.id === updatedSelected[rootId].id)) {
+         updatedSelected[rootId] = doc;
+         changed = true;
+       }
+     });
+ 
+     if (changed) {
+       setSelectedVersions(updatedSelected);
+     }
+   }, [latestPartDocs, groupedPartDocs]);
+
+   // Upload related state
+   const [uploading, setUploading] = useState(false);
+   const [selectedFileList, setSelectedFileList] = useState([]);
+   const [uploadDocType, setUploadDocType] = useState('2D');
+   const [uploadParentId, setUploadParentId] = useState(null);
+   const [uploadVersion, setUploadVersion] = useState('1.0');
   const fileInputRef = useRef(null);
 
-  useEffect(() => {
-    if (selectedItem) fetchDocuments();
-    else {
-      setDocuments([]);
-      setOperations([]);
-      setProcessPlans({});
-    }
-  }, [selectedItem]);
+   useEffect(() => {
+     if (selectedItem) fetchDocuments();
+     else {
+       setDocuments([]);
+       setOperations([]);
+     }
+   }, [selectedItem]);
 
-  const fetchDocuments = async () => {
-    setLoading(true);
-    try {
-      if (!selectedItem || selectedItem.itemType !== 'part') {
-        setDocuments([]);
-        setOperations([]);
-        setProcessPlans({});
-        return;
-      }
+   const fetchDocuments = async () => {
+     setLoading(true);
+     try {
+       if (!selectedItem || selectedItem.itemType !== 'part') {
+         setDocuments([]);
+         setOperations([]);
+         return;
+       }
 
-      if (selectedItem.product_id) {
-        const response = await fetch(`${API_BASE_URL}/products/${selectedItem.product_id}/hierarchical`);
-        if (response.ok) {
-          const hierarchicalData = await response.json();
-          let foundDocuments = [];
-          let foundOperations = [];
-          let foundProcessPlans = {};
-          
-          const extractData = (partData) => {
-            if (partData) {
-              foundDocuments = partData.documents || [];
-              foundOperations = partData.operations || [];
-              if (partData.process_plans) {
-                partData.process_plans.forEach(plan => {
-                  if (plan.operation_id) foundProcessPlans[plan.operation_id] = plan;
-                });
-              }
-            }
-          };
+       const [docsResponse, opsResponse] = await Promise.all([
+         fetch(`${API_BASE_URL}/documents/part/${selectedItem.id}`),
+         fetch(`${API_BASE_URL}/operations/part/${selectedItem.id}`)
+       ]);
 
-          if (hierarchicalData.direct_parts) {
-            const directPart = hierarchicalData.direct_parts.find(p => p.part?.id === selectedItem.id);
-            if (directPart) extractData(directPart);
-          }
-          
-          if (foundOperations.length === 0 && hierarchicalData.assemblies) {
-            const searchInAssemblies = (assemblies) => {
-              for (const assembly of assemblies) {
-                if (assembly.parts) {
-                  const part = assembly.parts.find(p => p.part?.id === selectedItem.id);
-                  if (part) {
-                    extractData(part);
-                    return true;
-                  }
-                }
-                if (assembly.subassemblies?.length > 0 && searchInAssemblies(assembly.subassemblies)) {
-                  return true;
-                }
-              }
-              return false;
-            };
-            searchInAssemblies(hierarchicalData.assemblies);
-          }
-          
-          setDocuments(foundDocuments);
-          setOperations(foundOperations);
-          setProcessPlans(foundProcessPlans);
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching data:", error);
-      setDocuments([]);
-      setOperations([]);
-      setProcessPlans({});
-    } finally {
-      setLoading(false);
-    }
+       if (docsResponse.ok && opsResponse.ok) {
+         const foundDocuments = await docsResponse.json();
+         const foundOperations = await opsResponse.json();
+         setDocuments(foundDocuments);
+         setOperations(foundOperations);
+       }
+     } catch (error) {
+       console.error("Error fetching data:", error);
+     } finally {
+       setLoading(false);
+     }
+   };
+
+  const handleDownload = (documentId) => {
+    // Simply open the download URL in a new tab or trigger direct download
+    // The backend now provides the correct Content-Disposition with filename and extension
+    const downloadUrl = `${API_BASE_URL}/documents/${documentId}/download`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
-  const handleDownload = async (documentId) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/documents/${documentId}/download/`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `document_${documentId}`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    } catch (error) {
-      console.error("Error downloading document:", error);
-      message.error("Failed to download document");
-    }
-  };
-
-  const handlePreview = (document) => {
+  const handlePreview = useCallback((document) => {
     if (!document.document_url) {
       message.error("Document URL not found");
       return;
     }
     setPreviewDocument(document);
     setIsPreviewModalOpen(true);
-  };
+  }, []);
 
-  const fetchProcessPlan = async (operationId) => {
-    if (!operationId || processPlans[operationId]) return;
-    try {
-      const response = await fetch(`${API_BASE_URL}/process-plans/operation/${operationId}`);
-      const data = response.ok ? await response.json() : {
-        operation_id: operationId,
-        work_instructions: 'No work instructions available',
-        notes: 'No notes available'
-      };
-      setProcessPlans(prev => ({ ...prev, [operationId]: data }));
-    } catch (error) {
-      console.error('Error fetching process plan:', error);
-      setProcessPlans(prev => ({ ...prev, [operationId]: { operation_id: operationId, work_instructions: 'Error loading', notes: 'Error loading' } }));
-    }
-  };
+
 
   const handleReplaceFile = (doc) => {
     setReplaceFileDocument(doc);
@@ -166,41 +415,197 @@ const DocumentsPanel = ({ selectedItem }) => {
     }
   };
 
+  const openPartActionModal = (type) => {
+    if (!selectedItem || selectedItem.itemType !== 'part') {
+      message.warning("Please select a part to add operations/documents");
+      return;
+    }
+    setPartActionType(type);
+    setShowPartActionModal(true);
+  };
+
+  const handleActionCreated = async (newItem, type) => {
+    const messages = {
+      operation: `Operation "${newItem.operation_name}" created successfully!`,
+      document: `Document "${newItem.document_name}" created successfully!`
+    };
+    message.success(messages[type]);
+    await fetchDocuments(); // Refresh data
+  };
+
+  const handleUpload = async () => {
+    if (selectedFileList.length === 0) {
+      message.warning('Please select a file first');
+      return;
+    }
+
+    setUploading(true);
+    const file = selectedFileList[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('document_name', file.name.split('.')[0]);
+    formData.append('document_type', uploadDocType);
+    formData.append('document_version', uploadVersion);
+    formData.append('part_id', selectedItem.id.toString());
+    
+    if (uploadParentId) {
+      formData.append('parent_id', uploadParentId.toString());
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents/`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (response.ok) {
+        message.success('Document uploaded successfully');
+        setSelectedFileList([]);
+        setUploadParentId(null);
+        setUploadVersion('1.0');
+        setIsUploadModalOpen(false);
+        await fetchDocuments();
+      } else {
+        const errorData = await response.json();
+        message.error(errorData.detail || 'Failed to upload document');
+      }
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      message.error('Error uploading document');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (docId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents/${docId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        message.success('Document deleted successfully');
+        await fetchDocuments();
+      } else {
+        const error = await response.json();
+        message.error(error.detail || 'Failed to delete document');
+      }
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      message.error('Error deleting document');
+    }
+  };
+
+  const handleEditDocument = async (values) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/documents/${editingDoc.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      });
+
+      if (response.ok) {
+        message.success('Document updated successfully');
+        setIsEditDocModalOpen(false);
+        setEditingDoc(null);
+        await fetchDocuments();
+      } else {
+        const error = await response.json();
+        message.error(error.detail || 'Failed to update document');
+      }
+    } catch (error) {
+      console.error('Error updating document:', error);
+      message.error('Error updating document');
+    }
+  };
+
+  const initiateNewVersion = (doc, latestVer) => {
+    const nextVer = (parseFloat(latestVer) + 1.0).toFixed(1);
+    setUploadParentId(doc.parent_id || doc.id);
+    setUploadVersion(nextVer);
+    setUploadDocType(doc.document_type || '2D');
+    setIsUploadModalOpen(true);
+  };
+
+  const handleDeleteOperation = async (operationId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/operations/${operationId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        message.success("Operation deleted successfully");
+        fetchDocuments(); // Refresh the list
+      } else {
+        message.error("Failed to delete operation");
+      }
+    } catch (error) {
+      console.error("Error deleting operation:", error);
+      message.error("Error deleting operation");
+    }
+  };
+
   const documentsColumns = [
     {
-      title: 'Type',
+      title: <span className="font-semibold text-gray-700">Type</span>,
       dataIndex: 'document_type',
       key: 'document_type',
-      width: 120,
-      render: (text) => <Tag color="blue">{text}</Tag>
+      width: 140,
+      render: (type) => (
+        <div className="flex items-center gap-2">
+          <FileTextOutlined className="text-blue-500" />
+          <Tag color="blue" className="text-xs">{type || 'Document'}</Tag>
+        </div>
+      ),
     },
     {
-      title: 'Document',
+      title: <span className="font-semibold text-gray-700">Document Name</span>,
       dataIndex: 'document_name',
       key: 'document_name',
-      ellipsis: true,
+      render: (name) => (
+        <span className="text-sm font-medium text-gray-800">
+          {name || 'Untitled Document'}
+        </span>
+      ),
     },
     {
-      title: 'Version',
+      title: <span className="font-semibold text-gray-700">Version</span>,
       dataIndex: 'document_version',
       key: 'document_version',
       width: 100,
-      render: (text) => <Tag>{text || 'v1'}</Tag>
+      render: (version) => (
+        <Tag color="green">{version || 'v1'}</Tag>
+      ),
     },
     {
-      title: 'Actions',
+      title: <span className="font-semibold text-gray-700">Actions</span>,
       key: 'actions',
       width: 150,
       render: (_, record) => (
         <div className="flex gap-2">
           <Tooltip title="Preview">
-            <Button size="small" icon={<EyeOutlined />} onClick={() => handlePreview(record)} />
+            <Button 
+              size="small" 
+              icon={<EyeOutlined />} 
+              onClick={(e) => { e.stopPropagation(); handlePreview(record); }} 
+              className="hover:text-blue-500"
+            />
           </Tooltip>
           <Tooltip title="Download">
-            <Button size="small" icon={<DownloadOutlined />} onClick={() => handleDownload(record.id)} />
+            <Button 
+              size="small" 
+              icon={<DownloadOutlined />} 
+              onClick={(e) => { e.stopPropagation(); handleDownload(record.id); }} 
+              className="hover:text-green-500"
+            />
           </Tooltip>
           <Tooltip title="Replace File">
-             <Button size="small" icon={<SyncOutlined />} onClick={() => handleReplaceFile(record)} />
+             <Button 
+               size="small" 
+               icon={<SyncOutlined />} 
+               onClick={(e) => { e.stopPropagation(); handleReplaceFile(record); }} 
+               className="hover:text-orange-500"
+             />
           </Tooltip>
         </div>
       ),
@@ -209,68 +614,115 @@ const DocumentsPanel = ({ selectedItem }) => {
 
   const operationsColumns = [
     {
-      title: 'Op #',
+      title: <span className="font-semibold text-gray-700">Op #</span>,
       dataIndex: 'operation_number',
       key: 'operation_number',
       width: 80,
+      render: (text, record, index) => (
+        <Tag color="cyan" className="font-mono">
+          {String(text || index + 1).padStart(2, '0')}
+        </Tag>
+      ),
     },
     {
-      title: 'Name',
+      title: <span className="font-semibold text-gray-700">Operation Name</span>,
       dataIndex: 'operation_name',
       key: 'operation_name',
+      width: 200,
+      render: (name) => (
+        <span className="text-sm font-medium text-gray-800">{name}</span>
+      ),
     },
     {
-      title: 'Setup',
+      title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Setup</span>,
       dataIndex: 'setup_time',
       key: 'setup_time',
-      width: 100,
-      render: (text) => <span className="font-mono text-xs">{text || '00:00:00'}</span>
+      width: 130,
+      render: (text) => (
+        <Tag color="orange" icon={<ClockCircleOutlined />}>
+          {text || '00:00:00'}
+        </Tag>
+      ),
     },
     {
-      title: 'Cycle',
+      title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Cycle</span>,
       dataIndex: 'cycle_time',
       key: 'cycle_time',
-      width: 100,
-      render: (text) => <span className="font-mono text-xs">{text || '00:00:00'}</span>
+      width: 130,
+      render: (text) => (
+        <Tag color="green" icon={<ClockCircleOutlined />}>
+          {text || '00:00:00'}
+        </Tag>
+      ),
     },
     {
-      title: 'Workcenter',
+      title: <span className="font-semibold text-gray-700"><EnvironmentOutlined /> Workcenter</span>,
       dataIndex: 'workcenter_id',
       key: 'workcenter_id',
-      width: 100,
+      width: 150,
+      render: (id, record) => (
+        <Tag color="purple" icon={<EnvironmentOutlined />}>
+          {record.work_center_name || id || 'N/A'}
+        </Tag>
+      ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Actions</span>,
+      key: 'actions',
+      width: 120,
+      render: (_, record) => (
+        <div className="flex gap-1">
+          <Tooltip title="Edit Details">
+            <Button 
+                size="small" 
+                icon={<EditOutlined />} 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedOperation(record);
+                    setModalTab('details');
+                    setShowAddToolForm(false);
+                    setIsOperationModalOpen(true);
+                }}
+                className="text-blue-500 hover:bg-blue-50"
+            />
+          </Tooltip>
+          <Tooltip title="Add Tool">
+            <Button 
+                size="small" 
+                icon={<ToolOutlined />} 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedOperation(record);
+                    setModalTab('tools');
+                    setShowAddToolForm(true);
+                    setIsOperationModalOpen(true);
+                }} 
+                className="text-orange-500 hover:bg-orange-50"
+            />
+          </Tooltip>
+          <Popconfirm
+            title="Delete Operation"
+            description="Are you sure you want to delete this operation?"
+            onConfirm={(e) => {
+                e.stopPropagation();
+                handleDeleteOperation(record.id);
+            }}
+            onCancel={(e) => e.stopPropagation()}
+            okText="Yes"
+            cancelText="No"
+          >
+            <Button 
+                size="small" 
+                danger
+                icon={<DeleteOutlined />} 
+                onClick={(e) => e.stopPropagation()}
+                className="hover:bg-red-50"
+            />
+          </Popconfirm>
+        </div>
+      ),
     },
   ];
-
-  const expandable = {
-    expandedRowRender: (record) => {
-        const processPlan = processPlans[record.id];
-        if (!processPlan) {
-            fetchProcessPlan(record.id);
-            return <Spin size="small" />;
-        }
-        return (
-            <div className="p-4 bg-gray-50 rounded">
-                <div className="mb-4">
-                    <h4 className="text-sm font-medium mb-1">Work Instructions</h4>
-                    <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap">
-                        {processPlan.work_instructions || 'No work instructions available'}
-                    </div>
-                </div>
-                <div>
-                    <h4 className="text-sm font-medium mb-1">Notes</h4>
-                    <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap">
-                        {processPlan.notes || 'No notes available'}
-                    </div>
-                </div>
-            </div>
-        );
-    },
-    onExpand: (expanded, record) => {
-        if (expanded && !processPlans[record.id]) {
-            fetchProcessPlan(record.id);
-        }
-    }
-  };
 
   if (!selectedItem || selectedItem.itemType !== 'part') {
     return <div className="flex-1 bg-gray-50" />;
@@ -278,37 +730,369 @@ const DocumentsPanel = ({ selectedItem }) => {
 
   const tabItems = [
     {
-      key: 'ebom',
-      label: 'eBOM',
-      children: (
-        <Table 
-            dataSource={documents} 
-            columns={documentsColumns} 
-            rowKey="id" 
-            pagination={false} 
-            size="small"
-            locale={{ emptyText: <Empty description="No documents attached" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-        />
-      ),
-    },
-    {
       key: 'mbom',
       label: 'mBOM',
       children: (
-        <div className="space-y-2">
-            <div className="px-1">
-                <h3 className="text-base font-medium mb-1">Operations</h3>
-                <p className="text-xs text-gray-500">Click + to view process plan details</p>
+        <div className="h-full flex flex-col">
+            <div className="px-1 flex justify-between items-start mb-2 shrink-0">
+                <div>
+                    <h3 className="text-base font-medium mb-1">Operations</h3>
+                    <p className="text-xs text-gray-500">Click row to view details</p>
+                </div>
+                <Button 
+                    type="primary" 
+                    size="small" 
+                    icon={<PlusOutlined />} 
+                    onClick={() => openPartActionModal('operation')}
+                    disabled={!selectedItem || selectedItem.itemType !== 'part'}
+                    className="no-hover-btn"
+                >
+                    Add Operation
+                </Button>
             </div>
-            <Table 
+            <FitTable 
                 dataSource={operations} 
                 columns={operationsColumns} 
                 rowKey="id" 
-                pagination={false} 
                 size="small"
-                expandable={expandable}
+                className="modern-table cursor-pointer"
+                onRow={(record) => ({
+                    onClick: () => {
+                        setSelectedOperation(record);
+                        setIsDetailsModalOpen(true);
+                    }
+                })}
                 locale={{ emptyText: <Empty description="No operations found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
             />
+        </div>
+      ),
+    },
+    {
+      key: 'ebom',
+      label: 'eBOM',
+      children: (
+        <div className="h-full flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center mb-4 px-1">
+                <div>
+                    <Title level={5} style={{ margin: 0 }}>Document Management</Title>
+                    <Text type="secondary" className="text-xs">View, manage and version control engineering documents</Text>
+                </div>
+                <div className="flex items-center gap-3">
+                    <Badge 
+                        count={latestPartDocs.length} 
+                        style={{ backgroundColor: '#1890ff' }} 
+                        overflowCount={99}
+                        title="Total Root Documents"
+                        className="mr-2"
+                    />
+                    <Button 
+                        type="primary" 
+                        icon={<PlusOutlined />} 
+                        onClick={() => {
+                            setUploadParentId(null);
+                            setUploadVersion('1.0');
+                            setIsUploadModalOpen(true);
+                        }}
+                        className="no-hover-btn"
+                    >
+                        Add Document
+                    </Button>
+                </div>
+            </div>
+            
+            <div className="flex-1 overflow-hidden">
+                <Table 
+                    dataSource={latestPartDocs}
+                    rowKey="id"
+                    size="small"
+                    pagination={false}
+                    className="modern-table border border-gray-100 rounded-lg overflow-hidden shadow-sm"
+                    scroll={{ y: 'calc(100vh - 400px)' }}
+                    columns={[
+                        {
+                            title: <span className="text-xs font-semibold">DOCUMENT NAME</span>,
+                            key: 'document_name',
+                            render: (_, record) => {
+                                const rootId = record.parent_id || record.id;
+                                const currentDoc = selectedVersions[rootId] || record;
+                                const isLatest = currentDoc.id === record.id;
+                                return (
+                                    <div className="flex items-center gap-3 py-1">
+                                        <div className="p-2 bg-blue-50 rounded">
+                                            <FilePdfOutlined className="text-blue-500" />
+                                        </div>
+                                        <div className="flex flex-col min-w-0">
+                                            <Text strong className="text-sm truncate max-w-[300px]">{currentDoc.document_name}</Text>
+                                            <div className="flex items-center gap-2">
+                                                <Tag color="blue" className="m-0 text-[9px] px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">
+                                                    {currentDoc.document_type || '2D'}
+                                                </Tag>
+                                                {!isLatest && (
+                                                    <Tag color="warning" className="m-0 text-[9px] px-1 leading-4 border-none bg-orange-100 text-orange-700">
+                                                        HISTORICAL
+                                                    </Tag>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            }
+                        },
+                        {
+                            title: <span className="text-xs font-semibold">VERSION</span>,
+                            key: 'version',
+                            width: 150,
+                            render: (_, record) => {
+                                const rootId = record.parent_id || record.id;
+                                const group = groupedPartDocs[rootId] || [];
+                                const currentDoc = selectedVersions[rootId] || record;
+                                const latestDoc = record;
+                                
+                                return (
+                                    <Select
+                                        size="small"
+                                        value={currentDoc.id}
+                                        variant="filled"
+                                        className="w-full version-select"
+                                        onChange={(val) => {
+                                            const selected = group.find(d => d.id === val);
+                                            setSelectedVersions(prev => ({ ...prev, [rootId]: selected }));
+                                        }}
+                                        dropdownStyle={{ minWidth: '180px', padding: '4px' }}
+                                        labelRender={({ label, value }) => {
+                                            const ver = group.find(d => d.id === value);
+                                            return (
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-blue-600">v{ver?.document_version}</span>
+                                                    <span className="text-[10px] text-gray-400">
+                                                        {new Date(ver?.created_at || Date.now()).toLocaleDateString()}
+                                                    </span>
+                                                </div>
+                                            );
+                                        }}
+                                    >
+                                        {group.sort((a,b) => parseFloat(b.document_version) - parseFloat(a.document_version)).map(ver => (
+                                            <Select.Option key={ver.id} value={ver.id}>
+                                                <div className="flex justify-between items-center w-full py-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <Badge status={ver.id === latestDoc.id ? "success" : "default"} />
+                                                        <span className={`font-bold ${ver.id === currentDoc.id ? 'text-blue-600' : 'text-gray-600'}`}>
+                                                            v{ver.document_version}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-[10px] text-gray-400 bg-gray-50 px-1 rounded">
+                                                        {new Date(ver.created_at || Date.now()).toLocaleDateString()}
+                                                    </span>
+                                                </div>
+                                            </Select.Option>
+                                        ))}
+                                    </Select>
+                                );
+                            }
+                        },
+                        {
+                            title: <span className="text-xs font-semibold text-center block">ACTIONS</span>,
+                            key: 'actions',
+                            width: 200,
+                            align: 'center',
+                            render: (_, record) => {
+                                const rootId = record.parent_id || record.id;
+                                const currentDoc = selectedVersions[rootId] || record;
+                                const latestDoc = record; // record is always the latest because it comes from latestPartDocs
+
+                                return (
+                                    <div className="flex gap-1 justify-center">
+                                        <Tooltip title="Preview">
+                                            <Button 
+                                                size="small" 
+                                                type="text" 
+                                                icon={<EyeOutlined />} 
+                                                onClick={() => handlePreview(currentDoc)} 
+                                                className="hover:text-blue-500 hover:bg-blue-50"
+                                            />
+                                        </Tooltip>
+                                        <Tooltip title="Update Version">
+                                            <Button 
+                                                size="small" 
+                                                type="text" 
+                                                className="text-orange-500 hover:bg-orange-50"
+                                                icon={<SyncOutlined />} 
+                                                onClick={() => initiateNewVersion(latestDoc, latestDoc.document_version)}
+                                            />
+                                        </Tooltip>
+                                        <Tooltip title="Edit Details">
+                                            <Button 
+                                                size="small" 
+                                                type="text" 
+                                                className="text-blue-500 hover:bg-blue-50"
+                                                icon={<EditOutlined />} 
+                                                onClick={() => {
+                                                    setEditingDoc(currentDoc);
+                                                    setIsEditDocModalOpen(true);
+                                                }}
+                                            />
+                                        </Tooltip>
+                                        <Tooltip title="Download">
+                                            <Button 
+                                                size="small" 
+                                                type="text" 
+                                                className="text-green-500 hover:bg-green-50"
+                                                icon={<DownloadOutlined />} 
+                                                onClick={() => handleDownload(currentDoc.id)}
+                                            />
+                                        </Tooltip>
+                                        <Popconfirm
+                                            title="Delete Document"
+                                            description="Delete this version? This cannot be undone."
+                                            onConfirm={() => handleDeleteDocument(currentDoc.id)}
+                                            okText="Yes"
+                                            cancelText="No"
+                                        >
+                                            <Button 
+                                                size="small" 
+                                                type="text" 
+                                                danger
+                                                icon={<DeleteOutlined />} 
+                                                className="hover:bg-red-50"
+                                            />
+                                        </Popconfirm>
+                                    </div>
+                                );
+                            }
+                        }
+                    ]}
+                />
+            </div>
+
+            {/* Upload Modal */}
+            <Modal
+                title={
+                    <div className="flex items-center gap-2">
+                        <PlusOutlined className="text-blue-500" />
+                        <span>{uploadParentId ? 'Upload New Version' : 'Add New Document'}</span>
+                    </div>
+                }
+                open={isUploadModalOpen}
+                onCancel={() => {
+                    setIsUploadModalOpen(false);
+                    setUploadParentId(null);
+                    setUploadVersion('1.0');
+                    setSelectedFileList([]);
+                }}
+                footer={null}
+                destroyOnClose
+                width={450}
+            >
+                <div className="space-y-4 mt-4">
+                    <div>
+                        <Text type="secondary" className="text-xs block mb-1">Document Type</Text>
+                        <Select 
+                            className="w-full" 
+                            value={uploadDocType}
+                            onChange={setUploadDocType}
+                        >
+                            <Select.Option value="2D">2D Drawing</Select.Option>
+                            <Select.Option value="3D">3D Model (STL/STEP)</Select.Option>
+                            <Select.Option value="MPP">MPP Document</Select.Option>
+                            <Select.Option value="Other">Other</Select.Option>
+                        </Select>
+                    </div>
+
+                    <div>
+                        <Text type="secondary" className="text-xs block mb-1">Version</Text>
+                        <Input 
+                            value={uploadVersion} 
+                            readOnly 
+                            prefix={<Tag color="blue" className="m-0 mr-1">v</Tag>}
+                            className="bg-gray-50"
+                        />
+                        {uploadParentId && (
+                            <div className="mt-1">
+                                <Text type="warning" className="text-[10px]">
+                                    Creating a new version for an existing document.
+                                </Text>
+                            </div>
+                        )}
+                    </div>
+
+                    <Dragger
+                        multiple={false}
+                        fileList={selectedFileList}
+                        beforeUpload={(file) => {
+                            setSelectedFileList([file]);
+                            return false;
+                        }}
+                        onRemove={() => setSelectedFileList([])}
+                        className="bg-gray-50 border-dashed border-2 py-8"
+                    >
+                        <p className="ant-upload-drag-icon">
+                            <InboxOutlined className="text-3xl text-blue-400" />
+                        </p>
+                        <p className="ant-upload-text">Click or drag file here</p>
+                        <p className="ant-upload-hint text-xs text-gray-400">
+                            Supports PDF, STL, STEP, Images...
+                        </p>
+                    </Dragger>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                        <Button onClick={() => setIsUploadModalOpen(false)}>Cancel</Button>
+                        <Button 
+                            type="primary" 
+                            icon={<UploadOutlined />}
+                            loading={uploading}
+                            disabled={selectedFileList.length === 0}
+                            onClick={handleUpload}
+                            className="no-hover-btn"
+                        >
+                            {uploadParentId ? 'Upload New Version' : 'Upload Document'}
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Edit Document Modal */}
+            <Modal
+                title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /> <span>Edit Document Details</span></div>}
+                open={isEditDocModalOpen}
+                onCancel={() => {
+                    setIsEditDocModalOpen(false);
+                    setEditingDoc(null);
+                }}
+                footer={null}
+                destroyOnClose
+                width={450}
+            >
+                <Form
+                    layout="vertical"
+                    initialValues={editingDoc}
+                    onFinish={handleEditDocument}
+                    className="mt-4"
+                >
+                    <Form.Item
+                        label="Document Name"
+                        name="document_name"
+                        rules={[{ required: true, message: 'Please enter document name' }]}
+                    >
+                        <Input placeholder="Enter document name" />
+                    </Form.Item>
+                    <Form.Item
+                        label="Document Type"
+                        name="document_type"
+                        rules={[{ required: true, message: 'Please select document type' }]}
+                    >
+                        <Select placeholder="Select type">
+                            <Select.Option value="2D">2D Drawing</Select.Option>
+                            <Select.Option value="3D">3D Model (STL/STEP)</Select.Option>
+                            <Select.Option value="MPP">MPP Document</Select.Option>
+                            <Select.Option value="Other">Other</Select.Option>
+                        </Select>
+                    </Form.Item>
+                    <div className="flex justify-end gap-2 mt-6">
+                        <Button onClick={() => setIsEditDocModalOpen(false)}>Cancel</Button>
+                        <Button type="primary" htmlType="submit" className="no-hover-btn">Save Changes</Button>
+                    </div>
+                </Form>
+            </Modal>
         </div>
       ),
     },
@@ -316,10 +1100,21 @@ const DocumentsPanel = ({ selectedItem }) => {
 
   return (
     <div className="flex-1 bg-white overflow-hidden flex flex-col h-full">
+      <style>
+        {`
+          .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
+            background-color: #2563eb !important;
+            color: white !important;
+            opacity: 1 !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+        `}
+      </style>
       <Card 
-        bordered={false} 
+        variant="borderless"
         className="flex-1 flex flex-col shadow-none rounded-none" 
-        bodyStyle={{ padding: '0 16px 16px 16px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { padding: '0 16px 16px 16px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' } }}
         title={
             <div className="flex justify-between items-center">
                 <span>Documents</span>
@@ -331,7 +1126,7 @@ const DocumentsPanel = ({ selectedItem }) => {
             activeKey={activeTab} 
             onChange={setActiveTab} 
             items={tabItems} 
-            className="flex-1 flex flex-col overflow-hidden"
+            className="flex-1 flex flex-col overflow-hidden full-height-tabs"
             style={{ height: '100%' }}
         />
       </Card>
@@ -345,9 +1140,9 @@ const DocumentsPanel = ({ selectedItem }) => {
         }}
         width={1000}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         style={{ top: 20 }}
-        bodyStyle={{ height: '80vh', padding: 0, overflow: 'hidden' }}
+        styles={{ body: { height: '80vh', padding: 0, overflow: 'hidden' } }}
       >
         <div className="w-full h-full bg-gray-50 flex items-center justify-center">
             {previewDocument?.document_url ? (
@@ -361,9 +1156,93 @@ const DocumentsPanel = ({ selectedItem }) => {
             )}
         </div>
       </Modal>
-      <input ref={fileInputRef} type="file" accept=".pdf,.docx,.csv,.xlsx,.doc,.xls,.txt" style={{ display: 'none' }} onChange={handleFileSelect} />
-    </div>
-  );
+      
+      <Modal
+        title={
+            <div className="flex items-center gap-2">
+                <ToolOutlined className="text-blue-500"/> 
+                <span>Operation Details: {selectedOperation?.operation_name}</span>
+            </div>
+        }
+        open={isDetailsModalOpen}
+        onCancel={() => setIsDetailsModalOpen(false)}
+        width={1100}
+        footer={null}
+        destroyOnHidden
+        styles={{ body: { maxHeight: '75vh', overflowY: 'auto' } }}
+      >
+        {selectedOperation && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200 space-y-4">
+               <div className="flex flex-col gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 mb-1">Work Instructions:</p>
+                        <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap shadow-sm">
+                        {selectedOperation.work_instructions || 'No instructions available'}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 mb-1">Notes:</p>
+                        <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap shadow-sm">
+                        {selectedOperation.notes || 'None specified'}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedOperation.tools?.length > 0 && (
+                    <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                        <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                            <ToolOutlined /> Tools Required:
+                        </p>
+                        <Table
+                            dataSource={selectedOperation.tools}
+                            rowKey="id"
+                            pagination={false}
+                            size="small"
+                            bordered
+                            columns={[
+                                { title: 'Tool Name', dataIndex: ['tool', 'item_description'], key: 'name', render: (text) => <span className="font-medium">{text}</span> },
+                                { title: 'Code', dataIndex: ['tool', 'identification_code'], key: 'code', render: (text) => <Tag>{text}</Tag> },
+                                { title: 'Make', dataIndex: ['tool', 'make'], key: 'make' },
+                                { title: 'Specification', dataIndex: ['tool', 'range'], key: 'range' },
+                            ]}
+                        />
+                    </div>
+                )}
+
+                 <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                    <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                        <FileTextOutlined /> Operation Documents:
+                    </p>
+                    <OperationDocumentsList operationId={selectedOperation.id} onPreview={handlePreview} />
+                </div>
+            </div>
+        )}
+      </Modal>
+     <input ref={fileInputRef} type="file" accept=".pdf,.docx,.csv,.xlsx,.doc,.xls,.txt" style={{ display: 'none' }} onChange={handleFileSelect} />
+
+     <PartActionModal
+       open={showPartActionModal}
+       onCancel={() => setShowPartActionModal(false)}
+       actionType={partActionType}
+       selectedPart={selectedItem}
+       onActionCreated={handleActionCreated}
+     />
+
+     <EditOperationModal
+        open={isOperationModalOpen}
+        onCancel={() => {
+            setIsOperationModalOpen(false);
+            setSelectedOperation(null);
+        }}
+        operation={selectedOperation}
+         defaultTab={modalTab}
+         showAddToolForm={showAddToolForm}
+         onUpdate={async () => {
+             await fetchDocuments();
+         }}
+       />
+   </div>
+ );
 };
 
 export default DocumentsPanel;

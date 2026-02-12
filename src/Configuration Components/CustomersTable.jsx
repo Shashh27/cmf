@@ -167,7 +167,7 @@ const CustomersTable = () => {
           New Customer
         </Button>
       }
-      bordered={false}
+      variant="borderless"
       className="shadow-sm"
     >
       <Table
