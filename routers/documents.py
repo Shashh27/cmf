@@ -17,7 +17,7 @@ router = APIRouter(
 )
 
 # Allowed file extensions
-ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.csv', '.xlsx', '.doc', '.xls', '.txt'}
+ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.csv', '.xlsx', '.doc', '.xls', '.txt', '.stl', '.step', '.stp', '.png', '.jpg', '.jpeg', '.gif', '.svg'}
 
 
 def get_file_extension(filename: str) -> str:
@@ -99,7 +99,15 @@ def detect_file_type_from_content(file_content: bytes) -> str:
         return 'text/plain'
     except UnicodeDecodeError:
         pass
-    
+
+    # STL/STEP files - check by extension if content detection fails
+    if filename:
+        ext = get_file_extension(filename)
+        if ext == '.stl':
+            return 'application/sla'
+        if ext in ['.step', '.stp']:
+            return 'application/step'
+
     return 'application/octet-stream'
 
 
@@ -143,7 +151,15 @@ def get_content_type(filename: str) -> str:
         '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         '.xls': 'application/vnd.ms-excel',
         '.csv': 'text/csv',
-        '.txt': 'text/plain'
+        '.txt': 'text/plain',
+        '.stl': 'application/sla',
+        '.step': 'application/step',
+        '.stp': 'application/step',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml'
     }
     return content_types.get(ext, 'application/octet-stream')
 
@@ -264,17 +280,17 @@ async def preview_document(document_id: int, db: Session = Depends(get_db)):
         )
 
     try:
-        # Extract object name from URL
+        # Extract object name and extension from URL
         # URL format: http://172.18.7.91:9000/cmf/documents/part_1/...
         minio_client = get_minio_client()
         object_name = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        file_extension = get_file_extension(object_name)
 
         # Download from MinIO
         file_data = minio_client.download_file(object_name)
 
         # Determine content type using content detection first
-        detected_content_type = get_content_type_from_detection(file_data, document.document_name)
-        file_extension = get_file_extension(document.document_name)
+        detected_content_type = get_content_type_from_detection(file_data, object_name)
         filename = f"{document.document_name}{file_extension}"
 
         # Return file as streaming response for inline preview
@@ -307,17 +323,17 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
         )
 
     try:
-        # Extract object name from URL
+        # Extract object name and extension from URL
         # URL format: http://172.18.7.91:9000/cmf/documents/part_1/...
         minio_client = get_minio_client()
         object_name = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        file_extension = get_file_extension(object_name)
 
         # Download from MinIO
         file_data = minio_client.download_file(object_name)
 
         # Determine content type using content detection first
-        detected_content_type = get_content_type_from_detection(file_data, document.document_name)
-        file_extension = get_file_extension(document.document_name)
+        detected_content_type = get_content_type_from_detection(file_data, object_name)
         filename = f"{document.document_name}{file_extension}"
 
         # Return file as streaming response

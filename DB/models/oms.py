@@ -108,25 +108,14 @@ class Operation(Base):
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"))
 
+    work_instructions = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+
     part = relationship("Part", back_populates="operations")
     machine = relationship("DB.models.configuration.Machine")
-    process_plan = relationship("ProcessPlan", back_populates="operation", uselist=False)
     operation_documents = relationship("OperationDocument", back_populates="operation")
 
 
-# =======================
-# Process Plan
-# =======================
-class ProcessPlan(Base):
-    __tablename__ = "process_plans"
-    __table_args__ = {'schema': 'oms'}
-
-    id = Column(Integer, primary_key=True, index=True)
-    operation_id = Column(Integer, ForeignKey("oms.operations.id"))
-    work_instructions = Column(Text)
-    notes = Column(Text)
-
-    operation = relationship("Operation", back_populates="process_plan")
 
 
 # =======================
@@ -157,10 +146,13 @@ class ToolWithPart(Base):
     __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
-    tool_id = Column(Integer, nullable=False)
+    tool_id = Column(Integer, ForeignKey("inventory.tools_list.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"))
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=True)
 
     part = relationship("Part", back_populates="tools")
+    tool = relationship("DB.models.inventory.ToolsList")
+    operation = relationship("Operation")
 
 
 
@@ -185,6 +177,7 @@ class Order(Base):
     product = relationship("Product", back_populates="orders")
     order_documents = relationship("OrderDocument", back_populates="order")
     raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order")
+    part_priorities = relationship("OrderPartPriority", back_populates="order")
 
 # =======================
 # Order Document
@@ -199,8 +192,10 @@ class OrderDocument(Base):
     document_url = Column(String, nullable=False)
     document_type = Column(String, nullable=False)
     document_version = Column(String, nullable=False)
+    parent_id = Column(Integer, ForeignKey("oms.order_documents.id"), nullable=True)
 
     order = relationship("Order", back_populates="order_documents")
+    parent = relationship("OrderDocument", remote_side=[id])
 
 
 
@@ -217,9 +212,11 @@ class OperationDocument(Base):
     document_type = Column(String, nullable=False)
     document_version = Column(String, nullable=False)
     operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("oms.operation_documents.id"), nullable=True)
 
     # Relationships
     operation = relationship("Operation", back_populates="operation_documents")
+    parent = relationship("OperationDocument", remote_side=[id])
 
 
 # =======================
@@ -239,3 +236,21 @@ class OrderPartsRawMaterialLinked(Base):
     raw_material = relationship("RawMaterial")
     part = relationship("Part")
     order = relationship("Order")
+
+
+# =======================
+# Order Part Priority
+# =======================
+class OrderPartPriority(Base):
+    __tablename__ = "order_part_priorities"
+    __table_args__ = {'schema': 'oms'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
+    product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    priority = Column(Integer, nullable=False)
+
+    order = relationship("Order", back_populates="part_priorities")
+    product = relationship("Product")
+    part = relationship("Part")

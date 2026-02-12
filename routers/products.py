@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 
 from DB.database import get_db
@@ -8,11 +8,11 @@ from DB.models.oms import (
     Assembly as AssemblyModel, 
     Part as PartModel,
     Operation as OperationModel,
-    ProcessPlan as ProcessPlanModel,
     Document as DocumentModel,
     ToolWithPart as ToolWithPartModel,
     PartType as PartTypeModel,
-    Order as OrderModel
+    Order as OrderModel,
+    OperationDocument as OperationDocumentModel
 )
 from DB.models.configuration import WorkCenter as WorkCenterModel
 from DB.models.inventory import RawMaterial as RawMaterialModel
@@ -142,14 +142,10 @@ def delete_product(product_id: int, db: Session = Depends(get_db)):
     return None
 
 
-@router.get("/{product_id}/hierarchical", response_model=ProductHierarchicalData)
-def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)):
+def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchicalData:
     """
-    Get hierarchical product data with nested structure:
-    - Product information
-    - Assemblies with nested subassemblies and parts
-    - Direct parts (parts not assigned to any assembly)
-    - Each part includes its operations, process plans, documents, and tools
+    Helper function to fetch hierarchical product data.
+    Can be used by other routers (like orders).
     """
     # Get product
     product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
@@ -180,9 +176,10 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
     # Get all related data for parts
     part_ids = list(part_map.keys())
     operations_by_part = {}
-    process_plans_by_operation = {}
+    operation_documents_by_operation = {}
     documents_by_part = {}
     tools_by_part = {}
+    tools_by_operation = {}
     
     if part_ids:
         # Get operations
@@ -192,14 +189,15 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
                 operations_by_part[op.part_id] = []
             operations_by_part[op.part_id].append(op)
         
-        # Get process plans
+        # Get operation documents
         operation_ids = [op.id for op in operations]
         if operation_ids:
-            process_plans = db.query(ProcessPlanModel).filter(ProcessPlanModel.operation_id.in_(operation_ids)).all()
-            for pp in process_plans:
-                if pp.operation_id not in process_plans_by_operation:
-                    process_plans_by_operation[pp.operation_id] = []
-                process_plans_by_operation[pp.operation_id].append(pp)
+            # Operation Documents
+            op_docs = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id.in_(operation_ids)).all()
+            for doc in op_docs:
+                if doc.operation_id not in operation_documents_by_operation:
+                    operation_documents_by_operation[doc.operation_id] = []
+                operation_documents_by_operation[doc.operation_id].append(doc)
         
         # Get documents
         documents = db.query(DocumentModel).filter(DocumentModel.part_id.in_(part_ids)).all()
@@ -208,18 +206,24 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
                 documents_by_part[doc.part_id] = []
             documents_by_part[doc.part_id].append(doc)
         
-        # Get tools
-        tools = db.query(ToolWithPartModel).filter(ToolWithPartModel.part_id.in_(part_ids)).all()
+        # Get tools with details
+        tools = db.query(ToolWithPartModel).options(joinedload(ToolWithPartModel.tool)).filter(ToolWithPartModel.part_id.in_(part_ids)).all()
         for tool in tools:
             if tool.part_id not in tools_by_part:
                 tools_by_part[tool.part_id] = []
             tools_by_part[tool.part_id].append(tool)
+            
+            # Also map to operation if applicable
+            if tool.operation_id:
+                if tool.operation_id not in tools_by_operation:
+                    tools_by_operation[tool.operation_id] = []
+                tools_by_operation[tool.operation_id].append(tool)
     
     def create_part_details(part: PartModel) -> PartDetails:
         """Create PartDetails with all related data"""
         part_operations_models = operations_by_part.get(part.id, [])
         
-        # Enrich operations with work_center_name
+        # Enrich operations with work_center_name and tools
         part_operations = []
         for op in part_operations_models:
             op_dict = {
@@ -229,15 +233,15 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
                 "setup_time": op.setup_time,
                 "cycle_time": op.cycle_time,
                 "workcenter_id": op.workcenter_id,
+                "machine_id": op.machine_id,
                 "part_id": op.part_id,
-                "work_center_name": work_center_map.get(op.workcenter_id)
+                "work_instructions": op.work_instructions,
+                "notes": op.notes,
+                "work_center_name": work_center_map.get(op.workcenter_id),
+                "operation_documents": operation_documents_by_operation.get(op.id, []),
+                "tools": tools_by_operation.get(op.id, [])
             }
             part_operations.append(OperationSchema(**op_dict))
-        
-        # Get process plans for this part's operations
-        part_process_plans = []
-        for op in part_operations_models:
-            part_process_plans.extend(process_plans_by_operation.get(op.id, []))
         
         # Get the part type
         part_type = db.query(PartTypeModel).filter(PartTypeModel.id == part.type_id).first()
@@ -260,7 +264,6 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
         return PartDetails(
             part=part_with_type,
             operations=part_operations,
-            process_plans=part_process_plans,
             documents=documents_by_part.get(part.id, []),
             tools=tools_by_part.get(part.id, [])
         )
@@ -308,3 +311,15 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
         assemblies=root_assemblies,
         direct_parts=direct_parts
     )
+
+
+@router.get("/{product_id}/hierarchical", response_model=ProductHierarchicalData)
+def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)):
+    """
+    Get hierarchical product data with nested structure:
+    - Product information
+    - Assemblies with nested subassemblies and parts
+    - Direct parts (parts not assigned to any assembly)
+    - Each part includes its operations, process plans, documents, and tools
+    """
+    return fetch_product_hierarchy(db, product_id)

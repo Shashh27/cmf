@@ -11,7 +11,7 @@ from routers import (
     part_types_router,
     parts_router,
     operations_router,
-    process_plans_router,
+
     documents_router,
     tools_router,
     customers_router,
@@ -91,7 +91,7 @@ app.include_router(assemblies_router, prefix="/api/v1")
 app.include_router(part_types_router, prefix="/api/v1")
 app.include_router(parts_router, prefix="/api/v1")
 app.include_router(operations_router, prefix="/api/v1")
-app.include_router(process_plans_router, prefix="/api/v1")
+
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(tools_router, prefix="/api/v1")
 app.include_router(customers_router, prefix="/api/v1")
@@ -155,7 +155,7 @@ def system_info():
             "part_types": "/api/v1/part-types",
             "parts": "/api/v1/parts",
             "operations": "/api/v1/operations",
-            "process_plans": "/api/v1/process-plans",
+           
             "documents": "/api/v1/documents",
             "tools": "/api/v1/tools",
             "customers": "/api/v1/customers",

@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models.oms import Part as PartModel, PartType
+from DB.models.oms import Part as PartModel, PartType, Order, OrderPartPriority
 from DB.models.inventory import RawMaterial
 from DB.schemas.oms import Part, PartCreate, PartUpdate
+from sqlalchemy import func
 
 router = APIRouter(
     prefix="/parts",
@@ -28,6 +29,27 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     db.add(db_part)
     db.commit()
     db.refresh(db_part)
+
+    # If the part is associated with a product, update existing orders
+    if db_part.product_id:
+        # Find all orders for this product
+        orders = db.query(Order).filter(Order.product_id == db_part.product_id).all()
+        
+        # Get current max priority globally
+        max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
+        
+        for index, order in enumerate(orders):
+            # Create priority entry
+            priority_entry = OrderPartPriority(
+                order_id=order.id,
+                product_id=db_part.product_id,
+                part_id=db_part.id,
+                priority=max_priority + 1 + index
+            )
+            db.add(priority_entry)
+        
+        db.commit()
+
     return db_part
 
 

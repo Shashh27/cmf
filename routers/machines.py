@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List
 
 from DB.database import get_db
@@ -106,6 +107,26 @@ def delete_machine(machine_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Machine with id {machine_id} not found"
         )
+
+    # Delete related machine_status records to avoid foreign key violation
+    # Note: machine_status table exists in DB but not in models
+    try:
+        with db.begin_nested():
+            db.execute(text("DELETE FROM machine_status WHERE machine_id = :id"), {"id": machine_id})
+    except Exception:
+        # Try with configuration schema if public schema fails or table not found
+        try:
+            with db.begin_nested():
+                db.execute(text("DELETE FROM configuration.machine_status WHERE machine_id = :id"), {"id": machine_id})
+        except Exception as e2:
+            print(f"Warning: Could not delete from machine_status: {e2}")
+
+    # Set machine_id to NULL in operations table if referenced
+    try:
+        with db.begin_nested():
+             db.execute(text("UPDATE oms.operations SET machine_id = NULL WHERE machine_id = :id"), {"id": machine_id})
+    except Exception as e3:
+        print(f"Warning: Could not update operations: {e3}")
 
     db.delete(db_machine)
     db.commit()
