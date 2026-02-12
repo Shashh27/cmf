@@ -22,7 +22,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const fetchDocuments = async (orderId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/customer-documents/order/${orderId}`);
+      const response = await fetch(`${API_BASE_URL}/order-documents/order/${orderId}`);
       if (response.ok) {
         const data = await response.json();
         setDocuments(data);
@@ -50,7 +50,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
     try {
       const response = await fetch(
-        `${API_BASE_URL}/customer-documents/upload/${selectedOrderId}`,
+        `${API_BASE_URL}/order-documents/upload/${selectedOrderId}`,
         {
           method: "POST",
           body: uploadFormData,
@@ -79,7 +79,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const handleDownload = async (documentId, documentName) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/customer-documents/download/${documentId}`);
+      const response = await fetch(`${API_BASE_URL}/order-documents/download/${documentId}`);
       if (response.ok) {
         const data = await response.json();
         console.log('Download response:', data); // Debug log
@@ -115,7 +115,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/customer-documents/${documentId}`, {
+      const response = await fetch(`${API_BASE_URL}/order-documents/${documentId}`, {
         method: "DELETE",
       });
 

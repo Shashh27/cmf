@@ -114,7 +114,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         uploadFormData.append("document_version", doc.document_version || "1.0");
 
         try {
-          await fetch(`${API_BASE_URL}/customer-documents/upload/${orderId}`, {
+          await fetch(`${API_BASE_URL}/order-documents/upload/${orderId}`, {
             method: "POST",
             body: uploadFormData,
           });

@@ -1,0 +1,41 @@
+import React, { useState } from 'react';
+import { Tabs } from 'antd';
+import Inventory from './Inventory';
+import ToolRequested from './ToolRequested';
+import ToolReturn from './ToolReturn';
+
+const InventoryData = () => {
+  const [activeTab, setActiveTab] = useState('1');
+
+  const items = [
+    {
+      key: '1',
+      label: 'Inventory Data',
+      children: <Inventory />,
+    },
+    {
+      key: '2',
+      label: 'Tool Requested',
+      children: <ToolRequested onReturnSuccess={() => setActiveTab('3')} />,
+    },
+    {
+      key: '3',
+      label: 'Tool Return',
+      children: <ToolReturn />,
+    },
+  ];
+
+  return (
+    <div style={{ padding: '24px' }}>
+      <h2 style={{ fontSize: '24px', fontWeight: '600', marginBottom: '16px', color: '#000000e0' }}>Inventory Data</h2>
+      <Tabs 
+        activeKey={activeTab} 
+        onChange={setActiveTab} 
+        items={items} 
+        destroyInactiveTabPane={true} // Ensures fresh data when switching tabs
+      />
+    </div>
+  );
+};
+
+export default InventoryData;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../Config/auth";
 import { Table, Badge, Button, message, Spin, Typography, Space } from "antd";
 import OrderModal from "../OMS Components/OrderModal";
@@ -8,6 +8,7 @@ import ProductBOMView from "../OMS Components/ProductBOMView";
 
 const OMS = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { productId } = useParams();
   const [messageApi, contextHolder] = message.useMessage();
   const [orders, setOrders] = useState([]);
@@ -20,6 +21,15 @@ const OMS = () => {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const hasFetchedData = useRef(false);
+
+  const getRolePrefix = () => {
+    const path = location.pathname;
+    if (path.startsWith('/admin')) return '/admin';
+    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
+    if (path.startsWith('/operator')) return '/operator';
+    return ''; 
+  };
+  const prefix = getRolePrefix();
 
   useEffect(() => {
     if (hasFetchedData.current) return;
@@ -160,11 +170,11 @@ const OMS = () => {
   };
 
   const handleViewBOM = (productId) => {
-    navigate(`/oms/product/${productId}`);
+    navigate(`${prefix}/oms/product/${productId}`);
   };
 
   const handleBackToOrders = () => {
-    navigate('/oms');
+    navigate(`${prefix}/oms`);
   };
 
   if (loading) {
