@@ -1,17 +1,25 @@
 import React from "react";
 import { Layout } from "antd";
+import { useLocation } from "react-router-dom";
 import Sidebar from "./ui/sidebar";
 import Navbar from "./ui/Navbar";
 
 const { Content } = Layout;
 
 const AppLayout = ({ children }) => {
+  const location = useLocation();
+  const isLoginPage = location.pathname === '/login';
+
+  if (isLoginPage) {
+    return <>{children}</>;
+  }
+
   return (
     <Layout hasSider>
       <Sidebar />
       <Layout style={{ marginLeft: 224, height: '100vh', overflow: 'hidden' }}>
         <Navbar />
-        <Content style={{ margin: '64px 12px 12px', overflow: 'hidden', height: 'calc(100vh - 76px)' }}>
+        <Content style={{ margin: '80px 24px 24px', overflow: 'initial', backgroundColor: 'transparent', padding: 0 }}>
           {children}
         </Content>
       </Layout>

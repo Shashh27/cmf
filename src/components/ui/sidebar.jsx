@@ -23,20 +23,32 @@ const Sidebar = () => {
   const location = useLocation();
   const selectedKey = location.pathname;
   
+  // Get the role prefix from the path
+  const getRolePrefix = () => {
+    const path = location.pathname;
+    if (path.startsWith('/admin')) return '/admin';
+    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
+    if (path.startsWith('/operator')) return '/operator';
+    return ''; // Default fallback
+  };
+
+  const prefix = getRolePrefix();
+
   // Determine open keys based on path
   const getOpenKeys = () => {
     const path = location.pathname;
-    if (path.startsWith('/oms')) return ['oms'];
-    if (path.startsWith('/pps')) return ['pps'];
-    if (path.startsWith('/product-monitoring')) return ['product-monitoring'];
-    if (path.startsWith('/inventory-management')) return ['inventory-management'];
+    if (path.includes('/oms')) return ['oms'];
+    if (path.includes('/pps')) return ['pps'];
+    if (path.includes('/product-monitoring')) return ['product-monitoring'];
+    if (path.includes('/inventory-management')) return ['inventory-management'];
     return [];
   };
 
-  const items = [
+  // Define all menu items with dynamic paths
+  const allItems = [
     {
-      key: '/dashboard',
-      label: <Link to="/dashboard">Dashboard</Link>,
+      key: `${prefix}/dashboard`,
+      label: <Link to={`${prefix}/dashboard`}>Dashboard</Link>,
       icon: <DashboardOutlined />,
     },
     {
@@ -44,14 +56,13 @@ const Sidebar = () => {
       label: 'OMS',
       icon: <ShoppingCartOutlined />,
       children: [
-        { key: '/oms/orders', label: <Link to="/oms/orders">Orders</Link> },
-        { key: '/oms/parts-priority', label: <Link to="/oms/parts-priority">Parts Priority</Link> },
-        { key: '/oms/rawmaterials', label: <Link to="/oms/rawmaterials">Raw Materials</Link> },
+        { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`}>Orders</Link> },
+        { key: `${prefix}/oms/rawmaterials`, label: <Link to={`${prefix}/oms/rawmaterials`}>Raw Materials</Link> },
       ],
     },
     {
-      key: '/pdm',
-      label: <Link to="/pdm">PDM</Link>,
+      key: `${prefix}/pdm`,
+      label: <Link to={`${prefix}/pdm`}>PDM</Link>,
       icon: <DeploymentUnitOutlined />,
     },
     {
@@ -59,14 +70,14 @@ const Sidebar = () => {
       label: 'PPS',
       icon: <AppstoreOutlined />,
       children: [
-        { key: '/pps/assets-availability', label: <Link to="/pps/assets-availability">Assets Availability</Link> },
-        { key: '/pps/capacity-planning', label: <Link to="/pps/capacity-planning">Capacity Planning</Link> },
-        { key: '/pps/machine-scheduling', label: <Link to="/pps/machine-scheduling">Machine Scheduling</Link> },
+        { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`}>Assets Availability</Link> },
+        { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`}>Capacity Planning</Link> },
+        { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`}>Machine Scheduling</Link> },
       ],
     },
     {
-      key: '/configuration',
-      label: <Link to="/configuration">Configuration</Link>,
+      key: `${prefix}/configuration`,
+      label: <Link to={`${prefix}/configuration`}>Configuration</Link>,
       icon: <SettingOutlined />,
     },
     {
@@ -74,15 +85,15 @@ const Sidebar = () => {
       label: 'Product Monitoring',
       icon: <MonitorOutlined />,
       children: [
-        { key: '/product-monitoring/live-monitoring', label: <Link to="/product-monitoring/live-monitoring">Live Monitoring</Link> },
-        { key: '/product-monitoring/planned-vs-actual', label: <Link to="/product-monitoring/planned-vs-actual">Planned vs Actual</Link> },
-        { key: '/product-monitoring/order-tracking', label: <Link to="/product-monitoring/order-tracking">Order Tracking</Link> },
-        { key: '/product-monitoring/maintenance', label: <Link to="/product-monitoring/maintenance">Maintenance</Link> },
+        { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`}>Live Monitoring</Link> },
+        { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`}>Planned vs Actual</Link> },
+        { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`}>Order Tracking</Link> },
+        { key: `${prefix}/product-monitoring/maintenance`, label: <Link to={`${prefix}/product-monitoring/maintenance`}>Maintenance</Link> },
       ],
     },
     {
-      key: '/quality-management',
-      label: <Link to="/quality-management">Quality Management</Link>,
+      key: `${prefix}/quality-management`,
+      label: <Link to={`${prefix}/quality-management`}>Quality Management</Link>,
       icon: <SafetyCertificateOutlined />,
     },
     {
@@ -90,26 +101,57 @@ const Sidebar = () => {
       label: 'Inventory Management',
       icon: <DatabaseOutlined />,
       children: [
-        { key: '/inventory-management/inventory-master', label: <Link to="/inventory-management/inventory-master">Inventory Master</Link> },
-        { key: '/inventory-management/overview-data', label: <Link to="/inventory-management/overview-data">Overview Data</Link> },
+        { key: `${prefix}/inventory-management/inventory-master`, label: <Link to={`${prefix}/inventory-management/inventory-master`}>Inventory Master</Link> },
+        { key: `${prefix}/inventory-management/overview-data`, label: <Link to={`${prefix}/inventory-management/overview-data`}>Overview Data</Link> },
       ],
     },
     {
-      key: '/document-management',
-      label: <Link to="/document-management">Document Management</Link>,
+      key: `${prefix}/document-management`,
+      label: <Link to={`${prefix}/document-management`}>Document Management</Link>,
       icon: <FileTextOutlined />,
     },
     {
-      key: '/notification',
-      label: <Link to="/notification">Notification</Link>,
+      key: `${prefix}/notification`,
+      label: <Link to={`${prefix}/notification`}>Notification</Link>,
       icon: <BellOutlined />,
     },
     {
-      key: '/access-control',
-      label: <Link to="/access-control">Access Control</Link>,
+      key: `${prefix}/access_control`,
+      label: <Link to={`${prefix}/access_control`}>Access Control</Link>,
       icon: <LockOutlined />,
     },
   ];
+
+  // Filter items based on role
+  let items = [];
+  if (prefix === '/admin') {
+    items = allItems;
+  } else if (prefix === '/operator') {
+    items = [
+      {
+        key: `${prefix}/dashboard`,
+        label: <Link to={`${prefix}/dashboard`}>Dashboard</Link>,
+        icon: <DashboardOutlined />,
+      },
+      {
+        key: `${prefix}/inspection-results`,
+        label: <Link to={`${prefix}/inspection-results`}>Inspection Results</Link>,
+        icon: <SafetyCertificateOutlined />,
+      },
+      {
+        key: `${prefix}/inventory-data`,
+        label: <Link to={`${prefix}/inventory-data`}>Inventory Data</Link>,
+        icon: <DatabaseOutlined />,
+      },
+      {
+        key: `${prefix}/documents`,
+        label: <Link to={`${prefix}/documents`}>Documents</Link>,
+        icon: <FileTextOutlined />,
+      },
+    ];
+  } else {
+    items = [allItems[0]];
+  }
 
   return (
     <Sider 
