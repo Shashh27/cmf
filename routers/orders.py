@@ -3,9 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from DB.database import get_db
-from DB.models.oms import Order, Product, OrderDocument
+from DB.models.oms import Order, Product, OrderDocument, Part
 from DB.models.configuration import Customer
-from DB.schemas.oms import Order as OrderResponse, OrderCreate, OrderUpdate, OrderWithCustomer, OrderWithCustomerAndProduct
+from DB.schemas.oms import Order as OrderResponse, OrderCreate, OrderUpdate, OrderWithCustomer, OrderWithCustomerAndProduct, Part as PartResponse
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -168,3 +168,27 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     db.delete(order)
     db.commit()
     return {"message": "Order deleted successfully"}
+
+@router.get("/sale-order/{sale_order_number}/parts", response_model=List[PartResponse])
+def get_order_parts(sale_order_number: str, db: Session = Depends(get_db)):
+    """
+    Get all parts associated with a specific sale order.
+    1. Finds the order by sale_order_number.
+    2. Identifies the product associated with the order.
+    3. Returns all parts linked to that product.
+    """
+    # 1. Find the order
+    order = db.query(Order).filter(Order.sale_order_number == sale_order_number).first()
+    if not order:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Order with sale_order_number {sale_order_number} not found"
+        )
+    
+    # 2. Get the product_id
+    product_id = order.product_id
+    
+    # 3. Find all parts for this product
+    parts = db.query(Part).filter(Part.product_id == product_id).all()
+    
+    return parts

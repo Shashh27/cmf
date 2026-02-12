@@ -24,6 +24,9 @@ from routers import (
     operation_documents_router,
     tools_list_router,
     access_control_router,
+    login_router,
+    inventory_requests_router,
+    inventory_return_requests_router,
     inventory_requests_router,
     inventory_return_requests_router,
     transaction_history_router,
@@ -107,6 +110,7 @@ app.include_router(rawmaterials_router, prefix="/api/v1")
 app.include_router(workcenter_router, prefix="/api/v1")
 app.include_router(general_documents_router)
 app.include_router(access_control_router, prefix="/api/v1")
+app.include_router(login_router, prefix="/api/v1")
 app.include_router(machines_router, prefix="/api/v1")
 app.include_router(order_parts_raw_material_linked_router, prefix="/api/v1")
 app.include_router(operation_documents_router, prefix="/api/v1")

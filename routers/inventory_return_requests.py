@@ -87,6 +87,7 @@ def create_inventory_return_request(
         )
     
     # Create the return request
+    from datetime import datetime
     db_return_request = InventoryReturnRequest(
         requested_id=return_request.requested_id,
         operator_id=return_request.operator_id,
