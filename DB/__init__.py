@@ -22,6 +22,10 @@ from .models.inventory import (
     RawMaterial,
     ToolsList
 )
+from .models.documents import (
+    GeneralFolder,
+    GeneralDocument
+)
 from . import schemas
 from .minio_client import get_minio_client, init_minio_client, MinIOClient
 
@@ -47,6 +51,8 @@ __all__ = [
     "Machine",
     "RawMaterial",
     "ToolsList",
+    "GeneralFolder",
+    "GeneralDocument",
     "schemas",
     "get_minio_client",
     "init_minio_client",
