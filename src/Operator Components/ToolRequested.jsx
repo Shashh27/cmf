@@ -44,6 +44,7 @@ const ToolRequested = ({ onReturnSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [returnLoading, setReturnLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [toolsById, setToolsById] = useState({});
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -58,11 +59,14 @@ const ToolRequested = ({ onReturnSuccess }) => {
   useEffect(() => {
     fetchRequests();
     fetchReturnRequests();
+    fetchToolsList();
   }, []);
 
   const isConsumableType = (item) => {
-    const v = (item?.tool_type || item?.type || '').toString();
-    return v.toUpperCase().includes('CONSUMABLE');
+    const v = (item?.tool_type ?? item?.type ?? '').toString().trim().toLowerCase();
+    if (!v) return false;
+    if (v.includes('non')) return false;
+    return v.includes('consum');
   };
 
   const handleTableChange = (newPagination) => {
@@ -109,7 +113,10 @@ const ToolRequested = ({ onReturnSuccess }) => {
         const data = await response.json();
         // Sort by date descending
         const sortedData = Array.isArray(data) ? data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];
-        setRequests(sortedData);
+        setRequests(sortedData.map(r => ({
+          ...r,
+          tool_type: r.tool_type || toolsById[r.tool_id] || r.tool_type
+        })));
       }
     } catch (error) {
       console.error('Failed to fetch requests:', error);
@@ -118,6 +125,22 @@ const ToolRequested = ({ onReturnSuccess }) => {
     }
   };
 
+  const fetchToolsList = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/tools-list/`);
+      if (res.ok) {
+        const tools = await res.json();
+        const map = {};
+        (Array.isArray(tools) ? tools : []).forEach(t => {
+          if (t && t.id != null) map[t.id] = t.type || '';
+        });
+        setToolsById(map);
+        setRequests(prev => prev.map(r => ({ ...r, tool_type: r.tool_type || map[r.tool_id] })));
+      }
+    } catch (e) {
+      console.error('Failed to fetch tools list', e);
+    }
+  };
   const fetchReturnRequests = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
