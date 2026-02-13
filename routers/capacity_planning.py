@@ -145,7 +145,12 @@ def get_machine_utilization_by_range(
     if start_date > end_date:
         raise HTTPException(400, "End date must be after start date")
 
-    range_end = end_date + timedelta(days=1)
+    # range_end = end_date + timedelta(days=1)
+
+    # 🔧 convert date → datetime (IMPORTANT FIX)
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_dt = datetime.combine(end_date, datetime.max.time())
+    range_end = end_dt + timedelta(seconds=1)
 
     # ------------------------------------
     # SHIFT CONFIG → AVAILABLE HOURS BASE
@@ -187,7 +192,7 @@ def get_machine_utilization_by_range(
             MachineStatus.available_from != None,
             MachineStatus.available_from < range_end,
             (MachineStatus.available_to == None)
-            | (MachineStatus.available_to > start_date)
+            | (MachineStatus.available_to > start_dt)
         )
         .order_by(MachineStatus.available_from)
         .all()
@@ -212,14 +217,14 @@ def get_machine_utilization_by_range(
             if st.status_id == 2:  # OFF
 
                 if st.available_to:
-                    overlap_start = max(st.available_from, start_date)
+                    overlap_start = max(st.available_from, start_dt)
                     overlap_end = min(st.available_to, range_end)
 
                     if overlap_end > overlap_start:
                         hours = (overlap_end - overlap_start).total_seconds() / 3600
                         downtime_hours += hours
                 else:
-                    overlap_start = max(st.available_from, start_date)
+                    overlap_start = max(st.available_from, start_dt)
                     overlap_end = range_end
                     hours = (overlap_end - overlap_start).total_seconds() / 3600
                     downtime_hours += hours

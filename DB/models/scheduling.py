@@ -93,4 +93,18 @@ class ShiftHoursConfiguration(Base):
 
 
 
+# =======================
+# Part Schedule Status
+# =======================
+class PartScheduleStatus(Base):
+    __tablename__ = "part_schedule_status"
+    __table_args__ = {'schema': 'scheduling'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    part_number = Column(String, ForeignKey("oms.parts.part_number"), nullable=False)
+    sale_order_number = Column(String, ForeignKey("oms.orders.sale_order_number"), nullable=False)
+    status = Column(String, nullable=False, default="inactive")
+    start_date = Column(DateTime, nullable=True)   
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
