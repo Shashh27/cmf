@@ -541,3 +541,16 @@ class OrderPartPriority(OrderPartPriorityBase):
 
     class Config:
         from_attributes = True
+
+
+class OrderWisePriority(BaseModel):
+    order_id: int
+    sale_order_number: Optional[str] = None
+    project_name: Optional[str] = None
+    product_name: Optional[str] = None
+    min_priority: int
+    max_priority: int
+    part_count: int
+
+    class Config:
+        from_attributes = True
