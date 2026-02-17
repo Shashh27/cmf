@@ -17,9 +17,9 @@ const AppLayout = ({ children }) => {
   return (
     <Layout hasSider>
       <Sidebar />
-      <Layout style={{ marginLeft: 224, height: '100vh', overflow: 'hidden' }}>
+      <Layout style={{ marginLeft: 224, minHeight: '100vh' }}>
         <Navbar />
-        <Content style={{ margin: '80px 24px 24px', overflow: 'initial', backgroundColor: 'transparent', padding: 0 }}>
+        <Content style={{ margin: '80px 24px 24px', overflowY: 'auto', backgroundColor: 'transparent', padding: 0 }}>
           {children}
         </Content>
       </Layout>

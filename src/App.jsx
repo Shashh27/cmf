@@ -17,6 +17,7 @@ import LiveMonitoring from "./Product Monitoring Components/LiveMonitoring";
 import PlannedVsActual from "./Product Monitoring Components/PlannedVsActual";
 import OrderTracking from "./Product Monitoring Components/OrderTracking";
 import Maintenance from "./Product Monitoring Components/Maintenance";
+import ProductionMonitoring from "./Pages/ProductionMonitoring";
 import QualityManagement from "./Quality Management Components/QualityManagement";
 import InventoryMaster from "./Pages/Inventory";
 import OverviewData from "./Pages/OverviewData";
@@ -58,6 +59,7 @@ function App() {
           <Route path="/admin/product-monitoring/planned-vs-actual" element={<PlannedVsActual />} />
           <Route path="/admin/product-monitoring/order-tracking" element={<OrderTracking />} />
           <Route path="/admin/product-monitoring/maintenance" element={<Maintenance />} />
+          <Route path="/admin/product-monitoring/pokayoke-checklists" element={<ProductionMonitoring />} />
 
           <Route path="/admin/quality-management" element={<QualityManagement />} />
 
