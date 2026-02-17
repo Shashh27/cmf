@@ -58,6 +58,7 @@ const Sidebar = () => {
       children: [
         { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`}>Orders</Link> },
         { key: `${prefix}/oms/rawmaterials`, label: <Link to={`${prefix}/oms/rawmaterials`}>Raw Materials</Link> },
+        { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`}>Parts Priority</Link> },
       ],
     },
     {

@@ -31,6 +31,7 @@ const OMS = () => {
   const [editingOrder, setEditingOrder] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const hasFetchedData = useRef(false);
+  const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
   const getRolePrefix = () => {
     const path = location.pathname;
@@ -396,10 +397,19 @@ const OMS = () => {
             dataSource={orders}
             rowKey="id"
             pagination={{
-                pageSize: 10,
+                current: ordersPagination.current,
+                pageSize: ordersPagination.pageSize,
                 showSizeChanger: true,
                 showQuickJumper: true,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                position: ['bottomCenter'],
+            }}
+            onChange={(paginationConfig) => {
+                setOrdersPagination({
+                    current: paginationConfig.current,
+                    pageSize: paginationConfig.pageSize,
+                });
             }}
             size="small"
             bordered
