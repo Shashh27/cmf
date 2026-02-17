@@ -1,22 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 from typing import List
 from datetime import datetime
 from DB.database import get_db
 from DB.models.oms import Order, Product, OrderDocument, Part, OrderPartPriority
 from DB.models.configuration import Customer
 from DB.schemas.oms import (
-    Order as OrderResponse, 
-    OrderCreate, 
-    OrderUpdate, 
-    OrderWithCustomer, 
-    OrderWithCustomerAndProduct, 
+    Order as OrderResponse,
+    OrderCreate,
+    OrderUpdate,
+    OrderWithCustomer,
+    OrderWithCustomerAndProduct,
     OrderWithHierarchy,
     OrderPartPriority as OrderPartPrioritySchema,
     OrderPartPriorityUpdate,
     OrderPartPriorityGlobalUpdate,
-    OrderPartPrioritySwap
+    OrderPartPrioritySwap,
+    OrderWisePriority,
 )
 from .products import fetch_product_hierarchy
 
@@ -36,8 +38,6 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_order)
 
-    from sqlalchemy import func
-    
     # Populate default part priorities (FIFO based on creation)
     parts = db.query(Part).filter(Part.product_id == db_order.product_id).order_by(Part.id.asc()).all()
     
@@ -317,6 +317,85 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
     db.commit()
     
     return {"message": "Priorities swapped successfully"}
+
+
+@router.get("/part-priorities/order-wise", response_model=List[OrderWisePriority])
+def get_order_wise_priorities(db: Session = Depends(get_db)):
+    groups_subquery = (
+        db.query(
+            OrderPartPriority.order_id.label("order_id"),
+            func.min(OrderPartPriority.priority).label("min_priority"),
+            func.max(OrderPartPriority.priority).label("max_priority"),
+            func.count(OrderPartPriority.id).label("part_count"),
+        )
+        .group_by(OrderPartPriority.order_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(
+            Order.id,
+            Order.sale_order_number,
+            Order.project_name,
+            Product.product_name,
+            groups_subquery.c.min_priority,
+            groups_subquery.c.max_priority,
+            groups_subquery.c.part_count,
+        )
+        .join(groups_subquery, Order.id == groups_subquery.c.order_id)
+        .join(Product, Product.id == Order.product_id)
+        .order_by(groups_subquery.c.min_priority.asc())
+        .all()
+    )
+
+    result = []
+    for row in rows:
+        result.append(
+            {
+                "order_id": row.id,
+                "sale_order_number": row.sale_order_number,
+                "project_name": row.project_name,
+                "product_name": row.product_name,
+                "min_priority": row.min_priority,
+                "max_priority": row.max_priority,
+                "part_count": row.part_count,
+            }
+        )
+    return result
+
+
+class OrderWisePriorityUpdate(BaseModel):
+    order_ids: List[int]
+
+
+@router.put("/part-priorities/order-wise/reorder")
+def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session = Depends(get_db)):
+    order_ids = update.order_ids
+    if not order_ids:
+        return {"message": "No changes"}
+
+    existing_ids = {row[0] for row in db.query(OrderPartPriority.order_id).distinct().all()}
+    if set(order_ids) != existing_ids:
+        raise HTTPException(status_code=400, detail="Order list does not match existing priorities")
+
+    records = db.query(OrderPartPriority).order_by(OrderPartPriority.priority.asc()).all()
+
+    grouped = {}
+    for record in records:
+        if record.order_id not in grouped:
+            grouped[record.order_id] = []
+        grouped[record.order_id].append(record)
+
+    new_priority = 1
+    for order_id in order_ids:
+        items = grouped.get(order_id, [])
+        items.sort(key=lambda r: r.priority)
+        for item in items:
+            item.priority = new_priority
+            new_priority += 1
+
+    db.commit()
+    return {"message": "Order-wise priorities updated successfully"}
 
 @router.put("/{order_id}", response_model=OrderWithCustomerAndProduct)
 def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends(get_db)):
