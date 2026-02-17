@@ -171,33 +171,44 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
                     const versions = [...group].sort((a, b) => parseFloat(b.document_version) - parseFloat(a.document_version));
                     
                     return (
-                        <div className="bg-gray-50 p-2 rounded">
-                            <p className="text-xs font-medium text-gray-500 mb-2">Version History:</p>
-                            <div className="flex flex-col gap-1">
+                        <div className="bg-gray-50 p-3 rounded">
+                            <p className="text-xs font-medium text-gray-600 mb-2">Version History:</p>
+                            <div className="flex flex-col gap-2">
                                 {versions.map(ver => (
-                                    <div key={ver.id} className="flex justify-between items-center bg-white p-2 rounded border border-gray-100">
-                                        <div className="flex items-center gap-3">
-                                            <Tag color="blue" variant="filled" className="text-[10px] m-0">v{ver.document_version}</Tag>
-                                            <span className="text-xs text-gray-600">{ver.document_name}</span>
+                                    <div
+                                        key={ver.id}
+                                        className="flex justify-between items-center bg-white px-3 py-2 rounded border border-gray-200 shadow-sm"
+                                    >
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <Tag color="blue" variant="filled" className="text-[10px] m-0 px-2">
+                                                v{ver.document_version}
+                                            </Tag>
+                                            <span className="text-xs text-gray-700 truncate">
+                                                {ver.document_name}
+                                            </span>
                                         </div>
-                                        <div className="flex gap-1">
-                                            <Button 
-                                                size="small" 
-                                                type="text" 
-                                                icon={<EyeOutlined />} 
-                                                onClick={() => onPreview(ver)}
-                                                className="text-[10px]"
-                                            />
-                                            <Button 
-                                                size="small" 
-                                                type="text" 
-                                                icon={<DownloadOutlined />}
-                                                onClick={() => {
-                                                    const downloadUrl = `${API_BASE_URL}/operation-documents/${ver.id}/download`;
-                                                    window.open(downloadUrl, '_blank');
-                                                }}
-                                                className="text-[10px]"
-                                            />
+                                        <div className="flex gap-2">
+                                            <Tooltip title="Preview">
+                                                <Button 
+                                                    size="small" 
+                                                    type="text" 
+                                                    icon={<EyeOutlined />} 
+                                                    onClick={() => onPreview(ver)}
+                                                    className="text-blue-500 hover:bg-blue-50"
+                                                />
+                                            </Tooltip>
+                                            <Tooltip title="Download">
+                                                <Button 
+                                                    size="small" 
+                                                    type="text" 
+                                                    icon={<DownloadOutlined />}
+                                                    onClick={() => {
+                                                        const downloadUrl = `${API_BASE_URL}/operation-documents/${ver.id}/download`;
+                                                        window.open(downloadUrl, '_blank');
+                                                    }}
+                                                    className="text-green-500 hover:bg-green-50"
+                                                />
+                                            </Tooltip>
                                         </div>
                                     </div>
                                 ))}
@@ -788,11 +799,7 @@ const DocumentsPanel = ({ selectedItem }) => {
                     <Button 
                         type="primary" 
                         icon={<PlusOutlined />} 
-                        onClick={() => {
-                            setUploadParentId(null);
-                            setUploadVersion('1.0');
-                            setIsUploadModalOpen(true);
-                        }}
+                        onClick={() => openPartActionModal('document')}
                         className="no-hover-btn"
                     >
                         Add Document

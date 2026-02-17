@@ -71,6 +71,9 @@ const RawMaterials = () => {
   const fetchingOrders = useRef(false);
   const fetchingLinkedMaterials = useRef(false);
 
+  const [rawMaterialsPagination, setRawMaterialsPagination] = useState({ current: 1, pageSize: 15 });
+  const [linkedMaterialsPagination, setLinkedMaterialsPagination] = useState({ current: 1, pageSize: 15 });
+
   useEffect(() => {
     const loadData = async () => {
       if (activeTab === "raw-materials") {
@@ -651,10 +654,19 @@ const RawMaterials = () => {
             size="small"
             bordered
             pagination={{
-              pageSize: 15,
+              current: linkedMaterialsPagination.current,
+              pageSize: linkedMaterialsPagination.pageSize,
               showSizeChanger: true,
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              pageSizeOptions: ['10', '20', '50', '100'],
+              position: ['bottomCenter'],
+            }}
+            onChange={(paginationConfig) => {
+              setLinkedMaterialsPagination({
+                current: paginationConfig.current,
+                pageSize: paginationConfig.pageSize,
+              });
             }}
             locale={{ emptyText: <Empty description="No linked materials found" /> }}
             className="modern-table"
@@ -822,11 +834,20 @@ const RawMaterials = () => {
             rowSelection={rowSelection || undefined}
             scroll={{ x: 'max-content' }}
             pagination={{
-              pageSize: 15,
+              current: rawMaterialsPagination.current,
+              pageSize: rawMaterialsPagination.pageSize,
               showSizeChanger: true,
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              pageSizeOptions: ['10', '20', '50', '100'],
+              position: ['bottomCenter'],
             }}
+          onChange={(paginationConfig) => {
+            setRawMaterialsPagination({
+              current: paginationConfig.current,
+              pageSize: paginationConfig.pageSize,
+            });
+          }}
             locale={{ emptyText: <Empty description="No raw materials found" /> }}
             className="modern-table"
         />
