@@ -108,3 +108,159 @@ class Customer(CustomerBase):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Pokayoke Checklists Schemas
+# =======================
+class PokayokeChecklistBase(BaseModel):
+    name: str
+    description: str
+
+
+class PokayokeChecklistItemBase(BaseModel):
+    item_text: str
+    item_type: str  # 'boolean', 'numerical', 'text'
+    is_required: bool = True
+    expected_value: Optional[str] = None
+
+
+class PokayokeMachineAssignmentBase(BaseModel):
+    machine_id: int
+
+
+# Response schemas
+class PokayokeChecklist(PokayokeChecklistBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PokayokeChecklistItem(PokayokeChecklistItemBase):
+    id: int
+    checklist_id: int
+    sequence_number: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PokayokeMachineAssignment(PokayokeMachineAssignmentBase):
+    id: int
+    checklist_id: int
+    assigned_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Create schemas
+class PokayokeChecklistCreate(PokayokeChecklistBase):
+    pass
+
+
+class PokayokeChecklistItemCreate(PokayokeChecklistItemBase):
+    pass
+
+
+class PokayokeMachineAssignmentCreate(PokayokeMachineAssignmentBase):
+    pass
+
+
+# Update schemas
+class PokayokeChecklistUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class PokayokeChecklistItemUpdate(BaseModel):
+    item_text: Optional[str] = None
+    sequence_number: Optional[int] = None
+    item_type: Optional[str] = None
+    is_required: Optional[bool] = None
+    expected_value: Optional[str] = None
+
+
+class PokayokeMachineAssignmentUpdate(BaseModel):
+    checklist_id: Optional[int] = None
+    machine_id: Optional[int] = None
+
+
+# Response with nested data
+class PokayokeChecklistWithItems(PokayokeChecklist):
+    items: List[PokayokeChecklistItem] = []
+    machine_assignments: List[PokayokeMachineAssignment] = []
+
+
+# =======================
+# POKAYOKE COMPLETED LOGS
+# =======================
+class PokayokeCompletedLogBase(BaseModel):
+    checklist_id: int
+    machine_id: int
+    operator_id: int
+    production_order_id: Optional[int] = None
+    completed_at: datetime
+    all_items_passed: bool
+    comments: Optional[str] = None
+    read: bool = False
+
+
+class PokayokeCompletedLog(PokayokeCompletedLogBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# POKAYOKE ITEM RESPONSES
+# =======================
+class PokayokeItemResponseBase(BaseModel):
+    completed_log_id: int
+    item_id: int
+    response_value: str
+    is_confirming: bool = False
+    timestamp: datetime
+
+
+class PokayokeItemResponse(PokayokeItemResponseBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# Create schemas
+class PokayokeCompletedLogCreate(PokayokeCompletedLogBase):
+    pass
+
+
+class PokayokeItemResponseCreate(PokayokeItemResponseBase):
+    pass
+
+
+# Update schemas
+class PokayokeCompletedLogUpdate(BaseModel):
+    checklist_id: Optional[int] = None
+    machine_id: Optional[int] = None
+    operator_id: Optional[int] = None
+    production_order_id: Optional[int] = None
+    all_items_passed: Optional[bool] = None
+    comments: Optional[str] = None
+    read: Optional[bool] = None
+
+
+class PokayokeItemResponseUpdate(BaseModel):
+    completed_log_id: Optional[int] = None
+    item_id: Optional[int] = None
+    response_value: Optional[str] = None
+    is_confirming: Optional[bool] = None
+
+
+# Response with nested data
+class PokayokeCompletedLogWithResponses(PokayokeCompletedLog):
+    item_responses: List[PokayokeItemResponse] = []
