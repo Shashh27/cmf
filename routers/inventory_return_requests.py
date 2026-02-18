@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime, timedelta, timezone
 from DB.database import get_db
 from DB.models.inventory import InventoryReturnRequest, InventoryRequest
 from DB.models.access_control import AccessUser
@@ -15,6 +16,9 @@ router = APIRouter(
     prefix="/inventory-return-requests",
     tags=["Inventory Return Requests"]
 )
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
 
 
 # =======================
@@ -50,6 +54,9 @@ def create_inventory_return_request(
             detail=f"Operator with id {return_request.operator_id} not found"
         )
     
+    # Auto-populate total_requested_qty from the original inventory request
+    total_requested_qty = inventory_request.quantity
+    
     # Get all existing return requests for this inventory request
     existing_returns = db.query(InventoryReturnRequest).filter(
         InventoryReturnRequest.requested_id == return_request.requested_id
@@ -57,7 +64,7 @@ def create_inventory_return_request(
     
     # Calculate total already returned
     total_returned_so_far = sum(r.returned_qty for r in existing_returns)
-    remaining_qty = return_request.total_requested_qty - total_returned_so_far
+    remaining_qty = total_requested_qty - total_returned_so_far
     
     # Validate the new return quantity
     if return_request.returned_qty <= 0:
@@ -84,12 +91,13 @@ def create_inventory_return_request(
     db_return_request = InventoryReturnRequest(
         requested_id=return_request.requested_id,
         operator_id=return_request.operator_id,
-        total_requested_qty=return_request.total_requested_qty,  # This will be the same for all returns of this request
+        total_requested_qty=total_requested_qty,  # Auto-populated from inventory request
         returned_qty=return_request.returned_qty,  # This is just for this specific return
         remarks=return_request.remarks,  # Optional remarks field
         status=return_request.status,  # Allow pending or collected initially
         admin_id=None,  # admin_id will be set when status is updated to collected
-        created_at=datetime.utcnow()
+        created_at=datetime.now(IST).replace(tzinfo=None),
+        updated_at=None
     )
     
     db.add(db_return_request)
@@ -109,7 +117,6 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
         admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
         
         # Get inventory request details
         inventory_request_details = None
@@ -120,7 +127,7 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
             
             tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
             inv_operator = db.query(AdminUser).filter(AdminUser.id == inventory_request.operator_id).first()
-            admin = db.query(AdminUser).filter(AdminUser.id == inventory_request.admin_id).first()
+            inventory_admin = db.query(AdminUser).filter(AdminUser.id == inventory_request.admin_id).first()
             project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
             part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
             
@@ -185,7 +192,7 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
         
         tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
         inv_operator = db.query(AdminUser).filter(AdminUser.id == inventory_request.operator_id).first()
-        admin = db.query(AdminUser).filter(AdminUser.id == inventory_request.admin_id).first()
+        inventory_admin = db.query(AdminUser).filter(AdminUser.id == inventory_request.admin_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
         
@@ -366,9 +373,13 @@ def update_inventory_return_request_status(
             db.commit()
             print(f"DEBUG: Final tool quantity after commit: {tool.quantity}")
     
-    # Update the return request with admin_id, status, and updated_at will be set automatically
-    db_return_request.admin_id = admin_id
+    # Update the return request with admin_id (only for collected status), status, and updated_at
+    if status == 'collected':
+        db_return_request.admin_id = admin_id
+    elif status == 'pending':
+        db_return_request.admin_id = None  # Clear admin_id when marking as pending
     db_return_request.status = status
+    db_return_request.updated_at = datetime.now(IST).replace(tzinfo=None)
     
     db.commit()
     db.refresh(db_return_request)

@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from datetime import datetime, timedelta, timezone
 from DB.database import get_db
 from DB.models.inventory import InventoryRequest, ToolsList
 from DB.models.access_control import AccessUser
@@ -17,6 +18,9 @@ router = APIRouter(
     prefix="/inventory-requests",
     tags=["Inventory Requests"]
 )
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
 
 
 # =======================
@@ -309,9 +313,10 @@ def update_inventory_request_status(
             tool.quantity += db_inventory_request.quantity
         # If already rejected, no change to inventory
     
-    # Update the request with admin_id, status, and updated_at will be set automatically
+    # Update the request with admin_id, status, and updated_at
     db_inventory_request.admin_id = admin_id
     db_inventory_request.status = status
+    db_inventory_request.updated_at = datetime.now(IST).replace(tzinfo=None)
     
     db.commit()
     db.refresh(db_inventory_request)

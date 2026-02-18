@@ -55,6 +55,13 @@ def get_parts_by_tool(tool_id: int, db: Session = Depends(get_db)):
     return tools
 
 
+@router.get("/operation/{operation_id}", response_model=List[ToolWithPart])
+def get_tools_by_operation(operation_id: int, db: Session = Depends(get_db)):
+    """Get all tools for a specific operation"""
+    tools = db.query(ToolWithPartModel).filter(ToolWithPartModel.operation_id == operation_id).all()
+    return tools
+
+
 @router.put("/{tool_with_part_id}", response_model=ToolWithPart)
 def update_tool_with_part(tool_with_part_id: int, tool: ToolWithPartUpdate, db: Session = Depends(get_db)):
     """Update a tool-part association"""

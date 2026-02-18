@@ -11,7 +11,7 @@ from routers import (
     part_types_router,
     parts_router,
     operations_router,
-    process_plans_router,
+
     documents_router,
     tools_router,
     customers_router,
@@ -28,8 +28,12 @@ from routers import (
     inventory_requests_router,
     inventory_return_requests_router,
     inventory_requests_router,
-    inventory_return_requests_router
+    inventory_return_requests_router,
+    transaction_history_router,
 )
+
+# Import general documents router
+from document_routers.general_documents import router as general_documents_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -64,9 +68,9 @@ async def startup_event():
     # Create database tables
     try:
         Base.metadata.create_all(bind=engine)
-        print("✓ Database tables created/verified")
+        print("SUCCESS: Database tables created/verified")
     except Exception as e:
-        print(f"✗ Error creating database tables: {e}")
+        print(f"ERROR: Error creating database tables: {e}")
 
     # Initialize MinIO client
     try:
@@ -77,11 +81,11 @@ async def startup_event():
             bucket_name=MINIO_BUCKET_NAME,
             secure=MINIO_SECURE
         )
-        print("✓ MinIO client initialized")
+        print("SUCCESS: MinIO client initialized")
         print(f"  - Endpoint: {MINIO_ENDPOINT}")
         print(f"  - Bucket: {MINIO_BUCKET_NAME}")
     except Exception as e:
-        print(f"✗ Error initializing MinIO client: {e}")
+        print(f"ERROR: Error initializing MinIO client: {e}")
         print("  Warning: Document upload functionality may not work")
 
     print("=" * 60)
@@ -96,7 +100,7 @@ app.include_router(assemblies_router, prefix="/api/v1")
 app.include_router(part_types_router, prefix="/api/v1")
 app.include_router(parts_router, prefix="/api/v1")
 app.include_router(operations_router, prefix="/api/v1")
-app.include_router(process_plans_router, prefix="/api/v1")
+
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(tools_router, prefix="/api/v1")
 app.include_router(customers_router, prefix="/api/v1")
@@ -104,6 +108,7 @@ app.include_router(orders_router, prefix="/api/v1")
 app.include_router(order_documents_router, prefix="/api/v1")
 app.include_router(rawmaterials_router, prefix="/api/v1")
 app.include_router(workcenter_router, prefix="/api/v1")
+app.include_router(general_documents_router)
 app.include_router(access_control_router, prefix="/api/v1")
 app.include_router(login_router, prefix="/api/v1")
 app.include_router(machines_router, prefix="/api/v1")
@@ -112,6 +117,7 @@ app.include_router(operation_documents_router, prefix="/api/v1")
 app.include_router(tools_list_router, prefix="/api/v1")
 app.include_router(inventory_requests_router, prefix="/api/v1")
 app.include_router(inventory_return_requests_router, prefix="/api/v1")
+app.include_router(transaction_history_router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -124,7 +130,8 @@ def root():
             "Complete CRUD operations for all entities",
             "Document upload to MinIO storage",
             "File download from MinIO",
-            "Support for PDF, DOCX, CSV, XLSX files"
+            "Support for PDF, DOCX, CSV, XLSX, and image files",
+            "General documents with folder structure and versioning"
         ],
         "docs": "/docs",
         "redoc": "/redoc"
@@ -156,14 +163,14 @@ def system_info():
             "bucket": MINIO_BUCKET_NAME,
             "secure": MINIO_SECURE
         },
-        "supported_file_types": ["pdf", "docx", "csv", "xlsx", "doc", "xls", "txt"],
+        "supported_file_types": ["pdf", "docx", "csv", "xlsx", "doc", "xls", "txt", "jpg", "jpeg", "png", "gif"],
         "endpoints": {
             "products": "/api/v1/products",
             "assemblies": "/api/v1/assemblies",
             "part_types": "/api/v1/part-types",
             "parts": "/api/v1/parts",
             "operations": "/api/v1/operations",
-            "process_plans": "/api/v1/process-plans",
+           
             "documents": "/api/v1/documents",
             "tools": "/api/v1/tools",
             "customers": "/api/v1/customers",
@@ -176,7 +183,8 @@ def system_info():
             "operation_documents": "/api/v1/operation-documents",
             "tools_list": "/api/v1/tools-list",
             "inventory_requests": "/api/v1/inventory-requests",
-            "inventory_return_requests": "/api/v1/inventory-return-requests"
+            "inventory_return_requests": "/api/v1/inventory-return-requests",
+            "general_documents": "/general-documents"
         }
     }
 

@@ -3,6 +3,7 @@ from typing import Optional, List, Text
 from datetime import datetime, time
 from typing_extensions import Self
 from .configuration import Customer
+from .inventory import ToolsList
 
 
 # =======================
@@ -12,6 +13,7 @@ class ProductBase(BaseModel):
     product_name: str
     product_number: str
     product_version: str
+    user_id: int
 
 
 class ProductCreate(ProductBase):
@@ -22,10 +24,12 @@ class ProductUpdate(BaseModel):
     product_name: Optional[str] = None
     product_number: Optional[str] = None
     product_version: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class Product(ProductBase):
     id: int
+    user_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -110,6 +114,7 @@ class Part(PartBase):
     id: int
     type_name: Optional[str] = None
     raw_material_name: Optional[str] = None
+    priority: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -126,6 +131,8 @@ class OperationBase(BaseModel):
     workcenter_id: Optional[int] = None
     machine_id: Optional[int] = None
     part_id: int
+    work_instructions: Optional[str] = None
+    notes: Optional[str] = None
 
     @field_validator('setup_time', 'cycle_time', mode='before')
     @classmethod
@@ -170,6 +177,8 @@ class OperationUpdate(BaseModel):
     workcenter_id: Optional[int] = None
     machine_id: Optional[int] = None
     part_id: Optional[int] = None
+    work_instructions: Optional[str] = None
+    notes: Optional[str] = None
 
     @field_validator('setup_time', 'cycle_time', mode='before')
     @classmethod
@@ -205,35 +214,37 @@ class OperationUpdate(BaseModel):
 class Operation(OperationBase):
     id: int
     work_center_name: Optional[str] = None
+    operation_documents: List['OperationDocument'] = []
+    tools: List['ToolWithPart'] = []
 
     class Config:
         from_attributes = True
 
 
 # =======================
-# Process Plan Schemas
+# Process Plan Schemas (Removed - Merged into Operations)
 # =======================
-class ProcessPlanBase(BaseModel):
-    operation_id: int
-    work_instructions: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class ProcessPlanCreate(ProcessPlanBase):
-    pass
-
-
-class ProcessPlanUpdate(BaseModel):
-    operation_id: Optional[int] = None
-    work_instructions: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class ProcessPlan(ProcessPlanBase):
-    id: int
-
-    class Config:
-        from_attributes = True
+# class ProcessPlanBase(BaseModel):
+#    operation_id: int
+#    work_instructions: Optional[str] = None
+#    notes: Optional[str] = None
+#
+#
+# class ProcessPlanCreate(ProcessPlanBase):
+#    pass
+#
+#
+# class ProcessPlanUpdate(BaseModel):
+#    operation_id: Optional[int] = None
+#    work_instructions: Optional[str] = None
+#    notes: Optional[str] = None
+#
+#
+# class ProcessPlan(ProcessPlanBase):
+#    id: int
+#
+#    class Config:
+#        from_attributes = True
 
 
 # =======================
@@ -274,6 +285,7 @@ class Document(DocumentBase):
 class ToolWithPartBase(BaseModel):
     tool_id: int
     part_id: int
+    operation_id: Optional[int] = None
 
 
 class ToolWithPartCreate(ToolWithPartBase):
@@ -283,10 +295,12 @@ class ToolWithPartCreate(ToolWithPartBase):
 class ToolWithPartUpdate(BaseModel):
     tool_id: Optional[int] = None
     part_id: Optional[int] = None
+    operation_id: Optional[int] = None
 
 
 class ToolWithPart(ToolWithPartBase):
     id: int
+    tool: Optional[ToolsList] = None
 
     class Config:
         from_attributes = True
@@ -298,7 +312,6 @@ class ToolWithPart(ToolWithPartBase):
 class PartDetails(BaseModel):
     part: Part
     operations: List[Operation] = []
-    process_plans: List[ProcessPlan] = []
     documents: List[Document] = []
     tools: List[ToolWithPart] = []
 
@@ -317,7 +330,6 @@ class ProductHierarchicalData(BaseModel):
 
 
 
-
 # =======================
 # Order Schemas
 # =======================
@@ -327,6 +339,7 @@ class OrderBase(BaseModel):
     order_date: Optional[datetime] = None
     customer_id: int
     product_id: int
+    user_id: int
     quantity: int
     due_date: datetime
     status: str
@@ -342,6 +355,7 @@ class OrderUpdate(BaseModel):
     order_date: Optional[datetime] = None
     customer_id: Optional[int] = None
     product_id: Optional[int] = None
+    user_id: Optional[int] = None
     quantity: Optional[int] = None
     due_date: Optional[datetime] = None
     status: Optional[str] = None
@@ -351,6 +365,7 @@ class Order(OrderBase):
     id: int
     company_name: Optional[str] = None
     product_name: Optional[str] = None
+    user_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -359,6 +374,14 @@ class Order(OrderBase):
 class OrderWithCustomerAndProduct(Order):
     company_name: Optional[str] = None
     product_name: Optional[str] = None
+    user_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class OrderWithHierarchy(OrderWithCustomerAndProduct):
+    product_hierarchy: ProductHierarchicalData
 
     class Config:
         from_attributes = True
@@ -379,6 +402,7 @@ class OrderDocumentBase(BaseModel):
     document_name: str
     document_type: str
     document_version: str
+    parent_id: Optional[int] = None
 
 
 class OrderDocumentCreate(OrderDocumentBase):
@@ -391,6 +415,7 @@ class OrderDocumentUpdate(BaseModel):
     document_type: Optional[str] = None
     document_version: Optional[str] = None
     document_url: Optional[str] = None
+    parent_id: Optional[int] = None
 
 
 class OrderDocument(OrderDocumentBase):
@@ -410,6 +435,7 @@ class OperationDocumentBase(BaseModel):
     document_type: str
     document_version: str
     operation_id: int
+    parent_id: Optional[int] = None
 
 
 class OperationDocumentCreate(OperationDocumentBase):
@@ -422,6 +448,7 @@ class OperationDocumentUpdate(BaseModel):
     document_type: Optional[str] = None
     document_version: Optional[str] = None
     operation_id: Optional[int] = None
+    parent_id: Optional[int] = None
 
 
 class OperationDocument(OperationDocumentBase):
@@ -437,6 +464,9 @@ class OperationDocumentWithDetails(OperationDocument):
 
     class Config:
         from_attributes = True
+
+# Update forward references
+Operation.model_rebuild()
 
 
 # =======================
@@ -472,6 +502,49 @@ class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     material_status: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Order Part Priority Schemas
+# =======================
+class OrderPartPriorityBase(BaseModel):
+    order_id: int
+    product_id: int
+    part_id: int
+    priority: int
+
+
+class OrderPartPriorityCreate(OrderPartPriorityBase):
+    pass
+
+
+class OrderPartPriorityUpdate(BaseModel):
+    order_id: Optional[int] = None
+    product_id: Optional[int] = None
+    part_id: Optional[int] = None
+    priority: Optional[int] = None
+
+
+class OrderPartPriorityGlobalUpdate(BaseModel):
+    id: int
+    priority: int
+
+
+class OrderPartPrioritySwap(BaseModel):
+    id1: int
+    id2: int
+
+
+class OrderPartPriority(OrderPartPriorityBase):
+    id: int
+    part_name: Optional[str] = None
+    part_number: Optional[str] = None
+    sale_order_number: Optional[str] = None
+    project_name: Optional[str] = None
+    product_name: Optional[str] = None
 
     class Config:
         from_attributes = True

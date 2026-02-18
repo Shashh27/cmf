@@ -3,7 +3,6 @@ from .assemblies import router as assemblies_router
 from .part_types import router as part_types_router
 from .parts import router as parts_router
 from .operations import router as operations_router
-from .process_plans import router as process_plans_router
 from .documents import router as documents_router
 from .tools import router as tools_router
 from .customers import router as customers_router
@@ -21,6 +20,7 @@ from .inventory_requests import router as inventory_requests_router
 from .inventory_return_requests import router as inventory_return_requests_router
 from .inventory_requests import router as inventory_requests_router
 from .inventory_return_requests import router as inventory_return_requests_router
+from .transaction_history import router as transaction_history_router
 
 __all__ = [
     "products_router",
@@ -28,7 +28,6 @@ __all__ = [
     "part_types_router",
     "parts_router",
     "operations_router",
-    "process_plans_router",
     "documents_router",
     "tools_router",
     "customers_router",
@@ -40,5 +39,6 @@ __all__ = [
     "order_parts_raw_material_linked_router",
     "operation_documents_router",
     "tools_list_router",
-    "access_control_router"
+    "access_control_router",
+    "transaction_history_router"
 ]

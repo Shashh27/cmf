@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from DB.database import get_db, MINIO_BUCKET_NAME
 from DB.models.oms import OrderDocument, Order
 from DB.minio_client import get_minio_client
@@ -18,8 +18,9 @@ router = APIRouter(prefix="/order-documents", tags=["order-documents"])
 async def upload_order_document(
     order_id: int,
     file: UploadFile = File(...),
-    document_type: str = "",
-    document_version: str = "1.0",
+    document_type: str = Form(""),
+    document_version: str = Form("1.0"),
+    parent_id: Optional[int] = Form(None),
     db: Session = Depends(get_db)
 ):
     """Upload an order document to MinIO"""
@@ -27,6 +28,12 @@ async def upload_order_document(
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Check if parent exists if provided
+    if parent_id:
+        parent = db.query(OrderDocument).filter(OrderDocument.id == parent_id).first()
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent document not found")
     
     # Generate unique filename
     file_extension = os.path.splitext(file.filename)[1]
@@ -56,7 +63,8 @@ async def upload_order_document(
             document_name=file.filename,
             document_url=document_url,
             document_type=document_type or file.content_type,
-            document_version=document_version
+            document_version=document_version,
+            parent_id=parent_id
         )
         
         db.add(db_document)

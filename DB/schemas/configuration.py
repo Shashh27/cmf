@@ -73,8 +73,27 @@ class Machine(MachineBase):
     class Config:
         from_attributes = True
 
+class MachinePublic(BaseModel):
+    work_center_id: int
+    type: str
+    make: Optional[str] = None
+    model: Optional[str] = None
+    year_of_installation: Optional[int] = None
+    cnc_controller: Optional[str] = None
+    cnc_controller_service: Optional[str] = None
+    remarks: Optional[str] = None
+    calibration_date: Optional[datetime] = None
+    calibration_due_date: Optional[datetime] = None
+    id: int
+
+    class Config:
+        from_attributes = True
+
 
 class MachineWithWorkCenter(Machine):
+    work_center: WorkCenter
+
+class MachineWithWorkCenterPublic(MachinePublic):
     work_center: WorkCenter
 
 
