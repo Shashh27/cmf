@@ -345,6 +345,7 @@ const TransactionHistory = () => {
           {!allTransactionsLoading && allTransactionsData && (
             <div>             
               <Table
+                className="inventory-history-table"
                 columns={combinedTransactionColumns}
                 dataSource={getCombinedTableData()}
                 rowKey="key"
@@ -367,6 +368,20 @@ const TransactionHistory = () => {
                       current: 1,
                       pageSize: size,
                     });
+                  },
+                }}
+                components={{
+                  header: {
+                    cell: (props) => (
+                      <th
+                        {...props}
+                        style={{
+                          ...(props.style || {}),
+                          paddingTop: 10,
+                          paddingBottom: 10,
+                        }}
+                      />
+                    ),
                   },
                 }}
                 size="small"

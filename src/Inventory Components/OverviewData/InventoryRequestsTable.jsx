@@ -287,6 +287,20 @@ const InventoryRequestsTable = () => {
           },
         }}
         size="small"
+        components={{
+          header: {
+            cell: (props) => (
+              <th
+                {...props}
+                style={{
+                  ...(props.style || {}),
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                }}
+              />
+            ),
+          },
+        }}
         scroll={{ x: 1200 }}
       />
 

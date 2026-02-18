@@ -37,6 +37,7 @@ const PokaYokeChecklists = () => {
   const [initialItems, setInitialItems] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingChecklist, setEditingChecklist] = useState(null);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [form] = Form.useForm();
   const [itemForm] = Form.useForm();
   const [editForm] = Form.useForm();
@@ -396,11 +397,20 @@ const PokaYokeChecklists = () => {
         size="small"
         scroll={{ x: 1000 }}
         pagination={{
-          pageSize: 10,
+          current: pagination.current,
+          pageSize: pagination.pageSize,
           showSizeChanger: true,
           showQuickJumper: true,
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
           pageSizeOptions: ['10', '20', '50', '100'],
+          onChange: (page, pageSize) => {
+            setPagination({ current: page, pageSize: pageSize });
+            console.log('Page changed to:', page, 'Page size:', pageSize);
+          },
+          onShowSizeChange: (current, size) => {
+            setPagination({ current: 1, pageSize: size });
+            console.log('Page size changed to:', size);
+          },
         }}
         style={{
           background: '#fff',
@@ -620,7 +630,10 @@ const PokaYokeChecklists = () => {
             key="addItem"
             type="primary"
             icon={<PlusOutlined />}
-            onClick={() => setAddItemModalVisible(true)}
+            onClick={() => {
+              setPreviewModalVisible(false);
+              setAddItemModalVisible(true);
+            }}
             style={{
               background: '#1890ff',
               borderColor: '#1890ff',

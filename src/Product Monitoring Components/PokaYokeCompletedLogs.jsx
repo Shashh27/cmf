@@ -27,8 +27,10 @@ const PokaYokeCompletedLogs = () => {
   const [machines, setMachines] = useState([]);
   const [checklists, setChecklists] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
   const [operators, setOperators] = useState([]);
   const [selectedMachine, setSelectedMachine] = useState(null);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
 
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -43,27 +45,31 @@ const PokaYokeCompletedLogs = () => {
 
   const fetchMetaData = async () => {
     try {
-      const [machinesRes, checklistsRes, ordersRes, operatorsRes] = await Promise.all([
+      const [machinesRes, checklistsRes, ordersRes, operatorsRes, partsRes] = await Promise.all([
         fetch(`${config.API_BASE_URL}/machines`),
         fetch(`${config.API_BASE_URL}/pokayoke-checklists`),
         fetch(`${config.API_BASE_URL}/orders`),
         fetch(`${config.API_BASE_URL}/access-users?skip=0&limit=1000`),
+        fetch(`${config.API_BASE_URL}/parts?skip=0&limit=1000`),
       ]);
 
       if (!machinesRes.ok) throw new Error('Failed to fetch machines');
       if (!checklistsRes.ok) throw new Error('Failed to fetch checklists');
       if (!ordersRes.ok) throw new Error('Failed to fetch orders');
       if (!operatorsRes.ok) throw new Error('Failed to fetch operators');
+      if (!partsRes.ok) throw new Error('Failed to fetch parts');
 
       const machinesData = await machinesRes.json();
       const checklistsData = await checklistsRes.json();
       const ordersData = await ordersRes.json();
       const operatorsData = await operatorsRes.json();
+      const partsData = await partsRes.json();
 
       setMachines(machinesData || []);
       setChecklists(checklistsData || []);
       setOrders(ordersData || []);
       setOperators(operatorsData || []);
+      setParts(partsData || []);
     } catch (error) {
       message.error(error.message || 'Failed to load reference data');
     }
@@ -139,6 +145,11 @@ const PokaYokeCompletedLogs = () => {
   const getOrderNumber = (id) => {
     const order = orders.find((o) => o.id === id);
     return order ? order.sale_order_number : '-';
+  };
+
+  const getPartName = (id) => {
+    const part = parts.find((p) => p.id === id);
+    return part ? part.part_name : '-';
   };
 
   const getStatusTag = (allItemsPassed) => {
@@ -348,7 +359,9 @@ const PokaYokeCompletedLogs = () => {
 
       <Card
         style={{
-          borderRadius: '8px',
+          borderRadius: '12px',
+          border: '1px solid #f0f0f0',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
           marginBottom: '16px',
         }}
         bodyStyle={{ padding: '16px 20px' }}
@@ -399,12 +412,21 @@ const PokaYokeCompletedLogs = () => {
         size="small"
         scroll={{ x: 1100 }}
         pagination={{
-          pageSize: 10,
+          current: pagination.current,
+          pageSize: pagination.pageSize,
           showSizeChanger: true,
           showQuickJumper: true,
           showTotal: (total, range) =>
             `${range[0]}-${range[1]} of ${total} items`,
           pageSizeOptions: ['10', '20', '50', '100'],
+          onChange: (page, pageSize) => {
+            setPagination({ current: page, pageSize: pageSize });
+            console.log('Page changed to:', page, 'Page size:', pageSize);
+          },
+          onShowSizeChange: (current, size) => {
+            setPagination({ current: 1, pageSize: size });
+            console.log('Page size changed to:', size);
+          },
         }}
         style={{
           background: '#fff',
@@ -500,6 +522,12 @@ const PokaYokeCompletedLogs = () => {
                     <Text type="secondary">Completed At</Text>
                     <div style={{ fontWeight: 500 }}>
                       {formatDateTime(selectedLogDetails.completed_at)}
+                    </div>
+                  </div>
+                  <div>
+                    <Text type="secondary">Part</Text>
+                    <div style={{ fontWeight: 500 }}>
+                      {getPartName(selectedLogDetails.part_id)}
                     </div>
                   </div>
                 </div>

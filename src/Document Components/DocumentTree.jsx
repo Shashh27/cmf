@@ -10,7 +10,9 @@ import {
   PlusOutlined,      // Icon for new folder/document
   FileAddOutlined,   // Icon for add document
   DeleteOutlined,    // Icon for delete
-  UploadOutlined     // Icon for upload
+  UploadOutlined,    // Icon for upload
+  DesktopOutlined,   // Icon for machines
+  FolderOpenOutlined // Icon for common documents
 } from '@ant-design/icons';
 import config from '../Config/config';
 
@@ -18,6 +20,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
+  const [machines, setMachines] = useState([]);
   const [treeData, setTreeData] = useState([]);
   const [expandedKeys, setExpandedKeys] = useState([]);
   const [selectedKeys, setSelectedKeys] = useState([]);
@@ -31,6 +34,11 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   const [newFolderName, setNewFolderName] = useState('');
   const [parentFolderId, setParentFolderId] = useState(null);
   
+  // Common Documents state
+  const [commonFolders, setCommonFolders] = useState([]);
+  const [newCommonFolderModalVisible, setNewCommonFolderModalVisible] = useState(false);
+  const [commonFolderParentId, setCommonFolderParentId] = useState(null);
+  
   // Delete and Upload state
   const [deleteFolderModalVisible, setDeleteFolderModalVisible] = useState(false);
   const [folderToDelete, setFolderToDelete] = useState(null);
@@ -38,19 +46,21 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   const [uploadFolderId, setUploadFolderId] = useState(null);
   const [fileList, setFileList] = useState([]);
 
-  // Fetch orders and general folders on component mount
+  // Fetch orders, parts, machines and general folders on component mount
   useEffect(() => {
     fetchOrders();
     fetchPartsList();
+    fetchMachines();
     fetchGeneralFolders();
+    fetchCommonFolders();
   }, []);
 
-  // Reinitialize tree data when general folders change
+  // Reinitialize tree data when general folders, machines, orders, or parts change
   useEffect(() => {
-    if (orders.length > 0 || parts.length > 0) {
-      initializeTreeData(orders, parts);
+    if (orders.length > 0 || parts.length > 0 || machines.length > 0) {
+      initializeTreeData(orders, parts, machines);
     }
-  }, [generalFolders, orders, parts]);
+  }, [generalFolders, commonFolders, orders, parts, machines]);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -61,7 +71,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       }
       const data = await response.json();
       setOrders(data);
-      initializeTreeData(data, parts);
+      initializeTreeData(data, parts, machines);
     } catch (error) {
       message.error('Failed to fetch orders: ' + error.message);
     } finally {
@@ -82,6 +92,19 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     }
   };
 
+  const fetchMachines = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/machines/`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch machines');
+      }
+      const data = await response.json();
+      setMachines(data);
+    } catch (error) {
+      message.error('Failed to fetch machines: ' + error.message);
+    }
+  };
+
   const fetchGeneralFolders = async () => {
     try {
       const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/tree`);
@@ -92,6 +115,22 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       setGeneralFolders(data);
     } catch (error) {
       message.error('Failed to fetch general folders: ' + error.message);
+    }
+  };
+
+  const fetchCommonFolders = async () => {
+    try {
+      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/tree?type=common`);
+      if (!response.ok) {
+        // If common folders endpoint doesn't exist, initialize empty
+        setCommonFolders([]);
+        return;
+      }
+      const data = await response.json();
+      setCommonFolders(data);
+    } catch (error) {
+      // If common folders endpoint doesn't exist, initialize empty
+      setCommonFolders([]);
     }
   };
 
@@ -198,7 +237,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     };
   };
 
-  const initializeTreeData = (ordersData, partsData) => {
+  const initializeTreeData = (ordersData, partsData, machinesData) => {
     const initialTreeData = [
       {
         title: (
@@ -255,9 +294,175 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
         selectable: false,
         children: partsData.map(part => buildPartNode(part, null, [], false))
       },
+      {
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <DesktopOutlined style={{ color: '#13c2c2' }} />
+            <span>Machine Documents</span>
+          </span>
+        ),
+        titleText: 'Machine Documents',
+        key: 'machine-documents-root',
+        selectable: false,
+        children: machinesData.map(machine => ({
+          title: (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <DesktopOutlined style={{ color: '#1890ff', fontSize: '14px' }} />
+                <span>{machine.make && machine.model ? `${machine.make} ${machine.model}` : machine.make || `Machine ${machine.id}`}</span>
+              </span>
+              <Button 
+                type="text" 
+                size="small" 
+                icon={<UploadOutlined />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setUploadFolderId(`machine-${machine.id}`);
+                  setUploadModalVisible(true);
+                }}
+                style={{ 
+                  padding: '0 2px',
+                  height: '16px',
+                  fontSize: '10px',
+                  color: '#1890ff',
+                  minWidth: 'auto'
+                }}
+                title="Upload Document"
+              />
+            </div>
+          ),
+          titleText: machine.make && machine.model ? `${machine.make} ${machine.model}` : machine.make || `Machine ${machine.id}`,
+          key: `machine-${machine.id}`,
+          isLeaf: true,
+          selectable: true,
+          nodeData: {
+            type: 'machine-folder',
+            machineId: machine.id,
+            machineName: machine.make && machine.model ? `${machine.make} ${machine.model}` : machine.make || `Machine ${machine.id}`
+          }
+        }))
+      },
+      {
+        title: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <FolderOpenOutlined style={{ color: '#722ed1' }} />
+              <span>Common Documents</span>
+            </span>
+            <Button 
+              type="text" 
+              size="small" 
+              icon={<PlusOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCommonFolderParentId(null);
+                setNewCommonFolderModalVisible(true);
+              }}
+              style={{ 
+                padding: '0 2px',
+                height: '16px',
+                fontSize: '10px',
+                color: '#52c41a',
+                minWidth: 'auto'
+              }}
+              title="Create Folder"
+            />
+          </div>
+        ),
+        titleText: 'Common Documents',
+        key: 'common-documents-root',
+        selectable: true,
+        nodeData: {
+          type: 'common-root',
+          folderName: 'Common Documents'
+        },
+        children: buildCommonFoldersTree(commonFolders)
+      },
       ...buildGeneralFoldersTree(generalFolders)
     ];
     setTreeData(initialTreeData);
+  };
+
+  const buildCommonFoldersTree = (folders, level = 0) => {
+    return folders.map(folder => ({
+      title: (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <FolderOutlined style={{ color: '#722ed1' }} />
+            <span>{folder.folder_name}</span>
+            {folder.document_count > 0 && (
+              <span style={{ fontSize: '11px', color: '#999' }}>({folder.document_count})</span>
+            )}
+          </span>
+          <div style={{ display: 'flex', gap: '2px' }}>
+            <Button 
+              type="text" 
+              size="small" 
+              icon={<PlusOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                setCommonFolderParentId(folder.id);
+                setNewCommonFolderModalVisible(true);
+              }}
+              style={{ 
+                padding: '0 2px',
+                height: '16px',
+                fontSize: '10px',
+                color: '#52c41a',
+                minWidth: 'auto'
+              }}
+              title="Add Subfolder"
+            />
+            <Button 
+              type="text" 
+              size="small" 
+              icon={<UploadOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                setUploadFolderId(folder.id);
+                setUploadModalVisible(true);
+              }}
+              style={{ 
+                padding: '0 2px',
+                height: '16px',
+                fontSize: '10px',
+                color: '#1890ff',
+                minWidth: 'auto'
+              }}
+              title="Upload Document"
+            />
+            <Button 
+              type="text" 
+              size="small" 
+              icon={<DeleteOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                setFolderToDelete(folder);
+                setDeleteFolderModalVisible(true);
+              }}
+              style={{ 
+                padding: '0 2px',
+                height: '16px',
+                fontSize: '10px',
+                color: '#ff4d4f',
+                minWidth: 'auto'
+              }}
+              title="Delete Folder"
+            />
+          </div>
+        </div>
+      ),
+      titleText: folder.folder_name,
+      key: `common-folder-${folder.id}`,
+      selectable: true,
+      nodeData: {
+        type: 'common-folder',
+        folderId: folder.id,
+        folderName: folder.folder_name,
+        documentCount: folder.document_count
+      },
+      children: folder.children && folder.children.length > 0 ? buildCommonFoldersTree(folder.children, level + 1) : []
+    }));
   };
 
   const buildGeneralFoldersTree = (folders, level = 0) => {
@@ -373,9 +578,47 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       await fetchGeneralFolders();
       
       // Reinitialize tree data
-      initializeTreeData(orders, parts);
+      initializeTreeData(orders, parts, machines);
     } catch (error) {
       message.error('Failed to create folder: ' + error.message);
+    }
+  };
+
+  const handleCreateCommonFolder = async () => {
+    if (!newFolderName.trim()) {
+      message.error('Please enter a folder name');
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          folder_name: newFolderName.trim(),
+          parent_id: commonFolderParentId,
+          folder_type: 'common'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create common folder');
+      }
+
+      message.success('Common folder created successfully');
+      setNewCommonFolderModalVisible(false);
+      setNewFolderName('');
+      setCommonFolderParentId(null);
+      
+      // Refresh common folders
+      await fetchCommonFolders();
+      
+      // Reinitialize tree data
+      initializeTreeData(orders, parts, machines);
+    } catch (error) {
+      message.error('Failed to create common folder: ' + error.message);
     }
   };
 
@@ -404,9 +647,10 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       
       // Refresh general folders
       await fetchGeneralFolders();
+      await fetchCommonFolders();
       
       // Reinitialize tree data
-      initializeTreeData(orders, parts);
+      initializeTreeData(orders, parts, machines);
     } catch (error) {
       message.error('Failed to delete folder: ' + error.message);
     }
@@ -438,16 +682,26 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     
     const formData = new FormData();
     formData.append('file', file, file.name);
-    formData.append('folder_id', uploadFolderId.toString());
     formData.append('file_name', file.name);
     
-    // Don't log FormData contents as it can be large
+    // Handle different upload scenarios
+    let uploadUrl;
+    if (typeof uploadFolderId === 'string' && uploadFolderId.startsWith('machine-')) {
+      // Machine document upload
+      const machineId = uploadFolderId.replace('machine-', '');
+      formData.append('machine_id', machineId);
+      uploadUrl = `${config.API_BASE_URL}/machines/${machineId}/upload-document`;
+    } else {
+      // General/Common folder upload
+      formData.append('folder_id', uploadFolderId.toString());
+      uploadUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
+    }
     
     try {
       setLoading(true);
-      console.log('Uploading file:', file.name, 'to folder:', uploadFolderId);
+      console.log('Uploading file:', file.name, 'to:', uploadUrl);
       
-      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`, {
+      const response = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,
         // Don't set Content-Type header, let browser set it with boundary
@@ -474,11 +728,12 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       setFileList([]);
       setUploadFolderId(null);
       
-      // Refresh general folders
+      // Refresh folders
       await fetchGeneralFolders();
+      await fetchCommonFolders();
       
       // Reinitialize tree data
-      initializeTreeData(orders, parts);
+      initializeTreeData(orders, parts, machines);
     } catch (error) {
       console.error('Upload error:', error);
       message.error('Failed to upload document: ' + error.message);
@@ -689,7 +944,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
           onSelect={onSelect}
           style={{ 
             background: 'transparent',
-            fontSize: isMobile ? '12px' : '14px',
+            fontSize: isMobile ? '14px' : '16px', // Increased font size
             minWidth: 'max-content' // Ensure tree items don't get cut off
           }}
           showLine={!isMobile}
@@ -716,6 +971,27 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
           value={newFolderName}
           onChange={(e) => setNewFolderName(e.target.value)}
           onPressEnter={handleCreateFolder}
+        />
+      </Modal>
+
+      {/* New Common Folder Modal */}
+      <Modal
+        title="Create New Common Folder"
+        open={newCommonFolderModalVisible}
+        onOk={handleCreateCommonFolder}
+        onCancel={() => {
+          setNewCommonFolderModalVisible(false);
+          setNewFolderName('');
+          setCommonFolderParentId(null);
+        }}
+        okText="Create"
+        cancelText="Cancel"
+      >
+        <Input
+          placeholder="Enter common folder name"
+          value={newFolderName}
+          onChange={(e) => setNewFolderName(e.target.value)}
+          onPressEnter={handleCreateCommonFolder}
         />
       </Modal>
 

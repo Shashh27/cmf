@@ -345,6 +345,7 @@ const ReturnRequestsTable = () => {
   return (
     <div>
       <Table
+        className="inventory-return-table"
         columns={columns}
         dataSource={returnRequests}
         rowKey="id"
@@ -367,6 +368,20 @@ const ReturnRequestsTable = () => {
               current: 1,
               pageSize: size,
             });
+          },
+        }}
+        components={{
+          header: {
+            cell: (props) => (
+              <th
+                {...props}
+                style={{
+                  ...(props.style || {}),
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                }}
+              />
+            ),
           },
         }}
         size="small"

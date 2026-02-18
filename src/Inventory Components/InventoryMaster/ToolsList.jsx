@@ -51,7 +51,10 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      setTools(data);
+      const sortedData = Array.isArray(data)
+        ? [...data].sort((a, b) => (a.id || 0) - (b.id || 0))
+        : [];
+      setTools(sortedData);
     } catch (error) {
       console.error('Failed to fetch tools:', error);
       message.error('Failed to fetch tools: ' + error.message);
@@ -380,6 +383,20 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         }}
         onChange={handleTableChange}
         size="small"
+        components={{
+          header: {
+            cell: (props) => (
+              <th
+                {...props}
+                style={{
+                  ...(props.style || {}),
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                }}
+              />
+            ),
+          },
+        }}
         scroll={{ x: 1300 }}
       />
     </div>

@@ -7,3 +7,40 @@
 .full-height-tabs .ant-tabs-tabpane {
   height: 100%;
 }
+
+/* Inventory & common table header styling - apply ONLY to header row */
+.ant-table-thead .table-header-styled {
+  background: linear-gradient(to bottom, #f0f5ff, #e6f0ff) !important;
+  color: #003a8c !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  border-bottom: 2px solid #1890ff !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  text-align: center !important;
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
+.ant-table-thead .table-header-styled .ant-table-column-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  white-space: nowrap;
+}
+
+/* Reset body cells that reuse the same column class */
+.ant-table-tbody .table-header-styled {
+  background: #ffffff !important;
+  color: inherit !important;
+  font-weight: inherit !important;
+  font-size: inherit !important;
+  border-bottom: 1px solid #f0f0f0 !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  text-align: center !important;
+}
+
+/* Previously had per-table header padding overrides; now all headers use same padding
+   via .ant-table-thead .table-header-styled to keep height consistent. */
