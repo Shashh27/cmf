@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-
 import Layout from "./components/Layout";
 import Login from "./Pages/Login";
 import OMS from "./Pages/OMS";
+import PartsPriority from "./OMS Components/PartsPriority";
 import RawMaterials from "./OMS Components/RawMaterials";
 import PDM from "./Pages/PDM";
 import Configuration from "./Pages/Configuration";
@@ -17,9 +18,9 @@ import PlannedVsActual from "./Product Monitoring Components/PlannedVsActual";
 import OrderTracking from "./Product Monitoring Components/OrderTracking";
 import Maintenance from "./Product Monitoring Components/Maintenance";
 import QualityManagement from "./Quality Management Components/QualityManagement";
-import InventoryMaster from "./Inventory Management Components/InventoryMaster";
-import OverviewData from "./Inventory Management Components/OverviewData";
-import DocumentManagement from "./Document Management Components/DocumentManagement";
+import InventoryMaster from "./Pages/Inventory";
+import OverviewData from "./Pages/OverviewData";
+import DocumentManagement from "./Pages/Document";
 import Notification from "./Notification Components/Notification";
 import AccessControl from "./Pages/AccessControl";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -39,6 +40,7 @@ function App() {
 
           <Route path="/admin/oms" element={<Navigate to="/admin/oms/orders" replace />} />
           <Route path="/admin/oms/orders" element={<OMS />} />
+          <Route path="/admin/oms/parts-priority" element={<PartsPriority />} />
           <Route path="/admin/oms/product/:productId" element={<OMS />} />
           <Route path="/admin/oms/rawmaterials" element={<RawMaterials />} />
 
@@ -70,9 +72,14 @@ function App() {
           <Route path="/admin/access_control" element={<AccessControl />} />
 
           {/* Project Coordinator Routes */}
-          <Route path="/project_coordinator" element={<Navigate to="/project_coordinator/dashboard" replace />} />
+          <Route path="/project_coordinator" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
           <Route path="/project_coordinator/dashboard" element={<ProjectCoordinatorDashboard />} />
-
+          <Route path="/project_coordinator/oms" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
+          <Route path="/project_coordinator/oms/orders" element={<ProjectCoordinatorDashboard />} />
+          <Route path="/project_coordinator/oms/product/:productId" element={<ProjectCoordinatorDashboard />} />
+          <Route path="/project_coordinator/pdm" element={<ProjectCoordinatorDashboard />} />
+         
+          
           {/* Operator Routes */}
           <Route path="/operator" element={<Navigate to="/operator/dashboard" replace />} />
           <Route path="/operator/dashboard" element={<OperatorDashboard />} />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Input, Typography, Tag, message, Space, Modal } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, EyeInvisibleOutlined, LockOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
@@ -166,8 +166,51 @@ const AccessControl = () => {
 
   return (
     <div style={{ padding: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <Title level={2} style={{ margin: 0 }}>Access Control Management</Title>
+      <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff;
+        }
+        .modern-table .ant-table-tbody > tr:hover > td {
+          background: #f0f8ff !important;
+        }
+        .modern-table .ant-table-tbody > tr > td {
+          border-bottom: 1px solid #f0f0f0;
+        }
+        .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
+          background-color: #2563eb !important;
+          color: white !important;
+          opacity: 1 !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+      `}</style>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <Title level={2} style={{ margin: 0, fontSize: '24px' }} className="flex items-center gap-3 text-gray-800">
+              <LockOutlined className="text-blue-600" />
+              Access Control Management
+            </Title>
+            <Typography.Text className="text-gray-500 mt-1 block">
+              Manage users, roles, and access permissions
+            </Typography.Text>
+          </div>
+          <Button 
+            type="primary" 
+            icon={<PlusOutlined />} 
+            onClick={() => {
+              setEditingUser(null);
+              setIsModalVisible(true);
+            }} 
+            size="large"
+            style={{ backgroundColor: '#2563eb' }}
+            className="border-none shadow-md no-hover-btn"
+          >
+            Register New User
+          </Button>
+        </div>
       </div>
 
       <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
@@ -178,12 +221,6 @@ const AccessControl = () => {
             style={{ width: 300 }}
             onChange={e => setSearchText(e.target.value)}
           />
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => {
-            setEditingUser(null);
-            setIsModalVisible(true);
-          }}>
-            Register New User
-          </Button>
         </div>
 
         <Table 
@@ -191,6 +228,7 @@ const AccessControl = () => {
           dataSource={filteredUsers} 
           rowKey="id"
           scroll={{ x: 'max-content' }}
+          className="modern-table"
           pagination={{ 
             total: filteredUsers.length,
             showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,

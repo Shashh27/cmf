@@ -7,14 +7,19 @@ const WorkCenterModal = ({ workCenter, isOpen, onClose, onSave }) => {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (workCenter) {
-      form.setFieldsValue({
-        code: workCenter.code || "",
-        work_center_name: workCenter.work_center_name || "",
-        description: workCenter.description || "",
-        is_schedulable: workCenter.is_schedulable || false,
-      });
-    } else {
+    if (workCenter && isOpen) {
+      // Use setTimeout to ensure form is mounted
+      setTimeout(() => {
+        if (form) {
+          form.setFieldsValue({
+            code: workCenter.code || "",
+            work_center_name: workCenter.work_center_name || "",
+            description: workCenter.description || "",
+            is_schedulable: workCenter.is_schedulable || false,
+          });
+        }
+      }, 0);
+    } else if (isOpen && form) {
       form.resetFields();
     }
   }, [workCenter, isOpen, form]);
@@ -57,7 +62,7 @@ const WorkCenterModal = ({ workCenter, isOpen, onClose, onSave }) => {
       open={isOpen}
       onCancel={onClose}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form
         form={form}

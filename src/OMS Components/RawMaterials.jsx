@@ -1,31 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { API_BASE_URL } from "../Config/auth";
-import { 
-  Table, 
-  Button, 
-  Tabs, 
-  Badge, 
-  Modal, 
-  Form, 
-  Input, 
-  Select, 
-  Typography, 
-  Space, 
-  Spin, 
-  Empty, 
-  message,
-  Checkbox
-} from "antd";
-import { 
-  CaretDownOutlined,
-  CaretRightOutlined,
-  AppstoreOutlined,
-  InboxOutlined,
-  ToolOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  PlusOutlined
-} from "@ant-design/icons";
+import { Table, Button, Tabs, Badge, Modal, Form, Input, InputNumber,Select, Typography, Space, Spin, Empty, 
+  message, Checkbox, Row, Col, Tooltip, Card, Tag } from "antd";
+import { CaretDownOutlined,CaretRightOutlined,AppstoreOutlined,CodeSandboxOutlined,EditOutlined,DeleteOutlined,PlusOutlined,
+  BlockOutlined,FileTextOutlined,InfoCircleOutlined,ExperimentOutlined,LinkOutlined,SafetyCertificateOutlined } from "@ant-design/icons";
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -45,13 +23,51 @@ const RawMaterials = () => {
   const [editingRawMaterial, setEditingRawMaterial] = useState(null);
   const [savingRawMaterial, setSavingRawMaterial] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [linkedMaterials, setLinkedMaterials] = useState([]);
+  const [linkedMaterialsLoading, setLinkedMaterialsLoading] = useState(false);
+
+  // Lazy loading states
+  const [activeTab, setActiveTab] = useState("raw-materials");
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [hasFetchedOrders, setHasFetchedOrders] = useState(false);
+  const [hasFetchedRawMaterials, setHasFetchedRawMaterials] = useState(false);
+  const [hasFetchedLinkedMaterials, setHasFetchedLinkedMaterials] = useState(false);
+
+  // Refs to track ongoing fetches
+  const fetchingRawMaterials = useRef(false);
+  const fetchingOrders = useRef(false);
+  const fetchingLinkedMaterials = useRef(false);
 
   useEffect(() => {
-    fetchOrders();
-    fetchRawMaterials();
-  }, []);
+    const loadData = async () => {
+      if (activeTab === "raw-materials") {
+        if (!hasFetchedRawMaterials) {
+          await fetchRawMaterials();
+          setHasFetchedRawMaterials(true);
+        }
+      } else if (activeTab === "linking") {
+        if (!hasFetchedOrders) {
+          await fetchOrders();
+          setHasFetchedOrders(true);
+        }
+        if (!hasFetchedRawMaterials) {
+          await fetchRawMaterials();
+          setHasFetchedRawMaterials(true);
+        }
+      } else if (activeTab === "order-status") {
+        if (!hasFetchedLinkedMaterials) {
+          await fetchLinkedMaterials();
+          setHasFetchedLinkedMaterials(true);
+        }
+      }
+    };
+    loadData();
+  }, [activeTab]);
 
   const fetchOrders = async () => {
+    if (fetchingOrders.current) return;
+    fetchingOrders.current = true;
+    setOrdersLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/orders/`);
       if (response.ok) {
@@ -63,57 +79,82 @@ const RawMaterials = () => {
     } catch (error) {
       console.error("Error fetching orders:", error);
       setOrders([]);
+    } finally {
+      setOrdersLoading(false);
+      fetchingOrders.current = false;
     }
   };
 
   const fetchRawMaterials = async () => {
+    if (fetchingRawMaterials.current) return;
+    fetchingRawMaterials.current = true;
     setLoading(true);
     
     try {
-      const response = await fetch(`${API_BASE_URL}/rawmaterials/?skip=0&limit=100`);
-      
-      if (response.ok) {
-        const data = await response.json();
-        
-        if (Array.isArray(data)) {
-          setRawMaterials(data);
-          setLoading(false);
-          return;
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching raw materials:', error);
-    }
-    
-    const endpoints = ["rawmaterials/", "raw-materials/", "raw_materials/"];
-    for (const endpoint of endpoints) {
       try {
-        const response = await fetch(`${API_BASE_URL}/${endpoint}`);
+        const response = await fetch(`${API_BASE_URL}/rawmaterials/?skip=0&limit=100`);
+        
         if (response.ok) {
           const data = await response.json();
-          let materials = [];
+          
           if (Array.isArray(data)) {
-            materials = data;
-          } else if (data?.results) {
-            materials = data.results;
-          } else if (data?.data) {
-            materials = Array.isArray(data.data) ? data.data : [];
-          } else if (data?.raw_materials) {
-            materials = data.raw_materials;
-          } else if (data?.id) {
-            materials = [data];
+            setRawMaterials(data);
+            return;
           }
-          setRawMaterials(materials);
-          setLoading(false);
-          return;
         }
       } catch (error) {
-        console.error(`Error fetching raw materials from ${endpoint}:`, error);
+        console.error('Error fetching raw materials:', error);
       }
+      
+      const endpoints = ["rawmaterials/", "raw-materials/", "raw_materials/"];
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(`${API_BASE_URL}/${endpoint}`);
+          if (response.ok) {
+            const data = await response.json();
+            let materials = [];
+            if (Array.isArray(data)) {
+              materials = data;
+            } else if (data?.results) {
+              materials = data.results;
+            } else if (data?.data) {
+              materials = Array.isArray(data.data) ? data.data : [];
+            } else if (data?.raw_materials) {
+              materials = data.raw_materials;
+            } else if (data?.id) {
+              materials = [data];
+            }
+            setRawMaterials(materials);
+            return;
+          }
+        } catch (error) {
+          console.error(`Error fetching raw materials from ${endpoint}:`, error);
+        }
+      }
+      
+      setRawMaterials([]);
+    } finally {
+      setLoading(false);
+      fetchingRawMaterials.current = false;
     }
-    
-    setRawMaterials([]);
-    setLoading(false);
+  };
+
+  const fetchLinkedMaterials = async () => {
+    if (fetchingLinkedMaterials.current) return;
+    fetchingLinkedMaterials.current = true;
+    setLinkedMaterialsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/order-parts-raw-material-linked/`);
+      if (response.ok) {
+        const data = await response.json();
+        setLinkedMaterials(data);
+      }
+    } catch (error) {
+      console.error("Error fetching linked materials:", error);
+    } finally {
+      setLinkedMaterialsLoading(false);
+      fetchingLinkedMaterials.current = false;
+    }
   };
 
   const openCreateRawMaterial = () => {
@@ -277,22 +318,25 @@ const RawMaterials = () => {
     return (
       <div
         key={part.id}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '6px 8px',
-          borderRadius: '4px',
-          marginLeft: `${level * 20}px`
-        }}
+        className={`
+          flex items-center gap-2 px-3 py-2.5 rounded-lg transition-all duration-200
+          ${isSelected 
+            ? 'bg-gradient-to-r from-blue-50 to-blue-100 border-l-4 border-blue-500 shadow-sm' 
+            : 'hover:bg-gray-50 border-l-4 border-transparent'
+          }
+        `}
+        style={{ marginLeft: `${level * 20}px` }}
       >
         <Checkbox
           checked={!!isSelected}
           onChange={() => togglePartSelection(orderId, part.id)}
-          style={{ marginRight: '8px' }}
+          className="mr-2"
         />
-        <ToolOutlined style={{ color: '#6b7280', marginRight: '8px', fontSize: '14px' }} />
-        <Text style={{ fontSize: '14px', fontWeight: 'medium' }}>{part.part_number}</Text>
-        <Text style={{ color: '#6b7280', fontSize: '14px', marginLeft: '8px' }}>{part.part_name}</Text>
+        <CodeSandboxOutlined className="text-green-500" />
+        <div className="flex flex-col">
+            <Text className="font-medium text-gray-800 leading-tight">{part.part_number}</Text>
+            <Text className="text-gray-500 text-xs">{part.part_name}</Text>
+        </div>
       </div>
     );
   };
@@ -306,33 +350,36 @@ const RawMaterials = () => {
     const isExpanded = expandedAssemblies[assembly.id];
 
     return (
-      <div key={assembly.id} style={{ marginBottom: '4px' }}>
+      <div key={assembly.id} className="mb-1">
         <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            padding: '6px 8px',
-            borderRadius: '4px',
-            cursor: hasChildren ? 'pointer' : 'default',
-            marginLeft: `${level * 20}px`,
-            backgroundColor: hasChildren ? (isExpanded ? '#f3f4f6' : 'transparent') : 'transparent'
-          }}
+          className={`
+            flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200
+            ${hasChildren && isExpanded 
+                ? 'bg-gradient-to-r from-gray-50 to-gray-100 border-l-4 border-gray-400' 
+                : 'hover:bg-gray-50 border-l-4 border-transparent'
+            }
+          `}
+          style={{ marginLeft: `${level * 20}px` }}
           onClick={() => hasChildren && toggleAssemblyExpand(assembly.id)}
         >
-          {hasChildren ? (
-            <span style={{ marginRight: '4px', color: '#1890ff' }}>
-              {isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-            </span>
-          ) : (
-            <span style={{ width: '16px', marginRight: '4px' }} />
-          )}
-          <span style={{ width: '16px', marginRight: '4px' }} />
-          <InboxOutlined style={{ color: '#1890ff', marginRight: '8px', fontSize: '14px' }} />
-          <Text style={{ fontSize: '14px', fontWeight: 'medium' }}>{assembly.assembly_number}</Text>
-          <Text style={{ color: '#6b7280', fontSize: '14px', marginLeft: '8px' }}>{assembly.assembly_name}</Text>
+          <div className="flex-shrink-0 w-6">
+            {hasChildren && (
+              <Button 
+                type="text" 
+                size="small" 
+                icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                className="text-blue-500 hover:bg-blue-100 rounded-md"
+              />
+            )}
+          </div>
+          <BlockOutlined className="text-blue-500" />
+          <div className="flex flex-col">
+            <Text className="font-medium text-gray-800 leading-tight">{assembly.assembly_number}</Text>
+            <Text className="text-gray-500 text-xs">{assembly.assembly_name}</Text>
+          </div>
         </div>
         {isExpanded && (
-          <div style={{ marginTop: '2px' }}>
+          <div className="mt-1">
             {parts.map((p) => renderPart(p, level + 1, orderId))}
             {subassemblies.map((s) => renderAssembly(s, level + 1, orderId))}
           </div>
@@ -347,15 +394,15 @@ const RawMaterials = () => {
 
     if (isLoading) {
       return (
-        <div style={{ padding: '16px', marginLeft: '20px' }}>
-          <Text type="secondary">Loading BOM...</Text>
+        <div className="p-4 ml-6 text-gray-500 flex items-center gap-2">
+          <Spin size="small" /> Loading BOM...
         </div>
       );
     }
     if (!bomData) {
       return (
-        <div style={{ padding: '16px', marginLeft: '20px' }}>
-          <Text type="secondary">No BOM data available</Text>
+        <div className="p-4 ml-6 text-gray-400 italic">
+          No BOM data available
         </div>
       );
     }
@@ -365,24 +412,12 @@ const RawMaterials = () => {
     const directParts = bomData.direct_parts || [];
 
     return (
-      <div style={{ 
-        paddingLeft: '16px', 
-        borderLeft: '2px solid #e5e7eb', 
-        marginLeft: '16px', 
-        marginTop: '4px', 
-        marginBottom: '8px' 
-      }}>
+      <div className="pl-4 border-l-2 border-gray-200 ml-4 mt-2 mb-2 space-y-1">
         {product && (
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            padding: '8px 0', 
-            borderBottom: '1px solid #f3f4f6', 
-            marginBottom: '8px' 
-          }}>
-            <AppstoreOutlined style={{ color: '#4f46e5', marginRight: '8px', fontSize: '14px' }} />
-            <Text style={{ fontSize: '14px', fontWeight: 'bold' }}>{product.product_number}</Text>
-            <Text style={{ color: '#6b7280', fontSize: '14px', marginLeft: '8px' }}>{product.product_name}</Text>
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 mb-2">
+            <AppstoreOutlined className="text-indigo-600" />
+            <Text className="font-bold text-gray-800">{product.product_number}</Text>
+            <Text className="text-gray-500 text-sm">{product.product_name}</Text>
           </div>
         )}
         {assemblies.map((a) => renderAssembly(a, 0, order.id))}
@@ -393,50 +428,48 @@ const RawMaterials = () => {
 
   const renderOrderTree = () => {
     return (
-      <div style={{ padding: '16px' }}>
+      <div className="p-2 space-y-1">
         {orders.map((order) => {
           const isExpanded = expandedOrders[order.id];
           const hasProduct = !!order.product_id;
 
           return (
-            <div key={order.id} style={{ marginBottom: '4px' }}>
+            <div key={order.id} className="mb-1">
               <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  backgroundColor: isExpanded ? '#f3f4f6' : 'transparent'
-                }}
+                className={`
+                  flex items-center gap-2 px-4 py-3 rounded-lg cursor-pointer transition-all duration-200
+                  ${isExpanded 
+                    ? 'bg-gradient-to-r from-indigo-50 to-indigo-100 border-l-4 border-indigo-500 shadow-sm' 
+                    : 'hover:bg-gray-50 border-l-4 border-transparent'
+                  }
+                `}
                 onClick={() => toggleOrderExpand(order)}
               >
-                {hasProduct ? (
-                  <span style={{ marginRight: '4px', color: '#6b7280' }}>
-                    {isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-                  </span>
-                ) : (
-                  <span style={{ width: '16px', marginRight: '4px' }} />
-                )}
-                <div style={{ 
-                  width: '12px', 
-                  height: '12px', 
-                  backgroundColor: '#4b5563', 
-                  borderRadius: '50%', 
-                  marginRight: '8px' 
-                }} />
-                <Text style={{ fontWeight: 'medium', color: '#111827' }}>{order.sale_order_number}</Text>
+                <div className="w-6 flex-shrink-0">
+                  {hasProduct && (
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                      className="text-indigo-500 hover:bg-indigo-100 rounded-md"
+                    />
+                  )}
+                </div>
+                <div className={`w-2 h-2 rounded-full mr-2 ${isExpanded ? 'bg-indigo-500' : 'bg-gray-400'}`} />
+                <Text className={`font-medium ${isExpanded ? 'text-indigo-800' : 'text-gray-800'}`}>
+                    {order.sale_order_number}
+                </Text>
               </div>
               {isExpanded && renderOrderBom(order)}
             </div>
           );
         })}
-        {orders.length === 0 && !loading && (
-          <Empty description="No orders found" />
+        {orders.length === 0 && !ordersLoading && (
+          <Empty description="No orders found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         )}
-        {loading && (
-          <div style={{ textAlign: 'center', padding: '24px 0' }}>
-            <Spin tip="Loading orders..." />
+        {ordersLoading && (
+          <div className="py-12 flex justify-center">
+            <Spin size="large" />
           </div>
         )}
       </div>
@@ -517,284 +550,506 @@ const RawMaterials = () => {
     }
   };
 
-  const renderMaterialsTable = ({ showSelection = false, showActions = false } = {}) => {
+  const renderLinkedMaterialsTable = () => {
     const columns = [
       {
-        title: 'SL NO',
+        title: <span className="font-semibold text-gray-700">SL NO</span>,
         dataIndex: 'index',
         key: 'index',
         width: 80,
-        render: (_, __, index) => index + 1,
+        render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
       },
       {
-        title: 'MATERIAL NAME',
+        title: <span className="font-semibold text-gray-700">Material Name</span>,
         dataIndex: 'material_name',
         key: 'material_name',
-        render: (text) => text || "-",
+        ellipsis: true,
+        render: (text) => <span className="font-medium text-gray-800">{text}</span>
       },
       {
-        title: 'SPECIFICATION',
+        title: <span className="font-semibold text-gray-700">Part Name</span>,
+        dataIndex: 'part_name',
+        key: 'part_name',
+        ellipsis: true,
+        render: (text) => text ? <Tag color="blue">{text}</Tag> : <span className="text-gray-400">-</span>,
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Sale Order</span>,
+        dataIndex: 'sale_order_number',
+        key: 'sale_order_number',
+        render: (text) => <span className="font-mono text-gray-700">{text}</span>
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Project Name</span>,
+        dataIndex: 'project_name',
+        key: 'project_name',
+        ellipsis: true,
+        render: (text) => text || <span className="text-gray-400">-</span>,
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Status</span>,
+        dataIndex: 'material_status',
+        key: 'material_status',
+        render: (status) => {
+            let color = 'default';
+            if (status === 'Completed') color = 'success';
+            if (status === 'In Progress') color = 'processing';
+            return <Tag color={color}>{status || "-"}</Tag>
+        },
+      },
+      
+    ];
+
+    return (
+       <Card 
+        className="shadow-sm rounded-xl border border-gray-100" 
+        bodyStyle={{ padding: 0 }}
+        title={
+            <div className="flex items-center gap-2">
+                <SafetyCertificateOutlined className="text-blue-500" />
+                <span className="font-bold text-gray-800">Parts with Raw Materials Status</span>
+            </div>
+        }
+       >
+        <Table
+            columns={columns}
+            dataSource={linkedMaterials}
+            rowKey="id"
+            size="small"
+            bordered
+            pagination={{
+              pageSize: 15,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            }}
+            locale={{ emptyText: <Empty description="No linked materials found" /> }}
+            className="modern-table"
+        />
+      </Card>
+    );
+  };
+
+  const renderMaterialsTable = ({ showSelection = false, showActions = false } = {}) => {
+    const columns = [
+      {
+        title: <span className="font-semibold text-gray-700">#</span>,
+        dataIndex: 'index',
+        key: 'index',
+        width: 60,
+        render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Material Name</span>,
+        dataIndex: 'material_name',
+        key: 'material_name',
+        ellipsis: true,
+        render: (text) => (
+          <Tooltip title={text}>
+            <span className="font-medium text-gray-800">{text || "-"}</span>
+          </Tooltip>
+        ),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Specification</span>,
         dataIndex: 'material_specification',
         key: 'material_specification',
-        render: (text) => text || "-",
+        ellipsis: true,
+        render: (text) => (
+          <Tooltip title={text}>
+            <span className="text-gray-600">{text || "-"}</span>
+          </Tooltip>
+        ),
       },
       {
-        title: 'MASS',
+        title: <span className="font-semibold text-gray-700">Mass</span>,
         dataIndex: 'mass',
         key: 'mass',
         render: (text) => text || "-",
       },
       {
-        title: 'DENSITY',
+        title: <span className="font-semibold text-gray-700">Density</span>,
         dataIndex: 'density',
         key: 'density',
         render: (text) => text || "-",
       },
       {
-        title: 'VOLUME',
+        title: <span className="font-semibold text-gray-700">Volume</span>,
         dataIndex: 'volume',
         key: 'volume',
         render: (text) => text || "-",
       },
       {
-        title: 'STOCK TYPE',
+        title: <span className="font-semibold text-gray-700">Stock Type</span>,
         dataIndex: 'stock_type',
         key: 'stock_type',
-        render: (text) => text || "-",
+        render: (text) => text ? <Tag>{text}</Tag> : "-",
       },
       {
-        title: 'QUANTITY',
+        title: <span className="font-semibold text-gray-700">Qty</span>,
         dataIndex: 'quantity',
         key: 'quantity',
         render: (text) => text || "-",
       },
       {
-        title: 'DIMENSIONS',
+        title: <span className="font-semibold text-gray-700">Dimensions</span>,
         dataIndex: 'stock_dimensions',
         key: 'stock_dimensions',
-        render: (text) => text || "-",
+        ellipsis: true,
+        render: (text) => (
+          <Tooltip title={text}>
+            <span className="text-gray-600 font-mono text-xs">{text || "-"}</span>
+          </Tooltip>
+        ),
       },
       {
-        title: 'STATUS',
+        title: <span className="font-semibold text-gray-700">Status</span>,
         dataIndex: 'status',
         key: 'status',
-        render: (status) => (
-          <Badge color={status ? 'blue' : 'default'}>
-            {status || "-"}
-          </Badge>
-        ),
+        render: (status) => {
+            let color = 'default';
+            if (status === 'available') color = 'success';
+            if (status === 'purchase order') color = 'processing';
+            if (status === 'purchase request') color = 'warning';
+            return <Tag color={color}>{status ? status.toUpperCase() : "-"}</Tag>
+        },
       },
     ];
 
-    if (showSelection) {
-      columns.unshift({
-        title: (
-          <Checkbox
-            checked={rawMaterials.length > 0 && rawMaterials.every((m) => selectedRawMaterialIds[m.id])}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              const next = {};
-              if (checked) {
-                rawMaterials.forEach((m) => {
-                  next[m.id] = true;
-                });
-              }
-              setSelectedRawMaterialIds(next);
-            }}
-          />
-        ),
-        key: 'selection',
-        width: 60,
-        render: () => null,
-      });
-    }
-
     if (showActions) {
       columns.push({
-        title: 'ACTIONS',
+        title: <span className="font-semibold text-gray-700">Actions</span>,
         key: 'actions',
-        width: 120,
+        width: 100,
         render: (_, record) => (
           <Space>
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => openEditRawMaterial(record)}
-            />
-            <Button
-              type="text"
-              size="small"
-              icon={<DeleteOutlined />}
-              danger
-              onClick={() => handleDeleteRawMaterial(record)}
-            />
+            <Tooltip title="Edit">
+                <Button
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                className="text-blue-500 hover:bg-blue-50"
+                onClick={() => openEditRawMaterial(record)}
+                />
+            </Tooltip>
+            <Tooltip title="Delete">
+                <Button
+                type="text"
+                size="small"
+                icon={<DeleteOutlined />}
+                className="text-red-500 hover:bg-red-50"
+                onClick={() => handleDeleteRawMaterial(record)}
+                />
+            </Tooltip>
           </Space>
         ),
       });
     }
 
+    const rowSelection = showSelection ? {
+      selectedRowKeys: Object.keys(selectedRawMaterialIds).filter(id => selectedRawMaterialIds[id]).map(k => Number(k)),
+      onChange: (selectedRowKeys) => {
+        const next = {};
+        selectedRowKeys.forEach(id => { next[id] = true; });
+        setSelectedRawMaterialIds(next);
+      },
+    } : null;
+
     return (
-      <div style={{ backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px 0 rgba(0,0,0,0.1)', border: '1px solid #d9d9d9' }}>
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Title level={3} style={{ margin: 0 }}>Raw Materials</Title>
-          {showActions && (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={openCreateRawMaterial}
-            >
-              Add Raw Material
-            </Button>
-          )}
-        </div>
-        <div style={{ maxHeight: "calc(100vh - 280px)", overflow: 'auto' }}>
-          <Table
+      <Card 
+        className="shadow-sm rounded-xl border border-gray-100" 
+        bodyStyle={{ padding: 0 }}
+        title={
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <ExperimentOutlined className="text-purple-600" />
+                    <span className="font-bold text-gray-800">Raw Materials Inventory</span>
+                </div>
+                {showActions && (
+                    <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={openCreateRawMaterial}
+                    size="large"
+                    style={{ backgroundColor: '#2563eb' }}
+                    className="border-none shadow-md no-hover-btn"
+                    >
+                    Add Raw Material
+                    </Button>
+                )}
+            </div>
+        }
+      >
+        <Table
             columns={columns}
             dataSource={rawMaterials}
             rowKey="id"
             size="small"
-            pagination={false}
-            scroll={{ y: 300 }}
-            locale={{
-              emptyText: 'No raw materials found'
+            bordered
+            rowSelection={rowSelection || undefined}
+            scroll={{ x: 'max-content' }}
+            pagination={{
+              pageSize: 15,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
             }}
-          />
-        </div>
-      </div>
+            locale={{ emptyText: <Empty description="No raw materials found" /> }}
+            className="modern-table"
+        />
+      </Card>
     );
   };
 
   if (loading) {
     return (
-      <div style={{ padding: '24px', textAlign: 'center' }}>
-        <Spin size="large" tip="Loading raw materials..." />
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="flex flex-col items-center">
+            <Spin size="large" />
+            <p className="mt-4 text-gray-500 font-medium">Loading raw materials...</p>
+        </div>
       </div>
     );
   }
 
-  return (
-    <div style={{ padding: '24px' }}>
-      <Title level={2} style={{ marginBottom: '24px' }}>Raw Materials</Title>
-
-      <Tabs defaultActiveKey="raw-materials">
-        <Tabs.TabPane tab="Raw Materials" key="raw-materials">
-          {renderMaterialsTable({ showSelection: false, showActions: true })}
-        </Tabs.TabPane>
-        
-        <Tabs.TabPane tab="Raw Materials Linking" key="linking">
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: '16px' }}>
+  const tabItems = [
+    {
+      key: 'raw-materials',
+      label: (
+        <span className="flex items-center gap-2 px-2">
+            <ExperimentOutlined /> Raw Materials
+        </span>
+      ),
+      children: renderMaterialsTable({ showSelection: false, showActions: true })
+    },
+    {
+      key: 'linking',
+      label: (
+        <span className="flex items-center gap-2 px-2">
+            <LinkOutlined /> Link Materials
+        </span>
+      ),
+      children: (
+        <div className="mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left side - Orders tree */}
-            <div style={{ backgroundColor: '#fff', borderRadius: '8px', boxShadow: '0 1px 3px 0 rgba(0,0,0,0.1)', border: '1px solid #d9d9d9' }}>
-              <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0' }}>
-                <Title level={4} style={{ margin: 0 }}>Orders</Title>
-              </div>
-              <div style={{ overflowY: 'auto', maxHeight: "calc(100vh - 280px)" }}>
-                {renderOrderTree()}
-              </div>
+            <div className="lg:col-span-1">
+                <Card 
+                    title={
+                        <div className="flex items-center gap-2">
+                            <BlockOutlined className="text-blue-600" />
+                            <span className="font-bold text-gray-800">Order Structure</span>
+                        </div>
+                    }
+                    className="shadow-sm rounded-xl border border-gray-100 h-full"
+                    bodyStyle={{ padding: '12px', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}
+                >
+                    {renderOrderTree()}
+                </Card>
             </div>
 
             {/* Right side - Raw Materials table */}
-            {renderMaterialsTable({ showSelection: true, showActions: false })}
+            <div className="lg:col-span-2 space-y-4">
+                {renderMaterialsTable({ showSelection: true, showActions: false })}
+                <div className="flex justify-end pt-2">
+                    <Button
+                        type="primary"
+                        icon={<LinkOutlined />}
+                        onClick={handleSubmitLinks}
+                        loading={linking}
+                        size="large"
+                        style={{ backgroundColor: '#2563eb' }}
+                        className="border-none shadow-md no-hover-btn px-8"
+                    >
+                        Submit Selections
+                    </Button>
+                </div>
+            </div>
           </div>
+        </div>
+      )
+    },
+    {
+      key: 'order-status',
+      label: (
+        <span className="flex items-center gap-2 px-2">
+            <SafetyCertificateOutlined /> Parts with Raw Materials Status
+        </span>
+      ),
+      children: <div className="mt-4">{renderLinkedMaterialsTable()}</div>
+    }
+  ];
 
-          <div style={{ textAlign: 'right', marginTop: '16px' }}>
-            <Button type="primary" onClick={handleSubmitLinks} loading={linking}>
-              {linking ? "Submitting..." : "Submit"}
-            </Button>
-          </div>
-        </Tabs.TabPane>
-      </Tabs>
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+      <style>{`
+        .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
+          background-color: #2563eb !important;
+          color: white !important;
+          opacity: 1 !important;
+          border: none !important;
+          box-shadow: none !important;
+        }
+      `}</style>
+      <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff;
+        }
+        .modern-table .ant-table-tbody > tr:hover > td {
+          background: #f0f8ff !important;
+        }
+        .modern-table .ant-table-tbody > tr > td {
+          border-bottom: 1px solid #f0f0f0;
+        }
+        .ant-tabs-nav {
+            margin-bottom: 0 !important;
+        }
+        .ant-card-head {
+            border-bottom: 1px solid #f0f0f0;
+            min-height: 56px;
+        }
+      `}</style>
+
+      {/* Header */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
+        <div className="flex items-center justify-between">
+            <div>
+                <Title level={2} style={{ margin: 0, fontSize: '24px' }} className="flex items-center gap-3 text-gray-800">
+                    <ExperimentOutlined className="text-blue-600" />
+                    Raw Materials Management
+                </Title>
+                <Text className="text-gray-500 mt-1 block">Manage raw materials, inventory, and order linking</Text>
+            </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-2">
+        <Tabs 
+            activeKey={activeTab} 
+            onChange={setActiveTab} 
+            items={tabItems}
+            type="card"
+            className="custom-tabs"
+            tabBarStyle={{ margin: 0, padding: '8px 8px 0 8px' }}
+        />
+      </div>
 
       {/* Raw Material Modal */}
       <Modal
         open={rawMaterialModalOpen}
         onCancel={closeRawMaterialModal}
-        width={600}
-        title={editingRawMaterial ? "Edit Raw Material" : "Add Raw Material"}
+        width={800}
+        title={
+            <div className="flex items-center gap-2">
+                {editingRawMaterial ? <EditOutlined className="text-blue-500" /> : <PlusOutlined className="text-blue-500" />}
+                <span className="font-bold text-gray-800">{editingRawMaterial ? "Edit Raw Material" : "Add New Raw Material"}</span>
+            </div>
+        }
         footer={null}
-        destroyOnClose
+        destroyOnHidden
+        className="rounded-xl overflow-hidden"
       >
         <Form
           form={form}
           layout="vertical"
           onFinish={handleSaveRawMaterial}
-          style={{ padding: '24px' }}
+          className="pt-4"
         >
-          <Form.Item
-            name="material_name"
-            label="Material Name"
-            rules={[{ required: true, message: 'Please enter material name' }]}
-          >
-            <Input placeholder="Enter material name" />
-          </Form.Item>
+          <Row gutter={24}>
+            <Col span={12}>
+              <Form.Item
+                name="material_name"
+                label={<span className="font-semibold text-gray-700">Material Name</span>}
+                rules={[{ required: true, message: 'Please enter material name' }]}
+              >
+                <Input placeholder="Enter material name" size="large" className="rounded-md" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="material_specification"
+                label={<span className="font-semibold text-gray-700">Specification</span>}
+              >
+                <Input placeholder="Enter specification" size="large" className="rounded-md" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="mass"
+                label={<span className="font-semibold text-gray-700">Mass</span>}
+              >
+                <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="density"
+                label={<span className="font-semibold text-gray-700">Density</span>}
+              >
+                <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="volume"
+                label={<span className="font-semibold text-gray-700">Volume</span>}
+              >
+                <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="stock_type"
+                label={<span className="font-semibold text-gray-700">Stock Type</span>}
+              >
+                <Input placeholder="e.g. Sheet, Bar, Rod" size="large" className="rounded-md" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="quantity"
+                label={<span className="font-semibold text-gray-700">Quantity</span>}
+              >
+                <InputNumber style={{ width: '100%' }} step="any" placeholder="0" size="large" className="rounded-md" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="stock_dimensions"
+                label={<span className="font-semibold text-gray-700">Dimensions</span>}
+              >
+                <Input placeholder="L x W x H" size="large" className="rounded-md" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="status"
+                label={<span className="font-semibold text-gray-700">Status</span>}
+              >
+                <Select placeholder="Select status" size="large" className="rounded-md">
+                  <Option value="purchase request">Purchase Request</Option>
+                  <Option value="purchase order">Purchase Order</Option>
+                  <Option value="available">Available</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
           
-          <Form.Item
-            name="material_specification"
-            label="Specification"
-          >
-            <Input placeholder="Enter specification" />
-          </Form.Item>
-          
-          <Form.Item
-            name="mass"
-            label="Mass"
-          >
-            <Input type="number" step="any" placeholder="Enter mass" />
-          </Form.Item>
-          
-          <Form.Item
-            name="density"
-            label="Density"
-          >
-            <Input type="number" step="any" placeholder="Enter density" />
-          </Form.Item>
-          
-          <Form.Item
-            name="volume"
-            label="Volume"
-          >
-            <Input type="number" step="any" placeholder="Enter volume" />
-          </Form.Item>
-          
-          <Form.Item
-            name="stock_type"
-            label="Stock Type"
-          >
-            <Input placeholder="Enter stock type" />
-          </Form.Item>
-          
-          <Form.Item
-            name="quantity"
-            label="Quantity"
-          >
-            <Input type="number" step="any" placeholder="Enter quantity" />
-          </Form.Item>
-          
-          <Form.Item
-            name="stock_dimensions"
-            label="Dimensions"
-          >
-            <Input placeholder="Enter dimensions" />
-          </Form.Item>
-          
-          <Form.Item
-            name="status"
-            label="Status"
-          >
-            <Select placeholder="Select status">
-              <Option value="purchase request">Purchase Request</Option>
-              <Option value="purchase order">Purchase Order</Option>
-              <Option value="available">Available</Option>
-            </Select>
-          </Form.Item>
-          
-          <div style={{ textAlign: 'right', marginTop: '24px' }}>
-            <Button onClick={closeRawMaterialModal} style={{ marginRight: '8px' }}>
+          <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
+            <Button onClick={closeRawMaterialModal} size="large" className="rounded-md">
               Cancel
             </Button>
-            <Button type="primary" htmlType="submit" loading={savingRawMaterial}>
-              {savingRawMaterial ? "Saving..." : (editingRawMaterial ? "Update" : "Create")}
+            <Button 
+              type="primary" 
+              htmlType="submit" 
+              loading={savingRawMaterial} 
+              size="large" 
+              style={{ backgroundColor: '#2563eb' }}
+              className="rounded-md border-none shadow-md no-hover-btn"
+            >
+              {savingRawMaterial ? "Saving..." : (editingRawMaterial ? "Update Material" : "Create Material")}
             </Button>
           </div>
         </Form>

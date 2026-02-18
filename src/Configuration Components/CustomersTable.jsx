@@ -167,7 +167,7 @@ const CustomersTable = () => {
           New Customer
         </Button>
       }
-      bordered={false}
+      variant="borderless"
       className="shadow-sm"
     >
       <Table
@@ -178,6 +178,7 @@ const CustomersTable = () => {
         pagination={{ pageSize: 10 }}
         bordered
         size="middle"
+        className="modern-table"
       />
 
       {customerModalOpen && (

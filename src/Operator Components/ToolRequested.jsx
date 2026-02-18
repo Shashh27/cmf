@@ -62,6 +62,20 @@ const ToolRequested = ({ onReturnSuccess }) => {
     fetchToolsList();
   }, []);
 
+  const getCurrentOperatorId = () => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        if (user && user.id != null) return parseInt(user.id);
+      }
+    } catch (e) {
+      
+    }
+    const fallback = localStorage.getItem('operator_id');
+    return fallback ? parseInt(fallback) : null;
+  };
+
   const isConsumableType = (item) => {
     const v = (item?.tool_type ?? item?.type ?? '').toString().trim().toLowerCase();
     if (!v) return false;
@@ -117,10 +131,17 @@ const ToolRequested = ({ onReturnSuccess }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
       if (response.ok) {
-        const data = await response.json();
+        let data = await response.json();
         // Sort by date descending
         const sortedData = Array.isArray(data) ? data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];
-        setRequests(sortedData.map(r => ({
+        const currentOpId = getCurrentOperatorId();
+        const filteredSorted = currentOpId != null
+          ? sortedData.filter(r => {
+              const oid = r.operator_id ?? r.operatorId ?? r.operator_id_fk ?? r.operator?.id;
+              return oid == null ? true : parseInt(oid) === currentOpId;
+            })
+          : sortedData;
+        setRequests(filteredSorted.map(r => ({
           ...r,
           tool_type: r.tool_type || toolsById[r.tool_id] || r.tool_type
         })));
@@ -152,8 +173,18 @@ const ToolRequested = ({ onReturnSuccess }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
       if (response.ok) {
-        const data = await response.json();
-        setReturnRequests(Array.isArray(data) ? data : []);
+        let data = await response.json();
+        const arr = Array.isArray(data) ? data : [];
+        const currentOpId = getCurrentOperatorId();
+        const filtered = currentOpId != null
+          ? arr.filter(rr => {
+              const top = rr.operator_id ?? rr.operatorId ?? rr.operator_id_fk;
+              const nested = rr.inventory_request_details?.operator_id ?? rr.inventory_request_details?.operator?.id;
+              const oid = top != null ? top : nested;
+              return oid == null ? true : parseInt(oid) === currentOpId;
+            })
+          : arr;
+        setReturnRequests(filtered);
       }
     } catch (error) {
       console.error('Failed to fetch return requests:', error);

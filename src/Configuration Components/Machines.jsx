@@ -209,7 +209,7 @@ const Machines = ({ workCenter, onBack }) => {
           Add Machine
         </Button>
       }
-      bordered={false}
+      variant="borderless"
       className="shadow-sm"
     >
       <Table

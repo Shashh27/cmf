@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Typography, Table, Space, Spin, Empty, Modal, Select, message, Tag, Card } from "antd";
+import { Button, Typography, Table, Space, message, Tag, Card, Tooltip, Badge, Modal, Spin } from "antd";
 import { 
   CaretDownOutlined, 
   CaretRightOutlined, 
@@ -10,16 +10,143 @@ import {
   CodeSandboxOutlined,
   EyeOutlined,
   DownloadOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  ToolOutlined,
+  ClockCircleOutlined,
+  EnvironmentOutlined,
+  InfoCircleOutlined,
+  CloseOutlined
 } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
 
 const { Title, Text } = Typography;
-const { Option } = Select;
 
-const ScrollArea = ({ className, children }) => (
-  <div className={className}>{children}</div>
-);
+const OperationDocumentsList = ({ operationId, onPreview }) => {
+    const [docs, setDocs] = useState([]);
+    const [loading, setLoading] = useState(false);
+    
+    useEffect(() => {
+        let isMounted = true;
+        const controller = new AbortController();
+        
+        // Debounce the fetch to prevent double-calls in StrictMode
+        const timer = setTimeout(() => {
+            if (operationId) {
+                fetchDocs(controller.signal, isMounted);
+            }
+        }, 100);
+
+        return () => {
+            isMounted = false;
+            clearTimeout(timer);
+            controller.abort();
+        };
+    }, [operationId]);
+
+    const fetchDocs = async (signal, isMounted) => {
+        if (!isMounted) return;
+        setLoading(true);
+        try {
+            const response = await fetch(`${API_BASE_URL}/operation-documents/operation/${operationId}`, { signal });
+            if (response.ok) {
+                const data = await response.json();
+                if (isMounted) setDocs(data);
+            }
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error("Error fetching operation documents:", error);
+            }
+        } finally {
+            if (isMounted && !signal?.aborted) {
+                setLoading(false);
+            }
+        }
+    };
+
+    const columns = [
+        {
+            title: 'Type',
+            dataIndex: 'document_type',
+            key: 'document_type',
+            width: 120,
+            render: (text) => (
+                <Tag color="blue" className="mr-0">
+                    {text || 'DOC'}
+                </Tag>
+            )
+        },
+        {
+            title: 'Document Name',
+            dataIndex: 'document_name',
+            key: 'document_name',
+            render: (text) => <span className="font-medium text-gray-800">{text}</span>
+        },
+        {
+            title: 'Version',
+            dataIndex: 'document_version',
+            key: 'document_version',
+            width: 100,
+            render: (text) => <span className="text-gray-500 text-xs">v{text || '1.0'}</span>
+        },
+        {
+            title: 'Actions',
+            key: 'actions',
+            width: 100,
+            align: 'center',
+            render: (_, doc) => (
+                <div className="flex gap-2 justify-center">
+                    <Tooltip title="Preview">
+                        <Button 
+                            size="small" 
+                            type="text" 
+                            className="text-blue-500 hover:bg-blue-50"
+                            icon={<EyeOutlined />} 
+                            onClick={() => onPreview(doc)} 
+                        />
+                    </Tooltip>
+                    <Tooltip title="Download">
+                        <Button 
+                            size="small" 
+                            type="text" 
+                            className="text-green-500 hover:bg-green-50"
+                            icon={<DownloadOutlined />} 
+                            onClick={() => {
+                                const downloadUrl = `${API_BASE_URL}/operation-documents/${doc.id}/download`;
+                                const link = document.createElement('a');
+                                link.href = downloadUrl;
+                                link.setAttribute('download', doc.document_name);
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                            }} 
+                        />
+                    </Tooltip>
+                </div>
+            )
+        }
+    ];
+
+    if (loading) return <div className="p-4 flex justify-center"><Spin size="small" tip="Loading documents..." /></div>;
+    
+    if (!docs || docs.length === 0) return (
+        <div className="p-6 text-center border border-dashed border-gray-300 rounded-lg bg-gray-50">
+            <FileTextOutlined className="text-2xl text-gray-300 mb-2" />
+            <p className="text-sm text-gray-500">No documents attached to this operation</p>
+        </div>
+    );
+
+    return (
+        <Table 
+            dataSource={docs} 
+            columns={columns} 
+            rowKey="id" 
+            pagination={false} 
+            size="small" 
+            bordered
+            className="bg-white"
+        />
+    );
+};
 
 const ProductBOMView = ({ onBackToOrders }) => {
   const { productId } = useParams();
@@ -29,8 +156,9 @@ const ProductBOMView = ({ onBackToOrders }) => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [loading, setLoading] = useState(false);
   const [bomView, setBomView] = useState('mbom');
-  const [expandedOperations, setExpandedOperations] = useState({});
   const [documentModal, setDocumentModal] = useState({ isOpen: false, url: null, name: null });
+  const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
+  const [currentOperation, setCurrentOperation] = useState(null);
   const hasFetchedData = useRef(false);
 
   useEffect(() => {
@@ -122,16 +250,25 @@ const ProductBOMView = ({ onBackToOrders }) => {
   };
 
   const toggleExpand = (itemId) => setExpandedItems(prev => ({ ...prev, [itemId]: !prev[itemId] }));
-  const toggleOperationExpand = (opId) => setExpandedOperations(prev => ({ ...prev, [opId]: !prev[opId] }));
 
   const getTypeIcon = (type) => {
     const icons = {
-      product: <AppstoreOutlined style={{ color: '#722ed1' }} />,
-      assembly: <BlockOutlined style={{ color: '#1890ff' }} />,
-      part: <CodeSandboxOutlined style={{ color: '#52c41a' }} />,
-      make: <CodeSandboxOutlined style={{ color: '#52c41a' }} />
+      product: <AppstoreOutlined className="text-purple-600" />,
+      assembly: <BlockOutlined className="text-blue-500" />,
+      part: <CodeSandboxOutlined className="text-green-500" />,
+      make: <CodeSandboxOutlined className="text-green-500" />
     };
-    return icons[type?.toLowerCase()] || <CodeSandboxOutlined style={{ color: '#8c8c8c' }} />;
+    return icons[type?.toLowerCase()] || <CodeSandboxOutlined className="text-gray-500" />;
+  };
+
+  const getTypeColor = (type) => {
+    const colors = {
+      product: 'purple',
+      assembly: 'blue',
+      part: 'green',
+      make: 'green'
+    };
+    return colors[type?.toLowerCase()] || 'default';
   };
 
   const handleDocumentAction = async (url, name, action = 'view') => {
@@ -162,10 +299,15 @@ const ProductBOMView = ({ onBackToOrders }) => {
         document.body.removeChild(link);
         if (link.href.startsWith('blob:')) window.URL.revokeObjectURL(link.href);
       }, 100);
+      message.success('Download started');
     } catch (error) {
       console.error('Download error:', error);
       window.open(url, '_blank', 'noopener,noreferrer');
     }
+  };
+
+  const handlePreviewForModal = (doc) => {
+    handleDocumentAction(doc.document_url, doc.document_name, 'view');
   };
 
   const renderBOMItem = (item, level = 0) => {
@@ -175,54 +317,50 @@ const ProductBOMView = ({ onBackToOrders }) => {
     const isSelected = selectedItem?.id === item.id;
     
     return (
-      <div key={item.id}>
+      <div key={item.id} className="select-none">
         <div 
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '8px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            marginLeft: `${level * 20}px`,
-            borderLeft: `2px solid ${isSelected ? '#1890ff' : 'transparent'}`,
-            backgroundColor: isSelected ? '#e6f7ff' : 'transparent',
-          }}
+          className={`
+            flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200
+            ${isSelected 
+              ? 'bg-gradient-to-r from-blue-50 to-blue-100 border-l-4 border-blue-500 shadow-sm' 
+              : 'hover:bg-gray-50 border-l-4 border-transparent'
+            }
+          `}
+          style={{ marginLeft: `${level * 16}px` }}
           onClick={() => setSelectedItem(item)}
-          onMouseEnter={(e) => {
-            if (!isSelected) e.currentTarget.style.backgroundColor = '#f0f8ff';
-          }}
-          onMouseLeave={(e) => {
-            if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
-          }}
         >
-          <div style={{ flexShrink: 0 }}>
+          <div className="flex-shrink-0">
             {hasChildren ? (
               <Button 
                 type="text" 
                 size="small" 
                 icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
                 onClick={(e) => { e.stopPropagation(); toggleExpand(item.id); }}
-                style={{ padding: '2px' }}
+                className="hover:bg-blue-100 rounded-md"
               />
-            ) : <div style={{ width: '16px' }} />}
+            ) : <div className="w-8" />}
           </div>
-        <div style={{ flexShrink: 0 }}>{getTypeIcon(item.type)}</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Text 
-              style={{ 
-                fontSize: '12px', 
-                fontWeight: 'medium',
-                color: isSelected ? '#1890ff' : '#262626'
-              }}
-              ellipsis={{ tooltip: item.name }}
-            >
-              {item.name}
-            </Text>
+          
+          <div className="flex-shrink-0 text-lg">
+            {getTypeIcon(item.type)}
+          </div>
+          
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <Tooltip title={item.name}>
+              <Text 
+                className={`text-sm font-medium truncate ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}
+              >
+                {item.name}
+              </Text>
+            </Tooltip>
+            <Tag color={getTypeColor(item.type)} className="text-xs">
+              {item.type?.toUpperCase()}
+            </Tag>
           </div>
         </div>
+        
         {hasChildren && isExpanded && (
-          <div style={{ marginTop: '2px' }}>
+          <div className="mt-1">
             {item.components.map(child => renderBOMItem(child, level + 1))}
           </div>
         )}
@@ -233,66 +371,62 @@ const ProductBOMView = ({ onBackToOrders }) => {
   const DocumentTable = ({ documents }) => {
     const columns = [
       {
-        title: 'Type',
+        title: <span className="font-semibold text-gray-700">Type</span>,
         dataIndex: 'document_type',
         key: 'document_type',
-        width: 120,
+        width: 140,
         render: (type) => (
           <Space>
-            <FileTextOutlined style={{ color: '#8c8c8c' }} />
-            <Text style={{ fontSize: '12px' }}>{type || 'Document'}</Text>
+            <FileTextOutlined className="text-blue-500" />
+            <Tag color="blue" className="text-xs">{type || 'Document'}</Tag>
           </Space>
         ),
       },
       {
-        title: 'Name',
+        title: <span className="font-semibold text-gray-700">Document Name</span>,
         dataIndex: 'document_name',
         key: 'document_name',
         render: (name) => (
-          <Text style={{ fontSize: '12px', fontWeight: 'medium' }}>
-            {name || 'Untitled'}
+          <Text className="text-sm font-medium text-gray-800">
+            {name || 'Untitled Document'}
           </Text>
         ),
       },
       {
-        title: 'Actions',
-        key: 'actions',
-        width: 120,
-        render: (_, record) => (
-          <Space size="small">
-            <Button 
-              type="text" 
-              size="small" 
-              icon={<EyeOutlined />}
-              onClick={() => handleDocumentAction(record.document_url, record.document_name, 'view')}
-              title="View"
-            />
-            <Button 
-              type="text" 
-              size="small" 
-              icon={<DownloadOutlined />}
-              onClick={() => handleDocumentAction(record.document_url, record.document_name, 'download')}
-              title="Download"
-            />
-          </Space>
-        ),
-      },
-      {
-        title: 'Version',
+        title: <span className="font-semibold text-gray-700">Version</span>,
         dataIndex: 'version',
         key: 'version',
         width: 100,
         render: (version, record) => (
-          <Select 
-            size="small" 
-            value={version || '1.0'} 
-            style={{ width: '100%' }}
-          >
-            <Option value="1.0">1.0</Option>
-            {record.versions?.map((v, i) => (
-              <Option key={i} value={v}>{v}</Option>
-            ))}
-          </Select>
+          <Tag color="green">{version || record.document_version || '1.0'}</Tag>
+        ),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Actions</span>,
+        key: 'actions',
+        width: 120,
+        render: (_, record) => (
+          <Space size="small">
+            <Tooltip title="View Document">
+              <Button 
+                type="primary"
+                ghost
+                size="small" 
+                icon={<EyeOutlined />}
+                onClick={() => handleDocumentAction(record.document_url, record.document_name, 'view')}
+                className="hover:scale-105 transition-transform"
+              />
+            </Tooltip>
+            <Tooltip title="Download">
+              <Button 
+                type="default"
+                size="small" 
+                icon={<DownloadOutlined />}
+                onClick={() => handleDocumentAction(record.document_url, record.document_name, 'download')}
+                className="hover:scale-105 transition-transform"
+              />
+            </Tooltip>
+          </Space>
         ),
       },
     ];
@@ -304,7 +438,8 @@ const ProductBOMView = ({ onBackToOrders }) => {
         rowKey="id"
         size="small"
         pagination={false}
-        scroll={{ y: 300 }}
+        scroll={{ y: 400 }}
+        className="modern-table"
       />
     );
   };
@@ -312,74 +447,61 @@ const ProductBOMView = ({ onBackToOrders }) => {
   const OperationsTable = ({ operations, processPlans }) => {
     const columns = [
       {
-        title: 'Op #',
+        title: <span className="font-semibold text-gray-700">Op #</span>,
         key: 'operation_number',
         width: 80,
-        render: (_, record, index) => {
-          const plan = processPlans?.find(pp => pp.operation_id === record.id);
-          const isExpanded = expandedOperations[record.id];
+        render: (_, record, index) => (
+          <Tag color="cyan" className="font-mono">
+            {String(record.operation_number || index + 1).padStart(2, '0')}
+          </Tag>
+        ),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Operation Name</span>,
+        dataIndex: 'operation_name',
+        key: 'operation_name',
+        width: 200,
+        render: (name) => (
+          <Text className="text-sm font-medium text-gray-800">{name}</Text>
+        ),
+      },
+      {
+        title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Setup Time</span>,
+        key: 'setup_time',
+        width: 130,
+        render: (_, record) => {
           return (
-            <Space>
-              {plan && (
-                <Button 
-                  type="text" 
-                  size="small" 
-                  icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-                  onClick={() => toggleOperationExpand(record.id)}
-                />
-              )}
-              <Text style={{ fontSize: '12px', fontWeight: 'medium' }}>
-                {record.operation_number || index + 1}
-              </Text>
-            </Space>
+            <Tag color="orange" icon={<ClockCircleOutlined />}>
+              {record.setup_time || '00:00:00'}
+            </Tag>
           );
         },
       },
       {
-        title: 'Name',
-        dataIndex: 'operation_name',
-        key: 'operation_name',
-        render: (name) => <Text style={{ fontSize: '12px' }}>{name}</Text>,
-      },
-      {
-        title: 'Setup',
-        key: 'setup_time',
-        width: 100,
-        render: (_, record) => {
-          const plan = processPlans?.find(pp => pp.operation_id === record.id);
-          return <Text style={{ fontSize: '12px' }}>{plan?.setup_time || '00:00:00'}</Text>;
-        },
-      },
-      {
-        title: 'Cycle',
+        title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Cycle Time</span>,
         key: 'cycle_time',
-        width: 100,
+        width: 130,
         render: (_, record) => {
-          const plan = processPlans?.find(pp => pp.operation_id === record.id);
-          return <Text style={{ fontSize: '12px' }}>{plan?.cycle_time || '00:00:00'}</Text>;
+          return (
+            <Tag color="green" icon={<ClockCircleOutlined />}>
+              {record.cycle_time || '00:00:00'}
+            </Tag>
+          );
         },
       },
       {
-        title: 'Workcenter',
+        title: <span className="font-semibold text-gray-700"><EnvironmentOutlined /> Workcenter</span>,
         key: 'workcenter',
-        width: 120,
+        width: 150,
         render: (_, record) => {
-          const plan = processPlans?.find(pp => pp.operation_id === record.id);
-          return <Text style={{ fontSize: '12px' }}>{plan?.workcenter || 'N/A'}</Text>;
+          return (
+            <Tag color="purple" icon={<EnvironmentOutlined />}>
+              {record.work_center_name || record.workcenter_id || 'N/A'}
+            </Tag>
+          );
         },
       },
     ];
-
-    const expandedRowRender = (record) => {
-      const plan = processPlans?.find(pp => pp.operation_id === record.id);
-      if (!plan) return null;
-      return (
-        <div className="p-3 bg-gray-50 rounded text-xs">
-           <p><strong>Description:</strong> {plan.description || 'No description available'}</p>
-           <p><strong>Resources:</strong> {plan.resources || 'None'}</p>
-        </div>
-      );
-    };
 
     return (
       <Table
@@ -388,53 +510,86 @@ const ProductBOMView = ({ onBackToOrders }) => {
         rowKey="id"
         size="small"
         pagination={false}
-        expandable={{
-          expandedRowRender,
-          expandedRowKeys: Object.keys(expandedOperations).filter(k => expandedOperations[k]).map(k => isNaN(Number(k)) ? k : Number(k)),
-          expandIconColumnIndex: -1
-        }}
+        scroll={{ y: 400 }}
+        onRow={(record) => ({
+            onClick: () => {
+                setCurrentOperation(record);
+                setIsOperationModalOpen(true);
+            },
+            style: { cursor: 'pointer' }
+        })}
+        className="modern-table"
       />
     );
   };
 
-  const EmptyState = ({ message }) => (
-    <div className="flex flex-col items-center justify-center py-8 text-gray-500">
-      <BlockOutlined className="text-2xl mb-2" />
-      <p className="text-sm">{message}</p>
+  const EmptyState = ({ message: msg, icon }) => (
+    <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+      <div className="text-5xl mb-4 opacity-50">
+        {icon || <BlockOutlined />}
+      </div>
+      <p className="text-sm font-medium">{msg}</p>
     </div>
   );
 
   const renderDetailsPanel = () => {
-    if (!selectedItem) return <EmptyState message="Select an item to view details" />;
+    if (!selectedItem) {
+      return <EmptyState message="Select an item from the BOM structure to view details" icon={<InfoCircleOutlined />} />;
+    }
     
-    // Check if the selected item is a part (not a product or assembly)
-    // We treat anything that isn't explicitly a product or assembly as a part/component
-    // This covers 'part', 'make', 'buy', 'component', etc.
     const isPart = selectedItem.type !== 'product' && selectedItem.type !== 'assembly';
 
-    if (!isPart) return <div className="text-center py-8"><p className="text-xs text-gray-400">Select a part to view {bomView === 'ebom' ? 'documents' : 'operations'}</p></div>;
+    if (!isPart) {
+      return (
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 max-w-md">
+            <InfoCircleOutlined className="text-4xl text-blue-500 mb-3" />
+            <p className="text-sm text-gray-600 text-center">
+              Select a <span className="font-semibold text-blue-600">part</span> to view {bomView === 'ebom' ? 'documents' : 'operations and process plans'}
+            </p>
+          </div>
+        </div>
+      );
+    }
 
     if (bomView === 'ebom') {
       return (
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold mb-2">Documents ({selectedItem.documents?.length || 0})</h3>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <FileTextOutlined className="text-blue-500" />
+              Documents
+              <Badge count={selectedItem.documents?.length || 0} style={{ backgroundColor: '#1890ff' }} />
+            </h3>
+          </div>
           {selectedItem.documents?.length > 0 ? (
             <DocumentTable documents={selectedItem.documents} />
           ) : (
-            <EmptyState message="No documents available for this part" />
+            <EmptyState message="No documents available for this part" icon={<FileTextOutlined />} />
           )}
         </div>
       );
     }
 
     return (
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold mb-2">Operations ({selectedItem.operations?.length || 0})</h3>
-        <p className="text-xs text-gray-500 mb-2">Click on an operation to view process plan details</p>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <ToolOutlined className="text-green-500" />
+            Manufacturing Operations
+            <Badge count={selectedItem.operations?.length || 0} style={{ backgroundColor: '#52c41a' }} />
+          </h3>
+        </div>
+        <div className="bg-blue-50 border-l-4 border-blue-500 p-3 rounded">
+          <p className="text-xs text-blue-800 flex items-center gap-2">
+            <InfoCircleOutlined />
+            Click on an operation to view detailed process plan information
+          </p>
+        </div>
         {selectedItem.operations?.length > 0 ? (
           <OperationsTable operations={selectedItem.operations} processPlans={selectedItem.process_plans} />
         ) : (
-          <EmptyState message="No operations defined for this part" />
+          <EmptyState message="No manufacturing operations defined for this part" icon={<ToolOutlined />} />
         )}
       </div>
     );
@@ -442,13 +597,18 @@ const ProductBOMView = ({ onBackToOrders }) => {
 
   if (loading) {
     return (
-      <div className="container mx-auto p-3">
-        <div className="flex items-center mb-3">
-          <Button type="default" size="small" disabled className="h-7 text-xs"><ArrowLeftOutlined className="h-3 w-3 mr-1" />Back</Button>
-          <h1 className="text-lg font-semibold ml-2">Loading...</h1>
-        </div>
-        <div className="flex justify-center py-8">
-          <div className="animate-spin rounded-full h-6 w-6 border-3 border-blue-600 border-r-transparent" />
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center mb-6">
+            <Button type="default" size="large" disabled className="shadow-sm">
+              <ArrowLeftOutlined />
+              Back
+            </Button>
+            <h1 className="text-2xl font-bold ml-4 text-gray-800">Loading...</h1>
+          </div>
+          <div className="flex justify-center items-center py-24">
+            <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent"></div>
+          </div>
         </div>
       </div>
     );
@@ -456,86 +616,241 @@ const ProductBOMView = ({ onBackToOrders }) => {
 
   if (!bomData) {
     return (
-      <div className="container mx-auto p-3">
-        <div className="flex items-center mb-3">
-          <Button type="default" size="small" onClick={onBackToOrders} className="h-7 text-xs"><ArrowLeftOutlined className="h-3 w-3 mr-1" />Back</Button>
-          <h1 className="text-lg font-semibold ml-2">{product?.product_name || 'Product'} BOM</h1>
-        </div>
-        <div className="bg-red-50 border-l-4 border-red-500 p-3">
-          <p className="text-sm text-red-700">Failed to load BOM data. Please try again.</p>
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center mb-6">
+            <Button type="default" size="large" onClick={onBackToOrders} className="shadow-sm">
+              <ArrowLeftOutlined />
+              Back
+            </Button>
+            <h1 className="text-2xl font-bold ml-4 text-gray-800">{product?.product_name || 'Product'} BOM</h1>
+          </div>
+          <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg shadow-sm">
+            <p className="text-sm text-red-700 font-medium">⚠️ Failed to load BOM data. Please try again.</p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto p-3">
-      <div className="flex justify-between items-center mb-3">
-        <Button type="default" size="small" onClick={onBackToOrders} className="h-7 text-xs"><ArrowLeftOutlined className="h-3 w-3 mr-1" />Back</Button>
-        <h1 className="text-lg font-bold">Product Bill of Materials</h1>
-        <div className="flex items-center space-x-1">
-          {['mbom', 'ebom'].map(view => (
-            <Button key={view} type={bomView === view ? 'primary' : 'default'} size="small" onClick={() => setBomView(view)} className="h-7 text-xs">{view.toUpperCase()}</Button>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-3">
-        <div className="w-full lg:w-1/3">
-          <Card 
-            title={<span className="text-sm font-semibold">BOM Structure</span>}
-            size="small"
-            bodyStyle={{ padding: 0 }}
-          >
-              <ScrollArea className="h-[calc(100vh-220px)]">{bomData && renderBOMItem(bomData)}</ScrollArea>
-          </Card>
-        </div>
-
-        <div className="flex-1">
-          <Card
-            title={
+    <div style={{ backgroundColor: 'white', padding: 12, borderRadius: 8, border: '1px solid #e8e8e8', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+      <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff;
+        }
+        .modern-table .ant-table-tbody > tr:hover > td {
+          background: #f0f8ff !important;
+        }
+        .modern-table .ant-table-tbody > tr > td {
+          border-bottom: 1px solid #f0f0f0;
+        }
+      `}</style>
+      
+      <div>
+        {/* Header */}
+        <div className="rounded-xl shadow-lg p-3 mb-4" style={{ backgroundColor: 'white' }}>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+            <div className="flex items-center gap-2">
+              <Button 
+                type="default" 
+                size="middle" 
+                onClick={onBackToOrders}
+                className="shadow-sm hover:shadow-md transition-shadow"
+                icon={<ArrowLeftOutlined />}
+              >
+                Back
+              </Button>
               <div>
-                <div className="text-sm font-semibold">{selectedItem?.name || 'Select an item'}</div>
-                {selectedItem && <div className="text-xs text-gray-600 uppercase font-normal">{selectedItem.type}</div>}
-              </div>
-            }
-            size="small"
-            headStyle={{ backgroundColor: '#f9fafb' }}
-            bodyStyle={{ paddingTop: '8px' }}
-          >
-              <ScrollArea className="h-[calc(100vh-220px)]">{renderDetailsPanel()}</ScrollArea>
-          </Card>
-        </div>
-      </div>
-
-      {documentModal.isOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-4xl max-h-[85vh] w-full mx-3">
-            <div className="flex items-center justify-between p-3 border-b">
-              <h3 className="text-sm font-semibold">{documentModal.name || 'Document'}</h3>
-              <button onClick={() => setDocumentModal({ isOpen: false, url: null, name: null })} className="p-1 hover:bg-gray-100 rounded-full transition-colors">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="p-4">
-              <div className="h-[70vh]">
-                {documentModal.url ? (
-                  <iframe src={documentModal.url} className="w-full h-full border-0 rounded" title={documentModal.name || 'Document'} />
-                ) : (
-                  <div className="flex items-center justify-center h-full text-gray-500">Document URL is not available</div>
-                )}
+                <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <AppstoreOutlined className="text-blue-600" />
+                  Bill of Materials
+                </h1>
+                <p className="text-sm text-gray-500 mt-1">{product?.product_name || 'Product View'}</p>
               </div>
             </div>
-            <div className="flex justify-end p-4 border-t">
-              <button onClick={() => setDocumentModal({ isOpen: false, url: null, name: null })} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors">
-                Close
-              </button>
+            
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-600 mr-2">View:</span>
+              {['mbom', 'ebom'].map(view => (
+                <Button 
+                  key={view}
+                  type={bomView === view ? 'primary' : 'default'}
+                  size="middle"
+                  onClick={() => setBomView(view)}
+                  className={`font-semibold shadow-sm transition-all ${
+                    bomView === view ? 'shadow-md scale-105' : 'hover:shadow-md'
+                  }`}
+                >
+                  {view.toUpperCase()}
+                </Button>
+              ))}
             </div>
           </div>
         </div>
-      )}
+
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* BOM Tree */}
+          <div className="lg:col-span-1">
+            <Card 
+              title={
+                <div className="flex items-center gap-2">
+                  <BlockOutlined className="text-blue-600" />
+                  <span className="font-bold text-gray-800">BOM Structure</span>
+                </div>
+              }
+              className="shadow-lg rounded-xl overflow-hidden"
+              bodyStyle={{ padding: '12px', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}
+            >
+              {bomData && renderBOMItem(bomData)}
+            </Card>
+          </div>
+
+          {/* Details Panel */}
+          <div className="lg:col-span-2">
+            <Card
+              title={
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      {selectedItem && getTypeIcon(selectedItem.type)}
+                      <span className="font-bold text-gray-800 text-lg">
+                        {selectedItem?.name || 'Item Details'}
+                      </span>
+                      {selectedItem && (
+                        <Tag color={getTypeColor(selectedItem.type)} className="text-xs font-semibold">
+                          {selectedItem.type?.toUpperCase()}
+                        </Tag>
+                      )}
+                    </div>
+                    {selectedItem?.part_number && (
+                      <Text className="text-xs text-gray-500 ml-8">P/N: {selectedItem.part_number}</Text>
+                    )}
+                  </div>
+                </div>
+              }
+              className="shadow-lg rounded-xl overflow-hidden"
+              headStyle={{ background: 'linear-gradient(to right, #f0f5ff, #e6f0ff)', borderBottom: '2px solid #1890ff' }}
+              bodyStyle={{ padding: '20px', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}
+            >
+              {renderDetailsPanel()}
+            </Card>
+          </div>
+        </div>
+      </div>
+
+      {/* Document Modal using Ant Design Modal */}
+      <Modal
+        title={
+          <div className="flex items-center gap-3">
+            <FileTextOutlined className="text-xl text-blue-600" />
+            <span className="font-bold text-gray-800">{documentModal.name || 'Document Viewer'}</span>
+          </div>
+        }
+        open={documentModal.isOpen}
+        onCancel={() => setDocumentModal({ isOpen: false, url: null, name: null })}
+        width="90%"
+        style={{ top: 20 }}
+        footer={[
+          <Button 
+            key="close" 
+            size="large"
+            onClick={() => setDocumentModal({ isOpen: false, url: null, name: null })}
+          >
+            Close
+          </Button>,
+          <Button 
+            key="download"
+            type="primary"
+            size="large"
+            icon={<DownloadOutlined />}
+            onClick={() => handleDocumentAction(documentModal.url, documentModal.name, 'download')}
+          >
+            Download
+          </Button>
+        ]}
+      >
+        <div style={{ height: '70vh' }}>
+          {documentModal.url ? (
+            <iframe 
+              src={documentModal.url} 
+              className="w-full h-full border-2 border-gray-200 rounded-lg" 
+              title={documentModal.name || 'Document'} 
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-500">
+              <div className="text-center">
+                <FileTextOutlined className="text-6xl mb-4 opacity-50" />
+                <p className="text-lg">Document URL is not available</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title={
+            <div className="flex items-center gap-2">
+                <ToolOutlined className="text-blue-500"/> 
+                <span>Operation Details: {currentOperation?.operation_name}</span>
+            </div>
+        }
+        open={isOperationModalOpen}
+        onCancel={() => setIsOperationModalOpen(false)}
+        width={800}
+        footer={null}
+        destroyOnHidden
+      >
+        {currentOperation && (
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 mb-1">Work Instructions:</p>
+                    <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap shadow-sm">
+                        {currentOperation.work_instructions || 'No instructions available'}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-600 mb-1">Notes:</p>
+                    <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap shadow-sm">
+                        {currentOperation.notes || 'None specified'}
+                    </div>
+                  </div>
+                </div>
+
+                {currentOperation.tools?.length > 0 && (
+                    <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                        <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                            <ToolOutlined /> Tools Required:
+                        </p>
+                        <Table
+                            dataSource={currentOperation.tools}
+                            rowKey="id"
+                            pagination={false}
+                            size="small"
+                            bordered
+                            columns={[
+                                { title: 'Tool Name', dataIndex: ['tool', 'item_description'], key: 'name', render: (text) => <span className="font-medium">{text}</span> },
+                                { title: 'Code', dataIndex: ['tool', 'identification_code'], key: 'code', render: (text) => <Tag>{text}</Tag> },
+                                { title: 'Make', dataIndex: ['tool', 'make'], key: 'make' },
+                                { title: 'Specification', dataIndex: ['tool', 'range'], key: 'range' },
+                            ]}
+                        />
+                    </div>
+                )}
+
+                 <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                    <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
+                        <FileTextOutlined /> Operation Documents:
+                    </p>
+                    <OperationDocumentsList operationId={currentOperation.id} onPreview={handlePreviewForModal} />
+                </div>
+            </div>
+        )}
+      </Modal>
     </div>
   );
 };

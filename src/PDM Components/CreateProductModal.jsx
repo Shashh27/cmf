@@ -15,13 +15,25 @@ const CreateProductModal = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [partTypes, setPartTypes] = useState([]);
+  const [rawMaterials, setRawMaterials] = useState([]);
   const hasFetchedPartTypes = useRef(false);
+  const hasFetchedRawMaterials = useRef(false);
 
   // Initial form values
+  const storedUser = (() => {
+    try {
+      const s = localStorage.getItem('user');
+      return s ? JSON.parse(s) : null;
+    } catch {
+      return null;
+    }
+  })();
   const [formData, setFormData] = useState({
     product_number: '',
     product_name: '',
     product_version: '1.0',
+    user_name_display: storedUser?.user_name || '',
+    user_id: storedUser?.id ?? null,
     assembly_number: '',
     assembly_name: '',
     part_number: '',
@@ -70,27 +82,103 @@ const CreateProductModal = ({
       }
     }
     
-    // Update internal state and form instance
+    // Update internal state
     setFormData(prev => ({ ...prev, ...newValues }));
-    form.setFieldsValue(newValues);
-    
-  }, [selectedProduct, parentAssembly, mode, editingItem, createType, form]);
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType]);
 
-  // Fetch part types when component mounts
+  // Update form values separately to avoid connection warning
   useEffect(() => {
-    if (hasFetchedPartTypes.current) return;
-    
-    const fetchPartTypesData = async () => {
-      hasFetchedPartTypes.current = true;
-      try {
-        await fetchPartTypes();
-      } catch (error) {
-        console.error('Error fetching part types:', error);
-      }
-    };
+    let newValues = {};
 
-    fetchPartTypesData();
-  }, []);
+    if (mode === 'edit' && editingItem) {
+      // Pre-fill form based on what we're editing
+      if (createType === 'product') {
+        newValues = {
+          product_number: editingItem.product_number || '',
+          product_name: editingItem.product_name || '',
+          product_version: editingItem.product_version || '1.0',
+        };
+      } else if (createType === 'assembly') {
+        newValues = {
+          assembly_number: editingItem.assembly_number || '',
+          assembly_name: editingItem.assembly_name || '',
+        };
+      } else if (createType === 'part') {
+        newValues = {
+          part_number: editingItem.part_number || '',
+          part_name: editingItem.part_name || '',
+          type_id: editingItem.type_id || 1,
+          raw_material_id: editingItem.raw_material_id,
+        };
+      }
+    } else {
+      // Default behavior for create mode
+      if (createType === 'product') {
+        newValues = {
+          product_version: '1.0',
+        };
+      } else if (createType === 'part') {
+        newValues = {
+          type_id: 1,
+        };
+      }
+    }
+    
+    // Update form instance
+    if (form && open) {
+      form.setFieldsValue(newValues);
+    }
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open]);
+
+  // Pre-fill user info for product creation
+  useEffect(() => {
+    if (open && createType === 'product') {
+      try {
+        const stored = localStorage.getItem('user');
+        if (stored) {
+          const u = JSON.parse(stored);
+          const userName = u?.user_name || '';
+          const userId = u?.id ?? null;
+          form.setFieldsValue({
+            user_name_display: userName,
+            user_id: userId != null ? String(userId) : null
+          });
+        }
+      } catch (e) {
+        console.error('Failed to parse user from localStorage', e);
+      }
+    }
+  }, [open, createType, form]);
+
+  // Fetch part types when createType becomes 'part'
+  useEffect(() => {
+    if (createType === 'part' && !hasFetchedPartTypes.current) {
+      const fetchPartTypesData = async () => {
+        hasFetchedPartTypes.current = true;
+        try {
+          await fetchPartTypes();
+        } catch (error) {
+          console.error('Error fetching part types:', error);
+        }
+      };
+      fetchPartTypesData();
+    }
+  }, [createType]);
+
+  // Fetch raw materials when component mounts or when createType becomes 'part'
+  useEffect(() => {
+    if (createType === 'part' && !hasFetchedRawMaterials.current) {
+      const fetchRawMaterialsData = async () => {
+        hasFetchedRawMaterials.current = true;
+        try {
+          await fetchRawMaterials();
+        } catch (error) {
+          console.error('Error fetching raw materials:', error);
+        }
+      };
+      fetchRawMaterialsData();
+    }
+  }, [createType]);
 
   const fetchPartTypes = async () => {
     try {
@@ -101,6 +189,18 @@ const CreateProductModal = ({
       }
     } catch (error) {
       console.error("Error fetching part types:", error);
+    }
+  };
+
+  const fetchRawMaterials = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/rawmaterials/`);
+      if (response.ok) {
+        const data = await response.json();
+        setRawMaterials(data);
+      }
+    } catch (error) {
+      console.error("Error fetching raw materials:", error);
     }
   };
 
@@ -120,10 +220,20 @@ const CreateProductModal = ({
       if (createType === 'product') {
         url = `${API_BASE_URL}/products${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
         method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
+        // Get user_id from localStorage
+        let uid = null;
+        try {
+          const stored = localStorage.getItem('user');
+          if (stored) {
+            const u = JSON.parse(stored);
+            uid = u?.id ?? null;
+          }
+        } catch {}
         payload = {
           product_number: values.product_number,
           product_name: values.product_name,
-          product_version: values.product_version
+          product_version: values.product_version,
+          user_id: uid
         };
       } else if (createType === 'assembly') {
         url = `${API_BASE_URL}/assemblies${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
@@ -180,9 +290,22 @@ const CreateProductModal = ({
       title={getTitle()}
       open={open}
       onCancel={onCancel}
+      maskClosable={false}
+      keyboard={false}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
+      <style>
+        {`
+          .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
+            background-color: #2563eb !important;
+            color: white !important;
+            opacity: 1 !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+        `}
+      </style>
       {(createType === 'assembly' || createType === 'part') && (
         <div style={{ marginBottom: 16 }}>
           <Badge 
@@ -201,25 +324,41 @@ const CreateProductModal = ({
         {createType === 'product' && (
           <>
             <Form.Item
+              name="user_name_display"
+              label="User"
+            >
+              <Input 
+                placeholder="-" 
+                autoComplete="off" 
+                readOnly 
+                disabled 
+                style={{ 
+                  backgroundColor: '#f5f5f5', 
+                  color: '#6b7280', 
+                  borderColor: '#e5e7eb' 
+                }} 
+              />
+            </Form.Item>
+            <Form.Item
               name="product_number"
               label="Product Number"
               rules={[{ required: true, message: 'Please input product number!' }]}
             >
-              <Input placeholder="e.g., PRD-001" />
+              <Input placeholder="e.g., PRD-001" autoComplete="off" />
             </Form.Item>
             <Form.Item
               name="product_name"
               label="Product Name"
               rules={[{ required: true, message: 'Please input product name!' }]}
             >
-              <Input placeholder="e.g., Main Product" />
+              <Input placeholder="e.g., Main Product" autoComplete="off" />
             </Form.Item>
             <Form.Item
               name="product_version"
               label="Product Version"
               rules={[{ required: true, message: 'Please input product version!' }]}
             >
-              <Input placeholder="e.g., 1.0" />
+              <Input placeholder="e.g., 1.0" autoComplete="off" />
             </Form.Item>
           </>
         )}
@@ -231,14 +370,14 @@ const CreateProductModal = ({
               label="Assembly Number"
               rules={[{ required: true, message: 'Please input assembly number!' }]}
             >
-              <Input placeholder="e.g., ASM-001" />
+              <Input placeholder="e.g., ASM-001" autoComplete="off" />
             </Form.Item>
             <Form.Item
               name="assembly_name"
               label="Assembly Name"
               rules={[{ required: true, message: 'Please input assembly name!' }]}
             >
-              <Input placeholder="e.g., Main Assembly" />
+              <Input placeholder="e.g., Main Assembly" autoComplete="off" />
             </Form.Item>
           </>
         )}
@@ -250,14 +389,14 @@ const CreateProductModal = ({
               label="Part Number"
               rules={[{ required: true, message: 'Please input part number!' }]}
             >
-              <Input placeholder="e.g., PRT-001" />
+              <Input placeholder="e.g., PRT-001" autoComplete="off" />
             </Form.Item>
             <Form.Item
               name="part_name"
               label="Part Name"
               rules={[{ required: true, message: 'Please input part name!' }]}
             >
-              <Input placeholder="e.g., Component Part" />
+              <Input placeholder="e.g., Component Part" autoComplete="off" />
             </Form.Item>
             <Form.Item
               name="type_id"
@@ -272,6 +411,20 @@ const CreateProductModal = ({
                 ))}
               </Select>
             </Form.Item>
+
+            <Form.Item
+              name="raw_material_id"
+              label="Raw Material"
+              rules={[{ required: false, message: 'Please select raw material!' }]}
+            >
+              <Select placeholder="Select raw material" allowClear showSearch optionFilterProp="children">
+                {rawMaterials.map(material => (
+                  <Select.Option key={material.id} value={material.id}>
+                    {material.material_name}
+                  </Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
           </>
         )}
 
@@ -279,7 +432,7 @@ const CreateProductModal = ({
           <Button onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="primary" htmlType="submit" loading={loading}>
+          <Button type="primary" htmlType="submit" loading={loading} className="no-hover-btn">
             {mode === 'edit' ? 'Save Changes' : 'Create'}
           </Button>
         </div>

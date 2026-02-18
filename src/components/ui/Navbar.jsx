@@ -14,10 +14,22 @@ const Navbar = () => {
   
   const getRoleInfo = () => {
     const path = location.pathname;
-    if (path.startsWith('/admin')) return { role: 'Admin', name: 'Admin', avatar: 'A' };
-    if (path.startsWith('/project_coordinator')) return { role: 'Project Coordinator', name: 'Coordinator', avatar: 'P' };
-    if (path.startsWith('/operator')) return { role: 'Operator', name: 'Operator', avatar: 'O' };
-    return { role: 'User', name: 'User', avatar: 'U' };
+    let role = 'User';
+    if (path.startsWith('/admin')) role = 'Admin';
+    else if (path.startsWith('/project_coordinator')) role = 'Project Coordinator';
+    else if (path.startsWith('/operator')) role = 'Operator';
+    let name = role;
+    try {
+      const stored = localStorage.getItem('user');
+      const u = stored ? JSON.parse(stored) : null;
+      if (u?.user_name) {
+        name = u.user_name;
+      } else if (u?.username) {
+        name = u.username;
+      }
+    } catch (e) {}
+    const avatar = (name && name.length > 0) ? name.charAt(0).toUpperCase() : role.charAt(0).toUpperCase();
+    return { role, name, avatar };
   };
 
   const roleInfo = getRoleInfo();
