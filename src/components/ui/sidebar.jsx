@@ -46,6 +46,7 @@ const Sidebar = () => {
       children: [
         { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`}>Orders</Link> },
         { key: `${prefix}/oms/rawmaterials`, label: <Link to={`${prefix}/oms/rawmaterials`}>Raw Materials</Link> },
+        { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`}>Parts Priority</Link> },
       ],
     },
     {
@@ -77,6 +78,7 @@ const Sidebar = () => {
         { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`}>Planned vs Actual</Link> },
         { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`}>Order Tracking</Link> },
         { key: `${prefix}/product-monitoring/maintenance`, label: <Link to={`${prefix}/product-monitoring/maintenance`}>Maintenance</Link> },
+        { key: `${prefix}/product-monitoring/pokayoke-checklists`, label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`}>PokaYoke Checklists</Link> },
       ],
     },
     {

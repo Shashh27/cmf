@@ -1,5 +1,5 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { Tree, Spin, message, Button, Modal, Input, Upload } from 'antd';
+import { Tree, Spin, message, Button, Modal, Input, Upload, Card } from 'antd';
 import { 
   FolderOutlined, 
   FileOutlined, 
@@ -12,14 +12,17 @@ import {
   DeleteOutlined,    // Icon for delete
   UploadOutlined     // Icon for upload
 } from '@ant-design/icons';
+import config from '../Config/config';
 
 const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
   const [treeData, setTreeData] = useState([]);
   const [expandedKeys, setExpandedKeys] = useState([]);
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [loadedParts, setLoadedParts] = useState({}); // Track which orders have parts loaded
+  const [loadedAllParts, setLoadedAllParts] = useState(false); // Track if global parts list is loaded
   const [loadedOperations, setLoadedOperations] = useState({}); // Track which parts have operations loaded
   
   // General Documents state
@@ -38,26 +41,27 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   // Fetch orders and general folders on component mount
   useEffect(() => {
     fetchOrders();
+    fetchPartsList();
     fetchGeneralFolders();
   }, []);
 
   // Reinitialize tree data when general folders change
   useEffect(() => {
-    if (orders.length > 0) {
-      initializeTreeData(orders);
+    if (orders.length > 0 || parts.length > 0) {
+      initializeTreeData(orders, parts);
     }
-  }, [generalFolders, orders]);
+  }, [generalFolders, orders, parts]);
 
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://172.18.7.89:8000/api/v1/orders/');
+      const response = await fetch(`${config.API_BASE_URL}/orders/`);
       if (!response.ok) {
         throw new Error('Failed to fetch orders');
       }
       const data = await response.json();
       setOrders(data);
-      initializeTreeData(data);
+      initializeTreeData(data, parts);
     } catch (error) {
       message.error('Failed to fetch orders: ' + error.message);
     } finally {
@@ -65,9 +69,22 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     }
   };
 
+  const fetchPartsList = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/parts/`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch parts');
+      }
+      const data = await response.json();
+      setParts(data);
+    } catch (error) {
+      message.error('Failed to fetch parts: ' + error.message);
+    }
+  };
+
   const fetchGeneralFolders = async () => {
     try {
-      const response = await fetch('http://172.18.7.89:8000/general-documents/folders/tree');
+      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/tree`);
       if (!response.ok) {
         throw new Error('Failed to fetch general folders');
       }
@@ -78,7 +95,110 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     }
   };
 
-  const initializeTreeData = (ordersData) => {
+  const buildPartNode = (part, orderId = null, operations = [], includeIPID = true) => {
+    const children = [
+      {
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <FolderOutlined style={{ color: '#722ed1' }} />
+            <span>MPP</span>
+          </span>
+        ),
+        titleText: 'MPP',
+        key: `mpp-${part.id}${orderId ? `-${orderId}` : ''}`,
+        isLeaf: true,
+        selectable: true,
+        nodeData: { type: 'part-category', category: 'MPP', partId: part.id, partName: part.part_name, orderId }
+      },
+      {
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <FolderOutlined style={{ color: '#722ed1' }} />
+            <span>ENGINEERING_DRAWING</span>
+          </span>
+        ),
+        titleText: 'ENGINEERING_DRAWING',
+        key: `eng-${part.id}${orderId ? `-${orderId}` : ''}`,
+        isLeaf: true,
+        selectable: true,
+        nodeData: { type: 'part-category', category: 'ENGINEERING_DRAWING', partId: part.id, partName: part.part_name, orderId }
+      }
+    ];
+
+    if (includeIPID) {
+      children.push({
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <FolderOutlined style={{ color: '#722ed1' }} />
+            <span>IPID</span>
+          </span>
+        ),
+        titleText: 'IPID',
+        key: `ipid-${part.id}${orderId ? `-${orderId}` : ''}`,
+        isLeaf: true,
+        selectable: true,
+        nodeData: { type: 'part-category', category: 'IPID', partId: part.id, partName: part.part_name, orderId }
+      });
+    }
+
+    children.push(
+      {
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <FolderOutlined style={{ color: '#722ed1' }} />
+            <span>Balloon</span>
+          </span>
+        ),
+        titleText: 'Balloon',
+        key: `balloon-${part.id}${orderId ? `-${orderId}` : ''}`,
+        isLeaf: true,
+        selectable: true,
+        nodeData: { type: 'part-category', category: 'Balloon', partId: part.id, partName: part.part_name, orderId }
+      },
+      // CNC Programs folder
+      {
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <FolderOutlined style={{ color: '#13c2c2' }} />
+            <span>CNC Programs</span>
+          </span>
+        ),
+        titleText: 'CNC Programs',
+        key: `cnc-${part.id}${orderId ? `-${orderId}` : ''}`,
+        isLeaf: false,
+        selectable: false,
+        children: operations.length > 0 ? operations.map(op => ({
+          title: (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <FolderOutlined style={{ color: '#13c2c2' }} />
+              <span>{op.operation_name}</span>
+            </span>
+          ),
+          titleText: op.operation_name,
+          key: `op-${op.id}${orderId ? `-${orderId}` : ''}`,
+          isLeaf: true,
+          selectable: true,
+          nodeData: { type: 'operation-folder', operationId: op.id, operationName: op.operation_name, partId: part.id, orderId }
+        })) : []
+      }
+    );
+
+    return {
+      title: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <AppstoreOutlined style={{ color: '#fa8c16', fontSize: '14px' }} />
+          <span>{part.part_name}</span>
+        </span>
+      ),
+      titleText: part.part_name,
+      key: `part-${part.id}${orderId ? `-${orderId}` : ''}`,
+      isLeaf: false,
+      selectable: false,
+      children
+    };
+  };
+
+  const initializeTreeData = (ordersData, partsData) => {
     const initialTreeData = [
       {
         title: (
@@ -87,6 +207,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
             <span>Orders</span>
           </span>
         ),
+        titleText: 'Orders',
         key: 'orders-root',
         selectable: false,
         children: ordersData.map(order => ({
@@ -96,6 +217,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
               <span>{order.sale_order_number}</span>
             </span>
           ),
+          titleText: order.sale_order_number,
           key: `order-${order.id}`,
           selectable: false,
           children: [
@@ -106,6 +228,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
                   <span>Reports</span>
                 </span>
               ),
+              titleText: 'Reports',
               key: `reports-${order.id}`,
               isLeaf: true,
               selectable: true,
@@ -119,6 +242,18 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
             }
           ]
         }))
+      },
+      {
+        title: (
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <FolderOutlined style={{ color: '#fa8c16' }} />
+            <span>Parts</span>
+          </span>
+        ),
+        titleText: 'Parts',
+        key: 'parts-root',
+        selectable: false,
+        children: partsData.map(part => buildPartNode(part, null, [], false))
       },
       ...buildGeneralFoldersTree(generalFolders)
     ];
@@ -194,6 +329,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
           </div>
         </div>
       ),
+      titleText: folder.folder_name,
       key: `general-folder-${folder.id}`,
       selectable: true,
       nodeData: {
@@ -213,7 +349,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     }
 
     try {
-      const response = await fetch('http://172.18.7.89:8000/general-documents/folders', {
+      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -237,7 +373,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       await fetchGeneralFolders();
       
       // Reinitialize tree data
-      initializeTreeData(orders);
+      initializeTreeData(orders, parts);
     } catch (error) {
       message.error('Failed to create folder: ' + error.message);
     }
@@ -253,7 +389,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     if (!folderToDelete) return;
 
     try {
-      const response = await fetch(`http://172.18.7.89:8000/general-documents/folders/${folderToDelete.id}`, {
+      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${folderToDelete.id}`, {
         method: 'DELETE'
       });
 
@@ -270,7 +406,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       await fetchGeneralFolders();
       
       // Reinitialize tree data
-      initializeTreeData(orders);
+      initializeTreeData(orders, parts);
     } catch (error) {
       message.error('Failed to delete folder: ' + error.message);
     }
@@ -311,7 +447,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       setLoading(true);
       console.log('Uploading file:', file.name, 'to folder:', uploadFolderId);
       
-      const response = await fetch('http://172.18.7.89:8000/general-documents/upload', {
+      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`, {
         method: 'POST',
         body: formData,
         // Don't set Content-Type header, let browser set it with boundary
@@ -342,7 +478,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       await fetchGeneralFolders();
       
       // Reinitialize tree data
-      initializeTreeData(orders);
+      initializeTreeData(orders, parts);
     } catch (error) {
       console.error('Upload error:', error);
       message.error('Failed to upload document: ' + error.message);
@@ -359,23 +495,23 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     }
   }));
 
-  const fetchPartsByOrder = async (orderId) => {
+  const fetchOrderHierarchy = async (orderId) => {
     try {
-      const response = await fetch(`http://172.18.7.89:8000/api/v1/order-parts-raw-material-linked/order/${orderId}`);
+      const response = await fetch(`${config.API_BASE_URL}/orders/${orderId}/hierarchical`);
       if (!response.ok) {
-        throw new Error('Failed to fetch parts');
+        throw new Error('Failed to fetch order hierarchy');
       }
       const data = await response.json();
       return data;
     } catch (error) {
-      message.error('Failed to fetch parts: ' + error.message);
-      return [];
+      message.error('Failed to fetch order hierarchy: ' + error.message);
+      return null;
     }
   };
 
   const fetchOperationsByPart = async (partId) => {
     try {
-      const response = await fetch(`http://172.18.7.89:8000/api/v1/operations/part/${partId}`);
+      const response = await fetch(`${config.API_BASE_URL}/operations/part/${partId}`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch operations: ${response.status} ${response.statusText}`);
@@ -390,292 +526,116 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   };
 
   
+  // Helper to collect all parts from hierarchy
+  const collectAllParts = (hierarchy) => {
+    let allParts = [];
+    
+    // Add direct parts
+    if (hierarchy.direct_parts) {
+      allParts = [...allParts, ...hierarchy.direct_parts];
+    }
+    
+    // Add parts from assemblies recursively
+    const collectFromAssemblies = (assemblies) => {
+      assemblies.forEach(asm => {
+        if (asm.parts) {
+          allParts = [...allParts, ...asm.parts];
+        }
+        if (asm.subassemblies) {
+          collectFromAssemblies(asm.subassemblies);
+        }
+      });
+    };
+    
+    if (hierarchy.assemblies) {
+      collectFromAssemblies(hierarchy.assemblies);
+    }
+    
+    return allParts;
+  };
+
   // Load parts when order is expanded
   const onExpand = async (expandedKeysValue, info) => {
     setExpandedKeys(expandedKeysValue);
 
-    // Check if an order node is being expanded
+    // 1. Check if an order node is being expanded
     if (info.node && info.node.key.startsWith('order-')) {
       const orderId = info.node.key.replace('order-', '');
       
-      // Check if parts are already loaded for this order
       if (!loadedParts[orderId]) {
         setLoading(true);
-        const parts = await fetchPartsByOrder(orderId);
+        const hierarchyData = await fetchOrderHierarchy(orderId);
         
-        // Update the tree data with parts directly under the order
+        if (!hierarchyData || !hierarchyData.product_hierarchy) {
+          setLoading(false);
+          return;
+        }
+
+        const partsFromHierarchy = collectAllParts(hierarchyData.product_hierarchy);
+        
         const updatedTreeData = [...treeData];
         const ordersRootNode = updatedTreeData.find(node => node.key === 'orders-root');
         
         if (ordersRootNode) {
           const orderNode = ordersRootNode.children.find(child => child.key === `order-${orderId}`);
           if (orderNode) {
-            // Add parts directly to order children, keeping Reports folder
-            const partsChildren = parts.map((part, index) => {
-              return {
-                title: (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <AppstoreOutlined style={{ color: '#fa8c16', fontSize: '14px' }} />
-                    <span>{part.part_name}</span>
-                  </span>
-                ),
-                key: `part-${part.part_id}`,
-                isLeaf: false,
-                selectable: false,
-                children: [
-                {
-                  title: (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <FolderOutlined style={{ color: '#722ed1' }} />
-                      <span>MPP</span>
-                    </span>
-                  ),
-                  key: `mpp-${part.part_id}`,
-                  isLeaf: true,
-                  selectable: true,
-                  nodeData: { type: 'folder', category: 'MPP', partId: part.part_id, partName: part.part_name, orderId }
-                },
-                {
-                  title: (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <FolderOutlined style={{ color: '#722ed1' }} />
-                      <span>ENGINEERING_DRAWING</span>
-                    </span>
-                  ),
-                  key: `eng-${part.part_id}`,
-                  isLeaf: true,
-                  selectable: true,
-                  nodeData: { type: 'folder', category: 'ENGINEERING_DRAWING', partId: part.part_id, partName: part.part_name, orderId }
-                },
-                {
-                  title: (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <FolderOutlined style={{ color: '#722ed1' }} />
-                      <span>IPID</span>
-                    </span>
-                  ),
-                  key: `ipid-${part.part_id}`,
-                  isLeaf: true,
-                  selectable: true,
-                  nodeData: { type: 'folder', category: 'IPID', partId: part.part_id, partName: part.part_name, orderId }
-                },
-                {
-                  title: (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <FolderOutlined style={{ color: '#722ed1' }} />
-                      <span>Balloon</span>
-                    </span>
-                  ),
-                  key: `balloon-${part.part_id}`,
-                  isLeaf: true,
-                  selectable: true,
-                  nodeData: { type: 'folder', category: 'Balloon', partId: part.part_id, partName: part.part_name, orderId }
-                },
-                {
-                  title: (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <FolderOutlined style={{ color: '#13c2c2' }} />
-                      <span>CNCPrograms</span>
-                    </span>
-                  ),
-                  key: `cnc-${part.part_id}`,
-                  isLeaf: false,
-                  selectable: false,
-                  children: [] // Will be loaded dynamically with operations
-                }
-              ]
-              };
+            const partsChildren = partsFromHierarchy.map((partDetail) => {
+              return buildPartNode(partDetail.part, orderId, partDetail.operations || []);
             });
             
-            // Combine existing Reports folder with new parts
-            orderNode.children = [...partsChildren, ...orderNode.children];
+            const reportsFolder = orderNode.children.find(child => child.key === `reports-${orderId}`);
+            orderNode.children = reportsFolder ? [reportsFolder, ...partsChildren] : partsChildren;
           }
         }
         
-        // Update tree data and mark parts as loaded
         setTreeData(updatedTreeData);
         setLoadedParts(prev => ({ ...prev, [orderId]: true }));
         setLoading(false);
       }
     }
 
-    // Check if a CNCPrograms node is being expanded
+    // 2. Check if CNC Programs folder is being expanded
     if (info.node && info.node.key.startsWith('cnc-')) {
-      const partId = info.node.key.replace('cnc-', '');
+      const keyParts = info.node.key.split('-');
+      const partId = keyParts[1];
+      const orderId = keyParts[2] || null;
       
-      // Check if operations are already loaded for this part
-      if (!loadedOperations[partId]) {
+      if (!loadedOperations[info.node.key]) {
         setLoading(true);
+        const operations = await fetchOperationsByPart(partId);
         
-        try {
-          const operations = await fetchOperationsByPart(partId);
-          
-          // Simple approach: Create mock operations for now to prevent crashes
-          let mockOperations = [];
-          
-          if (operations && operations.length > 0) {
-            mockOperations = operations.map((operation) => ({
-              title: operation.operation_name || `Operation ${operation.id}`,
-              key: `operation-${operation.id}`,
-              isLeaf: true,
-              selectable: true,
-              nodeData: { 
-                type: 'operation', 
-                category: 'CNCPrograms', 
-                operationId: operation.id, 
-                operationName: operation.operation_name,
-                partId: partId 
-              }
-            }));
-          } else {
-            mockOperations = [{
-              title: 'No operations found',
-              key: `no-operations-${partId}`,
-              isLeaf: true,
-              selectable: false
-            }];
-          }
-          
-          // Update the specific node directly without complex tree manipulation
-          const newExpandedKeys = [...expandedKeys];
-          setExpandedKeys(newExpandedKeys);
-          
-          // Update the tree with operations
-          if (operations && operations.length > 0) {
-            // Create operation nodes with proper styling and fallback
-            const operationNodes = operations.map((operation, index) => {
-              const operationName = operation.operation_name || 
-                                   operation.name || 
-                                   operation.operation_number || 
-                                   `Operation ${index + 1}`;
-              
-              return {
+        const updatedTreeData = [...treeData];
+        
+        // Function to find and update the CNC folder recursively
+        const updateCncFolder = (nodes) => {
+          for (let node of nodes) {
+            if (node.key === info.node.key) {
+              node.children = operations.map(op => ({
                 title: (
                   <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <FileOutlined style={{ color: '#13c2c2' }} />
-                    <span>{operationName}</span>
+                    <FolderOutlined style={{ color: '#13c2c2' }} />
+                    <span>{op.operation_name}</span>
                   </span>
                 ),
-                key: `operation-${operation.id}`,
+                titleText: op.operation_name,
+                key: `op-${op.id}${orderId ? `-${orderId}` : ''}`,
                 isLeaf: true,
                 selectable: true,
-                nodeData: { 
-                  type: 'operation', 
-                  category: 'CNCPrograms', 
-                  operationId: operation.id, 
-                  operationName: operationName,
-                  partId: partId 
-                }
-              };
-            });
-            
-            // Update tree with operations
-            try {
-              let cncFolderFound = false;
-              const updatedTreeData = treeData.map(orderNode => {
-                if (orderNode.children) {
-                  return {
-                    ...orderNode,
-                    children: orderNode.children.map(child => {
-                      // Check if this is an order (starts with 'order-')
-                      if (child.key.startsWith('order-') && child.children) {
-                        return {
-                          ...child,
-                          children: child.children.map(partChild => {
-                            // Look for parts inside the order
-                            if (partChild.key.startsWith('part-') && partChild.children) {
-                              return {
-                                ...partChild,
-                                children: partChild.children.map(folder => {
-                                  // Look for CNCPrograms folder
-                                  if (folder.key === `cnc-${partId}`) {
-                                    cncFolderFound = true;
-                                    return {
-                                      ...folder,
-                                      children: operationNodes,
-                                      isLeaf: false
-                                    };
-                                  }
-                                  return folder;
-                                })
-                              };
-                            }
-                            return partChild;
-                          })
-                        };
-                      }
-                      return child;
-                    })
-                  };
-                }
-                return orderNode;
-              });
-              
-              if (cncFolderFound) {
-                setTreeData(updatedTreeData);
-                
-                // Auto-expand after a short delay
-                setTimeout(() => {
-                  setExpandedKeys(prev => [...prev, `cnc-${partId}`]);
-                }, 200);
-              }
-              
-            } catch (error) {
-              console.error('Error updating tree:', error);
+                nodeData: { type: 'operation-folder', operationId: op.id, operationName: op.operation_name, partId, orderId }
+              }));
+              return true;
             }
-            
-            // Mark as loaded to prevent repeated calls
-            setLoadedOperations(prev => ({ ...prev, [partId]: true }));
-            
-          } else {
-            message.info('No operations found for this part');
-            
-            // Add "No operations found" placeholder
-            const updatedTreeData = treeData.map(orderNode => {
-              if (orderNode.children) {
-                const updatedChildren = orderNode.children.map(child => {
-                  if (child.children) {
-                    const updatedGrandChildren = child.children.map(folder => {
-                      if (folder.key === `cnc-${partId}`) {
-                        return {
-                          ...folder,
-                          children: [{
-                            title: 'No operations found',
-                            key: `no-operations-${partId}`,
-                            isLeaf: true,
-                            selectable: false
-                          }]
-                        };
-                      }
-                      return folder;
-                    });
-                    return {
-                      ...child,
-                      children: updatedGrandChildren
-                    };
-                  }
-                  return child;
-                });
-                return {
-                  ...orderNode,
-                  children: updatedChildren
-                };
-              }
-              return orderNode;
-            });
-            
-            setTreeData(updatedTreeData);
+            if (node.children && updateCncFolder(node.children)) {
+              return true;
+            }
           }
-          
-          // Mark as loaded to prevent repeated calls
-          setLoadedOperations(prev => ({ ...prev, [partId]: true }));
-          
-        } catch (error) {
-          console.error('Error loading operations:', error);
-          message.error('Failed to load operations: ' + error.message);
-        } finally {
-          setLoading(false);
-        }
+          return false;
+        };
+        
+        updateCncFolder(updatedTreeData);
+        setTreeData(updatedTreeData);
+        setLoadedOperations(prev => ({ ...prev, [info.node.key]: true }));
+        setLoading(false);
       }
     }
   };
@@ -689,11 +649,36 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   };
 
   return (
-    <div style={{ 
-      height: '100%', 
-      overflow: 'auto',
-      padding: isMobile ? '8px' : '16px'
-    }}>
+    <div 
+      className="tree-scroll-container"
+      style={{ 
+        padding: isMobile ? '8px' : '16px',
+        minWidth: 'max-content' // Ensure tree items don't get cut off
+      }}
+    >
+      <style>
+        {`
+          .tree-scroll-container::-webkit-scrollbar {
+            width: 8px;
+          }
+          .tree-scroll-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+          }
+          .tree-scroll-container::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+          }
+          .tree-scroll-container::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+          }
+          .tree-scroll-container {
+            scrollbar-width: thin;
+            scrollbar-color: #c1c1c1 #f1f1f1;
+          }
+        `}
+      </style>
+      
       <Spin spinning={loading}>
         <Tree
           showIcon
@@ -704,10 +689,12 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
           onSelect={onSelect}
           style={{ 
             background: 'transparent',
-            fontSize: isMobile ? '12px' : '14px'
+            fontSize: isMobile ? '12px' : '14px',
+            minWidth: 'max-content' // Ensure tree items don't get cut off
           }}
           showLine={!isMobile}
           blockNode={isMobile}
+          virtual={false} // Disable virtual scrolling for better compatibility
         />
       </Spin>
       
