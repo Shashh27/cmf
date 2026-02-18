@@ -10,6 +10,7 @@ from DB.database import get_db
 from DB.models.oms import Document as DocumentModel
 from DB.schemas.oms import Document, DocumentUpdate
 from DB.minio_client import get_minio_client
+from .step_converter import StepConverter
 
 router = APIRouter(
     prefix="/documents",
@@ -30,7 +31,7 @@ def is_allowed_file(filename: str) -> bool:
     return get_file_extension(filename) in ALLOWED_EXTENSIONS
 
 
-def detect_file_type_from_content(file_content: bytes) -> str:
+def detect_file_type_from_content(file_content: bytes, filename: str | None = None) -> str:
     """Detect file type from file content (magic bytes)"""
     if not file_content:
         return 'application/octet-stream'
@@ -100,7 +101,6 @@ def detect_file_type_from_content(file_content: bytes) -> str:
     except UnicodeDecodeError:
         pass
 
-    # STL/STEP files - check by extension if content detection fails
     if filename:
         ext = get_file_extension(filename)
         if ext == '.stl':
@@ -113,8 +113,7 @@ def detect_file_type_from_content(file_content: bytes) -> str:
 
 def get_content_type_from_detection(file_content: bytes, filename: str = None) -> str:
     """Get content type by detecting from file content first, then fallback to extension"""
-    # Try to detect from content first
-    detected_type = detect_file_type_from_content(file_content)
+    detected_type = detect_file_type_from_content(file_content, filename)
     if detected_type != 'application/octet-stream':
         return detected_type
     
@@ -306,6 +305,60 @@ async def preview_document(document_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to preview document: {str(e)}"
+        )
+
+
+@router.get("/{document_id}/3d")
+async def preview_document_3d(document_id: int, db: Session = Depends(get_db)):
+    from fastapi.responses import StreamingResponse
+
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with id {document_id} not found"
+        )
+
+    try:
+        minio_client = get_minio_client()
+        object_name = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        file_extension = get_file_extension(object_name)
+
+        file_data = minio_client.download_file(object_name)
+
+        if file_extension in [".step", ".stp"]:
+            glb_data = StepConverter.convert_step_to_glb(file_data)
+        elif file_extension == ".stl":
+            glb_data = StepConverter.convert_stl_to_glb(file_data)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="3D preview is only available for STEP/STL files"
+            )
+
+        if not glb_data:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to convert 3D model to GLB"
+            )
+
+        filename = f"{document.document_name}.glb"
+
+        return StreamingResponse(
+            io.BytesIO(glb_data),
+            media_type="model/gltf-binary",
+            headers={
+                "Content-Disposition": f"inline; filename={filename}"
+            }
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate 3D preview: {str(e)}"
         )
 
 

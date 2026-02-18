@@ -10,6 +10,7 @@ from DB.models.oms import (
     OperationDocument as OperationDocumentModel,
     ToolWithPart as ToolWithPartModel
 )
+from DB.models.configuration import WorkCenter as WorkCenterModel
 from DB.schemas.oms import Operation, OperationCreate, OperationUpdate
 
 router = APIRouter(
@@ -32,6 +33,16 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
 def get_operations(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """Get all operations with pagination"""
     operations = db.query(OperationModel).offset(skip).limit(limit).all()
+
+    work_center_ids = {op.workcenter_id for op in operations if op.workcenter_id is not None}
+    work_center_map = {}
+    if work_center_ids:
+        work_centers = db.query(WorkCenterModel).filter(WorkCenterModel.id.in_(work_center_ids)).all()
+        work_center_map = {wc.id: wc.work_center_name for wc in work_centers}
+
+    for op in operations:
+        op.work_center_name = work_center_map.get(op.workcenter_id)
+
     return operations
 
 
@@ -44,6 +55,13 @@ def get_operation(operation_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation with id {operation_id} not found"
         )
+    work_center = None
+    if operation.workcenter_id is not None:
+        work_center = db.query(WorkCenterModel).filter(WorkCenterModel.id == operation.workcenter_id).first()
+    if work_center:
+        operation.work_center_name = work_center.work_center_name
+    else:
+        operation.work_center_name = None
     return operation
 
 
@@ -51,6 +69,16 @@ def get_operation(operation_id: int, db: Session = Depends(get_db)):
 def get_operations_by_part(part_id: int, db: Session = Depends(get_db)):
     """Get all operations for a specific part"""
     operations = db.query(OperationModel).filter(OperationModel.part_id == part_id).all()
+
+    work_center_ids = {op.workcenter_id for op in operations if op.workcenter_id is not None}
+    work_center_map = {}
+    if work_center_ids:
+        work_centers = db.query(WorkCenterModel).filter(WorkCenterModel.id.in_(work_center_ids)).all()
+        work_center_map = {wc.id: wc.work_center_name for wc in work_centers}
+
+    for op in operations:
+        op.work_center_name = work_center_map.get(op.workcenter_id)
+
     return operations
 
 
