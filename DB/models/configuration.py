@@ -69,3 +69,87 @@ class Customer(Base):
     contact_person = Column(String, nullable=False)
 
     orders = relationship("Order", back_populates="customer")
+
+
+# =======================
+# Pokayoke Checklists
+# =======================
+class PokayokeChecklist(Base):
+    __tablename__ = "pokayoke_checklists"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    # Relationships
+    items = relationship("PokayokeChecklistItem", back_populates="checklist", cascade="all, delete-orphan")
+    machine_assignments = relationship("PokayokeMachineAssignment", back_populates="checklist", cascade="all, delete-orphan")
+
+
+class PokayokeChecklistItem(Base):
+    __tablename__ = "pokayoke_checklist_items"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
+    item_text = Column(String, nullable=False)
+    sequence_number = Column(Integer, nullable=False)
+    item_type = Column(String, nullable=False)  # 'boolean', 'numerical', 'text'
+    is_required = Column(Boolean, default=True)
+    expected_value = Column(String)  # Depends on item_type
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    # Relationships
+    checklist = relationship("PokayokeChecklist", back_populates="items")
+
+
+class PokayokeMachineAssignment(Base):
+    __tablename__ = "pokayoke_machine_assignments"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    assigned_at = Column(TIMESTAMP, server_default=func.now())
+
+    # Relationships
+    checklist = relationship("PokayokeChecklist", back_populates="machine_assignments")
+    machine = relationship("Machine")
+
+
+class PokayokeCompletedLog(Base):
+    __tablename__ = "pokayoke_completed_logs"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
+    completed_at = Column(TIMESTAMP, nullable=False)
+    all_items_passed = Column(Boolean, nullable=False)
+    comments = Column(Text, nullable=True)
+    read = Column(Boolean, default=False)
+
+    # Relationships
+    checklist = relationship("PokayokeChecklist")
+    machine = relationship("Machine")
+    item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
+
+
+class PokayokeItemResponse(Base):
+    __tablename__ = "pokayoke_item_responses"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    completed_log_id = Column(Integer, ForeignKey("configuration.pokayoke_completed_logs.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("configuration.pokayoke_checklist_items.id"), nullable=False)
+    response_value = Column(String, nullable=False)
+    is_confirming = Column(Boolean, default=False)
+    timestamp = Column(TIMESTAMP, nullable=False)
+
+    # Relationships
+    completed_log = relationship("PokayokeCompletedLog", back_populates="item_responses")
+    item = relationship("PokayokeChecklistItem")
