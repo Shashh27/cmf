@@ -1,30 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  SearchOutlined, 
-  DownOutlined, 
-  RightOutlined, 
-  PlusOutlined, 
-  PartitionOutlined, 
-  ToolOutlined, 
-  SettingOutlined, 
-  FileTextOutlined, 
-  ProfileOutlined, 
-  EditOutlined, 
-  DeleteOutlined, 
-  CodeSandboxOutlined, 
-  SafetyCertificateOutlined,
-  DashboardOutlined,
-  InboxOutlined,
-  ControlOutlined,
-  DeploymentUnitOutlined,
-  ClusterOutlined,
-  AppstoreOutlined,
-  BlockOutlined,
-  CaretDownOutlined,
-  CaretRightOutlined
-} from "@ant-design/icons";
+import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
-import { Input, Button, Card, message, Modal, Tooltip, Empty, Spin, Tag, Typography, Space } from "antd";
+import { Input, Button, message, Modal, Tooltip, Empty, Spin, Tag, Typography } from "antd";
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
@@ -339,27 +316,15 @@ const BillOfMaterials = ({ onItemSelected }) => {
   const renderPartInTree = (part, level = 0) => {
     const isSelected = activeItemId === part.id;
     return (
-      <div 
-        key={part.id} 
-        className={`
-          flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200 mb-0.5
-          ${isSelected
-            ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-500' 
-            : 'hover:bg-gray-50 border-l-2 border-transparent'
-          }
-        `}
-        style={{ marginLeft: `${level * 12}px` }} 
+      <div
+        key={part.id}
+        className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
+        style={{ marginLeft: `${level * 14}px` }}
         onClick={() => handleItemClick(part, 'part')}
-      > 
+      >
         <div className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="w-5 flex justify-center">
-            {getTypeIcon(part.type_name || 'part')}
-          </div>
-          <div className="flex flex-col min-w-0">
-            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
-              {part.part_name}
-            </Text>
-          </div>
+          <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
+          <Text className={`text-xs font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{part.part_name}</Text>
         </div>
         <ActionButtons item={part} type="part" />
       </div>
@@ -375,49 +340,26 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
     return (
       <div key={assembly.id} className="select-none">
-        <div 
-          className={`
-            flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200 mb-0.5
-            ${isSelected 
-              ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-500' 
-              : 'hover:bg-gray-50 border-l-2 border-transparent'
-            }
-          `}
-          style={{ marginLeft: `${level * 12}px` }} 
+        <div
+          className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
+          style={{ marginLeft: `${level * 14}px` }}
           onClick={() => handleItemClick(assembly, 'assembly')}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0 w-5 flex justify-center">
               {hasChildren ? (
-                 <Button 
-                   type="text" 
-                   size="small" 
-                   icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-                   onClick={(e) => { e.stopPropagation(); toggleExpand(assembly.id); }}
-                   className="hover:bg-gray-200 rounded-md w-5 h-5 flex items-center justify-center p-0 text-gray-500 no-hover-btn"
-                 />
+                <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                  onClick={(e) => { e.stopPropagation(); toggleExpand(assembly.id); }}
+                  className="w-5 h-5 flex items-center justify-center p-0 text-slate-500 hover:bg-slate-200 rounded" />
               ) : <div className="w-5" />}
             </div>
-            
-            <div className="flex-shrink-0">
-               {getTypeIcon('assembly')}
-            </div>
-
-            <div className="flex flex-col min-w-0 flex-1">
-               <div className="flex items-center gap-2">
-                  <Text className={`text-sm font-medium truncate ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
-                    {assembly.assembly_name}
-                  </Text>
-               </div>
-            </div>
+            <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly')}</span>
+            <Text className={`text-xs font-medium truncate flex-1 min-w-0 ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{assembly.assembly_name}</Text>
           </div>
           <ActionButtons item={assembly} type="assembly" />
         </div>
         {isExpanded && hasChildren && (
-          <div className="mt-0.5">
-            {assemblyParts.map(part => renderPartInTree(part, level + 1))}
-            {childAssemblies.map(child => renderAssemblyTree(child, level + 1))}
-          </div>
+          <div className="mt-0.5">{assemblyParts.map(part => renderPartInTree(part, level + 1))}{childAssemblies.map(child => renderAssemblyTree(child, level + 1))}</div>
         )}
       </div>
     );
@@ -435,45 +377,25 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
     return (
       <div key={product.id} className="select-none mb-1">
-        <div 
-          className={`
-            flex items-center justify-between px-2 py-1.5 rounded-md cursor-pointer transition-all duration-200 mb-0.5
-            ${isSelected 
-              ? 'bg-blue-50 text-blue-700 border-l-2 border-blue-500' 
-              : 'hover:bg-gray-50 border-l-2 border-transparent'
-            }
-          `}
+        <div
+          className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
           onClick={() => handleItemClick(product, 'product')}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
-             <div className="flex-shrink-0 w-5 flex justify-center">
+            <div className="flex-shrink-0 w-5 flex justify-center">
               {showArrow ? (
-                 <Button 
-                   type="text" 
-                   size="small" 
-                   icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-                   onClick={(e) => { e.stopPropagation(); handleExpandProduct(product); }}
-                   className="hover:bg-gray-200 rounded-md w-5 h-5 flex items-center justify-center p-0 text-gray-500 no-hover-btn"
-                 />
+                <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                  onClick={(e) => { e.stopPropagation(); handleExpandProduct(product); }}
+                  className="w-5 h-5 flex items-center justify-center p-0 text-slate-500 hover:bg-slate-200 rounded" />
               ) : <div className="w-5" />}
-             </div>
-             
-             <div className="flex-shrink-0">
-                {getTypeIcon('product')}
-             </div>
-
-             <div className="flex flex-col min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                   <Text className={`text-sm font-semibold truncate ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
-                     {product.product_name}
-                   </Text>
-                </div>
-             </div>
+            </div>
+            <span className="flex-shrink-0 text-sm">{getTypeIcon('product')}</span>
+            <Text className={`text-xs font-semibold truncate flex-1 min-w-0 ${isSelected ? 'text-indigo-800' : 'text-slate-800'}`}>{product.product_name}</Text>
           </div>
           <ActionButtons item={product} type="product" />
         </div>
         {isExpanded && hasChildren && (
-          <div className="mt-0.5 ml-2 border-l border-gray-100 pl-1">
+          <div className="mt-0.5 ml-2 border-l border-slate-200 pl-1">
             {directParts.map(part => renderPartInTree(part, 1))}
             {childAssemblies.map(assembly => renderAssemblyTree(assembly, 1))}
           </div>
@@ -499,62 +421,32 @@ const BillOfMaterials = ({ onItemSelected }) => {
     <>
       <style>
         {`
-          .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
-            background-color: #2563eb !important;
-            color: white !important;
-            opacity: 1 !important;
-            border: none !important;
-            box-shadow: none !important;
-          }
-          .custom-scrollbar::-webkit-scrollbar {
-            width: 4px;
-          }
-          .custom-scrollbar::-webkit-scrollbar-track {
-            background: #f1f1f1;
-          }
-          .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 4px;
-          }
-          .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-          }
+          .bom-primary-btn, .bom-primary-btn:hover { background: #2563eb !important; color: #fff !important; border: none !important; }
+          .bom-scroll::-webkit-scrollbar { width: 5px; }
+          .bom-scroll::-webkit-scrollbar-track { background: #f1f5f9; }
+          .bom-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
         `}
       </style>
-      <div className="flex flex-col h-full bg-white">
-        <div className="p-4 border-b border-gray-100 bg-white">
-          <div className="flex justify-between items-center mb-4">
+      <div className="flex flex-col h-full bg-slate-50/50">
+        <div className="p-3 border-b border-slate-200 bg-white shrink-0">
+          <div className="flex justify-between items-center gap-2 mb-3">
             <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-blue-50 rounded-lg">
-                    <AppstoreOutlined className="text-blue-600 text-lg" />
-                </div>
-                <h2 className="text-lg font-semibold text-gray-800 m-0">Bill of Materials</h2>
+              <div className="p-1.5 bg-indigo-100 rounded-lg">
+                <AppstoreOutlined className="text-indigo-600 text-base" />
+              </div>
+              <h2 className="text-sm font-semibold text-slate-800 m-0">Bill of Materials</h2>
             </div>
-            <Button 
-                type="primary" 
-                size="small" 
-                icon={<PlusOutlined />} 
-                onClick={handleCreateProduct}
-                className="bg-blue-600 hover:bg-blue-500 border-none shadow-sm flex items-center no-hover-btn"
-            >
-                New Product
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateProduct} className="bom-primary-btn">
+              New Product
             </Button>
+          </div>
+          <Input prefix={<SearchOutlined className="text-slate-400" />} placeholder="Search products..." value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)} className="rounded-md text-sm border-slate-200" allowClear />
         </div>
-        
-        <Input 
-          prefix={<SearchOutlined className="text-gray-400" />} 
-          placeholder="Search components..." 
-          value={searchTerm} 
-          onChange={(e) => setSearchTerm(e.target.value)} 
-          className="rounded-lg border-gray-200 hover:border-blue-400 focus:border-blue-500"
-          allowClear
-        />
-        </div>
-        
-        <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">
           {filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
-            <div className="flex flex-col items-center justify-center h-64 text-gray-400">
-                <Empty description={searchTerm ? 'No matches found' : 'No products available'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
+              <Empty description={searchTerm ? 'No matches' : 'No products'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           )}
         </div>

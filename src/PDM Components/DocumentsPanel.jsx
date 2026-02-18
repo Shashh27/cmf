@@ -1,32 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { 
-  PlusOutlined, 
-  DownloadOutlined, 
-  FileTextOutlined, 
-  EyeOutlined, 
-  SyncOutlined, 
-  ToolOutlined,
-  ClockCircleOutlined,
-  EnvironmentOutlined,
-  InfoCircleOutlined,
-  BlockOutlined,
-  AppstoreOutlined,
-  CodeSandboxOutlined,
-  DeleteOutlined,
-  InboxOutlined,
-  FileImageOutlined,
-  FilePdfOutlined,
-  FileZipOutlined,
-  FileExcelOutlined,
-  FileWordOutlined,
-  UploadOutlined,
-  EditOutlined
-} from "@ant-design/icons";
+import { PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined, SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined, DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
-import { Card, Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Row, Col, Typography, Divider, Upload, Input, Form } from "antd";
+import { Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Typography, Upload, Input, Form } from "antd";
 
-const { TabPane } = Tabs;
-const { Text, Title } = Typography;
+const { Text } = Typography;
 const { Dragger } = Upload;
 import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
@@ -225,58 +202,41 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
     );
 };
 
-// Auto-resize table helper component - Moved outside to prevent remounting
+const ROW_HEIGHT_PX = 38;
+const MIN_VISIBLE_ROWS = 15;
+const TABLE_HEADER_PX = 48;
+
 const FitTable = ({ columns, dataSource, ...props }) => {
     const containerRef = useRef(null);
-    const [scrollY, setScrollY] = useState(300);
+    const [scrollY, setScrollY] = useState(MIN_VISIBLE_ROWS * ROW_HEIGHT_PX);
 
     useEffect(() => {
         const updateHeight = () => {
             if (containerRef.current) {
-                // Calculate available height: container height
-                const height = containerRef.current.offsetHeight;
-                // Subtract header height (~40px) if needed, but sticky header handles it. 
-                // AntD scroll.y sets the body height.
-                // If we want the whole table to fit, we need to subtract the table header (~55px).
-                if (height > 55) {
-                    setScrollY(height - 55); 
+                const h = containerRef.current.offsetHeight;
+                if (h > TABLE_HEADER_PX) {
+                    const bodyHeight = h - TABLE_HEADER_PX;
+                    setScrollY(Math.max(bodyHeight, MIN_VISIBLE_ROWS * ROW_HEIGHT_PX));
                 }
             }
         };
-
-        const resizeObserver = new ResizeObserver(updateHeight);
-        if (containerRef.current) {
-            resizeObserver.observe(containerRef.current);
-        }
-        
-        // Initial check
+        const ro = new ResizeObserver(updateHeight);
+        if (containerRef.current) ro.observe(containerRef.current);
         updateHeight();
-        // Also check on window resize as a fallback
         window.addEventListener('resize', updateHeight);
-
-        return () => {
-            resizeObserver.disconnect();
-            window.removeEventListener('resize', updateHeight);
-        };
+        return () => { ro.disconnect(); window.removeEventListener('resize', updateHeight); };
     }, []);
 
     return (
-        <div className="flex-1 overflow-hidden" ref={containerRef} style={{ minHeight: 0 }}>
-            <Table
-                columns={columns}
-                dataSource={dataSource}
-                pagination={false}
-                scroll={{ y: scrollY }}
-                {...props}
-            />
+        <div className="flex-1 min-h-0 overflow-hidden" ref={containerRef}>
+            <Table columns={columns} dataSource={dataSource} pagination={false} scroll={{ y: scrollY }} {...props} />
         </div>
     );
 };
 
-const DocumentsPanel = ({ selectedItem }) => {
+const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const [documents, setDocuments] = useState([]);
   const [operations, setOperations] = useState([]);
-  const [processPlans, setProcessPlans] = useState({});
   const [activeTab, setActiveTab] = useState('mbom');
   const [loading, setLoading] = useState(false);
   const [previewDocument, setPreviewDocument] = useState(null);
@@ -353,6 +313,9 @@ const DocumentsPanel = ({ selectedItem }) => {
        if (!selectedItem || selectedItem.itemType !== 'part') {
          setDocuments([]);
          setOperations([]);
+        if (onDocumentsLoaded) {
+          onDocumentsLoaded([]);
+        }
          return;
        }
 
@@ -366,6 +329,9 @@ const DocumentsPanel = ({ selectedItem }) => {
          const foundOperations = await opsResponse.json();
          setDocuments(foundDocuments);
          setOperations(foundOperations);
+        if (onDocumentsLoaded) {
+          onDocumentsLoaded(foundDocuments);
+        }
        }
      } catch (error) {
        console.error("Error fetching data:", error);
@@ -624,115 +590,34 @@ const DocumentsPanel = ({ selectedItem }) => {
   ];
 
   const operationsColumns = [
-    {
-      title: <span className="font-semibold text-gray-700">Op #</span>,
-      dataIndex: 'operation_number',
-      key: 'operation_number',
-      width: 80,
-      render: (text, record, index) => (
-        <Tag color="cyan" className="font-mono">
-          {String(text || index + 1).padStart(2, '0')}
+    { title: 'Op #', dataIndex: 'operation_number', key: 'operation_number', width: 64,
+      render: (t, _, i) => (
+        <Tag color="cyan" className="font-mono text-sm font-medium m-0 px-1.5 py-0.5">
+          {String(t || i + 1).padStart(2, '0')}
         </Tag>
-      ),
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Operation Name</span>,
-      dataIndex: 'operation_name',
-      key: 'operation_name',
-      width: 200,
-      render: (name) => (
-        <span className="text-sm font-medium text-gray-800">{name}</span>
-      ),
-    },
-    {
-      title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Setup</span>,
-      dataIndex: 'setup_time',
-      key: 'setup_time',
-      width: 130,
-      render: (text) => (
-        <Tag color="orange" icon={<ClockCircleOutlined />}>
-          {text || '00:00:00'}
+      ) },
+    { title: <span className="font-semibold text-slate-700">Operation Name</span>, dataIndex: 'operation_name', key: 'operation_name', width: 200, ellipsis: { showTitle: true },
+      render: (n) => <span className="text-sm font-medium text-slate-900">{n || '—'}</span> },
+    { title: <><ClockCircleOutlined className="mr-0.5" /> Setup</>, dataIndex: 'setup_time', key: 'setup_time', width: 100,
+      render: (t) => <Tag color="orange" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
+    { title: <><ClockCircleOutlined className="mr-0.5" /> Cycle</>, dataIndex: 'cycle_time', key: 'cycle_time', width: 100,
+      render: (t) => <Tag color="green" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
+    { title: <><EnvironmentOutlined className="mr-0.5" /> Workcenter</>, dataIndex: 'workcenter_id', key: 'workcenter_id', width: 100,
+      render: (id, r) => (
+        <Tag color="purple" className="text-sm font-medium m-0 px-1.5 py-0.5">
+          {r.work_center_name || id || 'N/A'}
         </Tag>
-      ),
-    },
-    {
-      title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Cycle</span>,
-      dataIndex: 'cycle_time',
-      key: 'cycle_time',
-      width: 130,
-      render: (text) => (
-        <Tag color="green" icon={<ClockCircleOutlined />}>
-          {text || '00:00:00'}
-        </Tag>
-      ),
-    },
-    {
-      title: <span className="font-semibold text-gray-700"><EnvironmentOutlined /> Workcenter</span>,
-      dataIndex: 'workcenter_id',
-      key: 'workcenter_id',
-      width: 150,
-      render: (id, record) => (
-        <Tag color="purple" icon={<EnvironmentOutlined />}>
-          {record.work_center_name || id || 'N/A'}
-        </Tag>
-      ),
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Actions</span>,
-      key: 'actions',
-      width: 120,
+      ) },
+    { title: '', key: 'actions', width: 100,
       render: (_, record) => (
-        <div className="flex gap-1">
-          <Tooltip title="Edit Details">
-            <Button 
-                size="small" 
-                icon={<EditOutlined />} 
-                onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedOperation(record);
-                    setModalTab('details');
-                    setShowAddToolForm(false);
-                    setIsOperationModalOpen(true);
-                }}
-                className="text-blue-500 hover:bg-blue-50"
-            />
-          </Tooltip>
-          <Tooltip title="Add Tool">
-            <Button 
-                size="small" 
-                icon={<ToolOutlined />} 
-                onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedOperation(record);
-                    setModalTab('tools');
-                    setShowAddToolForm(true);
-                    setIsOperationModalOpen(true);
-                }} 
-                className="text-orange-500 hover:bg-orange-50"
-            />
-          </Tooltip>
-          <Popconfirm
-            title="Delete Operation"
-            description="Are you sure you want to delete this operation?"
-            onConfirm={(e) => {
-                e.stopPropagation();
-                handleDeleteOperation(record.id);
-            }}
-            onCancel={(e) => e.stopPropagation()}
-            okText="Yes"
-            cancelText="No"
-          >
-            <Button 
-                size="small" 
-                danger
-                icon={<DeleteOutlined />} 
-                onClick={(e) => e.stopPropagation()}
-                className="hover:bg-red-50"
-            />
+        <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
+          <Tooltip title="Edit"><Button size="small" icon={<EditOutlined />} onClick={() => { setSelectedOperation(record); setModalTab('details'); setShowAddToolForm(false); setIsOperationModalOpen(true); }} className="text-blue-500 hover:bg-blue-50" /></Tooltip>
+          <Tooltip title="Add Tool"><Button size="small" icon={<ToolOutlined />} onClick={() => { setSelectedOperation(record); setModalTab('tools'); setShowAddToolForm(true); setIsOperationModalOpen(true); }} className="text-orange-500 hover:bg-orange-50" /></Tooltip>
+          <Popconfirm title="Delete operation?" onConfirm={() => handleDeleteOperation(record.id)} okText="Yes" cancelText="No">
+            <Button size="small" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
           </Popconfirm>
         </div>
-      ),
-    },
+      ) },
   ];
 
   if (!selectedItem || selectedItem.itemType !== 'part') {
@@ -742,79 +627,43 @@ const DocumentsPanel = ({ selectedItem }) => {
   const tabItems = [
     {
       key: 'mbom',
-      label: 'mBOM',
+      label: <span className="font-medium">mBOM</span>,
       children: (
-        <div className="h-full flex flex-col">
-            <div className="px-1 flex justify-between items-start mb-2 shrink-0">
-                <div>
-                    <h3 className="text-base font-medium mb-1">Operations</h3>
-                    <p className="text-xs text-gray-500">Click row to view details</p>
-                </div>
-                <Button 
-                    type="primary" 
-                    size="small" 
-                    icon={<PlusOutlined />} 
-                    onClick={() => openPartActionModal('operation')}
-                    disabled={!selectedItem || selectedItem.itemType !== 'part'}
-                    className="no-hover-btn"
-                >
-                    Add Operation
-                </Button>
-            </div>
-            <FitTable 
-                dataSource={operations} 
-                columns={operationsColumns} 
-                rowKey="id" 
-                size="small"
-                className="modern-table cursor-pointer"
-                onRow={(record) => ({
-                    onClick: () => {
-                        setSelectedOperation(record);
-                        setIsDetailsModalOpen(true);
-                    }
-                })}
-                locale={{ emptyText: <Empty description="No operations found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-            />
+        <div className="h-full flex flex-col min-h-0">
+          <div className="flex justify-between items-center mb-1.5 shrink-0">
+            <span className="text-xs text-slate-500">Click row to view details</span>
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => openPartActionModal('operation')}
+              disabled={!selectedItem || selectedItem.itemType !== 'part'} className="primary-btn-sm">
+              Add Operation
+            </Button>
+          </div>
+          <FitTable dataSource={operations} columns={operationsColumns} rowKey="id" size="small"
+            className="docs-ops-table cursor-pointer"
+            onRow={(record) => ({ onClick: () => { setSelectedOperation(record); setIsDetailsModalOpen(true); } })}
+            locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+          />
         </div>
       ),
     },
     {
       key: 'ebom',
-      label: 'eBOM',
+      label: <span className="font-medium">eBOM</span>,
       children: (
-        <div className="h-full flex flex-col overflow-hidden">
-            <div className="flex justify-between items-center mb-4 px-1">
-                <div>
-                    <Title level={5} style={{ margin: 0 }}>Document Management</Title>
-                    <Text type="secondary" className="text-xs">View, manage and version control engineering documents</Text>
-                </div>
-                <div className="flex items-center gap-3">
-                    <Badge 
-                        count={latestPartDocs.length} 
-                        style={{ backgroundColor: '#1890ff' }} 
-                        overflowCount={99}
-                        title="Total Root Documents"
-                        className="mr-2"
-                    />
-                    <Button 
-                        type="primary" 
-                        icon={<PlusOutlined />} 
-                        onClick={() => openPartActionModal('document')}
-                        className="no-hover-btn"
-                    >
-                        Add Document
-                    </Button>
-                </div>
-            </div>
-            
-            <div className="flex-1 overflow-hidden">
-                <Table 
+        <div className="h-full flex flex-col min-h-0 overflow-hidden">
+          <div className="flex justify-between items-center mb-2 shrink-0">
+            <span className="text-xs text-slate-500">Documents & versions</span>
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => openPartActionModal('document')} className="primary-btn-sm">
+              Add Document
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <Table
                     dataSource={latestPartDocs}
                     rowKey="id"
                     size="small"
                     pagination={false}
-                    className="modern-table border border-gray-100 rounded-lg overflow-hidden shadow-sm"
-                    scroll={{ y: 'calc(100vh - 400px)' }}
+                    className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden"
+                    scroll={{ y: 'calc(100vh - 380px)' }}
                     columns={[
                         {
                             title: <span className="text-xs font-semibold">DOCUMENT NAME</span>,
@@ -1109,34 +958,17 @@ const DocumentsPanel = ({ selectedItem }) => {
     <div className="flex-1 bg-white overflow-hidden flex flex-col h-full">
       <style>
         {`
-          .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
-            background-color: #2563eb !important;
-            color: white !important;
-            opacity: 1 !important;
-            border: none !important;
-            box-shadow: none !important;
-          }
+          .primary-btn-sm, .no-hover-btn, .primary-btn-sm:hover, .no-hover-btn:hover { background-color: #2563eb !important; color: #fff !important; border: none !important; }
+          .docs-ops-table .ant-table-tbody > tr > td { padding: 8px 10px !important; }
+          .docs-ops-table .ant-table-thead > tr > th { font-weight: 600; color: #334155 !important; padding: 8px 10px !important; }
+          .pdm-tabs-full.ant-tabs { display: flex; flex-direction: column; }
+          .pdm-tabs-full .ant-tabs-content { flex: 1; min-height: 0; }
+          .pdm-tabs-full .ant-tabs-tabpane { height: 100%; }
         `}
       </style>
-      <Card 
-        variant="borderless"
-        className="flex-1 flex flex-col shadow-none rounded-none" 
-        styles={{ body: { padding: '0 16px 16px 16px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' } }}
-        title={
-            <div className="flex justify-between items-center">
-                <span>Documents</span>
-                <Badge count={documents.length} showZero style={{ backgroundColor: '#52c41a' }} />
-            </div>
-        }
-      >
-        <Tabs 
-            activeKey={activeTab} 
-            onChange={setActiveTab} 
-            items={tabItems} 
-            className="flex-1 flex flex-col overflow-hidden full-height-tabs"
-            style={{ height: '100%' }}
-        />
-      </Card>
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 pt-2 pb-3">
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} className="flex-1 flex flex-col min-h-0 overflow-hidden pdm-tabs-full" style={{ minHeight: 0 }} />
+      </div>
       
       <Modal
         title={previewDocument?.document_name || "Document Preview"}

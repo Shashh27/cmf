@@ -8,9 +8,11 @@ const { Sider, Content } = Layout;
 
 const PDM = () => {
   const [selectedItem, setSelectedItem] = useState(null);
+  const [partDocuments, setPartDocuments] = useState([]);
 
   const handleItemSelected = (item) => {
     setSelectedItem(item);
+    setPartDocuments([]);
   };
 
   return (
@@ -20,16 +22,13 @@ const PDM = () => {
         <BillOfMaterials onItemSelected={handleItemSelected} />
       </Sider>
       
-      {/* Right Side Container */}
-      <Content style={{ display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: '#f5f5f5' }}>
-        {/* ProductDetails - Top Right */}
-        <div style={{ flexShrink: 0 }}>
-          <ProductDetails selectedItem={selectedItem} />
+      {/* Right: compact ProductDetails on top, DocumentsPanel gets remaining space */}
+      <Content style={{ display: "flex", flexDirection: "column", overflow: "hidden", backgroundColor: "#f8fafc" }}>
+        <div style={{ flexShrink: 0, maxHeight: "38vh", minHeight: 0 }}>
+          <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments} />
         </div>
-        
-        {/* DocumentsPanel - Bottom Right with scroll */}
-        <div style={{ flex: 1, overflow: "hidden" }}>
-          <DocumentsPanel selectedItem={selectedItem} />
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <DocumentsPanel selectedItem={selectedItem} onDocumentsLoaded={setPartDocuments} />
         </div>
       </Content>
     </Layout>
