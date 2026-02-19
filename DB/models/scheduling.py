@@ -1,3 +1,5 @@
+from platform import machine
+from typing import Optional
 from sqlalchemy import (
     Column,
     Integer,
@@ -108,3 +110,57 @@ class PartScheduleStatus(Base):
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
+    order = relationship("Order", back_populates="part_schedule_status")
+
+
+# =======================
+# Planned Schedule Items
+# =======================
+class PlannedScheduleItem(Base):
+    __tablename__ = "planned_schedule_items"
+    __table_args__ = {'schema': 'scheduling'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    part_number = Column(String, ForeignKey("oms.parts.part_number"), nullable=False)
+    sale_order_number = Column(String, ForeignKey("oms.orders.sale_order_number"), nullable=False)
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    
+    planned_start_time = Column(DateTime, nullable=False)
+    planned_end_time = Column(DateTime, nullable=False)
+
+    total_quantity = Column(Integer, nullable=False)
+    remaining_quantity = Column(Integer, nullable=False)
+
+    status = Column(String, nullable=True, default="pending")
+
+    created_at = Column(DateTime, nullable=False, default=func.now())
+
+
+    schedule_history_id = Column(Integer, ForeignKey("scheduling.schedule_history.id"),nullable=True)
+    schedule_history = relationship("ScheduleHistory",back_populates="planned_schedule_items")
+
+    # updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+# =======================
+# Schedule History
+# =======================
+class ScheduleHistory(Base):
+    __tablename__ = "schedule_history"
+    __table_args__ = {'schema': 'scheduling'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    version = Column(Integer, nullable=False)
+    is_active = Column(Boolean, default=False, nullable=False)
+    generated_at = Column(DateTime, nullable=False, default=func.now())
+    
+    planned_schedule_items = relationship("PlannedScheduleItem",back_populates="schedule_history")
+
+
+
+
+
+
+# class ScheduleVersion
+# class RescheduleHistory

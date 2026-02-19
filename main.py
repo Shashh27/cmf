@@ -3,13 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from DB.database import engine, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME, MINIO_SECURE
 from DB.models import Base, scheduling
 from DB.minio_client import init_minio_client
-
+from routers.machine_scheduling import router as machine_scheduling_router
 # Import all routers
 from routers import (
     machine_status, 
     machines, 
     shift_hours,
-    capacity_planning
+    capacity_planning,
+    machine_scheduling
 )
 
 
@@ -36,6 +37,7 @@ app.include_router(machine_status.router, prefix="/api/v1")
 app.include_router(machines.router, prefix="/api/v1")
 app.include_router(shift_hours.router, prefix="/api/v1")
 app.include_router(capacity_planning.router, prefix="/api/v1")
+app.include_router(machine_scheduling_router, prefix="/api/v1")
 
 
 @app.on_event("startup")

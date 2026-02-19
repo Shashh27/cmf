@@ -18,6 +18,7 @@
 from .machine_status import router as machine_status_router
 from .machines import router as machines_router
 from .shift_hours import router as shift_hours_router
+from .machine_scheduling import router as machine_scheduling_router
 
 __all__ = [
     # "products_router",
@@ -40,5 +41,6 @@ __all__ = [
     "machine_status_router",
     "machines_router",
     "shift_hours_router",
-    "capacity_planning_router"
+    "capacity_planning_router",
+    "machine_scheduling_router",
 ]

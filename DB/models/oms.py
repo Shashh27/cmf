@@ -170,7 +170,7 @@ class Order(Base):
     __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
-    sale_order_number = Column(String, nullable=False)
+    sale_order_number = Column(String, unique=True, nullable=False, index=True) # updated 
     customer_id = Column(Integer, ForeignKey("configuration.customers.id"), nullable=False)
     product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
@@ -183,6 +183,8 @@ class Order(Base):
     product = relationship("Product", back_populates="orders")
     order_documents = relationship("OrderDocument", back_populates="order")
     raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order")
+    
+    part_schedule_status = relationship("PartScheduleStatus", back_populates="order")
 
 # =======================
 # Order Document
@@ -191,8 +193,8 @@ class OrderDocument(Base):
     __tablename__ = "order_documents"
     __table_args__ = {'schema': 'oms'}
 
-    id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
+    id = Column(Integer, primary_key=True, index=True)  
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False) # 
     document_name = Column(String, nullable=False)
     document_url = Column(String, nullable=False)
     document_type = Column(String, nullable=False)

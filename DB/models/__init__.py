@@ -26,7 +26,8 @@ from .scheduling import (
     Status,
     MachineStatus,
     MachineDowntime,
-    ShiftHoursConfiguration
+    ShiftHoursConfiguration,
+    PartScheduleStatus
 )
 
 __all__ = [
