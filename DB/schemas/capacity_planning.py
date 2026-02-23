@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic import ConfigDict
 
 
@@ -17,3 +17,18 @@ class MachineUtilization(BaseModel):
     utilized_hours: float
     remaining_hours: float
     utilization_percentage: float
+
+
+class EfficiencyCreate(BaseModel):
+    efficiency_factor: float = Field(..., gt=0.1, lt=1)
+
+class EfficiencyUpdate(BaseModel):
+    efficiency_factor: float = Field(..., gt=0.1, lt=1)
+
+class EfficiencyResponse(BaseModel):
+    id: int
+    efficiency_factor: float
+
+    class Config:
+        orm_mode = True
+

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import List
-from datetime import datetime
+from datetime import datetime, date
 
 from DB.database import get_db
 from DB.models.scheduling import MachineStatus, Status, MachineDowntime
@@ -357,3 +357,42 @@ async def get_all_downtime_records(
             status_code=500,
             detail=f"Error fetching downtime records: {str(e)}"
         )
+
+
+
+@router.get("/machine-downtime-by-date")
+def get_downtime_by_date(
+    start_date: date,
+    end_date: date,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns all machine downtimes overlapping given date range
+    """
+
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_dt = datetime.combine(end_date, datetime.max.time())
+
+    records = db.query(
+        MachineDowntime,
+        Machine
+    ).join(
+        Machine, MachineDowntime.machine_id == Machine.id
+    ).filter(
+        MachineDowntime.start_time <= end_dt,
+        MachineDowntime.end_time >= start_dt
+    ).all()
+
+    result = []
+
+    for record, machine in records:
+        result.append({
+            "machine_id": record.machine_id,
+            "machine_name": machine.make,
+            "status_name": record.status_name,
+            "description": record.description,
+            "start_time": record.start_time,
+            "end_time": record.end_time
+        })
+
+    return result

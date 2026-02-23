@@ -6,12 +6,15 @@ import calendar
 from datetime import date
 
 from DB.database import get_db
-from DB.models.scheduling import MachineStatus, ShiftHoursConfiguration, Status, MachineDowntime
+from DB.models.scheduling import MachineStatus, ShiftHoursConfiguration, Status, MachineDowntime, EfficiencyFactor
 from DB.models.configuration import Machine   # adjust path if needed
 
 
 from DB.schemas.capacity_planning import (
-    MachineUtilization
+    MachineUtilization,
+    EfficiencyCreate,
+    EfficiencyUpdate,
+    EfficiencyResponse
 )
 
 router = APIRouter(
@@ -47,7 +50,9 @@ def get_machine_utilization(
         if datetime(year, month, d).weekday() < 5
     )
 
-    efficiency = 0.85
+    # efficiency = 0.85
+    settings = db.query(EfficiencyFactor).first()
+    efficiency = settings.efficiency_factor if settings else 0.85
     daily_hours = 8
 
     base_available_hours = working_days * daily_hours * efficiency
@@ -170,7 +175,9 @@ def get_machine_utilization_by_range(
         if sc.working_day:
             total_shift_hours += sc.number_of_shifts * 8
 
-    efficiency = 0.85
+    # efficiency = 0.85
+    settings = db.query(EfficiencyFactor).first()
+    efficiency = settings.efficiency_factor if settings else 0.85
     base_available_hours = total_shift_hours * efficiency
 
     # ------------------------------------
@@ -255,3 +262,63 @@ def get_machine_utilization_by_range(
         )
 
     return result
+
+
+# ------------------------------------
+# EFFICIENCY ENDPOINTS
+# ------------------------------------
+
+
+# Create efficiency setting
+# @router.post("/efficiency", response_model=EfficiencyResponse)
+# def create_efficiency(settings: EfficiencyCreate, db: Session = Depends(get_db)):
+
+#     existing = db.query(EfficiencyFactor).first()
+#     if existing:
+#         raise HTTPException(400, "Efficiency already initialized")
+
+#     record = EfficiencyFactor(
+#         efficiency_factor=settings.efficiency_factor
+#     )
+
+#     db.add(record)
+#     db.commit()
+#     db.refresh(record)
+
+#     return record
+
+# ------------------------------------
+# EFFICIENCY ENDPOINTS
+# ------------------------------------
+
+# Get efficiency setting
+@router.get("/efficiency", response_model=EfficiencyResponse)
+def get_efficiency(db: Session = Depends(get_db)):
+
+    record = db.query(EfficiencyFactor).first()
+
+    if not record:
+        record = EfficiencyFactor(efficiency_factor=0.85)
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+
+    return record
+
+
+
+# Update efficiency setting
+@router.put("/efficiency", response_model=EfficiencyResponse)
+def update_efficiency(settings: EfficiencyUpdate, db: Session = Depends(get_db)):
+
+    record = db.query(EfficiencyFactor).first()
+
+    if not record:
+        raise HTTPException(404, "Efficiency not initialized")
+
+    record.efficiency_factor = settings.efficiency_factor
+
+    db.commit()
+    db.refresh(record)
+
+    return record
