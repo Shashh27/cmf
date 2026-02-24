@@ -103,14 +103,17 @@ class PartScheduleStatus(Base):
     __table_args__ = {'schema': 'scheduling'}
 
     id = Column(Integer, primary_key=True, index=True)
-    part_number = Column(String, ForeignKey("oms.parts.part_number"), nullable=False)
-    sale_order_number = Column(String, ForeignKey("oms.orders.sale_order_number"), nullable=False)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    sale_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
+    # part_number = Column(String, ForeignKey("oms.parts.part_number"), nullable=False)
+    # sale_order_number = Column(String, ForeignKey("oms.orders.sale_order_number"), nullable=False)
     status = Column(String, nullable=False, default="inactive")
     start_date = Column(DateTime, nullable=True)   
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
     order = relationship("Order", back_populates="part_schedule_status")
+    # part = relationship("Part")
 
 
 # =======================
@@ -121,7 +124,9 @@ class PlannedScheduleItem(Base):
     __table_args__ = {'schema': 'scheduling'}
 
     id = Column(Integer, primary_key=True, index=True)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
     part_number = Column(String, ForeignKey("oms.parts.part_number"), nullable=False)
+    sale_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     sale_order_number = Column(String, ForeignKey("oms.orders.sale_order_number"), nullable=False)
     operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)

@@ -291,6 +291,8 @@ def get_machine_utilization_by_range(
 # EFFICIENCY ENDPOINTS
 # ------------------------------------
 
+
+
 # Get efficiency setting
 @router.get("/efficiency", response_model=EfficiencyResponse)
 def get_efficiency(db: Session = Depends(get_db)):

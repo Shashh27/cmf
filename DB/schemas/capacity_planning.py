@@ -31,4 +31,3 @@ class EfficiencyResponse(BaseModel):
 
     class Config:
         orm_mode = True
-

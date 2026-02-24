@@ -13,8 +13,8 @@ class PartStatusUpdate(BaseModel):
 
 class UpdatePartStatusResponse(BaseModel):
     message: str
-    sale_order_number: str
-    part_number: str
+    sale_order_id: int
+    part_id: int
     part_type: str
     status: str
     will_be_scheduled: bool

@@ -1,9 +1,10 @@
+from bisect import insort_right
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-
+from sqlalchemy import exists
 from DB.database import get_db
 
 from DB.models.oms import Order
@@ -83,9 +84,9 @@ def overlap_with_shift(downtime_start: datetime, downtime_end: datetime, shift_s
 # SET ORDER STATUS
 # =========================================================
 
-@router.post("/set-order-status/{sale_order_number}")
+@router.post("/set-order-status/{sale_order_id}")
 def set_order_status(
-    sale_order_number: str,
+    sale_order_id: str,
     status: str,
     db: Session = Depends(get_db)
 ):
@@ -96,7 +97,7 @@ def set_order_status(
     # Get order
     # -----------------------------
     order = db.query(Order).filter(
-        Order.sale_order_number == sale_order_number
+        Order.id == sale_order_id
     ).first()
 
     if not order:
@@ -105,7 +106,7 @@ def set_order_status(
     if not order.product:
         raise HTTPException(400, "Order has no product")
 
-    parts = order.product.parts
+    parts = [p for p in order.product.parts if p.type_id == 1]
 
     if not parts:
         raise HTTPException(400, "No parts found for this order's product")
@@ -118,15 +119,15 @@ def set_order_status(
     for part in parts:
 
         record = db.query(PartScheduleStatus).filter(
-            PartScheduleStatus.sale_order_number == sale_order_number,
-            PartScheduleStatus.part_number == part.part_number
+            PartScheduleStatus.sale_order_id == sale_order_id,
+            PartScheduleStatus.part_id == part.id
         ).first()
 
         # CREATE
         if not record:
             record = PartScheduleStatus(
-                sale_order_number=sale_order_number,
-                part_number=part.part_number,
+                sale_order_id=sale_order_id,
+                part_id=part.id,
                 status=status,
                 start_date=now if status == "active" else None,
                 created_at=now,
@@ -138,50 +139,53 @@ def set_order_status(
         else:
             record.status = status
             record.updated_at = now
+            record.start_date = now if status == "active" else None
 
-            if status == "active":
-                record.start_date = now
-            else:
-                record.start_date = None
+            # if status == "active":
+            #     record.start_date = now
+            # else:
+            #     record.start_date = None
 
     db.commit()
 
     return {
-        "message": f"Order {sale_order_number} → all parts set to {status}",
-        "parts_count": len(parts)
+        "message": f"In-house parts of Order {sale_order_id} set to {status}",
+        "inhouse_parts_count": len(parts)
     }
 
 
 # =========================================================
 # GET ACTIVE PARTS FOR A SALE ORDER
 # =========================================================
-@router.get("/active-parts/{sale_order_number}")
+@router.get("/active-parts/{sale_order_id}")
 def get_active_parts_for_order(
-    sale_order_number: str,
+    sale_order_id: int,
     db: Session = Depends(get_db)
 ):
-    # check order exists
-    order = db.query(Order).filter(
-        Order.sale_order_number == sale_order_number
-    ).first()
-
+    order = db.query(Order).filter(Order.id == sale_order_id).first()
     if not order:
         raise HTTPException(404, "Order not found")
 
-    # get active parts
-    records = db.query(PartScheduleStatus).filter(
-        PartScheduleStatus.sale_order_number == sale_order_number,
-        PartScheduleStatus.status == "active"
-    ).all()
+    records = (
+        db.query(PartScheduleStatus, Part)
+        .join(Part, Part.id == PartScheduleStatus.part_id)
+        .filter(
+            PartScheduleStatus.sale_order_id == sale_order_id,
+            PartScheduleStatus.status == "active"
+        )
+        .all()
+    )
 
     result = []
 
-    for r in records:
+    for schedule, part in records:
         result.append({
-            "sale_order_number": r.sale_order_number,
-            "part_number": r.part_number,
-            "status": r.status,
-            "quantity": order.quantity   # from order table
+            "sale_order_id": sale_order_id,
+            "part_id": part.id,
+            "part_number": part.part_number,   # if exists
+            "status": schedule.status,
+            "start_date": schedule.start_date,
+            "quantity": order.quantity
         })
 
     return {"active_parts": result}
@@ -194,53 +198,61 @@ def get_active_parts_for_order(
 def get_all_orders_parts_status(db: Session = Depends(get_db)):
 
     orders = db.query(Order).all()
-
     response = []
 
     for order in orders:
 
-        # product info
         product = order.product
+        if not product:
+            continue
 
-        # all parts for this product
+        # get parts of this product
         parts = db.query(Part).filter(
-            Part.product_id == order.product_id
+            Part.product_id == product.id
         ).all()
+
+        # get schedule records for this order
+        schedule_records = db.query(PartScheduleStatus).filter(
+            PartScheduleStatus.sale_order_id == order.id
+        ).all()
+
+        # create lookup dictionary
+        schedule_map = {r.part_id: r for r in schedule_records}
 
         for part in parts:
 
-            # check status table
-            status_record = db.query(PartScheduleStatus).filter(
-                PartScheduleStatus.sale_order_number == order.sale_order_number,
-                PartScheduleStatus.part_number == part.part_number
-            ).first()
+            status_record = schedule_map.get(part.id)
 
             response.append({
+                "sale_order_id": order.id,
                 "sale_order_number": order.sale_order_number,
                 "product_id": product.id,
                 "product_name": product.product_name,
+                "part_id": part.id,
                 "part_number": part.part_number,
                 "part_name": part.part_name,
-                "status": status_record.status if status_record else "inactive"
+                "part_type": part.type.type_name if part.type else None,
+                "status": status_record.status if status_record else "inactive",
+                "start_date": status_record.start_date if status_record else None
             })
 
     return {"orders": response}
 
 
 # =========================================================
-# GET MAKE PARTS FOR ORDER
+# GET MAKE (IN-HOUSE) PARTS FOR ORDER
 # =========================================================
-@router.get("/make-parts/{sale_order_number}")
+@router.get("/make-parts/{sale_order_id}")
 def get_make_parts_for_order(
-    sale_order_number: str,
+    sale_order_id: int,
     db: Session = Depends(get_db)
 ):
     order = db.query(Order).filter(
-        Order.sale_order_number == sale_order_number
+        Order.id == sale_order_id
     ).first()
 
     if not order:
-        raise HTTPException(404, "Order not found")
+        raise HTTPException(status_code=404, detail="Order not found")
 
     parts = db.query(Part).join(PartType).filter(
         Part.product_id == order.product_id,
@@ -248,26 +260,34 @@ def get_make_parts_for_order(
     ).all()
 
     return {
-        "order": sale_order_number,
+        "sale_order_id": sale_order_id,
+        "sale_order_number": order.sale_order_number,  # optional display
         "product_id": order.product_id,
-        "make_parts": [p.part_name for p in parts]
+        "make_parts": [
+            {
+                "part_id": p.id,
+                "part_name": p.part_name,
+                "part_number": p.part_number
+            }
+            for p in parts
+        ]
     }
 
 
 # =========================================================
-# GET BUY PARTS FOR ORDER
+# GET BUY (OUTSOURCE) PARTS FOR ORDER
 # =========================================================
-@router.get("/buy-parts/{sale_order_number}")
+@router.get("/buy-parts/{sale_order_id}")
 def get_buy_parts_for_order(
-    sale_order_number: str,
+    sale_order_id: int,
     db: Session = Depends(get_db)
 ):
     order = db.query(Order).filter(
-        Order.sale_order_number == sale_order_number
+        Order.id == sale_order_id
     ).first()
 
     if not order:
-        raise HTTPException(404, "Order not found")
+        raise HTTPException(status_code=404, detail="Order not found")
 
     parts = db.query(Part).join(PartType).filter(
         Part.product_id == order.product_id,
@@ -275,9 +295,17 @@ def get_buy_parts_for_order(
     ).all()
 
     return {
-        "order": sale_order_number,
+        "sale_order_id": sale_order_id,
+        "sale_order_number": order.sale_order_number,
         "product_id": order.product_id,
-        "buy_parts": [p.part_name for p in parts]
+        "buy_parts": [
+            {
+                "part_id": p.id,
+                "part_name": p.part_name,
+                "part_number": p.part_number
+            }
+            for p in parts
+        ]
     }
 
 
@@ -286,12 +314,12 @@ def get_buy_parts_for_order(
 # UPDATE PART STATUS FOR ORDER
 # =========================================================
 @router.put(
-    "/update-part-status/{sale_order_number}/{part_number}",
+    "/update-part-status/{sale_order_id}/{part_id}",
     response_model=UpdatePartStatusResponse
 )
 def update_part_status(
-    sale_order_number: str,
-    part_number: str,
+    sale_order_id: int,
+    part_id: int,
     status: str,
     db: Session = Depends(get_db)
 ):
@@ -307,7 +335,7 @@ def update_part_status(
     # Check order exists
     # ----------------------------
     order = db.query(Order).filter(
-        Order.sale_order_number == sale_order_number
+        Order.id == sale_order_id
     ).first()
 
     if not order:
@@ -317,7 +345,7 @@ def update_part_status(
     # Check part exists
     # ----------------------------
     part = db.query(Part).filter(
-        Part.part_number == part_number,
+        Part.id == part_id,
         Part.product_id == order.product_id   # part belongs to that product
     ).first()
 
@@ -337,8 +365,8 @@ def update_part_status(
     # Existing status record?
     # ----------------------------
     record = db.query(PartScheduleStatus).filter(
-        PartScheduleStatus.sale_order_number == sale_order_number,
-        PartScheduleStatus.part_number == part_number
+        PartScheduleStatus.sale_order_id == sale_order_id,
+        PartScheduleStatus.part_id == part_id
     ).first()
 
     now_utc = datetime.now(timezone.utc)
@@ -351,8 +379,8 @@ def update_part_status(
         if record.status == status:
             return {
                 "message": f"Part already {status}",
-                "sale_order_number": sale_order_number,
-                "part_number": part_number,
+                "sale_order_id": sale_order_id,
+                "part_id": part_id,
                 "part_type": part_type_name,
                 "status": status,
                 "will_be_scheduled": part_type_name == "IN-House" and status == "active"
@@ -361,17 +389,18 @@ def update_part_status(
         # update
         record.status = status
         record.updated_at = now_utc
+        record.start_date = now_utc if status == "active" else None
 
-        if status == "active":
-            record.start_date = now_utc
-        else:
-            record.start_date = None
+        # if status == "active":
+        #     record.start_date = now_utc
+        # else:
+        #     record.start_date = None
 
     else:
         # create new record
         record = PartScheduleStatus(
-            sale_order_number=sale_order_number,
-            part_number=part_number,
+            sale_order_id=sale_order_id,
+            part_id=part_id,
             status=status,
             created_at=now_utc,
             updated_at=now_utc,
@@ -387,8 +416,8 @@ def update_part_status(
     if part_type_name == "Out-Source":
         return {
             "message": "Part status updated",
-            "sale_order_number": sale_order_number,
-            "part_number": part_number,
+            "sale_order_id": sale_order_id,
+            "part_id": part_id,
             "part_type": part_type_name,
             "status": status,
             "will_be_scheduled": False,
@@ -398,9 +427,39 @@ def update_part_status(
     # IN-HOUSE
     return {
         "message": "Part status updated",
-        "sale_order_number": sale_order_number,
-        "part_number": part_number,
+        "sale_order_id": sale_order_id,
+        "part_id": part_id,
         "part_type": part_type_name,
         "status": status,
         "will_be_scheduled": status == "active"
     }
+
+
+
+
+@router.get("/order-status/{sale_order_id}")
+def get_order_status(sale_order_id: int, db: Session = Depends(get_db)):
+    """
+    Order is active if any part is active.
+    Otherwise inactive.
+    """
+    order = db.query(Order).filter(Order.id == sale_order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+
+    # check if ANY active part exists
+    active_exists = db.query(
+        exists().where(
+            PartScheduleStatus.sale_order_id == sale_order_id,
+            PartScheduleStatus.status == "active"
+        )
+    ).scalar()
+
+    order_status = "active" if active_exists else "inactive"
+
+    return {
+        "order_id": sale_order_id,
+        "sale_order_number": order.sale_order_number,
+        "order_status": order_status
+    }
+
