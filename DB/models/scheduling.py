@@ -182,3 +182,26 @@ class EfficiencyFactor(Base):
     efficiency_factor = Column(Float, nullable=False, default=0.85)
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+# ====================================================================
+# Order Schedule Status
+# ====================================================================
+class OrderScheduleStatus(Base):
+    __tablename__ = "order_schedule_status"
+    __table_args__ = {"schema": "scheduling"}
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    order_id = Column(Integer, ForeignKey("oms.orders.id"))
+    product_id = Column(Integer, ForeignKey("oms.products.id"))
+
+    active_parts_count = Column(Integer, default=0)
+    active_inhouse_parts = Column(Integer, default=0)   #  NEW
+
+    status = Column(String, default="inactive")
+
+    activated_at = Column(DateTime)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    order = relationship("Order")

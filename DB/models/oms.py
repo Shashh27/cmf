@@ -175,8 +175,8 @@ class Order(Base):
     product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     due_date = Column(TIMESTAMP, nullable=False)
-    priority = Column(Integer, nullable=False)
-    supervisor_id = Column(Integer, nullable=False)
+    # priority = Column(Integer, nullable=False)
+    # supervisor_id = Column(Integer, nullable=False)
     status = Column(String, nullable=False)
 
     customer = relationship("Customer", back_populates="orders")
@@ -185,6 +185,7 @@ class Order(Base):
     raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order")
     
     part_schedule_status = relationship("PartScheduleStatus", back_populates="order")
+    # order_schedule_status = relationship("OrderScheduleStatus", back_populates="order", uselist=False)
 
 # =======================
 # Order Document

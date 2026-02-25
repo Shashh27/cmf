@@ -4,6 +4,7 @@ from typing import List, Dict, Optional, Any
 
 
 from DB.models.scheduling import PartScheduleStatus
+from DB.models.scheduling import OrderScheduleStatus
 
 
 class PartStatusUpdate(BaseModel):
@@ -19,3 +20,19 @@ class UpdatePartStatusResponse(BaseModel):
     status: str
     will_be_scheduled: bool
     note: Optional[str] = None
+
+
+class OrderScheduleStatusResponse(BaseModel):
+    order_id: int
+    product_id: int
+
+    active_parts_count: int
+    active_inhouse_parts: int
+
+    status: str
+    activated_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
+    model_config = {
+        "from_attributes": True   # Pydantic v2 replacement for orm_mode
+    }

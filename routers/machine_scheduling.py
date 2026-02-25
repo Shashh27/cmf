@@ -1,4 +1,5 @@
 from bisect import insort_right
+from threading import active_count
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
@@ -8,11 +9,11 @@ from sqlalchemy import exists
 from DB.database import get_db
 
 from DB.models.oms import Order
-from DB.models.scheduling import PartScheduleStatus
+from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus
 from DB.models.oms import Order, Part, Product
 from DB.models.oms import PartType
 
-from DB.schemas.machine_scheduling import PartStatusUpdate, UpdatePartStatusResponse
+from DB.schemas.machine_scheduling import PartStatusUpdate, UpdatePartStatusResponse, OrderScheduleStatusResponse
 
 
 
@@ -86,7 +87,7 @@ def overlap_with_shift(downtime_start: datetime, downtime_end: datetime, shift_s
 
 @router.post("/set-order-status/{sale_order_id}")
 def set_order_status(
-    sale_order_id: str,
+    sale_order_id: int,
     status: str,
     db: Session = Depends(get_db)
 ):
@@ -140,11 +141,53 @@ def set_order_status(
             record.status = status
             record.updated_at = now
             record.start_date = now if status == "active" else None
+    
+    db.flush()
+    
+    active_count = db.query(PartScheduleStatus).filter(
+        PartScheduleStatus.sale_order_id == sale_order_id,
+        PartScheduleStatus.status == "active"
+    ).count()
 
-            # if status == "active":
-            #     record.start_date = now
-            # else:
-            #     record.start_date = None
+    active_inhouse_count = db.query(PartScheduleStatus).join(Part, Part.id == PartScheduleStatus.part_id).filter(
+        PartScheduleStatus.sale_order_id == sale_order_id,
+        PartScheduleStatus.status == "active",
+        Part.type_id == 1
+    ).count()
+
+    order_status = "active" if active_count > 0 else "inactive"
+
+    summary = db.query(OrderScheduleStatus).filter(
+        OrderScheduleStatus.order_id == sale_order_id
+    ).first()
+
+    if not summary:
+        summary = OrderScheduleStatus(
+            order_id=sale_order_id,
+            product_id=order.product_id,
+            active_parts_count=active_count,
+            active_inhouse_parts=active_inhouse_count,
+            status=order_status,
+            activated_at=now if order_status == "active" else None,
+            updated_at=now
+        )
+        db.add(summary)
+
+    else:
+        summary.active_parts_count = active_count
+        summary.active_inhouse_parts = active_inhouse_count
+        summary.status = order_status
+        summary.updated_at = now
+        summary.activated_at = now if status == "active" else None
+
+        # only set activated_at when transitioning to active
+        if order_status == "active" and not summary.activated_at:
+            summary.activated_at = now
+
+        # clear when inactive
+        if order_status == "inactive":
+            summary.activated_at = None
+
 
     db.commit()
 
@@ -463,3 +506,17 @@ def get_order_status(sale_order_id: int, db: Session = Depends(get_db)):
         "order_status": order_status
     }
 
+
+
+
+@router.get("/order-summary/{sale_order_id}", response_model=OrderScheduleStatusResponse)
+def get_order_summary(sale_order_id: int, db: Session = Depends(get_db)):
+
+    summary = db.query(OrderScheduleStatus).filter(
+        OrderScheduleStatus.order_id == sale_order_id
+    ).first()
+
+    if not summary:
+        raise HTTPException(404, "Summary not found")
+
+    return summary
