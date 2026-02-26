@@ -1,5 +1,6 @@
 from platform import machine
 from typing import Optional
+# from backend.cmf.routers import workcenter
 from sqlalchemy import (
     Column,
     Integer,
@@ -205,3 +206,28 @@ class OrderScheduleStatus(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     order = relationship("Order")
+
+
+
+# ====================================================================
+# Machine Schedule
+# ====================================================================
+class MachineSchedule(Base):
+    __tablename__ = "machine_schedule"
+    __table_args__ = {"schema": "scheduling"}
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    order_id = Column(Integer, ForeignKey("oms.orders.id"))
+    part_id = Column(Integer, ForeignKey("oms.parts.id"))
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"))
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"))
+    workcenter_id = Column(Integer, ForeignKey("configuration.work_centers.id"))
+
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+
+    status = Column(String, default="planned")  # planned/running/completed
+
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
