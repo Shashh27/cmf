@@ -62,6 +62,20 @@ const ToolRequested = ({ onReturnSuccess }) => {
     fetchToolsList();
   }, []);
 
+  const getCurrentOperatorId = () => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        if (user && user.id != null) return parseInt(user.id);
+      }
+    } catch (e) {
+      
+    }
+    const fallback = localStorage.getItem('operator_id');
+    return fallback ? parseInt(fallback) : null;
+  };
+
   const isConsumableType = (item) => {
     const v = (item?.tool_type ?? item?.type ?? '').toString().trim().toLowerCase();
     if (!v) return false;
@@ -80,6 +94,12 @@ const ToolRequested = ({ onReturnSuccess }) => {
     }
     return acc;
   }, {});
+  const collectedByReq = returnRequests.reduce((acc, rr) => {
+    if (rr.status === 'collected') {
+      acc[rr.requested_id] = (acc[rr.requested_id] || 0) + (rr.returned_qty || 0);
+    }
+    return acc;
+  }, {});
   const totalReturned = returnRequests.reduce((sum, rr) => {
     return rr.status === 'collected' ? sum + (rr.returned_qty || 0) : sum;
   }, 0);
@@ -87,7 +107,8 @@ const ToolRequested = ({ onReturnSuccess }) => {
     const isConsum = isConsumableType(r);
     if (r.status === 'approved' && !isConsum) {
       const pendingQty = pendingByReq[r.id] || 0;
-      const remainingWithOperator = (r.quantity || 0) - (r.total_returned_qty || 0) - pendingQty;
+      const collectedQty = collectedByReq[r.id] || 0;
+      const remainingWithOperator = (r.quantity || 0) - collectedQty - pendingQty;
       return sum + (remainingWithOperator > 0 ? remainingWithOperator : 0);
     }
     return sum;
@@ -110,10 +131,17 @@ const ToolRequested = ({ onReturnSuccess }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
       if (response.ok) {
-        const data = await response.json();
+        let data = await response.json();
         // Sort by date descending
         const sortedData = Array.isArray(data) ? data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];
-        setRequests(sortedData.map(r => ({
+        const currentOpId = getCurrentOperatorId();
+        const filteredSorted = currentOpId != null
+          ? sortedData.filter(r => {
+              const oid = r.operator_id ?? r.operatorId ?? r.operator_id_fk ?? r.operator?.id;
+              return oid == null ? true : parseInt(oid) === currentOpId;
+            })
+          : sortedData;
+        setRequests(filteredSorted.map(r => ({
           ...r,
           tool_type: r.tool_type || toolsById[r.tool_id] || r.tool_type
         })));
@@ -145,8 +173,18 @@ const ToolRequested = ({ onReturnSuccess }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
       if (response.ok) {
-        const data = await response.json();
-        setReturnRequests(Array.isArray(data) ? data : []);
+        let data = await response.json();
+        const arr = Array.isArray(data) ? data : [];
+        const currentOpId = getCurrentOperatorId();
+        const filtered = currentOpId != null
+          ? arr.filter(rr => {
+              const top = rr.operator_id ?? rr.operatorId ?? rr.operator_id_fk;
+              const nested = rr.inventory_request_details?.operator_id ?? rr.inventory_request_details?.operator?.id;
+              const oid = top != null ? top : nested;
+              return oid == null ? true : parseInt(oid) === currentOpId;
+            })
+          : arr;
+        setReturnRequests(filtered);
       }
     } catch (error) {
       console.error('Failed to fetch return requests:', error);
@@ -154,9 +192,16 @@ const ToolRequested = ({ onReturnSuccess }) => {
   };
 
   const handleReturnTool = (record) => {
+    const totalReturnedAnyStatus = returnRequests
+      .filter(rr => rr.requested_id === record.id)
+      .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
+    const remaining = (record.quantity || 0) - totalReturnedAnyStatus;
+    if (remaining <= 0) {
+      message.warning('No items remaining to return');
+      return;
+    }
     setCurrentRecord(record);
-    const remaining = record.quantity - (record.total_returned_qty || 0);
-    setReturnQuantity(remaining); // Default to remaining quantity
+    setReturnQuantity(remaining);
     setRemarks('');
     setIsModalVisible(true);
   };
@@ -165,7 +210,10 @@ const ToolRequested = ({ onReturnSuccess }) => {
     if (!currentRecord) return;
 
     // Client-side validation for quantity
-    const remaining = currentRecord.quantity - (currentRecord.total_returned_qty || 0);
+    const totalReturnedAnyStatus = returnRequests
+      .filter(rr => rr.requested_id === currentRecord.id)
+      .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
+    const remaining = (currentRecord.quantity || 0) - totalReturnedAnyStatus;
     if (returnQuantity > remaining) {
       message.error(`Cannot return more than remaining quantity (${remaining})`);
       return;
@@ -311,11 +359,11 @@ const ToolRequested = ({ onReturnSuccess }) => {
       fixed: 'right',
       render: (_, record) => {
         const isConsumable = isConsumableType(record);
-        const pendingQty = returnRequests
-          .filter(rr => rr.requested_id === record.id && (rr.status === 'pending' || rr.status === 'not_collected'))
+        const totalReturnedAnyStatus = returnRequests
+          .filter(rr => rr.requested_id === record.id)
           .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
-        const remainingWithOperator = (record.quantity || 0) - (record.total_returned_qty || 0) - pendingQty;
-        const isExhausted = remainingWithOperator <= 0;
+        const remaining = (record.quantity || 0) - totalReturnedAnyStatus;
+        const isExhausted = remaining <= 0;
         
         return (
         <Button 
@@ -325,7 +373,7 @@ const ToolRequested = ({ onReturnSuccess }) => {
           onClick={() => handleReturnTool(record)}
           loading={returnLoading}
         >
-          {isExhausted ? 'Returned' : (isConsumable ? 'Consumable' : 'Return Tool')}
+          {isConsumable ? 'Consumable' : (isExhausted ? 'Returned' : 'Return Tool')}
         </Button>
       )},
     },

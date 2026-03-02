@@ -1,29 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { 
-  PlusOutlined, 
-  DownloadOutlined, 
-  FileTextOutlined, 
-  EyeOutlined, 
-  SyncOutlined, 
-  ToolOutlined,
-  ClockCircleOutlined,
-  EnvironmentOutlined,
-  InfoCircleOutlined,
-  BlockOutlined,
-  AppstoreOutlined,
-  CodeSandboxOutlined,
-  DeleteOutlined,
-  InboxOutlined,
-  FileImageOutlined,
-  FilePdfOutlined,
-  FileZipOutlined,
-  FileExcelOutlined,
-  FileWordOutlined,
-  UploadOutlined,
-  EditOutlined
-} from "@ant-design/icons";
+import { PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined, SyncOutlined, ToolOutlined,ClockCircleOutlined,EnvironmentOutlined,
+  InfoCircleOutlined,BlockOutlined,AppstoreOutlined,CodeSandboxOutlined,DeleteOutlined,InboxOutlined,FileImageOutlined,FilePdfOutlined,
+  FileZipOutlined,FileExcelOutlined,FileWordOutlined,UploadOutlined,EditOutlined } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
 import { Card, Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Row, Col, Typography, Divider, Upload, Input, Form } from "antd";
+import { useLocation } from "react-router-dom";
 
 const { TabPane } = Tabs;
 const { Text, Title } = Typography;
@@ -274,6 +255,16 @@ const FitTable = ({ columns, dataSource, ...props }) => {
 };
 
 const DocumentsPanel = ({ selectedItem }) => {
+  const location = useLocation();
+  const getRolePrefix = () => {
+    const path = location.pathname;
+    if (path.startsWith('/admin')) return '/admin';
+    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
+    if (path.startsWith('/operator')) return '/operator';
+    return '';
+  };
+  const prefix = getRolePrefix();
+  const isAddDisabled = !selectedItem || selectedItem.itemType !== 'part' || prefix === '/project_coordinator';
   const [documents, setDocuments] = useState([]);
   const [operations, setOperations] = useState([]);
   const [processPlans, setProcessPlans] = useState({});
@@ -755,8 +746,8 @@ const DocumentsPanel = ({ selectedItem }) => {
                     size="small" 
                     icon={<PlusOutlined />} 
                     onClick={() => openPartActionModal('operation')}
-                    disabled={!selectedItem || selectedItem.itemType !== 'part'}
-                    className="no-hover-btn"
+                    disabled={isAddDisabled}
+                    className={isAddDisabled ? "disabled-primary-btn" : "no-hover-btn"}
                 >
                     Add Operation
                 </Button>
@@ -1115,6 +1106,13 @@ const DocumentsPanel = ({ selectedItem }) => {
             opacity: 1 !important;
             border: none !important;
             box-shadow: none !important;
+          }
+          .disabled-primary-btn, .disabled-primary-btn:hover, .disabled-primary-btn:focus, .disabled-primary-btn:active {
+            background-color: #e5e7eb !important;
+            color: #9ca3af !important;
+            border: none !important;
+            box-shadow: none !important;
+            cursor: not-allowed !important;
           }
         `}
       </style>

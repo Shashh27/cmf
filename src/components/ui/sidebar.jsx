@@ -1,20 +1,8 @@
 import React from "react";
 import { Layout, Menu } from "antd";
 import { Link, useLocation } from "react-router-dom";
-import { 
-  AppstoreOutlined, 
-  DeploymentUnitOutlined, 
-  SettingOutlined, 
-  ShoppingCartOutlined,
-  DashboardOutlined,
-  MonitorOutlined,
-  ToolOutlined,
-  SafetyCertificateOutlined,
-  DatabaseOutlined,
-  FileTextOutlined,
-  BellOutlined,
-  LockOutlined
-} from "@ant-design/icons";
+import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,SafetyCertificateOutlined,
+  DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 
 const { Sider } = Layout;
@@ -149,6 +137,19 @@ const Sidebar = () => {
         key: `${prefix}/documents`,
         label: <Link to={`${prefix}/documents`}>Documents</Link>,
         icon: <FileTextOutlined />,
+      },
+    ];
+  } else if (prefix === '/project_coordinator') {
+    items = [
+      {
+        key: `${prefix}/oms/orders`,
+        label: <Link to={`${prefix}/oms/orders`}>Orders</Link>,
+        icon: <ShoppingCartOutlined />,
+      },
+      {
+        key: `${prefix}/pdm`,
+        label: <Link to={`${prefix}/pdm`}>PDM</Link>,
+        icon: <DeploymentUnitOutlined />,
       },
     ];
   } else {

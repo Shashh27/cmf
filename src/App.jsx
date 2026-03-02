@@ -74,9 +74,14 @@ function App() {
           <Route path="/admin/access_control" element={<AccessControl />} />
 
           {/* Project Coordinator Routes */}
-          <Route path="/project_coordinator" element={<Navigate to="/project_coordinator/dashboard" replace />} />
+          <Route path="/project_coordinator" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
           <Route path="/project_coordinator/dashboard" element={<ProjectCoordinatorDashboard />} />
-
+          <Route path="/project_coordinator/oms" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
+          <Route path="/project_coordinator/oms/orders" element={<ProjectCoordinatorDashboard />} />
+          <Route path="/project_coordinator/oms/product/:productId" element={<ProjectCoordinatorDashboard />} />
+          <Route path="/project_coordinator/pdm" element={<ProjectCoordinatorDashboard />} />
+         
+          
           {/* Operator Routes */}
           <Route path="/operator" element={<Navigate to="/operator/dashboard" replace />} />
           <Route path="/operator/dashboard" element={<OperatorDashboard />} />

@@ -23,6 +23,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           quantity: editingOrder.quantity?.toString() ?? "",
           due_date: editingOrder.due_date ? editingOrder.due_date.split("T")[0] : "",
           order_date: editingOrder.order_date ? editingOrder.order_date.split("T")[0] : "",
+          user_id: editingOrder.user_id?.toString() ?? "",
         });
       } else {
         form.resetFields();
@@ -30,6 +31,19 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           status: "Pending",
         });
         setDocuments([]);
+
+        try {
+          const stored = localStorage.getItem("user");
+          if (stored) {
+            const userObj = JSON.parse(stored);
+            if (userObj?.id != null) {
+              form.setFieldsValue({ user_id: String(userObj.id) });
+            }
+            if (userObj?.user_name) {
+              form.setFieldsValue({ user_name_display: userObj.user_name });
+            }
+          }
+        } catch {}
       }
     }
   }, [isOpen, editingOrder, form]);
@@ -50,6 +64,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         quantity: parseInt(values.quantity),
         customer_id: parseInt(values.customer_id),
         product_id: parseInt(values.product_id),
+        user_id: values.user_id ? parseInt(values.user_id) : undefined,
       };
 
       if (values.due_date) {
@@ -150,6 +165,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       footer={null}
       width={1100}
       centered
+      maskClosable={false}
+      keyboard={false}
       title={
         <div className="flex items-center gap-2">
           <FileTextOutlined className="text-blue-500" />
@@ -159,6 +176,9 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         </div>
       }
     >
+      <style>{`
+        .hide-optional .ant-form-item-optional { display: none !important; }
+      `}</style>
       <Form
         form={form}
         layout="vertical"
@@ -166,6 +186,20 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         className="mt-2"
         requiredMark="optional"
       >
+        <Row gutter={24}>
+          <Col span={6}>
+            <Form.Item
+              name="user_name_display"
+              label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">User</span>}
+              className="mb-4 hide-optional"
+            >
+              <Input placeholder="Name" className="rounded-md border-gray-300 h-10" disabled readOnly />
+            </Form.Item>
+          </Col>
+          <Form.Item name="user_id" hidden rules={[{ required: true, message: 'Required' }]}>
+            <input type="hidden" />
+          </Form.Item>
+        </Row>
         <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 shadow-sm">
           <Row gutter={24}>
             <Col span={6}>

@@ -20,10 +20,20 @@ const CreateProductModal = ({
   const hasFetchedRawMaterials = useRef(false);
 
   // Initial form values
+  const storedUser = (() => {
+    try {
+      const s = localStorage.getItem('user');
+      return s ? JSON.parse(s) : null;
+    } catch {
+      return null;
+    }
+  })();
   const [formData, setFormData] = useState({
     product_number: '',
     product_name: '',
     product_version: '1.0',
+    user_name_display: storedUser?.user_name || '',
+    user_id: storedUser?.id ?? null,
     assembly_number: '',
     assembly_name: '',
     part_number: '',
@@ -120,6 +130,26 @@ const CreateProductModal = ({
     }
   }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open]);
 
+  // Pre-fill user info for product creation
+  useEffect(() => {
+    if (open && createType === 'product') {
+      try {
+        const stored = localStorage.getItem('user');
+        if (stored) {
+          const u = JSON.parse(stored);
+          const userName = u?.user_name || '';
+          const userId = u?.id ?? null;
+          form.setFieldsValue({
+            user_name_display: userName,
+            user_id: userId != null ? String(userId) : null
+          });
+        }
+      } catch (e) {
+        console.error('Failed to parse user from localStorage', e);
+      }
+    }
+  }, [open, createType, form]);
+
   // Fetch part types when createType becomes 'part'
   useEffect(() => {
     if (createType === 'part' && !hasFetchedPartTypes.current) {
@@ -190,10 +220,20 @@ const CreateProductModal = ({
       if (createType === 'product') {
         url = `${API_BASE_URL}/products${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
         method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
+        // Get user_id from localStorage
+        let uid = null;
+        try {
+          const stored = localStorage.getItem('user');
+          if (stored) {
+            const u = JSON.parse(stored);
+            uid = u?.id ?? null;
+          }
+        } catch {}
         payload = {
           product_number: values.product_number,
           product_name: values.product_name,
-          product_version: values.product_version
+          product_version: values.product_version,
+          user_id: uid
         };
       } else if (createType === 'assembly') {
         url = `${API_BASE_URL}/assemblies${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
@@ -250,6 +290,8 @@ const CreateProductModal = ({
       title={getTitle()}
       open={open}
       onCancel={onCancel}
+      maskClosable={false}
+      keyboard={false}
       footer={null}
       destroyOnHidden
     >
@@ -281,6 +323,22 @@ const CreateProductModal = ({
       >
         {createType === 'product' && (
           <>
+            <Form.Item
+              name="user_name_display"
+              label="User"
+            >
+              <Input 
+                placeholder="-" 
+                autoComplete="off" 
+                readOnly 
+                disabled 
+                style={{ 
+                  backgroundColor: '#f5f5f5', 
+                  color: '#6b7280', 
+                  borderColor: '#e5e7eb' 
+                }} 
+              />
+            </Form.Item>
             <Form.Item
               name="product_number"
               label="Product Number"

@@ -1,42 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { API_BASE_URL } from "../Config/auth";
-import { 
-  Table, 
-  Button, 
-  Tabs, 
-  Badge, 
-  Modal, 
-  Form, 
-  Input, 
-  InputNumber,
-  Select, 
-  Typography, 
-  Space, 
-  Spin, 
-  Empty, 
-  message,
-  Checkbox,
-  Row,
-  Col,
-  Tooltip,
-  Card,
-  Tag
-} from "antd";
-import { 
-  CaretDownOutlined,
-  CaretRightOutlined,
-  AppstoreOutlined,
-  CodeSandboxOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  PlusOutlined,
-  BlockOutlined,
-  FileTextOutlined,
-  InfoCircleOutlined,
-  ExperimentOutlined,
-  LinkOutlined,
-  SafetyCertificateOutlined
-} from "@ant-design/icons";
+import { Table, Button, Tabs, Badge, Modal, Form, Input, InputNumber,Select, Typography, Space, Spin, Empty, 
+  message, Checkbox, Row, Col, Tooltip, Card, Tag } from "antd";
+import { CaretDownOutlined,CaretRightOutlined,AppstoreOutlined,CodeSandboxOutlined,EditOutlined,DeleteOutlined,PlusOutlined,
+  BlockOutlined,FileTextOutlined,InfoCircleOutlined,ExperimentOutlined,LinkOutlined,SafetyCertificateOutlined } from "@ant-design/icons";
 
 const { Title, Text } = Typography;
 const { Option } = Select;

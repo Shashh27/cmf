@@ -178,6 +178,7 @@ const CustomersTable = () => {
         pagination={{ pageSize: 10 }}
         bordered
         size="middle"
+        className="modern-table"
       />
 
       {customerModalOpen && (

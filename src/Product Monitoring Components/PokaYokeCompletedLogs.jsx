@@ -1,21 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Table,
-  Select,
-  Typography,
-  Card,
-  Button,
-  Space,
-  Tag,
-  Modal,
-  message,
-} from 'antd';
-import {
-  ReloadOutlined,
-  FileTextOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-} from '@ant-design/icons';
+import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,} from 'antd';
+import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,} from '@ant-design/icons';
 import config from '../Config/config';
 
 const { Title, Text } = Typography;

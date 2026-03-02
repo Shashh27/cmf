@@ -1,36 +1,26 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  SearchOutlined, 
-  DownOutlined, 
-  RightOutlined, 
-  PlusOutlined, 
-  PartitionOutlined, 
-  ToolOutlined, 
-  SettingOutlined, 
-  FileTextOutlined, 
-  ProfileOutlined, 
-  EditOutlined, 
-  DeleteOutlined, 
-  CodeSandboxOutlined, 
-  SafetyCertificateOutlined,
-  DashboardOutlined,
-  InboxOutlined,
-  ControlOutlined,
-  DeploymentUnitOutlined,
-  ClusterOutlined,
-  AppstoreOutlined,
-  BlockOutlined,
-  CaretDownOutlined,
-  CaretRightOutlined
+import { SearchOutlined, DownOutlined, RightOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, SettingOutlined, FileTextOutlined, 
+  ProfileOutlined, EditOutlined, DeleteOutlined, CodeSandboxOutlined, SafetyCertificateOutlined,DashboardOutlined,InboxOutlined,
+  ControlOutlined,DeploymentUnitOutlined,ClusterOutlined,AppstoreOutlined,BlockOutlined,CaretDownOutlined,CaretRightOutlined
 } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
 import { Input, Button, Card, message, Modal, Tooltip, Empty, Spin, Tag, Typography, Space } from "antd";
+import { useLocation } from "react-router-dom";
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 
 const BillOfMaterials = ({ onItemSelected }) => {
+  const location = useLocation();
+  const getRolePrefix = () => {
+    const path = location.pathname;
+    if (path.startsWith('/admin')) return '/admin';
+    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
+    if (path.startsWith('/operator')) return '/operator';
+    return '';
+  };
+  const prefix = getRolePrefix();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
@@ -77,7 +67,20 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
   const fetchProducts = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/products/`);
+      // Filter by logged-in user's id for Project Coordinator
+      let url = `${API_BASE_URL}/products/`;
+      if (prefix === '/project_coordinator') {
+        try {
+          const stored = localStorage.getItem('user');
+          const u = stored ? JSON.parse(stored) : null;
+          if (u?.id) {
+            url = `${API_BASE_URL}/products/?user_id=${u.id}`;
+          }
+        } catch (e) {
+          console.error('Failed to parse user from localStorage', e);
+        }
+      }
+      const response = await fetch(url);
       if (response.ok) setProducts(await response.json());
     } catch (error) {
       console.error('Error fetching products:', error);

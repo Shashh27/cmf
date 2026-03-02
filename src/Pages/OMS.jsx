@@ -2,17 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../Config/auth";
 import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty } from "antd";
-import { 
-  ShoppingOutlined, 
-  PlusOutlined, 
-  EditOutlined, 
-  DeleteOutlined, 
-  FileTextOutlined, 
-  AppstoreOutlined,
-  UserOutlined,
-  CalendarOutlined,
-  SearchOutlined
-} from "@ant-design/icons";
+import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
+  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import ProductBOMView from "../OMS Components/ProductBOMView";
@@ -78,7 +69,19 @@ const OMS = () => {
 
   const fetchProducts = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/products/`);
+      let url = `${API_BASE_URL}/products/`;
+      if (prefix === '/project_coordinator') {
+        try {
+          const stored = localStorage.getItem('user');
+          const u = stored ? JSON.parse(stored) : null;
+          if (u?.id) {
+            url = `${API_BASE_URL}/products/?user_id=${u.id}`;
+          }
+        } catch (e) {
+          console.error('Failed to parse user from localStorage', e);
+        }
+      }
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
         setProducts(data);
@@ -90,14 +93,36 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/`);
-      if (response.ok) {
-        const data = await response.json();
-        setOrders(data);
-      } else {
-        console.error("Failed to fetch orders:", response.statusText);
-        setOrders([]);
+      let url = `${API_BASE_URL}/orders/?skip=0&limit=1000`;
+      if (prefix === '/project_coordinator') {
+        try {
+          const stored = localStorage.getItem('user');
+          const u = stored ? JSON.parse(stored) : null;
+          if (u?.id) {
+            url = `${API_BASE_URL}/orders/?user_id=${u.id}&skip=0&limit=1000`;
+          }
+        } catch (e) {
+          console.error('Failed to parse user from localStorage', e);
+        }
       }
+      let data = [];
+      let ok = false;
+      try {
+        const response = await fetch(url);
+        ok = response.ok;
+        if (ok) {
+          data = await response.json();
+        }
+      } catch (_) {}
+      if ((!ok || !Array.isArray(data) || data.length === 0) && prefix === '/admin') {
+        const alt = await fetch(`${API_BASE_URL}/orders/with-customers?skip=0&limit=1000`);
+        if (alt.ok) {
+          const altData = await alt.json();
+          setOrders(Array.isArray(altData) ? altData : []);
+          return;
+        }
+      }
+      setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error fetching orders:", error);
       setOrders([]);
@@ -294,6 +319,17 @@ const OMS = () => {
       render: (status) => getStatusBadge(status),
     },
     {
+      title: <span className="font-semibold text-gray-700">Project Coordinator</span>,
+      dataIndex: "user_name",
+      key: "user_name",
+      render: (text, record) => (
+        <Space>
+          <UserOutlined className="text-gray-400" />
+          <span className="text-gray-700">{text || record.user_id}</span>
+        </Space>
+      ),
+    },
+    {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: "actions",
       width: 150,
@@ -334,6 +370,12 @@ const OMS = () => {
     },
   ];
 
+  // KPI stats (Project Coordinator)
+  const totalOrders = orders.length;
+  const inProgressCount = orders.filter(o => o.status === 'Pending').length;
+  const scheduledCount = orders.filter(o => o.status === 'Ongoing').length;
+  const completedCount = orders.filter(o => o.status === 'Completed').length;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
       <style>{`
@@ -362,7 +404,49 @@ const OMS = () => {
       `}</style>
 
       {contextHolder}
-      
+
+      {/* KPI Cards - only for Project Coordinator */}
+      {prefix === '/project_coordinator' && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="rounded-xl p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-gray-600">Total Orders</div>
+                <div className="text-2xl font-bold text-blue-700">{totalOrders}</div>
+              </div>
+              <ShoppingOutlined className="text-blue-600 text-2xl" />
+            </div>
+          </div>
+          <div className="rounded-xl p-4 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-gray-600">Pending</div>
+                <div className="text-2xl font-bold text-orange-600">{inProgressCount}</div>
+              </div>
+              <AppstoreOutlined className="text-orange-500 text-2xl" />
+            </div>
+          </div>
+          <div className="rounded-xl p-4 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-gray-600">Scheduled</div>
+                <div className="text-2xl font-bold text-purple-600">{scheduledCount}</div>
+              </div>
+              <ClockCircleOutlined className="text-purple-500 text-2xl" />
+            </div>
+          </div>
+          <div className="rounded-xl p-4 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm text-gray-600">Completed</div>
+                <div className="text-2xl font-bold text-green-600">{completedCount}</div>
+              </div>
+              <CheckCircleOutlined className="text-green-500 text-2xl" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex items-center justify-between">
@@ -387,7 +471,6 @@ const OMS = () => {
             </Button>
         </div>
       </div>
-
       <Card 
         className="shadow-sm rounded-xl border border-gray-100" 
         styles={{ body: { padding: 0 } }}

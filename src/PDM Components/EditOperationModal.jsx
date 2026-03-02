@@ -1,18 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, Button, Tabs, Upload, message, Popconfirm, Spin, Empty, Tag, Table, Row, Col, TimePicker, Select, Tooltip, Flex, Badge } from 'antd';
-import { 
-  UploadOutlined, 
-  DeleteOutlined, 
-  FileTextOutlined, 
-  SaveOutlined, 
-  InboxOutlined,
-  ExclamationCircleOutlined,
-  ToolOutlined,
-  PlusOutlined,
-  SyncOutlined,
-  DownloadOutlined,
-  EyeOutlined
-} from '@ant-design/icons';
+import { UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined, InboxOutlined,ExclamationCircleOutlined,ToolOutlined,PlusOutlined,SyncOutlined,DownloadOutlined,EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth';
 

@@ -16,6 +16,20 @@ const ToolReturn = () => {
     fetchReturns();
   }, []);
 
+  const getCurrentOperatorId = () => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        if (user && user.id != null) return parseInt(user.id);
+      }
+    } catch (e) {
+      
+    }
+    const fallback = localStorage.getItem('operator_id');
+    return fallback ? parseInt(fallback) : null;
+  };
+
   const handleTableChange = (newPagination) => {
     setPagination(newPagination);
   };
@@ -39,7 +53,17 @@ const ToolReturn = () => {
             };
         });
         
-        setReturns(returnsData);
+        const currentOpId = getCurrentOperatorId();
+        const filtered = currentOpId != null
+          ? returnsData.filter(ret => {
+              const top = ret.operator_id ?? ret.operatorId ?? ret.operator_id_fk;
+              const nested = ret.inventory_request_details?.operator_id ?? ret.inventory_request_details?.operator?.id;
+              const oid = top != null ? top : nested;
+              return oid == null ? true : parseInt(oid) === currentOpId;
+            })
+          : returnsData;
+        
+        setReturns(filtered);
       } else {
         // Fallback for demo/development if endpoint doesn't exist yet
         console.warn('Inventory returns endpoint not found');

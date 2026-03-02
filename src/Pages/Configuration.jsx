@@ -187,6 +187,7 @@ const Configuration = () => {
             pagination={{ pageSize: 10 }}
             bordered
             size="middle"
+            className="modern-table"
           />
         </Card>
       ),
@@ -200,6 +201,19 @@ const Configuration = () => {
 
   return (
     <div style={{ padding: '24px' }}>
+      <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff;
+        }
+        .modern-table .ant-table-tbody > tr:hover > td {
+          background: #f0f8ff !important;
+        }
+        .modern-table .ant-table-tbody > tr > td {
+          border-bottom: 1px solid #f0f0f0;
+        }
+      `}</style>
       <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '24px' }}>Configuration</h1>
       <Tabs defaultActiveKey="work-center" items={items} />
 
