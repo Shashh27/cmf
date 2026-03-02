@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import config from '../../Config/config';
 
 const ReturnRequestsTable = () => {
   const [returnRequests, setReturnRequests] = useState([]);
@@ -17,9 +18,8 @@ const ReturnRequestsTable = () => {
   }, []);
 
   const fetchReturnRequests = async () => {
-    setLoading(true);
     try {
-      const response = await fetch('http://172.18.100.76:8000/api/v1/inventory-return-requests/');
+      const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -36,8 +36,6 @@ const ReturnRequestsTable = () => {
     } catch (error) {
       console.error('Failed to fetch return requests:', error);
       message.error('Failed to fetch return requests: ' + error.message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -53,10 +51,10 @@ const ReturnRequestsTable = () => {
         console.log('Record ID:', record.id);
         console.log('Record Tool Name:', record.inventory_request_details?.tool_name);
         console.log('Current Status:', record.status);
-        console.log('API URL:', `http://172.18.100.76:8000/api/v1/inventory-return-requests/${record.id}/status?admin_id=6&status=pending&table_id=${record.id}`);
+        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=6&status=pending&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`http://172.18.100.76:8000/api/v1/inventory-return-requests/${record.id}/status?admin_id=6&status=pending&table_id=${record.id}`, {
+          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=6&status=pending&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -68,9 +66,9 @@ const ReturnRequestsTable = () => {
           const result = await response.json();
           console.log('API Response:', result);
           
-          // Update the local state immediately - clear admin_name when marking as pending
-          setReturnRequests(prevRequests => 
-            prevRequests.map(req => 
+          // Update UI immediately for better UX
+          setReturnRequests(prev => 
+            prev.map(req => 
               req.id === record.id 
                 ? { 
                     ...req, 
@@ -83,11 +81,6 @@ const ReturnRequestsTable = () => {
           );
           
           message.success('Return request status updated to pending successfully');
-          
-          // Refetch data to ensure we have the latest state from database
-          setTimeout(() => {
-            fetchReturnRequests();
-          }, 500); // Small delay to ensure backend has processed the update
         } catch (error) {
           console.error('Failed to update status to pending:', error);
           message.error('Failed to update status to pending: ' + error.message);
@@ -108,10 +101,10 @@ const ReturnRequestsTable = () => {
         console.log('Record ID:', record.id);
         console.log('Record Tool Name:', record.inventory_request_details?.tool_name);
         console.log('Current Status:', record.status);
-        console.log('API URL:', `http://172.18.100.76:8000/api/v1/inventory-return-requests/${record.id}/status?admin_id=6&status=collected&table_id=${record.id}`);
+        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=6&status=collected&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`http://172.18.100.76:8000/api/v1/inventory-return-requests/${record.id}/status?admin_id=6&status=collected&table_id=${record.id}`, {
+          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=6&status=collected&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -138,11 +131,6 @@ const ReturnRequestsTable = () => {
           );
           
           message.success(`Return request marked as collected by ${result.admin_name || 'admin'}`);
-          
-          // Refetch data after a longer delay to ensure backend consistency
-          setTimeout(() => {
-            fetchReturnRequests();
-          }, 1000); // Longer delay to ensure backend has processed the update
         } catch (error) {
           console.error('Failed to update status to collected:', error);
           message.error('Failed to update status to collected: ' + error.message);
@@ -153,7 +141,7 @@ const ReturnRequestsTable = () => {
 
   const handleDelete = async (record) => {
     try {
-      const response = await fetch(`http://172.18.100.76:8000/api/v1/inventory-return-requests/${record.id}`, {
+      const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}`, {
         method: 'DELETE'
       });
       
@@ -163,7 +151,9 @@ const ReturnRequestsTable = () => {
       }
       
       message.success('Return request deleted successfully');
-      fetchReturnRequests();
+      
+      // Remove the deleted row from state instead of refetching
+      setReturnRequests(prev => prev.filter(req => req.id !== record.id));
     } catch (error) {
       console.error('Failed to delete return request:', error);
       message.error('Failed to delete return request: ' + error.message);
@@ -210,52 +200,65 @@ const ReturnRequestsTable = () => {
 
   const columns = [
     {
-      title: 'Sl No',
+      title: 'SL NO',
       key: 'sl_no',
-      width: 60,
+      width: 70,
+      fixed: 'left',
+      align: 'center',
+      className: 'table-header-styled',
       render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1,
     },
     {
       title: 'Tool Name',
       dataIndex: ['inventory_request_details', 'tool_name'],
       key: 'tool_name',
-      width: 150,
+      width: 180,
+      fixed: 'left',
       ellipsis: true,
+      className: 'table-header-styled',
       render: (text, record) => record.inventory_request_details?.tool_name || '-',
     },
     {
       title: 'Project Number',
       dataIndex: ['inventory_request_details', 'project_name'],
       key: 'project_number',
-      width: 120,
+      width: 140,
       ellipsis: true,
+      className: 'table-header-styled',
       render: (text, record) => record.inventory_request_details?.project_name || '-',
     },
     {
       title: 'Part Name',
       dataIndex: ['inventory_request_details', 'part_name'],
       key: 'part_name',
-      width: 120,
+      width: 140,
       ellipsis: true,
+      className: 'table-header-styled',
       render: (text, record) => record.inventory_request_details?.part_name || '-',
     },
     {
-      title: 'Total Requested Qty',
+      title: 'Requested Qty',
       dataIndex: 'total_requested_qty',
       key: 'total_requested_qty',
-      width: 140,
+      width: 120,
+      align: 'center',
+      className: 'table-header-styled',
     },
     {
       title: 'Returned Qty',
       dataIndex: 'returned_qty',
       key: 'returned_qty',
-      width: 100,
+      width: 110,
+      align: 'center',
+      className: 'table-header-styled',
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 120,
+      align: 'center',
+      className: 'table-header-styled',
       filters: [
         { text: 'Pending', value: 'pending' },
         { text: 'Collected', value: 'collected' },
@@ -268,46 +271,44 @@ const ReturnRequestsTable = () => {
       ),
     },
     {
-      title: 'Remarks',
-      dataIndex: 'remarks',
-      key: 'remarks',
-      width: 150,
-      ellipsis: true,
-      render: (text) => text || '-',
-    },
-    {
       title: 'Returned By',
       dataIndex: 'operator_name',
       key: 'operator_name',
-      width: 120,
+      width: 140,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Collected By',
       dataIndex: 'admin_name',
       key: 'admin_name',
-      width: 120,
+      width: 140,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Created At',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 150,
+      width: 160,
+      className: 'table-header-styled',
       render: (date) => formatDateTime(date),
     },
     {
       title: 'Updated At',
       dataIndex: 'updated_at',
       key: 'updated_at',
-      width: 120,
+      width: 160,
+      className: 'table-header-styled',
       render: (date) => formatDateTime(date),
     },
     {
       title: 'Action',
       key: 'action',
-      width: 150,
+      width: 180,
       fixed: 'right',
+      align: 'center',
+      className: 'table-header-styled',
       render: (_, record, index) => {
         console.log(`=== TABLE ROW RENDER ===`);
         console.log(`Row Index: ${index}`);
@@ -348,6 +349,7 @@ const ReturnRequestsTable = () => {
         dataSource={returnRequests}
         rowKey="id"
         loading={loading}
+        className="modern-table"
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,

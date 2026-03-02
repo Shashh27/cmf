@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card,Row,Col,Typography,Button,Tag,Space,DatePicker,Select,Input,Tabs } from 'antd';
 import { ToolOutlined,DashboardOutlined,ClockCircleOutlined,ProfileOutlined,SettingOutlined,FileTextOutlined,DownloadOutlined } from '@ant-design/icons';
 import machineImg from '../assets/machine.png';
+import PokaYokeChecklist from './PokaYokeChecklist';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -13,6 +14,8 @@ const Dashboard = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [machineName, setMachineName] = useState('');
   const [docFilter, setDocFilter] = useState('All Documents');
+  const [showChecklist, setShowChecklist] = useState(false);
+  const [machineId, setMachineId] = useState(null);
 
   useEffect(() => {
     try {
@@ -24,9 +27,13 @@ const Dashboard = () => {
           [m?.type, m?.make, m?.model].filter(Boolean).join('-') ||
           '';
         setMachineName(candidate);
+        const id =
+          m?.id ?? m?.machine_id ?? m?.machineId ?? m?.machine?.id ?? null;
+        setMachineId(id);
       }
     } catch (e) {
       setMachineName('');
+      setMachineId(null);
     }
   }, []);
 
@@ -39,7 +46,6 @@ const Dashboard = () => {
   const minuteOptions = [0, 15, 30, 45];
   const [cardHeight, setCardHeight] = useState(520);
   const [isMobile, setIsMobile] = useState(false);
-  const [handoverTab, setHandoverTab] = useState('Info');
   useEffect(() => {
     const update = () => {
       const w = window.innerWidth;
@@ -491,6 +497,7 @@ const Dashboard = () => {
                 background: '#22c55e',
                 borderColor: '#22c55e',
               }}
+              onClick={() => setShowChecklist(true)}
             >
               Open Poka Yoke Checklist
             </Button>
@@ -513,73 +520,14 @@ const Dashboard = () => {
               }}
             />
 
-            <div style={{ marginBottom: 8, fontWeight: 600 }}>Operator Handover</div>
-            <div style={{ marginBottom: 12, fontSize: 12, color: '#94a3b8' }}>
-              Leave important information for the next operator.
-            </div>
-            <div
-              style={{
-                display: 'inline-flex',
-                borderRadius: 9999,
-                border: '1px solid #e2e8f0',
-                overflow: 'hidden',
-                marginBottom: 8,
-              }}
-            >
-              {['Info', 'Issue', 'Task'].map((label) => (
-                <Button
-                  key={label}
-                  type={label === handoverTab ? 'primary' : 'text'}
-                  size="small"
-                  style={
-                    label === handoverTab
-                      ? {
-                          borderRadius: 9999,
-                          padding: '0 16px',
-                        }
-                      : {
-                          padding: '0 16px',
-                          color: '#64748b',
-                        }
-                  }
-                  onClick={() => setHandoverTab(label)}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-            <TextArea
-              rows={4}
-              placeholder={
-                handoverTab === 'Info'
-                  ? 'Share important information for the next operator...'
-                  : handoverTab === 'Issue'
-                  ? 'Describe the issue observed...'
-                  : 'Describe the task to be done...'
-              }
-              style={{ resize: 'none', marginBottom: 8 }}
-            />
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                fontSize: 12,
-                color: '#94a3b8',
-                marginBottom: 8,
-              }}
-            >
-              <span>Current Shift: Evening (14–22)</span>
-              <span>operator</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <Button type="primary" disabled>
-                Submit Note
-              </Button>
-            </div>
           </Card>
         </Col>
       </Row>
+      <PokaYokeChecklist
+        open={showChecklist}
+        onClose={() => setShowChecklist(false)}
+        machineId={machineId}
+      />
     </div>
   );
 };

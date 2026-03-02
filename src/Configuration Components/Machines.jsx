@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Button, message, Popconfirm, Space, Card, Tooltip } from "antd";
-import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
 import MachineModal from "../Configuration Components/MachineModal";
 
 const Machines = ({ workCenter, onBack }) => {
@@ -9,6 +9,7 @@ const Machines = ({ workCenter, onBack }) => {
   const [loading, setLoading] = useState(true);
   const [machineModalOpen, setMachineModalOpen] = useState(false);
   const [editingMachine, setEditingMachine] = useState(null);
+  const [visiblePasswords, setVisiblePasswords] = useState({});
 
   useEffect(() => {
     if (workCenter) {
@@ -48,6 +49,13 @@ const Machines = ({ workCenter, onBack }) => {
   const handleEditMachine = (machine) => {
     setEditingMachine(machine);
     setMachineModalOpen(true);
+  };
+
+  const togglePasswordVisibility = (id) => {
+    setVisiblePasswords((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
   };
 
   const handleDeleteMachine = async (id) => {
@@ -147,6 +155,31 @@ const Machines = ({ workCenter, onBack }) => {
       key: 'calibration_due_date',
       align: 'center',
       render: (text) => formatDate(text),
+    },
+    {
+      title: 'PASSWORD',
+      dataIndex: 'password',
+      key: 'password',
+      align: 'center',
+      render: (text, record) => (
+        <Space>
+          <span>
+            {text
+              ? visiblePasswords[record.id]
+                ? text
+                : "•".repeat(text.length)
+              : "-"}
+          </span>
+          {text && (
+            <Button
+              type="text"
+              size="small"
+              icon={visiblePasswords[record.id] ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+              onClick={() => togglePasswordVisibility(record.id)}
+            />
+          )}
+        </Space>
+      ),
     },
     {
       title: 'ACTIONS',

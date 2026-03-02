@@ -17,6 +17,7 @@ import LiveMonitoring from "./Product Monitoring Components/LiveMonitoring";
 import PlannedVsActual from "./Product Monitoring Components/PlannedVsActual";
 import OrderTracking from "./Product Monitoring Components/OrderTracking";
 import Maintenance from "./Product Monitoring Components/Maintenance";
+import ProductionMonitoring from "./Pages/ProductionMonitoring";
 import QualityManagement from "./Quality Management Components/QualityManagement";
 import InventoryMaster from "./Pages/Inventory";
 import OverviewData from "./Pages/OverviewData";
@@ -58,6 +59,7 @@ function App() {
           <Route path="/admin/product-monitoring/planned-vs-actual" element={<PlannedVsActual />} />
           <Route path="/admin/product-monitoring/order-tracking" element={<OrderTracking />} />
           <Route path="/admin/product-monitoring/maintenance" element={<Maintenance />} />
+          <Route path="/admin/product-monitoring/pokayoke-checklists" element={<ProductionMonitoring />} />
 
           <Route path="/admin/quality-management" element={<QualityManagement />} />
 
@@ -72,9 +74,14 @@ function App() {
           <Route path="/admin/access_control" element={<AccessControl />} />
 
           {/* Project Coordinator Routes */}
-          <Route path="/project_coordinator" element={<Navigate to="/project_coordinator/dashboard" replace />} />
+          <Route path="/project_coordinator" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
           <Route path="/project_coordinator/dashboard" element={<ProjectCoordinatorDashboard />} />
-
+          <Route path="/project_coordinator/oms" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
+          <Route path="/project_coordinator/oms/orders" element={<ProjectCoordinatorDashboard />} />
+          <Route path="/project_coordinator/oms/product/:productId" element={<ProjectCoordinatorDashboard />} />
+          <Route path="/project_coordinator/pdm" element={<ProjectCoordinatorDashboard />} />
+         
+          
           {/* Operator Routes */}
           <Route path="/operator" element={<Navigate to="/operator/dashboard" replace />} />
           <Route path="/operator/dashboard" element={<OperatorDashboard />} />

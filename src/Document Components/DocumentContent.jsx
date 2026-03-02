@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Typography, Empty, Button, Table, Space, message, Modal, Input, Upload } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, Typography, Empty, Button, Table, Space, message, Modal, Input, Upload, Tooltip, Select, Tag } from 'antd';
 import { 
   FileOutlined, 
   FolderOutlined, 
@@ -9,10 +9,13 @@ import {
   DownloadOutlined,
   LoadingOutlined,
   UploadOutlined,
-  CloudUploadOutlined
+  CloudUploadOutlined,
+  HistoryOutlined
 } from '@ant-design/icons';
+import config from '../Config/config';
 
 const { Title, Text } = Typography;
+const { Option } = Select;
 
 const DocumentContent = ({ selectedNode }) => {
   const [documents, setDocuments] = useState([]);
@@ -21,10 +24,13 @@ const DocumentContent = ({ selectedNode }) => {
   const [editingDocument, setEditingDocument] = useState(null);
   const [newDocumentName, setNewDocumentName] = useState('');
   
+  // Version selection state - tracks selected version ID for each document family
+  const [selectedVersions, setSelectedVersions] = useState({});
+  
   // Version upload state
   const [versionModalVisible, setVersionModalVisible] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(null);
-  const [newVersion, setNewVersion] = useState('');
+  const [nextVersion, setNextVersion] = useState('');
   const [versionFileList, setVersionFileList] = useState([]);
   const [versionUploading, setVersionUploading] = useState(false);
   
@@ -32,32 +38,126 @@ const DocumentContent = ({ selectedNode }) => {
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewingDocument, setPreviewingDocument] = useState(null);
 
+  // Add Document state
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [addFileList, setAddFileList] = useState([]);
+  const [addUploading, setAddUploading] = useState(false);
+  const [addDocType, setAddDocType] = useState('CNC');
+
   // Fetch documents when a folder is selected
   useEffect(() => {
-    if (selectedNode && selectedNode.type === 'general-folder') {
-      fetchDocuments();
+    if (selectedNode) {
+      if (selectedNode.type === 'general-folder' || 
+          selectedNode.type === 'part-category' || 
+          selectedNode.type === 'operation-folder' ||
+          (selectedNode.type === 'folder' && selectedNode.category === 'Reports')) {
+        fetchDocuments();
+      } else {
+        setDocuments([]);
+      }
     } else {
       setDocuments([]);
     }
   }, [selectedNode]);
 
   const fetchDocuments = async () => {
-    if (!selectedNode || !selectedNode.folderId) return;
+    if (!selectedNode) return;
 
     setLoading(true);
     try {
-      const response = await fetch(`http://172.18.100.76:8000/general-documents/folders/${selectedNode.folderId}/documents`);
+      let url = '';
+      if (selectedNode.type === 'general-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${selectedNode.folderId}/documents`;
+      } else if (selectedNode.type === 'part-category') {
+        url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
+      } else if (selectedNode.type === 'operation-folder') {
+        url = `${config.API_BASE_URL}/operation-documents/operation/${selectedNode.operationId}`;
+      } else if (selectedNode.type === 'folder' && selectedNode.category === 'Reports') {
+        url = `${config.API_BASE_URL}/order-documents/order/${selectedNode.orderId}`;
+      }
+
+      if (!url) {
+        setDocuments([]);
+        setLoading(false);
+        return;
+      }
+
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch documents');
       }
-      const data = await response.json();
-      setDocuments(data);
+      let data = await response.json();
+
+      // Normalize data and filter if needed
+      if (selectedNode.type === 'part-category') {
+        const category = selectedNode.category;
+        data = data.filter(doc => {
+          const docType = (doc.document_type || '').toLowerCase();
+          if (category === 'MPP') return docType === 'mpp';
+          if (category === 'ENGINEERING_DRAWING') return docType === '2d' || docType === '3d';
+          if (category === 'IPID') return docType === 'ipid';
+          if (category === 'Balloon') return docType === 'balloon';
+          return false;
+        });
+      }
+
+      // Map field names to a consistent format
+      const normalizedData = data.map(doc => ({
+        ...doc,
+        file_name: doc.file_name || doc.document_name,
+        version: doc.version || doc.document_version,
+        url: doc.document_url || doc.url, // Ensure we have a URL for preview
+        doc_source_type: selectedNode.type // Keep track of where it came from
+      }));
+
+      // Reset selected versions when new documents are fetched
+      setSelectedVersions({});
+      setDocuments(normalizedData);
     } catch (error) {
       message.error('Failed to fetch documents: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
+
+  // Group documents by their unique identity (family) to handle versioning
+  const groupedDocuments = useMemo(() => {
+    const groups = {};
+    
+    documents.forEach(doc => {
+      // Create a unique key for the document family
+      // All document types use parent_id if it exists, otherwise they use their own id as the family root
+      const familyId = doc.parent_id || doc.id;
+      const familyKey = `${doc.doc_source_type}-${familyId}`;
+
+      if (!groups[familyKey]) {
+        groups[familyKey] = [];
+      }
+      groups[familyKey].push(doc);
+    });
+
+    // For each group, sort by version descending
+    return Object.values(groups).map(group => {
+      const sortedGroup = [...group].sort((a, b) => {
+        const vA = parseFloat(a.version) || 0;
+        const vB = parseFloat(b.version) || 0;
+        return vB - vA;
+      });
+      
+      // The family ID is the root document ID (parent_id of versions, or id of the root itself)
+      const familyId = sortedGroup[0].parent_id || sortedGroup[0].id;
+      
+      const selectedId = selectedVersions[familyId];
+      // If no version is selected, default to the latest version (sortedGroup[0])
+      const activeDoc = selectedId ? sortedGroup.find(d => d.id === selectedId) : sortedGroup[0];
+
+      return {
+        ...activeDoc,
+        allVersions: sortedGroup,
+        familyId: familyId
+      };
+    });
+  }, [documents, selectedVersions]);
 
   const columns = [
     {
@@ -70,27 +170,85 @@ const DocumentContent = ({ selectedNode }) => {
       title: 'Document Name',
       dataIndex: 'file_name',
       key: 'file_name',
-      render: (text) => (
-        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <FileOutlined style={{ color: '#1890ff' }} />
-          {text}
-        </span>
+      render: (text, record) => (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+          <div style={{ 
+            width: '32px', 
+            height: '32px', 
+            backgroundColor: '#e6f7ff', 
+            borderRadius: '4px', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            marginTop: '2px'
+          }}>
+            <FileOutlined style={{ color: '#1890ff', fontSize: '18px' }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <Text strong style={{ fontSize: '14px', color: '#262626' }}>{text}</Text>
+            {record.document_type && (
+              <Tag size="small" style={{ 
+                fontSize: '10px', 
+                margin: 0, 
+                width: 'fit-content', 
+                padding: '0 4px',
+                backgroundColor: '#f5f5f5',
+                color: '#8c8c8c',
+                border: 'none',
+                lineHeight: '16px',
+                marginTop: '2px'
+              }}>
+                {record.document_type.toUpperCase()}
+              </Tag>
+            )}
+          </div>
+        </div>
       ),
     },
     {
       title: 'Version',
-      dataIndex: 'version',
       key: 'version',
-      width: 80,
-      render: (version) => (
-        <span style={{ 
-          background: '#f0f0f0', 
-          padding: '2px 8px', 
-          borderRadius: '4px',
-          fontSize: '12px'
-        }}>
-          v{version}
-        </span>
+      width: 220,
+      render: (_, record) => (
+        <Select
+          size="middle"
+          value={record.id}
+          onChange={(value) => {
+            setSelectedVersions(prev => ({
+              ...prev,
+              [record.familyId]: value
+            }));
+          }}
+          className="version-select-custom"
+          dropdownMatchSelectWidth={false}
+          bordered={true}
+          style={{ 
+            width: '180px', 
+            borderRadius: '6px',
+            border: '1px solid #d9d9d9'
+          }}
+        >
+          {record.allVersions.map(v => (
+            <Option key={v.id} value={v.id}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
+                <div style={{ 
+                  width: '8px', 
+                  height: '8px', 
+                  borderRadius: '50%', 
+                  backgroundColor: v.id === record.allVersions[0].id ? '#52c41a' : '#d9d9d9' 
+                }} />
+                <Text strong style={{ color: v.id === record.id ? '#1890ff' : '#595959' }}>
+                  v{v.version}
+                </Text>
+                {v.created_at && (
+                  <Text type="secondary" style={{ fontSize: '12px', marginLeft: 'auto' }}>
+                    {new Date(v.created_at).toLocaleDateString('en-GB')}
+                  </Text>
+                )}
+              </div>
+            </Option>
+          ))}
+        </Select>
       ),
     },
     {
@@ -99,43 +257,47 @@ const DocumentContent = ({ selectedNode }) => {
       width: 250,
       render: (_, record) => (
         <Space size="small">
-          <Button
-            type="text"
-            size="small"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewDocument(record)}
-            title="Preview"
-          />
-          <Button
-            type="text"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => handleEditDocument(record)}
-            title="Edit Name"
-          />
-          <Button
-            type="text"
-            size="small"
-            icon={<DownloadOutlined />}
-            onClick={() => handleDownloadDocument(record)}
-            title="Download"
-          />
-          <Button
-            type="text"
-            size="small"
-            icon={<CloudUploadOutlined />}
-            onClick={() => handleUploadVersion(record)}
-            title="Upload New Version"
-            style={{ color: '#52c41a' }}
-          />
-          <Button
-            type="text"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => handleDeleteDocument(record)}
-            title="Delete"
-          />
+          <Tooltip title="Preview Document">
+            <Button
+              type="text"
+              size="small"
+              icon={<EyeOutlined className="text-blue-500" />}
+              onClick={() => handleViewDocument(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Edit Document Name">
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined className="text-orange-500" />}
+              onClick={() => handleEditDocument(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Download Document">
+            <Button
+              type="text"
+              size="small"
+              icon={<DownloadOutlined className="text-green-600" />}
+              onClick={() => handleDownloadDocument(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Upload New Version">
+            <Button
+              type="text"
+              size="small"
+              icon={<CloudUploadOutlined className="text-green-500" />}
+              onClick={() => handleUploadVersion(record)}
+            />
+          </Tooltip>
+          <Tooltip title="Delete Document">
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDeleteDocument(record)}
+            />
+          </Tooltip>
         </Space>
       ),
     },
@@ -146,140 +308,52 @@ const DocumentContent = ({ selectedNode }) => {
     setPreviewModalVisible(true);
   };
 
-  const getFileExtension = (filename) => {
-    return filename.toLowerCase().split('.').pop();
+  const getFileExtension = (path) => {
+    if (!path) return '';
+    // Remove query parameters if present (important for MinIO signed URLs)
+    const cleanPath = path.split('?')[0];
+    return cleanPath.toLowerCase().split('.').pop();
   };
 
   const isPreviewable = (document) => {
-    const ext = getFileExtension(document.file_name);
-    const previewableTypes = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'html', 'htm', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+    const ext = getFileExtension(document.url);
+    const previewableTypes = ['pdf', 'jpg', 'jpeg', 'png', 'gif'];
     return previewableTypes.includes(ext);
   };
 
   const getPreviewContent = (document) => {
-    const ext = getFileExtension(document.file_name);
+    const ext = getFileExtension(document.url);
     
-    if (ext === 'pdf') {
+    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) {
       return (
-        <iframe
-          src={document.url}
-          style={{
-            width: '100%',
-            height: '100%',
-            border: '1px solid #d9d9d9',
-            borderRadius: '6px'
-          }}
-          title={document.file_name}
-        />
-      );
-    } else if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) {
-      return (
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          height: '100%',
-          backgroundColor: '#f5f5f5'
-        }}>
-          <img
-            src={document.url}
-            alt={document.file_name}
-            style={{
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain'
-            }}
-            onError={(e) => {
-              e.target.onerror = null;
-              e.target.style.display = 'none';
-              e.target.parentElement.innerHTML = `
-                <div style="text-align: center; padding: 20px;">
-                  <div style="font-size: 48px; color: #d9d9d9; margin-bottom: 16px;">🖼️</div>
-                  <div style="color: #666;">Failed to load image</div>
-                </div>
-              `;
-            }}
+        <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+          <img 
+            src={document.url} 
+            alt={document.file_name} 
+            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
           />
         </div>
       );
-    } else if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) {
-      // Use Microsoft Office Online Viewer for Office documents
-      const officeViewerUrl = `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(document.url)}`;
+    } else if (ext === 'pdf') {
       return (
         <iframe
-          src={officeViewerUrl}
-          style={{
-            width: '100%',
-            height: '100%',
-            border: '1px solid #d9d9d9',
-            borderRadius: '6px'
-          }}
+          src={`${document.url}#toolbar=0`}
           title={document.file_name}
-          onError={(e) => {
-            e.target.onerror = null;
-            e.target.style.display = 'none';
-            e.target.parentElement.innerHTML = `
-              <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; background-color: #f5f5f5; text-align: center; padding: 20px;">
-                <div style="font-size: 48px; color: #d9d9d9; margin-bottom: 16px;">📄</div>
-                <div style="color: #666; margin-bottom: 8px;">Failed to load Office document</div>
-                <div style="color: #999; font-size: 12px;">Please download the file to view its contents</div>
-              </div>
-            `;
-          }}
-        />
-      );
-    } else if (['txt', 'html', 'htm'].includes(ext)) {
-      return (
-        <iframe
-          src={document.url}
-          style={{
-            width: '100%',
-            height: '100%',
-            border: '1px solid #d9d9d9',
-            borderRadius: '6px'
-          }}
-          title={document.file_name}
-          onError={(e) => {
-            e.target.onerror = null;
-            e.target.style.display = 'none';
-            e.target.parentElement.innerHTML = `
-              <div style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100%; background-color: #f5f5f5; text-align: center; padding: 20px;">
-                <div style="font-size: 48px; color: #d9d9d9; margin-bottom: 16px;">📄</div>
-                <div style="color: #666; margin-bottom: 8px;">Failed to load content</div>
-                <div style="color: #999; font-size: 12px;">Please download the file to view its contents</div>
-              </div>
-            `;
-          }}
+          width="100%"
+          height="100%"
+          style={{ border: 'none' }}
         />
       );
     } else {
       return (
-        <div style={{ 
-          display: 'flex', 
-          flexDirection: 'column',
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          height: '100%',
-          backgroundColor: '#f5f5f5',
-          textAlign: 'center',
-          padding: '20px'
-        }}>
-          <FileOutlined style={{ fontSize: '48px', color: '#d9d9d9', marginBottom: '16px' }} />
-          <Title level={4} type="secondary">Preview Not Available</Title>
-          <Text type="secondary">
-            This file type (.{ext}) cannot be previewed directly.
-          </Text>
-          <br />
-          <Text type="secondary">
-            Supported preview formats: PDF, Office Documents, Images, Text, HTML
-          </Text>
+        <div className="flex flex-col items-center justify-center h-full">
+          <Empty description="Preview not available for this file type" />
           <Button 
             type="primary" 
-            icon={<DownloadOutlined />}
+            icon={<DownloadOutlined />} 
             onClick={() => handleDownloadDocument(document)}
-            style={{ marginTop: '16px' }}
           >
-            Download File
+            Download to View
           </Button>
         </div>
       );
@@ -299,14 +373,29 @@ const DocumentContent = ({ selectedNode }) => {
     }
 
     try {
-      const response = await fetch(`http://172.18.100.76:8000/general-documents/documents/${editingDocument.id}`, {
+      let url = '';
+      let body = {};
+
+      if (editingDocument.doc_source_type === 'general-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${editingDocument.id}`;
+        body = { file_name: newDocumentName.trim() };
+      } else if (editingDocument.doc_source_type === 'part-category') {
+        url = `${config.API_BASE_URL}/documents/${editingDocument.id}`;
+        body = { document_name: newDocumentName.trim() };
+      } else if (editingDocument.doc_source_type === 'operation-folder') {
+        url = `${config.API_BASE_URL}/operation-documents/${editingDocument.id}`;
+        body = { document_name: newDocumentName.trim() };
+      } else if (editingDocument.doc_source_type === 'folder') {
+        url = `${config.API_BASE_URL}/order-documents/${editingDocument.id}`;
+        body = { document_name: newDocumentName.trim() };
+      }
+
+      const response = await fetch(url, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          file_name: newDocumentName.trim()
-        })
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) {
@@ -325,81 +414,55 @@ const DocumentContent = ({ selectedNode }) => {
     }
   };
 
-  const handleDownloadDocument = async (document) => {
+  const handleDownloadDocument = (document) => {
+    let downloadUrl = '';
+    if (document.doc_source_type === 'general-folder') {
+      downloadUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${document.id}/download`;
+    } else if (document.doc_source_type === 'part-category') {
+      downloadUrl = `${config.API_BASE_URL}/documents/${document.id}/download`;
+    } else if (document.doc_source_type === 'operation-folder') {
+      downloadUrl = `${config.API_BASE_URL}/operation-documents/${document.id}/download`;
+    } else if (document.doc_source_type === 'folder') {
+      downloadUrl = `${config.API_BASE_URL}/order-documents/download/${document.id}`;
+    }
+
+    if (downloadUrl) {
+      window.open(downloadUrl, '_blank');
+      message.success('Download started');
+    } else {
+      message.error('Download URL not found');
+    }
+  };
+
+  const fetchNextVersion = async (document) => {
     try {
-      console.log('Downloading document:', document.file_name, 'ID:', document.id);
+      // Find all versions for this document family from the grouped data
+      const family = groupedDocuments.find(g => g.familyId === document.familyId);
+      const allVersions = family ? family.allVersions : [document];
       
-      // Show loading message
-      const loadingMessage = message.loading('Downloading document...', 0);
+      // Calculate the highest version among all existing versions
+      const versions = allVersions.map(v => parseFloat(v.version) || 0);
+      const latestVersion = Math.max(...versions, 0);
       
-      // Fetch the document through the backend
-      const response = await fetch(`http://172.18.100.76:8000/general-documents/documents/${document.id}/download`, {
-        method: 'GET',
-        credentials: 'include', // Include cookies if needed
-        headers: {
-          'Accept': 'application/octet-stream, application/pdf, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.openxmlformats-officedocument.wordprocessingml.document, */*'
-        }
-      });
-      
-      loadingMessage();
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Download response error:', response.status, errorText);
-        throw new Error(`Download failed: ${response.status} ${response.statusText}`);
-      }
-      
-      // Get the content type from response headers
-      const contentType = response.headers.get('content-type') || 'application/octet-stream';
-      console.log('Content type:', contentType);
-      
-      // Get the blob
-      const blob = await response.blob();
-      console.log('Blob size:', blob.size, 'type:', blob.type);
-      
-      if (blob.size === 0) {
-        throw new Error('Downloaded file is empty');
-      }
-      
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = document.file_name;
-      link.style.display = 'none';
-      
-      // Add to DOM, click, and remove
-      document.body.appendChild(link);
-      link.click();
-      
-      // Clean up
-      setTimeout(() => {
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      }, 100);
-      
-      message.success('Document downloaded successfully');
+      // Set the next version (increment by 1.0)
+      setNextVersion((latestVersion + 1.0).toFixed(1));
     } catch (error) {
-      console.error('Download error:', error);
-      message.error('Failed to download document: ' + error.message);
+      console.error('Failed to calculate next version:', error);
+      setNextVersion('1.0'); // Fallback
     }
   };
 
   const handleUploadVersion = (document) => {
     setUploadingDocument(document);
-    setNewVersion('');
     setVersionFileList([]);
+    setNextVersion(''); // Reset while fetching
     setVersionModalVisible(true);
+    fetchNextVersion(document); // Fetch and set the next version
   };
 
   const handleUploadNewVersion = async () => {
     if (!versionFileList.length) {
       message.error('Please select a file to upload');
-      return;
-    }
-
-    if (!newVersion.trim()) {
-      message.error('Please enter a version number');
       return;
     }
 
@@ -413,15 +476,45 @@ const DocumentContent = ({ selectedNode }) => {
 
     const formData = new FormData();
     formData.append('file', file, file.name);
-    formData.append('folder_id', uploadingDocument.general_folder_id.toString());
-    formData.append('file_name', uploadingDocument.file_name);
-    formData.append('parent_id', uploadingDocument.id.toString()); // This creates a new version
 
     try {
       setVersionUploading(true);
-      console.log('Uploading new version:', file.name, 'version:', newVersion, 'parent:', uploadingDocument.id);
+      let url = '';
       
-      const response = await fetch('http://172.18.100.76:8000/general-documents/upload', {
+      if (uploadingDocument.doc_source_type === 'general-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
+        formData.append('folder_id', uploadingDocument.general_folder_id.toString());
+        // Use the actual uploaded file name instead of parent document name
+        formData.append('file_name', file.name);
+        formData.append('parent_id', uploadingDocument.id.toString());
+      } else if (uploadingDocument.doc_source_type === 'part-category') {
+        url = `${config.API_BASE_URL}/documents/`;
+        formData.append('document_name', file.name); // Use the name of the new file
+        formData.append('document_type', uploadingDocument.document_type);
+        formData.append('document_version', nextVersion);
+        formData.append('part_id', selectedNode.partId);
+        formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+      } else if (uploadingDocument.doc_source_type === 'operation-folder') {
+        url = `${config.API_BASE_URL}/operation-documents/upload/`;
+        formData.append('operation_id', selectedNode.operationId);
+        formData.append('document_type', uploadingDocument.document_type || 'CNC');
+        formData.append('document_version', nextVersion);
+        formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        // Operation documents endpoint expects 'files' (plural) as it supports multi-upload
+        formData.delete('file');
+        formData.append('files', file, file.name);
+      } else if (uploadingDocument.doc_source_type === 'folder' && selectedNode.category === 'Reports') {
+        url = `${config.API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
+        formData.append('document_type', uploadingDocument.document_type || 'Other');
+        formData.append('document_version', nextVersion);
+        formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+      }
+
+      if (!url) {
+        throw new Error('Upload URL not determined');
+      }
+
+      const response = await fetch(url, {
         method: 'POST',
         body: formData,
       });
@@ -437,12 +530,9 @@ const DocumentContent = ({ selectedNode }) => {
         throw new Error(errorData.detail || `Failed to upload version: ${response.status}`);
       }
 
-      const result = await response.json();
-      console.log('Version upload success:', result);
       message.success('New version uploaded successfully');
       setVersionModalVisible(false);
       setVersionFileList([]);
-      setNewVersion('');
       setUploadingDocument(null);
       
       // Refresh documents
@@ -455,6 +545,69 @@ const DocumentContent = ({ selectedNode }) => {
     }
   };
 
+  const handleAddDocument = async () => {
+    if (!addFileList.length) {
+      message.error('Please select a file to upload');
+      return;
+    }
+
+    const fileObj = addFileList[0];
+    const file = fileObj.originFileObj || fileObj;
+
+    const formData = new FormData();
+    formData.append('file', file, file.name);
+
+    try {
+      setAddUploading(true);
+      let url = '';
+      
+      if (selectedNode.type === 'general-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
+        formData.append('folder_id', selectedNode.folderId.toString());
+        formData.append('file_name', file.name);
+      } else if (selectedNode.type === 'part-category') {
+        url = `${config.API_BASE_URL}/documents/`;
+        formData.append('document_name', file.name);
+        formData.append('document_type', selectedNode.category === 'MPP' ? 'mpp' : 
+                        selectedNode.category === 'ENGINEERING_DRAWING' ? '2d' : 
+                        selectedNode.category === 'IPID' ? 'ipid' : 
+                        selectedNode.category === 'Balloon' ? 'balloon' : 'other');
+        formData.append('document_version', '1.0');
+        formData.append('part_id', selectedNode.partId);
+      } else if (selectedNode.type === 'operation-folder') {
+        url = `${config.API_BASE_URL}/operation-documents/upload/`;
+        formData.append('operation_id', selectedNode.operationId);
+        formData.append('document_type', addDocType);
+        formData.append('document_version', '1.0');
+        formData.delete('file');
+        formData.append('files', file, file.name);
+      } else if (selectedNode.type === 'folder' && selectedNode.category === 'Reports') {
+        url = `${config.API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
+        formData.append('document_type', 'Report');
+        formData.append('document_version', '1.0');
+      }
+
+      const response = await fetch(url, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to add document');
+      }
+
+      message.success('Document added successfully');
+      setAddModalVisible(false);
+      setAddFileList([]);
+      fetchDocuments();
+    } catch (error) {
+      message.error('Failed to add document: ' + error.message);
+    } finally {
+      setAddUploading(false);
+    }
+  };
+
   const handleDeleteDocument = (document) => {
     Modal.confirm({
       title: 'Delete Document',
@@ -464,7 +617,18 @@ const DocumentContent = ({ selectedNode }) => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          const response = await fetch(`http://172.18.100.76:8000/general-documents/documents/${document.id}`, {
+          let url = '';
+          if (document.doc_source_type === 'general-folder') {
+            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${document.id}`;
+          } else if (document.doc_source_type === 'part-category') {
+            url = `${config.API_BASE_URL}/documents/${document.id}`;
+          } else if (document.doc_source_type === 'operation-folder') {
+            url = `${config.API_BASE_URL}/operation-documents/${document.id}`;
+          } else if (document.doc_source_type === 'folder') {
+            url = `${config.API_BASE_URL}/order-documents/${document.id}`;
+          }
+
+          const response = await fetch(url, {
             method: 'DELETE'
           });
 
@@ -494,26 +658,60 @@ const DocumentContent = ({ selectedNode }) => {
     );
   }
 
-  if (selectedNode.type !== 'general-folder') {
+  const isSupportedNodeType = 
+    selectedNode.type === 'general-folder' || 
+    selectedNode.type === 'part-category' || 
+    selectedNode.type === 'operation-folder' ||
+    (selectedNode.type === 'folder' && selectedNode.category === 'Reports');
+
+  if (!isSupportedNodeType) {
     return (
       <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <Empty
-          description="Select a general documents folder to view documents"
+          description="Select a valid folder to view documents"
           image={Empty.PRESENTED_IMAGE_SIMPLE}
         />
       </div>
     );
   }
 
+  const getHeaderIcon = () => {
+    if (selectedNode.type === 'part-category') return <FileOutlined style={{ color: '#1890ff', fontSize: '20px' }} />;
+    if (selectedNode.type === 'operation-folder') return <FileOutlined style={{ color: '#faad14', fontSize: '20px' }} />;
+    if (selectedNode.category === 'Reports') return <FileOutlined style={{ color: '#52c41a', fontSize: '20px' }} />;
+    return <FolderOutlined style={{ color: '#722ed1', fontSize: '20px' }} />;
+  };
+
+  const getHeaderTitle = () => {
+    if (selectedNode.type === 'part-category') return `${selectedNode.partName} - ${selectedNode.category}`;
+    if (selectedNode.type === 'operation-folder') return `Operation: ${selectedNode.operationName}`;
+    if (selectedNode.category === 'Reports') return `Reports - Order: ${selectedNode.orderId}`;
+    return selectedNode.folderName;
+  };
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <div style={{ padding: '16px', borderBottom: '1px solid #f0f0f0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-          <FolderOutlined style={{ color: '#722ed1', fontSize: '20px' }} />
-          <Title level={4} style={{ margin: 0 }}>
-            {selectedNode.folderName}
-          </Title>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {getHeaderIcon()}
+            <Title level={4} style={{ margin: 0 }}>
+              {getHeaderTitle()}
+            </Title>
+          </div>
+          {isSupportedNodeType && (
+            <Button 
+              type="primary" 
+              icon={<UploadOutlined />} 
+              onClick={() => {
+                setAddFileList([]);
+                setAddModalVisible(true);
+              }}
+            >
+              Add Document
+            </Button>
+          )}
         </div>
         <Text type="secondary">
           {documents.length} document{documents.length !== 1 ? 's' : ''} in this folder
@@ -524,7 +722,7 @@ const DocumentContent = ({ selectedNode }) => {
       <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
         <Table
           columns={columns}
-          dataSource={documents}
+          dataSource={groupedDocuments}
           rowKey="id"
           loading={loading}
           pagination={{
@@ -568,7 +766,7 @@ const DocumentContent = ({ selectedNode }) => {
 
       {/* Preview Document Modal */}
       <Modal
-        title="Document Preview"
+        title={previewingDocument?.file_name}
         open={previewModalVisible}
         onCancel={() => {
           setPreviewModalVisible(false);
@@ -582,51 +780,24 @@ const DocumentContent = ({ selectedNode }) => {
           }}>
             Download
           </Button>,
-          <Button key="close" onClick={() => {
+          <Button key="close" type="primary" onClick={() => {
             setPreviewModalVisible(false);
             setPreviewingDocument(null);
           }}>
             Close
           </Button>
         ]}
-        width={900}
+        width={1000}
         style={{ top: 20 }}
+        bodyStyle={{ height: '80vh', padding: 0 }}
       >
-        <Card
-          title={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <FileOutlined style={{ color: '#1890ff' }} />
-              <span>{previewingDocument?.file_name}</span>
-              <span style={{ 
-                background: '#f0f0f0', 
-                padding: '2px 8px', 
-                borderRadius: '4px',
-                fontSize: '12px'
-              }}>
-                v{previewingDocument?.version}
-              </span>
-            </div>
-          }
-          style={{ backgroundColor: '#ffffff' }}
-        >
-          <div style={{ height: '60vh', overflow: 'hidden' }}>
-            {previewingDocument ? (
-              <div key={previewingDocument.id}>
-                {getPreviewContent(previewingDocument)}
-              </div>
-            ) : (
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'center', 
-                alignItems: 'center', 
-                height: '100%',
-                backgroundColor: '#f5f5f5'
-              }}>
-                <LoadingOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-              </div>
-            )}
+        {previewingDocument ? (
+          getPreviewContent(previewingDocument)
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <LoadingOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
           </div>
-        </Card>
+        )}
       </Modal>
 
       {/* Upload New Version Modal */}
@@ -638,7 +809,6 @@ const DocumentContent = ({ selectedNode }) => {
           setVersionModalVisible(false);
           setUploadingDocument(null);
           setVersionFileList([]);
-          setNewVersion('');
         }}
         okText="Upload Version"
         cancelText="Cancel"
@@ -650,10 +820,14 @@ const DocumentContent = ({ selectedNode }) => {
             Version Number:
           </label>
           <Input
-            placeholder="Enter version number (e.g., 2.0, 1.1, etc.)"
-            value={newVersion}
-            onChange={(e) => setNewVersion(e.target.value)}
+            placeholder="Loading next version..."
+            value={nextVersion}
+            readOnly
+            style={{ backgroundColor: '#f5f5f5', cursor: 'not-allowed' }}
           />
+          <Text style={{ fontSize: '12px', color: '#666', marginTop: '4px', display: 'block' }}>
+            Next version number is automatically calculated
+          </Text>
         </div>
         
         <div>
@@ -677,6 +851,55 @@ const DocumentContent = ({ selectedNode }) => {
           </Upload>
           <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
             Drag and drop a file here or click to select
+          </p>
+        </div>
+      </Modal>
+
+      {/* Add Document Modal */}
+      <Modal
+        title={`Add New Document to ${getHeaderTitle()}`}
+        open={addModalVisible}
+        onOk={handleAddDocument}
+        onCancel={() => {
+          setAddModalVisible(false);
+          setAddFileList([]);
+        }}
+        okText="Upload"
+        cancelText="Cancel"
+        confirmLoading={addUploading}
+        width={600}
+      >
+        {selectedNode?.type === 'operation-folder' && (
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              Document Type:
+            </label>
+            <Select
+              style={{ width: '100%' }}
+              value={addDocType}
+              onChange={setAddDocType}
+            >
+              <Option value="CNC">CNC</Option>
+            </Select>
+          </div>
+        )}
+        
+        <div>
+          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+            Select File:
+          </label>
+          <Upload
+            beforeUpload={() => false}
+            fileList={addFileList}
+            onChange={({ fileList }) => setAddFileList(fileList)}
+            onRemove={() => setAddFileList([])}
+            maxCount={1}
+            accept=".pdf,.docx,.doc,.txt,.jpg,.jpeg,.png,.xlsx,.xls,.csv"
+          >
+            <Button icon={<UploadOutlined />}>Select File</Button>
+          </Upload>
+          <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+            This will be stored as version 1.0
           </p>
         </div>
       </Modal>

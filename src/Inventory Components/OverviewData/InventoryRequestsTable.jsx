@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
+import config from '../../Config/config';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
@@ -17,9 +18,8 @@ const InventoryRequestsTable = () => {
   }, []);
 
   const fetchInventoryRequests = async () => {
-    setLoading(true);
     try {
-      const response = await fetch('http://172.18.100.76:8000/api/v1/inventory-requests/');
+      const response = await fetch(`${config.API_BASE_URL}/inventory-requests/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -28,8 +28,6 @@ const InventoryRequestsTable = () => {
     } catch (error) {
       console.error('Failed to fetch inventory requests:', error);
       message.error('Failed to fetch inventory requests: ' + error.message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -41,7 +39,7 @@ const InventoryRequestsTable = () => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          const response = await fetch(`http://172.18.100.76:8000/api/v1/inventory-requests/${record.id}/status?admin_id=6&status=approved`, {
+          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=6&status=approved`, {
             method: 'PUT'
           });
           
@@ -51,7 +49,11 @@ const InventoryRequestsTable = () => {
           }
           
           message.success('Inventory request approved successfully');
-          fetchInventoryRequests();
+          
+          // Update only the specific row instead of refetching all data
+          setRequests(prev => prev.map(req => 
+            req.id === record.id ? { ...req, status: 'approved' } : req
+          ));
         } catch (error) {
           console.error('Failed to approve request:', error);
           message.error('Failed to approve request: ' + error.message);
@@ -69,7 +71,7 @@ const InventoryRequestsTable = () => {
       okType: 'danger',
       onOk: async () => {
         try {
-          const response = await fetch(`http://172.18.100.76:8000/api/v1/inventory-requests/${record.id}/status?admin_id=6&status=rejected`, {
+          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=6&status=rejected`, {
             method: 'PUT'
           });
           
@@ -79,7 +81,11 @@ const InventoryRequestsTable = () => {
           }
           
           message.success('Inventory request rejected successfully');
-          fetchInventoryRequests();
+          
+          // Update only the specific row instead of refetching all data
+          setRequests(prev => prev.map(req => 
+            req.id === record.id ? { ...req, status: 'rejected' } : req
+          ));
         } catch (error) {
           console.error('Failed to reject request:', error);
           message.error('Failed to reject request: ' + error.message);
@@ -130,51 +136,57 @@ const InventoryRequestsTable = () => {
 
   const columns = [
     {
-      title: 'Sl No',
+      title: 'SL NO',
       key: 'sl_no',
-      width: 60,
+      width: 70,
+      fixed: 'left',
+      align: 'center',
+      className: 'table-header-styled',
       render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1,
     },
     {
       title: 'Tool Name',
       dataIndex: 'tool_name',
       key: 'tool_name',
-      width: 150,
+      width: 180,
+      fixed: 'left',
       ellipsis: true,
+      className: 'table-header-styled',
+      render: (text) => text || '-',
     },
     {
       title: 'Project Number',
       dataIndex: 'project_name',
-      key: 'project_name',
-      width: 120,
+      key: 'project_number',
+      width: 140,
       ellipsis: true,
+      className: 'table-header-styled',
+      render: (text) => text || '-',
     },
     {
       title: 'Part Name',
       dataIndex: 'part_name',
       key: 'part_name',
-      width: 120,
+      width: 140,
       ellipsis: true,
+      className: 'table-header-styled',
+      render: (text) => text || '-',
     },
     {
       title: 'Quantity',
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 80,
-    },
-    {
-      title: 'Purpose',
-      dataIndex: 'purpose_of_use',
-      key: 'purpose_of_use',
-      width: 150,
-      ellipsis: true,
-      render: (text) => text || '-',
+      width: 100,
+      align: 'center',
+      className: 'table-header-styled',
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
+      width: 120,
+      align: 'center',
+      className: 'table-header-styled',
       filters: [
         { text: 'Pending', value: 'pending' },
         { text: 'Approved', value: 'approved' },
@@ -191,35 +203,41 @@ const InventoryRequestsTable = () => {
       title: 'Requested By',
       dataIndex: 'operator_name',
       key: 'operator_name',
-      width: 120,
+      width: 140,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Approved By',
       dataIndex: 'admin_name',
       key: 'admin_name',
-      width: 120,
+      width: 140,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Created At',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 150,
+      width: 160,
+      className: 'table-header-styled',
       render: (date) => formatDateTime(date),
     },
     {
       title: 'Updated At',
       dataIndex: 'updated_at',
       key: 'updated_at',
-      width: 120,
+      width: 160,
+      className: 'table-header-styled',
       render: (date) => formatDateTime(date),
     },
     {
       title: 'Action',
       key: 'action',
-      width: 150,
+      width: 180,
       fixed: 'right',
+      align: 'center',
+      className: 'table-header-styled',
       render: (_, record) => (
         <Space size="small">
           <Button
@@ -248,6 +266,7 @@ const InventoryRequestsTable = () => {
         dataSource={requests}
         rowKey="id"
         loading={loading}
+        className="modern-table"
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,

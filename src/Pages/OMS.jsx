@@ -1,21 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty } from "antd";
-import { 
-  ShoppingOutlined, 
-  PlusOutlined, 
-  EditOutlined, 
-  DeleteOutlined, 
-  FileTextOutlined, 
-  AppstoreOutlined,
-  UserOutlined,
-  CalendarOutlined,
-  SearchOutlined
-} from "@ant-design/icons";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input } from "antd";
+import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
+  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import ProductBOMView from "../OMS Components/ProductBOMView";
+import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
 
 const OMS = () => {
   const navigate = useNavigate();
@@ -30,6 +22,7 @@ const OMS = () => {
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [searchText, setSearchText] = useState("");
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
@@ -43,17 +36,13 @@ const OMS = () => {
   const prefix = getRolePrefix();
 
   useEffect(() => {
-    if (hasFetchedData.current) return;
+    if (hasFetchedData.current || productId) return;
     
     const fetchData = async () => {
       hasFetchedData.current = true;
       setLoading(true);
       try {
-        await Promise.all([
-          fetchOrders(),
-          fetchCustomers(), 
-          fetchProducts()
-        ]);
+        await fetchOrders();
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -62,7 +51,7 @@ const OMS = () => {
     };
 
     fetchData();
-  }, []);
+  }, [productId]);
 
   const fetchCustomers = async () => {
     try {
@@ -78,7 +67,19 @@ const OMS = () => {
 
   const fetchProducts = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/products/`);
+      let url = `${API_BASE_URL}/products/`;
+      if (prefix === '/project_coordinator') {
+        try {
+          const stored = localStorage.getItem('user');
+          const u = stored ? JSON.parse(stored) : null;
+          if (u?.id) {
+            url = `${API_BASE_URL}/products/?user_id=${u.id}`;
+          }
+        } catch (e) {
+          console.error('Failed to parse user from localStorage', e);
+        }
+      }
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
         setProducts(data);
@@ -90,12 +91,23 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/`);
+      let url = `${API_BASE_URL}/orders/`;
+      if (prefix === '/project_coordinator') {
+        try {
+          const stored = localStorage.getItem('user');
+          const u = stored ? JSON.parse(stored) : null;
+          if (u?.id) {
+            url = `${API_BASE_URL}/orders/?user_id=${u.id}`;
+          }
+        } catch (e) {
+          console.error('Failed to parse user from localStorage', e);
+        }
+      }
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
-        setOrders(data);
+        setOrders(Array.isArray(data) ? data : []);
       } else {
-        console.error("Failed to fetch orders:", response.statusText);
         setOrders([]);
       }
     } catch (error) {
@@ -104,14 +116,16 @@ const OMS = () => {
     }
   };
 
-  const getCustomerName = (customerId) => {
+  const getCustomerName = (customerId, record) => {
     const customer = customers.find((c) => c.id === customerId);
-    return customer?.company_name ?? customerId;
+    if (customer) return customer.company_name;
+    return record?.customer_name ?? customerId;
   };
 
-  const getProductName = (productId) => {
+  const getProductName = (productId, record) => {
     const product = products.find((p) => p.id === productId);
-    return (product?.product_name || product?.product_number) ?? productId;
+    if (product) return (product.product_name || product.product_number);
+    return record?.product_name ?? productId;
   };
 
   const formatDate = (dateStr) => {
@@ -119,6 +133,7 @@ const OMS = () => {
     const date = new Date(dateStr);
     return date.toLocaleDateString();
   };
+
 
   const getStatusBadge = (status) => {
     const statusConfig = {
@@ -162,8 +177,13 @@ const OMS = () => {
         try {
           const response = await fetch(`${API_BASE_URL}/orders/${order.id}`, { method: "DELETE" });
           if (response.ok) {
+            const result = await response.json();
             fetchOrders();
-            messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
+            if (result.product_also_deleted) {
+              messageApi.success(`Order "${order.sale_order_number}" and its associated product deleted successfully!`);
+            } else {
+              messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
+            }
           } else {
             const data = await response.json();
             messageApi.error(data.detail || "Failed to delete order");
@@ -191,6 +211,38 @@ const OMS = () => {
     navigate(`${prefix}/oms`);
   };
 
+  const handleSearch = (value) => {
+    setSearchText(value);
+  };
+
+  const filteredOrders = orders.filter(order => {
+    if (!searchText) return true;
+    
+    const searchLower = searchText.toLowerCase();
+    const customerName = getCustomerName(order.customer_id).toLowerCase();
+    const productName = getProductName(order.product_id).toLowerCase();
+    const projectName = (order.project_name || "").toLowerCase();
+    const saleOrderNumber = (order.sale_order_number || "").toLowerCase();
+    const userName = (order.user_name || "").toLowerCase();
+    
+    return (
+      projectName.includes(searchLower) ||
+      saleOrderNumber.includes(searchLower) ||
+      customerName.includes(searchLower) ||
+      productName.includes(searchLower) ||
+      userName.includes(searchLower)
+    );
+  });
+
+  if (productId) {
+    return (
+      <ProductBOMView 
+        productId={productId}
+        onBackToOrders={handleBackToOrders}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -199,15 +251,6 @@ const OMS = () => {
             <p className="mt-4 text-gray-500 font-medium">Loading orders...</p>
         </div>
       </div>
-    );
-  }
-
-  if (productId) {
-    return (
-      <ProductBOMView 
-        productId={productId}
-        onBackToOrders={handleBackToOrders}
-      />
     );
   }
 
@@ -235,10 +278,10 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Customer</span>,
       dataIndex: "customer_id",
       key: "customer_id",
-      render: (customerId) => (
+      render: (customerId, record) => (
         <Space>
             <UserOutlined className="text-gray-400" />
-            <span className="text-gray-700">{getCustomerName(customerId)}</span>
+            <span className="text-gray-700">{getCustomerName(customerId, record)}</span>
         </Space>
       ),
     },
@@ -246,7 +289,7 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Product</span>,
       dataIndex: "product_id",
       key: "product_id",
-      render: (productId) => (
+      render: (productId, record) => (
         <Button 
           type="link" 
           onClick={() => handleViewBOM(productId)}
@@ -254,7 +297,7 @@ const OMS = () => {
           icon={<AppstoreOutlined />}
           className="flex items-center gap-1"
         >
-          {getProductName(productId)}
+          {getProductName(productId, record)}
         </Button>
       ),
     },
@@ -292,6 +335,17 @@ const OMS = () => {
       dataIndex: "status",
       key: "status",
       render: (status) => getStatusBadge(status),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Project Coordinator</span>,
+      dataIndex: "user_name",
+      key: "user_name",
+      render: (text, record) => (
+        <Space>
+          <UserOutlined className="text-gray-400" />
+          <span className="text-gray-700">{text || record.user_id}</span>
+        </Space>
+      ),
     },
     {
       title: <span className="font-semibold text-gray-700">Actions</span>,
@@ -334,8 +388,20 @@ const OMS = () => {
     },
   ];
 
+  // KPI stats (Project Coordinator)
+  const totalOrders = orders.length;
+  const inProgressCount = orders.filter(o => o.status === 'Pending').length;
+  const scheduledCount = orders.filter(o => o.status === 'Ongoing').length;
+  const completedCount = orders.filter(o => o.status === 'Completed').length;
+
+  const ordersForPdf = orders.map(order => ({
+    ...order,
+    customer_name: getCustomerName(order.customer_id, order),
+    product_name: getProductName(order.product_id, order),
+  }));
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-2 sm:p-4 lg:p-6">
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
@@ -359,42 +425,126 @@ const OMS = () => {
           border: none !important;
           box-shadow: none !important;
         }
+        .ant-input-search:hover .ant-input {
+          border-color: #4096ff !important;
+        }
+        .ant-input-search:hover .ant-input-group-addon {
+          background-color: #4096ff !important;
+          border-color: #4096ff !important;
+        }
+        .ant-input-search:hover .ant-input-group-addon .anticon {
+          color: white !important;
+        }
+        @media (max-width: 768px) {
+          .ant-table {
+            font-size: 12px;
+          }
+          .ant-table-thead > tr > th {
+            padding: 8px 4px;
+          }
+          .ant-table-tbody > tr > td {
+            padding: 8px 4px;
+          }
+        }
       `}</style>
 
       {contextHolder}
-      
+
+      {/* KPI Cards - only for Project Coordinator */}
+      {prefix === '/project_coordinator' && (
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-4 lg:mb-6">
+          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs sm:text-sm text-gray-600">Total Orders</div>
+                <div className="text-xl sm:text-2xl font-bold text-blue-700">{totalOrders}</div>
+              </div>
+              <ShoppingOutlined className="text-blue-600 text-xl sm:text-2xl" />
+            </div>
+          </div>
+          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs sm:text-sm text-gray-600">Pending</div>
+                <div className="text-xl sm:text-2xl font-bold text-orange-600">{inProgressCount}</div>
+              </div>
+              <AppstoreOutlined className="text-orange-500 text-xl sm:text-2xl" />
+            </div>
+          </div>
+          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs sm:text-sm text-gray-600">Scheduled</div>
+                <div className="text-xl sm:text-2xl font-bold text-purple-600">{scheduledCount}</div>
+              </div>
+              <ClockCircleOutlined className="text-purple-500 text-xl sm:text-2xl" />
+            </div>
+          </div>
+          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs sm:text-sm text-gray-600">Completed</div>
+                <div className="text-xl sm:text-2xl font-bold text-green-600">{completedCount}</div>
+              </div>
+              <CheckCircleOutlined className="text-green-500 text-xl sm:text-2xl" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
-        <div className="flex items-center justify-between">
-            <div>
-                <Typography.Title level={2} style={{ margin: 0, fontSize: '24px' }} className="flex items-center gap-3 text-gray-800">
+      <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4">
+            <div className="w-full lg:w-auto">
+                <Typography.Title 
+                  level={2} 
+                  style={{ margin: 0, fontSize: 'clamp(18px, 4vw, 24px)' }} 
+                  className="flex items-center gap-2 sm:gap-3 text-gray-800"
+                >
                     <ShoppingOutlined className="text-blue-600" />
-                    Order Management
+                    <span className="hidden sm:inline">Order Management</span>
+                    <span className="sm:hidden">Orders</span>
                 </Typography.Title>
-                <Typography.Text className="text-gray-500 mt-1 block">
+                <Typography.Text className="text-gray-500 mt-1 block text-xs sm:text-sm">
                     Manage sales orders, track status, and handle documents
                 </Typography.Text>
             </div>
-            <Button 
-                type="primary" 
-                icon={<PlusOutlined />}
-                onClick={handleCreateOrder}
-                size="large"
-                style={{ backgroundColor: '#2563eb' }}
-                className="border-none shadow-md no-hover-btn"
-            >
-                New Order
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+              <Input.Search
+                placeholder="Search orders..."
+                allowClear
+                onSearch={handleSearch}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="w-full sm:w-64 lg:w-80"
+                size="middle"
+              />
+              <div className="flex gap-2">
+                <OMSOrdersPdfDownload
+                  orders={ordersForPdf}
+                  formatDate={formatDate}
+                />
+                <Button 
+                    type="primary" 
+                    icon={<PlusOutlined />}
+                    onClick={handleCreateOrder}
+                    size="middle"
+                    style={{ backgroundColor: '#2563eb' }}
+                    className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
+                >
+                    <span className="hidden sm:inline">New Order</span>
+                    <span className="sm:hidden">New</span>
+                </Button>
+              </div>
+            </div>
         </div>
       </div>
-
       <Card 
-        className="shadow-sm rounded-xl border border-gray-100" 
+        className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" 
         styles={{ body: { padding: 0 } }}
       >
         <Table
             columns={columns}
-            dataSource={orders}
+            dataSource={filteredOrders}
             rowKey="id"
             pagination={{
                 current: ordersPagination.current,
@@ -403,7 +553,8 @@ const OMS = () => {
                 showQuickJumper: true,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
                 pageSizeOptions: ['10', '20', '50', '100'],
-                position: ['bottomCenter'],
+                placement: 'bottom',
+                responsive: true,
             }}
             onChange={(paginationConfig) => {
                 setOrdersPagination({
@@ -414,8 +565,8 @@ const OMS = () => {
             size="small"
             bordered
             className="modern-table"
-            locale={{ emptyText: <Empty description="No orders found" /> }}
-            scroll={{ x: 'max-content' }}
+            locale={{ emptyText: <Empty description={searchText ? "No orders found matching your search" : "No orders found"} /> }}
+            scroll={{ x: 1200 }}
         />
       </Card>
 
@@ -428,6 +579,8 @@ const OMS = () => {
         editingOrder={editingOrder}
         customers={customers}
         products={products}
+        fetchCustomers={fetchCustomers}
+        fetchProducts={fetchProducts}
       />
       
       <DocumentModal

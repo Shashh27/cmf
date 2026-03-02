@@ -33,6 +33,7 @@ import {
   LineChart,
   Line
 } from 'recharts';
+import config from '../../Config/config';
 
 const { Text } = Typography;
 
@@ -55,14 +56,13 @@ const InventoryAnalytics = () => {
   }, [selectedYear]);
 
   const fetchAnalyticsData = async (year) => {
-    setLoading(true);
     try {
       // Fetch inventory requests
-      const requestsResponse = await fetch('http://172.18.100.76:8000/api/v1/inventory-requests/');
+      const requestsResponse = await fetch(`${config.API_BASE_URL}/inventory-requests/`);
       const requestsData = await requestsResponse.json();
       
       // Fetch return requests
-      const returnsResponse = await fetch('http://172.18.100.76:8000/api/v1/inventory-return-requests/');
+      const returnsResponse = await fetch(`${config.API_BASE_URL}/inventory-return-requests/`);
       const returnsData = await returnsResponse.json();
       
       // Process analytics data

@@ -46,11 +46,23 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       return;
     }
 
+    if (
+      values.document_type === "Other" &&
+      !(values.document_type_other && values.document_type_other.trim())
+    ) {
+      message.error("Please enter document type name for 'Other' document type");
+      return;
+    }
+
     setLoading(true);
     const uploadFormData = new FormData();
     uploadFormData.append("file", file);
     uploadFormData.append("document_name", file.name);
-    uploadFormData.append("document_type", values.document_type || "");
+    let docType = values.document_type || "";
+    if (docType === "Other" && values.document_type_other && values.document_type_other.trim()) {
+      docType = values.document_type_other.trim();
+    }
+    uploadFormData.append("document_type", docType);
     uploadFormData.append("document_version", parentId ? (values.document_version || "1.0") : "1.0"); // Enforce 1.0 for new uploads
     if (parentId) {
       uploadFormData.append("parent_id", parentId);
@@ -263,39 +275,47 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       open={isOpen}
       onCancel={handleClose}
       footer={null}
-      width={1000}
+      width="95%"
+      style={{ maxWidth: 1000 }}
       centered
       title={
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: 24, flexWrap: 'wrap', gap: '8px' }}>
           <Space>
             <div style={{ backgroundColor: '#e6f7ff', padding: '8px', borderRadius: '50%', display: 'flex' }}>
               <FileTextOutlined style={{ color: '#1890ff', fontSize: 20 }} />
             </div>
             <div>
-              <Title level={4} style={{ margin: 0 }}>Document Management</Title>
-              <Text type="secondary" style={{ fontSize: 12 }}>Manage and version project documents</Text>
+              <Title level={4} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 18px)' }}>Document Management</Title>
+              <Text type="secondary" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Manage and version project documents</Text>
             </div>
           </Space>
           <Badge count={documents.length} overflowCount={99} style={{ backgroundColor: '#1890ff' }}>
-            <Tag color="blue" style={{ margin: 0, padding: '4px 12px', borderRadius: 16 }}>
+            <Tag color="blue" style={{ margin: 0, padding: '4px 12px', borderRadius: 16, fontSize: 'clamp(10px, 2vw, 12px)' }}>
               Total Documents
             </Tag>
           </Badge>
         </div>
       }
     >
+      <style>{`
+        @media (max-width: 768px) {
+          .ant-modal-body {
+            padding: 12px;
+          }
+        }
+      `}</style>
       <Form
         form={form}
         layout="vertical"
         onFinish={handleUpload}
         initialValues={{ document_version: '1.0' }}
       >
-        <Row gutter={24}>
-          <Col span={14}>
-            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Title level={5} style={{ margin: 0 }}>Document History</Title>
+        <Row gutter={[12, 12]}>
+          <Col xs={24} lg={14}>
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <Title level={5} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 16px)' }}>Document History</Title>
               {orderId ? (
-                <Tag color="cyan">Order: {orders.find(order => order.id.toString() === orderId.toString())?.sale_order_number || `Order ${orderId}`}</Tag>
+                <Tag color="cyan" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Order: {orders.find(order => order.id.toString() === orderId.toString())?.sale_order_number || `Order ${orderId}`}</Tag>
               ) : (
                 <Select
                   value={selectedOrderId}
@@ -304,7 +324,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                     fetchDocuments(value);
                   }}
                   placeholder="Select order"
-                  style={{ width: 200 }}
+                  style={{ width: '100%', maxWidth: 200 }}
                   size="small"
                 >
                   {orders.map((order) => (
@@ -338,19 +358,17 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
             </div>
           </Col>
 
-          <Col span={10}>
+          <Col xs={24} lg={10}>
             <div 
               style={{ 
                 backgroundColor: '#f9fafb', 
-                padding: '20px', 
+                padding: '16px', 
                 borderRadius: 12, 
                 border: '1px solid #f0f0f0',
-                position: 'sticky',
-                top: 0
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <Title level={5} style={{ margin: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: '8px' }}>
+                <Title level={5} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 16px)' }}>
                   {parentId ? (
                     <Space><UploadOutlined /> Update Version</Space>
                   ) : (
@@ -401,21 +419,45 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                   <p className="ant-upload-drag-icon">
                     <UploadOutlined style={{ color: '#1890ff' }} />
                   </p>
-                  <p className="ant-upload-text" style={{ fontSize: 14 }}>Click or drag file</p>
-                  <p className="ant-upload-hint" style={{ fontSize: 11 }}>PDF, DOC, XLS, CSV, TXT</p>
+                  <p className="ant-upload-text" style={{ fontSize: 'clamp(12px, 3vw, 14px)' }}>Click or drag file</p>
+                  <p className="ant-upload-hint" style={{ fontSize: 'clamp(10px, 2vw, 11px)' }}>PDF, DOC, XLS, CSV, TXT</p>
                 </Upload.Dragger>
               </Form.Item>
 
-              <Row gutter={12}>
-                <Col span={14}>
-                  <Form.Item name="document_type" label="Document Type" rules={[{ required: true }]} style={{ marginBottom: 16 }}>
-                    <Select placeholder="Select type">
-                    
-                      <Option value="Other">Other</Option>
-                    </Select>
+              <Row gutter={[12, 12]}>
+                <Col xs={24} sm={14}>
+                  <Form.Item
+                    shouldUpdate={(prev, current) => prev.document_type !== current.document_type}
+                    label="Document Type"
+                    style={{ marginBottom: 16 }}
+                  >
+                    {({ getFieldValue }) => {
+                      const type = getFieldValue("document_type");
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+                          <Form.Item
+                            name="document_type"
+                            style={{ marginBottom: 0 }}
+                            rules={[{ required: true, message: "Please select document type" }]}
+                          >
+                            <Select placeholder="Select type">
+                              <Option value="Other">Other</Option>
+                            </Select>
+                          </Form.Item>
+                          {type === "Other" && (
+                            <Form.Item
+                              name="document_type_other"
+                              style={{ marginBottom: 0 }}
+                            >
+                              <Input placeholder="Enter document type name" />
+                            </Form.Item>
+                          )}
+                        </div>
+                      );
+                    }}
                   </Form.Item>
                 </Col>
-                <Col span={10}>
+                <Col xs={24} sm={10}>
                   <Form.Item name="document_version" label="Version" rules={[{ required: true }]} style={{ marginBottom: 16 }}>
                     <Input 
                       placeholder="1.0" 
@@ -452,7 +494,8 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
         open={viewerOpen}
         onCancel={() => { setViewerOpen(false); setViewerDoc(null); }}
         footer={null}
-        width={1000}
+        width="95%"
+        style={{ maxWidth: 1000 }}
         title={viewerDoc?.document_name || 'Preview'}
       >
         {viewerDoc ? (

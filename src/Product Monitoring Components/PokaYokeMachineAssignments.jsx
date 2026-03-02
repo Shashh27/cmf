@@ -1,0 +1,458 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Table, 
+  Button, 
+  Modal, 
+  Form, 
+  Select, 
+  message, 
+  Space, 
+  Popconfirm,
+  Tag,
+  Card,
+  Typography,
+  Input,
+  Divider
+} from 'antd';
+import { 
+  PlusOutlined, 
+  DeleteOutlined,
+  SettingOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  ReloadOutlined,
+  LinkOutlined
+} from '@ant-design/icons';
+import config from '../Config/config';
+
+const { Title, Text } = Typography;
+const { Option } = Select;
+
+const PokaYokeMachineAssignments = () => {
+  const [machines, setMachines] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [checklists, setChecklists] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedMachine, setSelectedMachine] = useState(null);
+  const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [form] = Form.useForm();
+
+  useEffect(() => {
+    fetchMachines();
+    fetchChecklists();
+  }, []);
+
+  useEffect(() => {
+    if (selectedMachine) {
+      fetchMachineAssignments(selectedMachine);
+    }
+  }, [selectedMachine]);
+
+  const fetchMachines = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/machines/?skip=0&limit=100`);
+      if (!response.ok) throw new Error('Failed to fetch machines');
+      const data = await response.json();
+      setMachines(data);
+    } catch (error) {
+      message.error('Failed to fetch machines: ' + error.message);
+    }
+  };
+
+  const fetchChecklists = async () => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/`);
+      if (!response.ok) throw new Error('Failed to fetch checklists');
+      const data = await response.json();
+      setChecklists(data);
+    } catch (error) {
+      message.error('Failed to fetch checklists: ' + error.message);
+    }
+  };
+
+  const fetchMachineAssignments = async (machineId) => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`);
+      if (!response.ok) throw new Error('Failed to fetch assignments');
+      const data = await response.json();
+      
+      // Fetch full checklist details for each assignment
+      const assignmentsWithDetails = await Promise.all(
+        data.map(async (assignment) => {
+          try {
+            const checklistResponse = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}`);
+            if (checklistResponse.ok) {
+              const checklist = await checklistResponse.json();
+              const itemsResponse = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}/items`);
+              const items = itemsResponse.ok ? await itemsResponse.json() : [];
+              return { 
+                ...assignment, 
+                checklistName: checklist.name,
+                itemsCount: items.length
+              };
+            }
+            return { ...assignment, checklistName: 'Unknown', itemsCount: 0 };
+          } catch (error) {
+            return { ...assignment, checklistName: 'Unknown', itemsCount: 0 };
+          }
+        })
+      );
+      
+      setAssignments(assignmentsWithDetails);
+    } catch (error) {
+      message.error('Failed to fetch assignments: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAssignChecklist = async (values) => {
+    if (!selectedMachine) return;
+    
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${values.checklist_id}/assignments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ machine_id: selectedMachine }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to assign checklist');
+      }
+      
+      message.success('Checklist assigned successfully');
+      setAssignModalVisible(false);
+      form.resetFields();
+      fetchMachineAssignments(selectedMachine);
+    } catch (error) {
+      message.error('Failed to assign checklist: ' + error.message);
+    }
+  };
+
+  const handleDeleteAssignment = async (id) => {
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/assignments/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('Failed to delete assignment');
+      
+      message.success('Assignment deleted successfully');
+      fetchMachineAssignments(selectedMachine);
+    } catch (error) {
+      message.error('Failed to delete assignment: ' + error.message);
+    }
+  };
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const columns = [
+    {
+      title: 'SL NO',
+      key: 'sl_no',
+      width: 80,
+      align: 'center',
+      className: 'table-header-styled',
+      render: (_, __, index) => index + 1,
+    },
+    {
+      title: 'Checklist',
+      dataIndex: 'checklistName',
+      key: 'checklistName',
+      width: 250,
+      className: 'table-header-styled',
+      render: (text) => <Text strong>{text}</Text>,
+    },
+    {
+      title: 'Assigned Items',
+      dataIndex: 'itemsCount',
+      key: 'itemsCount',
+      width: 150,
+      align: 'center',
+      className: 'table-header-styled',
+      render: (count) => (
+        <Tag color="green" style={{ fontSize: '12px', padding: '2px 8px' }}>
+          {count} items
+        </Tag>
+      ),
+    },
+    {
+      title: 'Assigned At',
+      dataIndex: 'assigned_at',
+      key: 'assigned_at',
+      width: 180,
+      className: 'table-header-styled',
+      render: (date) => <Text type="secondary">{formatDate(date)}</Text>,
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      width: 100,
+      align: 'center',
+      className: 'table-header-styled',
+      render: (_, record) => (
+        <Popconfirm
+          title="Are you sure you want to remove this assignment?"
+          onConfirm={() => handleDeleteAssignment(record.id)}
+          okText="Yes"
+          cancelText="No"
+        >
+          <Button
+            type="text"
+            size="small"
+            icon={<DeleteOutlined />}
+            danger
+            style={{ borderRadius: '4px' }}
+          />
+        </Popconfirm>
+      ),
+    },
+  ];
+
+  const handleRefresh = () => {
+    if (selectedMachine) {
+      fetchMachineAssignments(selectedMachine);
+    } else {
+      fetchMachines();
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <Title level={4} style={{ margin: 0 }}>Machine Checklist Assignments</Title>
+          <Text type="secondary" style={{ fontSize: '14px' }}>
+            Assign checklists to machines for operator completion
+          </Text>
+        </div>
+        <Space>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={handleRefresh}
+            style={{ borderRadius: '6px' }}
+          />
+          <Button
+            type="primary"
+            icon={<LinkOutlined />}
+            onClick={() => {
+              if (!selectedMachine) {
+                message.warning('Please select a machine before assigning a checklist');
+                return;
+              }
+              setAssignModalVisible(true);
+            }}
+            style={{
+              background: '#1890ff',
+              borderColor: '#1890ff',
+              borderRadius: '6px',
+              height: '40px',
+              fontWeight: '500'
+            }}
+          >
+            Assign Checklist
+          </Button>
+        </Space>
+      </div>
+
+      <Card 
+        style={{ 
+          borderRadius: '12px', 
+          border: '1px solid #f0f0f0',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.05)'
+        }}
+        bodyStyle={{ padding: '24px' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+          <div style={{ minWidth: '140px' }}>
+            <Text strong style={{ fontSize: '14px' }}>Select Machine:</Text>
+          </div>
+          <div style={{ flex: '0 0 450px' }}>
+            <Select
+              placeholder="Select a machine to see its assigned checklists"
+              style={{ 
+                width: '100%',
+                borderRadius: '6px'
+              }}
+              value={selectedMachine}
+              onChange={setSelectedMachine}
+              showSearch
+              filterOption={(input, option) =>
+                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+              }
+            >
+              {machines.map(machine => (
+                <Option key={machine.id} value={machine.id}>
+                  {machine.make} - {machine.model || 'N/A'}
+                </Option>
+              ))}
+            </Select>
+          </div>
+          {selectedMachine && (
+            <div>
+              <span
+                style={{
+                  display: 'inline-block',
+                  padding: '4px 10px',
+                  borderRadius: '4px',
+                  border: '1px solid #1890ff',
+                  backgroundColor: '#edf5ff',
+                  color: '#1890ff',
+                  fontSize: '12px',
+                  whiteSpace: 'nowrap',
+                  maxWidth: '420px',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                {(() => {
+                  const machine = machines.find(m => m.id === selectedMachine);
+                  if (!machine) return '';
+                  const parts = [];
+                  if (machine.make) parts.push(machine.make);
+                  if (machine.model) parts.push(machine.model);
+                  return parts.join(' - ');
+                })()}
+              </span>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {selectedMachine ? (
+        <div style={{ marginTop: '24px' }}>
+          <Title level={5} style={{ marginBottom: '16px' }}>
+            Assigned Checklists - {machines.find(m => m.id === selectedMachine)?.make || 'Selected Machine'}
+          </Title>
+          <Table
+            columns={columns}
+            dataSource={assignments}
+            loading={loading}
+            rowKey="id"
+            size="small"
+            scroll={{ x: 800 }}
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              pageSizeOptions: ['10', '20', '50', '100'],
+            }}
+            locale={{
+              emptyText: (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                  <SettingOutlined style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }} />
+                  <div>No checklists assigned to this machine</div>
+                </div>
+              )
+            }}
+          />
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', padding: '40px 0', color: '#999' }}>
+          <SettingOutlined style={{ fontSize: '64px', marginBottom: '16px', display: 'block', opacity: 0.5 }} />
+          <Title level={4} type="secondary">Please select a machine</Title>
+          <Text>Please select a machine to view its assigned checklists</Text>
+        </div>
+      )}
+
+      {/* Assign Checklist Modal */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <PlusOutlined style={{ color: '#1890ff' }} />
+            Assign Checklist to Machine
+          </div>
+        }
+        open={assignModalVisible}
+        onCancel={() => {
+          setAssignModalVisible(false);
+          form.resetFields();
+        }}
+        footer={null}
+        width={500}
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleAssignChecklist}
+          style={{ marginTop: '20px' }}
+        >
+          <Form.Item
+            name="checklist_id"
+            label="Select Checklist"
+            rules={[{ required: true, message: 'Please select a checklist' }]}
+          >
+            <Select
+              placeholder="Select a checklist to assign"
+              style={{ 
+                width: '100%',
+                borderRadius: '6px'
+              }}
+              showSearch
+              filterOption={(input, option) =>
+                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+              }
+            >
+              {checklists.map(checklist => (
+                <Option key={checklist.id} value={checklist.id}>
+                  {checklist.name}
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+          
+          <div style={{ 
+            background: '#f8f9fa', 
+            padding: '12px', 
+            borderRadius: '6px',
+            marginBottom: '16px'
+          }}>
+            <Text type="secondary">
+              <strong>Machine:</strong> {machines.find(m => m.id === selectedMachine)?.make || 'Selected Machine'}
+            </Text>
+          </div>
+          
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button 
+                onClick={() => {
+                  setAssignModalVisible(false);
+                  form.resetFields();
+                }}
+                style={{ borderRadius: '6px' }}
+              >
+                Cancel
+              </Button>
+              <Button 
+                type="primary" 
+                htmlType="submit"
+                style={{
+                  background: '#1890ff',
+                  borderColor: '#1890ff',
+                  borderRadius: '6px'
+                }}
+              >
+                Assign Checklist
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  );
+};
+
+export default PokaYokeMachineAssignments;

@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
-import { Tabs, message } from 'antd';
+import { Tabs, message, Card, Typography } from 'antd';
+import { DatabaseOutlined } from '@ant-design/icons';
 import { ToolsList, InstrumentsList, ToolForm } from '../Inventory Components/InventoryMaster';
+import config from '../Config/config';
 
 const { TabPane } = Tabs;
+const { Title, Text } = Typography;
 
 const Inventory = () => {
   const [toolFormVisible, setToolFormVisible] = useState(false);
@@ -20,7 +23,7 @@ const Inventory = () => {
 
   const handleDeleteTool = async (tool) => {
     try {
-      const response = await fetch(`http://172.18.100.76:8000/api/v1/tools-list/${tool.id}`, {
+      const response = await fetch(`${config.API_BASE_URL}/tools-list/${tool.id}`, {
         method: 'DELETE'
       });
       
@@ -70,33 +73,50 @@ const Inventory = () => {
   };
 
   return (
-    <div style={{ padding: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: 0 }}>Inventory Master</h1>
-      </div>
+    <div style={{ padding: '16px' }}>
+      {/* Header Card */}
+      <Card 
+        bordered={false} 
+        style={{ 
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
+          marginBottom: '16px'
+        }}
+        bodyStyle={{ padding: '16px 24px' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <DatabaseOutlined style={{ fontSize: '28px', color: '#1890ff' }} />
+          <div>
+            <Title level={3} style={{ margin: 0, fontSize: '22px', fontWeight: 600, color: '#1a1a1a' }}>
+              Inventory Master
+            </Title>
+            <Text type="secondary" style={{ fontSize: '14px', marginTop: '2px', display: 'block' }}>
+              Manage and track all tools, instruments, and inventory items in your facility
+            </Text>
+          </div>
+        </div>
+      </Card>
       
-      <Tabs defaultActiveKey="tools">
-        <TabPane tab="Tools" key="tools">
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+      <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+        <Tabs defaultActiveKey="tools" destroyInactiveTabPane={false}>
+          <TabPane tab="Tools" key="tools">
             <ToolsList
               key={toolsListRefresh}
               onEdit={handleEditTool}
               onDelete={handleDeleteTool}
               onCreateNew={handleCreateTool}
             />
-          </div>
-        </TabPane>
-        
-        <TabPane tab="Instruments" key="instruments">
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+          </TabPane>
+          
+          <TabPane tab="Instruments" key="instruments">
             <InstrumentsList
               onEdit={handleEditInstrument}
               onDelete={handleDeleteInstrument}
               onCreateNew={handleCreateInstrument}
             />
-          </div>
-        </TabPane>
-      </Tabs>
+          </TabPane>
+        </Tabs>
+      </div>
 
       <ToolForm
         visible={toolFormVisible}

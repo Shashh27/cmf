@@ -106,18 +106,25 @@ const Login = () => {
 
       if (response.ok) {
         const data = await response.json();
-        // Assuming data contains user info or token.
-        // For now, we rely on the activeRole to decide navigation as per requirement.
-        
-        message.success('Login Successful');
-        
-        // Store authentication state in localStorage
-        localStorage.setItem('isAuthenticated', 'true');
+        const normalize = (s) => String(s || '').toLowerCase().replace(/_/g, ' ').trim();
+        const selected = normalize(role);
+        const actual = normalize(data.role);
+        const rolePrefix = actual === 'admin' ? '/admin' : actual.includes('project coordinator') ? '/project_coordinator' : '/operator';
 
-        // Store all response data in localStorage under 'user' key
-        if (data) {
-          localStorage.setItem('user', JSON.stringify(data));
+        if (selected !== actual) {
+          if (selected === 'admin') {
+            message.error('You do not have admin access');
+          } else if (selected.includes('project coordinator')) {
+            message.error('You do not have project coordinator access');
+          } else {
+            message.error('You do not have operator access');
+          }
+          return;
         }
+
+        message.success('Login Successful');
+        localStorage.setItem('isAuthenticated', 'true');
+        localStorage.setItem('user', JSON.stringify(data));
 
         // Check if there's a saved location to redirect back to
         const fromState = location.state?.from;
@@ -126,19 +133,17 @@ const Login = () => {
         // Validate if the 'from' path is allowed for this role
         let allowedRedirect = false;
         if (from) {
-           if (role === 'Admin' && from.startsWith('/admin')) allowedRedirect = true;
-           if (role === 'Project Coordinator' && from.startsWith('/project_coordinator')) allowedRedirect = true;
-           if (role === 'Operator' && from.startsWith('/operator')) allowedRedirect = true;
+           if (from.startsWith(rolePrefix)) allowedRedirect = true;
         }
 
         if (allowedRedirect) {
           navigate(from, { replace: true });
         } else {
-          if (role === 'Admin') {
+          if (actual === 'admin') {
              navigate('/admin/dashboard');
-          } else if (role === 'Project Coordinator') {
-             navigate('/project_coordinator/dashboard');
-          } else if (role === 'Operator') {
+          } else if (actual.includes('project coordinator')) {
+             navigate('/project_coordinator/oms/orders');
+          } else {
              navigate('/operator/dashboard');
           }
         }
@@ -175,6 +180,7 @@ const Login = () => {
         maxWidth: '240px',
         whiteSpace: 'nowrap'
       }}
+      className="role-select-btn"
     >
       {icon}
       <span>{label}</span>
@@ -249,6 +255,22 @@ const Login = () => {
         {/* Body Section */}
         <div style={{ padding: '20px 30px', background: '#f8fafc', minHeight: 'auto' }}>
           
+          <style>{`
+            .role-select-btn:hover {
+              transform: translateY(-2px);
+              box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+            }
+            .role-select-btn:active {
+              transform: translateY(0);
+              box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            }
+            .hover-blue-btn:hover {
+              filter: brightness(1.06);
+              box-shadow: 0 6px 16px rgba(0,0,0,0.15) !important;
+              transform: translateY(-1px);
+            }
+          `}</style>
+          
           {/* Role Selection Buttons */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
             <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
@@ -260,19 +282,19 @@ const Login = () => {
                 onClick={handleRoleSelect}
               />
               <RoleButton 
-                role="coordinator" 
-                label="Project Coordinator Login"
-                icon={<TeamOutlined style={{ fontSize: '18px' }}/>}
-                isActive={activeRole === 'coordinator'}
+                role="admin" 
+                label="Admin Login" 
+                icon={<UserOutlined style={{ fontSize: '18px' }}/>}
+                isActive={activeRole === 'admin'}
                 onClick={handleRoleSelect}
               />
             </div>
             <div style={{ display: 'flex', justifyContent: 'center' }}>
               <RoleButton 
-                role="admin" 
-                label="Admin Login" 
-                icon={<UserOutlined style={{ fontSize: '18px' }}/>}
-                isActive={activeRole === 'admin'}
+                role="coordinator" 
+                label="Project Coordinator Login"
+                icon={<TeamOutlined style={{ fontSize: '18px' }}/>}
+                isActive={activeRole === 'coordinator'}
                 onClick={handleRoleSelect}
               />
             </div>
@@ -299,7 +321,7 @@ const Login = () => {
                   </div>
                   
                   {operatorStep === 0 ? (
-                    <Form form={machineForm} layout="vertical" onFinish={onMachineSubmit}>
+                    <Form form={machineForm} layout="vertical" onFinish={onMachineSubmit} autoComplete="off">
                       <Form.Item name="machine" rules={[{ required: true, message: 'Select a machine' }]}>
                         <Select placeholder="Select Machine" size="large">
                           {machines.map(machine => (
@@ -314,19 +336,21 @@ const Login = () => {
                           prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
                           placeholder="Machine Password" 
                           size="large" 
+                          autoComplete="new-password"
                         />
                       </Form.Item>
-                      <Button type="primary" htmlType="submit" block size="large" loading={loading}>
+                      <Button type="primary" htmlType="submit" block size="large" loading={loading} className="hover-blue-btn">
                         Next
                       </Button>
                     </Form>
                   ) : (
-                    <Form form={operatorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Operator')}>
+                    <Form form={operatorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Operator')} autoComplete="off">
                       <Form.Item name="operator_id" rules={[{ required: true, message: 'Enter Operator ID' }]}>
                         <Input 
                           prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 
                           placeholder="Operator Name" 
                           size="large" 
+                          autoComplete="off"
                         />
                       </Form.Item>
                       <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
@@ -334,13 +358,14 @@ const Login = () => {
                           prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
                           placeholder="Password" 
                           size="large" 
+                          autoComplete="new-password"
                         />
                       </Form.Item>
                       <div style={{ display: 'flex', gap: '10px' }}>
                         <Button onClick={() => setOperatorStep(0)} size="large" style={{ flex: 1 }}>
                           Back
                         </Button>
-                        <Button type="primary" htmlType="submit" size="large" loading={loading} style={{ flex: 1 }}>
+                        <Button type="primary" htmlType="submit" size="large" loading={loading} style={{ flex: 1 }} className="hover-blue-btn">
                           Login
                         </Button>
                       </div>
@@ -352,13 +377,14 @@ const Login = () => {
 
             {/* Project Coordinator (Supervisor) Login Form */}
             {activeRole === 'coordinator' && (
-              <Form form={coordinatorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Project Coordinator')}>
+              <Form form={coordinatorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Project Coordinator')} autoComplete="off">
                 <Text strong style={{ display: 'block', marginBottom: '16px' }}>Project Coordinator Credentials</Text>
                 <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
                   <Input 
                     prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 
                     placeholder="Enter your name" 
                     size="large" 
+                    autoComplete="off"
                   />
                 </Form.Item>
                 <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
@@ -366,9 +392,10 @@ const Login = () => {
                     prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
                     placeholder="Enter your password" 
                     size="large" 
+                    autoComplete="new-password"
                   />
                 </Form.Item>
-                <Button type="primary" htmlType="submit" block size="large" loading={loading}>
+                <Button type="primary" htmlType="submit" block size="large" loading={loading} className="hover-blue-btn">
                   Next
                 </Button>
               </Form>
@@ -376,13 +403,14 @@ const Login = () => {
 
             {/* Admin Login Form */}
             {activeRole === 'admin' && (
-              <Form form={adminForm} layout="vertical" onFinish={(v) => onLogin(v, 'Admin')}>
+              <Form form={adminForm} layout="vertical" onFinish={(v) => onLogin(v, 'Admin')} autoComplete="off">
                 <Text strong style={{ display: 'block', marginBottom: '16px' }}>Admin Credentials</Text>
                 <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
                   <Input 
                     prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 
                     placeholder="Enter your name" 
                     size="large" 
+                    autoComplete="off"
                   />
                 </Form.Item>
                 <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
@@ -390,9 +418,10 @@ const Login = () => {
                     prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
                     placeholder="Enter your password" 
                     size="large" 
+                    autoComplete="new-password"
                   />
                 </Form.Item>
-                <Button type="primary" htmlType="submit" block size="large" loading={loading}>
+                <Button type="primary" htmlType="submit" block size="large" loading={loading} className="hover-blue-btn">
                   Next
                 </Button>
               </Form>

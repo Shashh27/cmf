@@ -7,6 +7,7 @@ const { Text } = Typography;
 const { Dragger } = Upload;
 import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
+import OperationImportModal from "./OperationImportModal";
 
 const OperationDocumentsList = ({ operationId, onPreview }) => {
     const [docs, setDocs] = useState([]);
@@ -110,7 +111,13 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
         }
     ];
 
-    if (loading) return <div className="p-4 flex justify-center"><Spin size="small" tip="Loading documents..." /></div>;
+    if (loading) return (
+        <div className="p-4 flex justify-center">
+            <Spin size="small">
+                <span className="text-xs text-gray-600">Loading documents...</span>
+            </Spin>
+        </div>
+    );
     
     if (!docs || docs.length === 0) return (
         <div className="p-6 text-center border border-dashed border-gray-300 rounded-lg bg-gray-50">
@@ -202,22 +209,17 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
     );
 };
 
-const ROW_HEIGHT_PX = 38;
-const MIN_VISIBLE_ROWS = 15;
-const TABLE_HEADER_PX = 48;
-
 const FitTable = ({ columns, dataSource, ...props }) => {
     const containerRef = useRef(null);
-    const [scrollY, setScrollY] = useState(MIN_VISIBLE_ROWS * ROW_HEIGHT_PX);
+    const [scrollY, setScrollY] = useState('calc(100vh - 450px)');
 
     useEffect(() => {
         const updateHeight = () => {
             if (containerRef.current) {
-                const h = containerRef.current.offsetHeight;
-                if (h > TABLE_HEADER_PX) {
-                    const bodyHeight = h - TABLE_HEADER_PX;
-                    setScrollY(Math.max(bodyHeight, MIN_VISIBLE_ROWS * ROW_HEIGHT_PX));
-                }
+                const rect = containerRef.current.getBoundingClientRect();
+                const viewportHeight = window.innerHeight;
+                const availableHeight = viewportHeight - rect.top - 80; // 80px for bottom margin
+                setScrollY(`${Math.max(availableHeight, 400)}px`); // Minimum 400px
             }
         };
         const ro = new ResizeObserver(updateHeight);
@@ -228,8 +230,14 @@ const FitTable = ({ columns, dataSource, ...props }) => {
     }, []);
 
     return (
-        <div className="flex-1 min-h-0 overflow-hidden" ref={containerRef}>
-            <Table columns={columns} dataSource={dataSource} pagination={false} scroll={{ y: scrollY }} {...props} />
+        <div className="flex-1 min-h-0 overflow-hidden" ref={containerRef} style={{ height: '100%' }}>
+            <Table 
+                columns={columns} 
+                dataSource={dataSource} 
+                pagination={false} 
+                scroll={{ y: scrollY, x: 'max-content' }} 
+                {...props} 
+            />
         </div>
     );
 };
@@ -248,7 +256,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
   const [modalTab, setModalTab] = useState('details');
   const [showAddToolForm, setShowAddToolForm] = useState(false);
-  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importOperations, setImportOperations] = useState([]);
   
   // New: Selected versions for table display
   const [selectedVersions, setSelectedVersions] = useState({}); // { rootId: documentObject }
@@ -291,10 +300,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
      }
    }, [latestPartDocs, groupedPartDocs]);
 
-   // Upload related state
    const [uploading, setUploading] = useState(false);
    const [selectedFileList, setSelectedFileList] = useState([]);
    const [uploadDocType, setUploadDocType] = useState('2D');
+  const [uploadDocTypeOther, setUploadDocTypeOther] = useState('');
    const [uploadParentId, setUploadParentId] = useState(null);
    const [uploadVersion, setUploadVersion] = useState('1.0');
   const fileInputRef = useRef(null);
@@ -368,6 +377,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     fileInputRef.current?.click();
   };
 
+  const handleUseImportedOperations = (ops) => {
+    setImportOperations(ops);
+    setShowImportModal(false);
+    openPartActionModal('operation');
+  };
+
   const handleFileSelect = async (event) => {
     const file = event.target.files[0];
     if (file && replaceFileDocument) {
@@ -407,7 +422,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       document: `Document "${newItem.document_name}" created successfully!`
     };
     message.success(messages[type]);
-    await fetchDocuments(); // Refresh data
+    await fetchDocuments();
+    setImportOperations([]);
   };
 
   const handleUpload = async () => {
@@ -416,12 +432,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       return;
     }
 
-    setUploading(true);
     const file = selectedFileList[0];
+    let effectiveDocType = uploadDocType;
+    if (uploadDocType === 'Other') {
+      if (!uploadDocTypeOther.trim()) {
+        message.warning('Please enter document type');
+        return;
+      }
+      effectiveDocType = uploadDocTypeOther.trim();
+    }
+
+    setUploading(true);
     const formData = new FormData();
     formData.append('file', file);
     formData.append('document_name', file.name.split('.')[0]);
-    formData.append('document_type', uploadDocType);
+    formData.append('document_type', effectiveDocType);
     formData.append('document_version', uploadVersion);
     formData.append('part_id', selectedItem.id.toString());
     
@@ -440,6 +465,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         setSelectedFileList([]);
         setUploadParentId(null);
         setUploadVersion('1.0');
+        setUploadDocType('2D');
+        setUploadDocTypeOther('');
         setIsUploadModalOpen(false);
         await fetchDocuments();
       } else {
@@ -590,34 +617,63 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   ];
 
   const operationsColumns = [
-    { title: 'Op #', dataIndex: 'operation_number', key: 'operation_number', width: 64,
+    { title: 'Op #', dataIndex: 'operation_number', key: 'operation_number', width: 70,
       render: (t, _, i) => (
         <Tag color="cyan" className="font-mono text-sm font-medium m-0 px-1.5 py-0.5">
           {String(t || i + 1).padStart(2, '0')}
         </Tag>
       ) },
-    { title: <span className="font-semibold text-slate-700">Operation Name</span>, dataIndex: 'operation_name', key: 'operation_name', width: 200, ellipsis: { showTitle: true },
+    { title: <span className="font-semibold text-slate-700">Operation Name</span>, dataIndex: 'operation_name', key: 'operation_name', ellipsis: { showTitle: true }, minWidth: 150,
       render: (n) => <span className="text-sm font-medium text-slate-900">{n || '—'}</span> },
-    { title: <><ClockCircleOutlined className="mr-0.5" /> Setup</>, dataIndex: 'setup_time', key: 'setup_time', width: 100,
+    { title: <span><ClockCircleOutlined className="mr-0.5" /> Setup</span>, dataIndex: 'setup_time', key: 'setup_time', width: 100,
       render: (t) => <Tag color="orange" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
-    { title: <><ClockCircleOutlined className="mr-0.5" /> Cycle</>, dataIndex: 'cycle_time', key: 'cycle_time', width: 100,
+    { title: <span><ClockCircleOutlined className="mr-0.5" /> Cycle</span>, dataIndex: 'cycle_time', key: 'cycle_time', width: 100,
       render: (t) => <Tag color="green" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
-    { title: <><EnvironmentOutlined className="mr-0.5" /> Workcenter</>, dataIndex: 'workcenter_id', key: 'workcenter_id', width: 100,
+    { title: <span><EnvironmentOutlined className="mr-0.5" /> Workcenter</span>, dataIndex: 'workcenter_id', key: 'workcenter_id',
       render: (id, r) => (
-        <Tag color="purple" className="text-sm font-medium m-0 px-1.5 py-0.5">
+        <Tag color="purple" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">
           {r.work_center_name || id || 'N/A'}
         </Tag>
       ) },
-    { title: '', key: 'actions', width: 100,
-      render: (_, record) => (
-        <div className="flex gap-0.5" onClick={e => e.stopPropagation()}>
+    { title: <span className="font-semibold text-slate-700">Machine</span>, dataIndex: 'machine_id', key: 'machine_id',
+      render: (id, r) => (
+        <Tag color="geekblue" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">
+          {r.machine_name || id || 'N/A'}
+        </Tag>
+      ) },
+    { title: <span className="font-semibold text-slate-700">Operation Type</span>, dataIndex: 'part_type_id', key: 'part_type',
+      render: (_, r) => (
+        <Tag color={r.part_type_name === 'Out-Source' ? 'orange' : 'blue'} className="m-0 px-1.5 py-0.5 text-xs">
+          {r.part_type_name || 'IN-House'}
+        </Tag>
+      ) },
+    { title: <span className="font-semibold text-slate-700">From Date</span>, dataIndex: 'from_date', key: 'from_date',
+      render: (val) => {
+        if (!val) return <span className="text-slate-500">—</span>;
+        const d = typeof val === 'string' ? new Date(val) : val;
+        return <span className="text-sm text-slate-700">{isNaN(d.getTime()) ? '—' : d.toLocaleDateString()}</span>;
+      } },
+    { title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to_date',
+      render: (val) => {
+        if (!val) return <span className="text-slate-500">—</span>;
+        const d = typeof val === 'string' ? new Date(val) : val;
+        return <span className="text-sm text-slate-700">{isNaN(d.getTime()) ? '—' : d.toLocaleDateString()}</span>;
+      } },
+    { title: <span className="font-semibold text-slate-700 text-center block">Actions</span>, key: 'actions', align: 'center', width: 120, fixed: 'right',
+      render: (_, record) => {
+        const isOutSource = record.part_type_name === 'Out-Source' || record.part_type_id === 2;
+        return (
+        <div className="flex gap-0.5 justify-center" onClick={e => e.stopPropagation()}>
           <Tooltip title="Edit"><Button size="small" icon={<EditOutlined />} onClick={() => { setSelectedOperation(record); setModalTab('details'); setShowAddToolForm(false); setIsOperationModalOpen(true); }} className="text-blue-500 hover:bg-blue-50" /></Tooltip>
-          <Tooltip title="Add Tool"><Button size="small" icon={<ToolOutlined />} onClick={() => { setSelectedOperation(record); setModalTab('tools'); setShowAddToolForm(true); setIsOperationModalOpen(true); }} className="text-orange-500 hover:bg-orange-50" /></Tooltip>
+          {!isOutSource && (
+            <Tooltip title="Add Tool"><Button size="small" icon={<ToolOutlined />} onClick={() => { setSelectedOperation(record); setModalTab('tools'); setShowAddToolForm(true); setIsOperationModalOpen(true); }} className="text-orange-500 hover:bg-orange-50" /></Tooltip>
+          )}
           <Popconfirm title="Delete operation?" onConfirm={() => handleDeleteOperation(record.id)} okText="Yes" cancelText="No">
             <Button size="small" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
           </Popconfirm>
         </div>
-      ) },
+        );
+      } },
   ];
 
   if (!selectedItem || selectedItem.itemType !== 'part') {
@@ -630,18 +686,49 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       label: <span className="font-medium">mBOM</span>,
       children: (
         <div className="h-full flex flex-col min-h-0">
-          <div className="flex justify-between items-center mb-1.5 shrink-0">
-            <span className="text-xs text-slate-500">Click row to view details</span>
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => openPartActionModal('operation')}
-              disabled={!selectedItem || selectedItem.itemType !== 'part'} className="primary-btn-sm">
-              Add Operation
-            </Button>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
+            <span className="text-xs text-slate-500">Click row to view or edit</span>
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+              <Button
+                size="small"
+                icon={<UploadOutlined />}
+                onClick={() => setShowImportModal(true)}
+                disabled={!selectedItem || selectedItem.itemType !== 'part'}
+                className="primary-btn-sm flex-1 sm:flex-initial"
+              >
+                <span className="hidden sm:inline">Upload MPP</span>
+                <span className="sm:hidden">MPP</span>
+              </Button>
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setImportOperations([]);
+                  openPartActionModal('operation');
+                }}
+                disabled={!selectedItem || selectedItem.itemType !== 'part'}
+                className="primary-btn-sm flex-1 sm:flex-initial"
+              >
+                <span className="hidden sm:inline">Add Operation</span>
+                <span className="sm:hidden">Add Op</span>
+              </Button>
+            </div>
           </div>
-          <FitTable dataSource={operations} columns={operationsColumns} rowKey="id" size="small"
-            className="docs-ops-table cursor-pointer"
-            onRow={(record) => ({ onClick: () => { setSelectedOperation(record); setIsDetailsModalOpen(true); } })}
-            locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-          />
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <FitTable dataSource={operations} columns={operationsColumns} rowKey="id" size="small"
+              className="docs-ops-table cursor-pointer"
+              onRow={(record) => ({
+              onClick: () => {
+                setSelectedOperation(record);
+                setModalTab('details');
+                setShowAddToolForm(false);
+                setIsOperationModalOpen(true);
+              },
+            })}
+              locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+            />
+          </div>
         </div>
       ),
     },
@@ -650,9 +737,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       label: <span className="font-medium">eBOM</span>,
       children: (
         <div className="h-full flex flex-col min-h-0 overflow-hidden">
-          <div className="flex justify-between items-center mb-2 shrink-0">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 shrink-0 gap-2">
             <span className="text-xs text-slate-500">Documents & versions</span>
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => openPartActionModal('document')} className="primary-btn-sm">
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => openPartActionModal('document')} className="primary-btn-sm w-full sm:w-auto">
               Add Document
             </Button>
           </div>
@@ -663,7 +750,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                     size="small"
                     pagination={false}
                     className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden"
-                    scroll={{ y: 'calc(100vh - 380px)' }}
+                    scroll={{ y: 'calc(100vh - 450px)', x: 600 }}
                     columns={[
                         {
                             title: <span className="text-xs font-semibold">DOCUMENT NAME</span>,
@@ -679,18 +766,27 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                                         </div>
                                         <div className="flex flex-col min-w-0">
                                             <Text strong className="text-sm truncate max-w-[300px]">{currentDoc.document_name}</Text>
-                                            <div className="flex items-center gap-2">
-                                                <Tag color="blue" className="m-0 text-[9px] px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">
-                                                    {currentDoc.document_type || '2D'}
-                                                </Tag>
-                                                {!isLatest && (
-                                                    <Tag color="warning" className="m-0 text-[9px] px-1 leading-4 border-none bg-orange-100 text-orange-700">
-                                                        HISTORICAL
-                                                    </Tag>
-                                                )}
-                                            </div>
+                                            {!isLatest && (
+                                                <div className="flex items-center gap-2">
+                                                   
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
+                                );
+                            }
+                        },
+                        {
+                            title: <span className="text-xs font-semibold">DOCUMENT TYPE</span>,
+                            key: 'document_type',
+                            width: 120,
+                            render: (_, record) => {
+                                const rootId = record.parent_id || record.id;
+                                const currentDoc = selectedVersions[rootId] || record;
+                                return (
+                                    <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">
+                                        {currentDoc.document_type || '2D'}
+                                    </Tag>
                                 );
                             }
                         },
@@ -714,7 +810,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                                             const selected = group.find(d => d.id === val);
                                             setSelectedVersions(prev => ({ ...prev, [rootId]: selected }));
                                         }}
-                                        dropdownStyle={{ minWidth: '180px', padding: '4px' }}
+                                        styles={{ 
+                                          popup: { 
+                                            root: { minWidth: '180px', padding: '4px' } 
+                                          } 
+                                        }}
                                         labelRender={({ label, value }) => {
                                             const ver = group.find(d => d.id === value);
                                             return (
@@ -833,11 +933,14 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                     setIsUploadModalOpen(false);
                     setUploadParentId(null);
                     setUploadVersion('1.0');
+                    setUploadDocType('2D');
+                    setUploadDocTypeOther('');
                     setSelectedFileList([]);
                 }}
                 footer={null}
-                destroyOnClose
-                width={450}
+                destroyOnHidden
+                width="95%"
+                style={{ maxWidth: 450 }}
             >
                 <div className="space-y-4 mt-4">
                     <div>
@@ -849,9 +952,17 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                         >
                             <Select.Option value="2D">2D Drawing</Select.Option>
                             <Select.Option value="3D">3D Model (STL/STEP)</Select.Option>
-                            <Select.Option value="MPP">MPP Document</Select.Option>
+                          
                             <Select.Option value="Other">Other</Select.Option>
                         </Select>
+                        {uploadDocType === 'Other' && (
+                            <Input
+                                className="mt-2"
+                                placeholder="Enter custom document type"
+                                value={uploadDocTypeOther}
+                                onChange={(e) => setUploadDocTypeOther(e.target.value)}
+                            />
+                        )}
                     </div>
 
                     <div>
@@ -890,15 +1001,15 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                         </p>
                     </Dragger>
 
-                    <div className="flex justify-end gap-2 pt-2">
-                        <Button onClick={() => setIsUploadModalOpen(false)}>Cancel</Button>
+                    <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
+                        <Button onClick={() => setIsUploadModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>
                         <Button 
                             type="primary" 
                             icon={<UploadOutlined />}
                             loading={uploading}
                             disabled={selectedFileList.length === 0}
                             onClick={handleUpload}
-                            className="no-hover-btn"
+                            className="no-hover-btn w-full sm:w-auto"
                         >
                             {uploadParentId ? 'Upload New Version' : 'Upload Document'}
                         </Button>
@@ -915,8 +1026,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                     setEditingDoc(null);
                 }}
                 footer={null}
-                destroyOnClose
-                width={450}
+                destroyOnHidden
+                width="95%"
+                style={{ maxWidth: 450 }}
             >
                 <Form
                     layout="vertical"
@@ -939,13 +1051,13 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                         <Select placeholder="Select type">
                             <Select.Option value="2D">2D Drawing</Select.Option>
                             <Select.Option value="3D">3D Model (STL/STEP)</Select.Option>
-                            <Select.Option value="MPP">MPP Document</Select.Option>
+                           
                             <Select.Option value="Other">Other</Select.Option>
                         </Select>
                     </Form.Item>
-                    <div className="flex justify-end gap-2 mt-6">
-                        <Button onClick={() => setIsEditDocModalOpen(false)}>Cancel</Button>
-                        <Button type="primary" htmlType="submit" className="no-hover-btn">Save Changes</Button>
+                    <div className="flex flex-col sm:flex-row justify-end gap-2 mt-6">
+                        <Button onClick={() => setIsEditDocModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>
+                        <Button type="primary" htmlType="submit" className="no-hover-btn w-full sm:w-auto">Save Changes</Button>
                     </div>
                 </Form>
             </Modal>
@@ -955,19 +1067,27 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   ];
 
   return (
-    <div className="flex-1 bg-white overflow-hidden flex flex-col h-full">
+    <div className="flex-1 bg-white overflow-hidden flex flex-col h-full" style={{ height: '100%' }}>
       <style>
         {`
           .primary-btn-sm, .no-hover-btn, .primary-btn-sm:hover, .no-hover-btn:hover { background-color: #2563eb !important; color: #fff !important; border: none !important; }
           .docs-ops-table .ant-table-tbody > tr > td { padding: 8px 10px !important; }
           .docs-ops-table .ant-table-thead > tr > th { font-weight: 600; color: #334155 !important; padding: 8px 10px !important; }
-          .pdm-tabs-full.ant-tabs { display: flex; flex-direction: column; }
-          .pdm-tabs-full .ant-tabs-content { flex: 1; min-height: 0; }
-          .pdm-tabs-full .ant-tabs-tabpane { height: 100%; }
+          @media (max-width: 640px) {
+            .docs-ops-table .ant-table-tbody > tr > td { padding: 5px 6px !important; font-size: 11px !important; }
+            .docs-ops-table .ant-table-thead > tr > th { padding: 5px 6px !important; font-size: 11px !important; }
+            .docs-ebom-table .ant-table-tbody > tr > td { padding: 5px 6px !important; font-size: 11px !important; }
+            .docs-ebom-table .ant-table-thead > tr > th { padding: 5px 6px !important; font-size: 11px !important; }
+          }
+          .pdm-tabs-full.ant-tabs { display: flex; flex-direction: column; height: 100%; }
+          .pdm-tabs-full .ant-tabs-content { flex: 1; min-height: 0; overflow: hidden; }
+          .pdm-tabs-full .ant-tabs-tabpane { height: 100%; overflow: hidden; }
+          .pdm-tabs-full .ant-tabs-content-holder { overflow: hidden; }
+          .pdm-tabs-full .ant-tabs-body { height: 100%; overflow: hidden; }
         `}
       </style>
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 pt-2 pb-3">
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} className="flex-1 flex flex-col min-h-0 overflow-hidden pdm-tabs-full" style={{ minHeight: 0 }} />
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 pt-2 pb-3" style={{ height: '100%' }}>
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} className="flex-1 flex flex-col min-h-0 overflow-hidden pdm-tabs-full" style={{ height: '100%' }} />
       </div>
       
       <Modal
@@ -977,11 +1097,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
           setIsPreviewModalOpen(false);
           setPreviewDocument(null);
         }}
-        width={1000}
+        width="95%"
+        style={{ maxWidth: 1000, top: 20 }}
         footer={null}
         destroyOnHidden
-        style={{ top: 20 }}
-        styles={{ body: { height: '80vh', padding: 0, overflow: 'hidden' } }}
+        styles={{ body: { height: '75vh', padding: 0, overflow: 'hidden' } }}
       >
         <div className="w-full h-full bg-gray-50 flex items-center justify-center">
             {previewDocument?.document_url ? (
@@ -995,69 +1115,13 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             )}
         </div>
       </Modal>
-      
-      <Modal
-        title={
-            <div className="flex items-center gap-2">
-                <ToolOutlined className="text-blue-500"/> 
-                <span>Operation Details: {selectedOperation?.operation_name}</span>
-            </div>
-        }
-        open={isDetailsModalOpen}
-        onCancel={() => setIsDetailsModalOpen(false)}
-        width={1100}
-        footer={null}
-        destroyOnHidden
-        styles={{ body: { maxHeight: '75vh', overflowY: 'auto' } }}
-      >
-        {selectedOperation && (
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200 space-y-4">
-               <div className="flex flex-col gap-3">
-                  <div>
-                    <p className="text-xs font-semibold text-gray-600 mb-1">Work Instructions:</p>
-                        <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap shadow-sm">
-                        {selectedOperation.work_instructions || 'No instructions available'}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-gray-600 mb-1">Notes:</p>
-                        <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap shadow-sm">
-                        {selectedOperation.notes || 'None specified'}
-                    </div>
-                  </div>
-                </div>
-
-                {selectedOperation.tools?.length > 0 && (
-                    <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                        <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
-                            <ToolOutlined /> Tools Required:
-                        </p>
-                        <Table
-                            dataSource={selectedOperation.tools}
-                            rowKey="id"
-                            pagination={false}
-                            size="small"
-                            bordered
-                            columns={[
-                                { title: 'Tool Name', dataIndex: ['tool', 'item_description'], key: 'name', render: (text) => <span className="font-medium">{text}</span> },
-                                { title: 'Code', dataIndex: ['tool', 'identification_code'], key: 'code', render: (text) => <Tag>{text}</Tag> },
-                                { title: 'Make', dataIndex: ['tool', 'make'], key: 'make' },
-                                { title: 'Specification', dataIndex: ['tool', 'range'], key: 'range' },
-                            ]}
-                        />
-                    </div>
-                )}
-
-                 <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                    <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
-                        <FileTextOutlined /> Operation Documents:
-                    </p>
-                    <OperationDocumentsList operationId={selectedOperation.id} onPreview={handlePreview} />
-                </div>
-            </div>
-        )}
-      </Modal>
      <input ref={fileInputRef} type="file" accept=".pdf,.docx,.csv,.xlsx,.doc,.xls,.txt" style={{ display: 'none' }} onChange={handleFileSelect} />
+
+     <OperationImportModal
+       open={showImportModal}
+       onCancel={() => setShowImportModal(false)}
+       onUseOperations={handleUseImportedOperations}
+     />
 
      <PartActionModal
        open={showPartActionModal}
@@ -1065,6 +1129,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
        actionType={partActionType}
        selectedPart={selectedItem}
        onActionCreated={handleActionCreated}
+       initialOperations={importOperations}
      />
 
      <EditOperationModal

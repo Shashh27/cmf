@@ -16,6 +16,7 @@ import {
   TableOutlined,
   SearchOutlined
 } from '@ant-design/icons';
+import config from '../../Config/config';
 
 const { Title, Text } = Typography;
 
@@ -34,10 +35,9 @@ const TransactionHistory = () => {
   }, []);
 
   const fetchAllTransactions = async () => {
-    setAllTransactionsLoading(true);
     try {
       console.log('Fetching all transactions...');
-      const response = await fetch('http://172.18.100.76:8000/api/v1/transaction-history/all');
+      const response = await fetch(`${config.API_BASE_URL}/transaction-history/all`);
       console.log('Response status:', response.status);
       
       if (!response.ok) {
@@ -50,8 +50,6 @@ const TransactionHistory = () => {
     } catch (error) {
       console.error('Failed to fetch all transactions:', error);
       setError('Failed to fetch all transactions: ' + error.message);
-    } finally {
-      setAllTransactionsLoading(false);
     }
   };
 
@@ -94,121 +92,128 @@ const TransactionHistory = () => {
   // Combined Transaction Table Columns - Multiple rows for multiple returns
   const combinedTransactionColumns = [
     {
-      title: 'Sl No',
+      title: 'SL NO',
       key: 'sl_no',
-      width: 60,
+      width: 70,
+      fixed: 'left',
+      align: 'center',
+      className: 'table-header-styled',
       render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1,
     },
     {
       title: 'Tool Name',
       dataIndex: 'tool_name',
       key: 'tool_name',
-      width: 150,
+      width: 180,
+      fixed: 'left',
       ellipsis: true,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Project Number',
       dataIndex: 'project_name',
       key: 'project_number',
-      width: 120,
+      width: 150,
+      fixed: 'left',
       ellipsis: true,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Part Name',
       dataIndex: 'part_name',
       key: 'part_name',
-      width: 120,
+      width: 150,
       ellipsis: true,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Requested Qty',
       dataIndex: 'requested_qty',
       key: 'requested_qty',
-      width: 100,
+      width: 110,
+      align: 'center',
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Requested By',
       dataIndex: 'requested_by',
       key: 'requested_by',
-      width: 120,
+      width: 130,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
-      title: 'Created At',
+      title: 'Request Date',
       dataIndex: 'request_created_at',
       key: 'request_created_at',
       width: 150,
+      className: 'table-header-styled',
       render: (date) => formatDateTime(date),
     },
     {
       title: 'Approved By',
       dataIndex: 'approved_by',
       key: 'approved_by',
-      width: 120,
+      width: 130,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
-      title: 'Status',
+      title: 'Request Status',
       dataIndex: 'request_status',
       key: 'request_status',
-      width: 100,
+      width: 120,
+      align: 'center',
+      className: 'table-header-styled',
       render: (status) => (
-        <Tag color={getStatusColor(status)}>
+        <Tag color={getStatusColor(status)} style={{ borderRadius: '4px' }}>
           {status?.toUpperCase() || '-'}
         </Tag>
       ),
     },
     {
-      title: 'Updated At',
-      dataIndex: 'request_updated_at',
-      key: 'request_updated_at',
-      width: 150,
-      render: (date) => formatDateTime(date),
-    },
-    {
       title: 'Returned Qty',
       dataIndex: 'returned_qty',
       key: 'returned_qty',
-      width: 100,
+      width: 110,
+      align: 'center',
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
-      title: 'Created At',
+      title: 'Return Date',
       dataIndex: 'return_created_at',
       key: 'return_created_at',
       width: 150,
+      className: 'table-header-styled',
       render: (date) => date ? formatDateTime(date) : '-',
     },
     {
       title: 'Collected By',
       dataIndex: 'collected_by',
       key: 'collected_by',
-      width: 120,
+      width: 130,
+      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
-      title: 'Status',
+      title: 'Return Status',
       dataIndex: 'return_status',
       key: 'return_status',
-      width: 100,
+      width: 130,
+      align: 'center',
+      className: 'table-header-styled',
       render: (status) => status ? (
-        <Tag color={getStatusColor(status)}>
+        <Tag color={getStatusColor(status)} style={{ borderRadius: '4px' }}>
           {status?.toUpperCase()}
         </Tag>
       ) : (
-        <Tag color="default">NO RETURNS</Tag>
+        <Tag color="default" style={{ borderRadius: '4px' }}>NO RETURNS</Tag>
       ),
-    },
-    {
-      title: 'Updated At',
-      dataIndex: 'return_updated_at',
-      key: 'return_updated_at',
-      width: 150,
-      render: (date) => date ? formatDateTime(date) : '-',
     },
   ];
 

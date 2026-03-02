@@ -1,18 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Form, Input, Button, Tabs, Upload, message, Popconfirm, Spin, Empty, Tag, Table, Row, Col, TimePicker, Select, Tooltip, Flex, Badge } from 'antd';
-import { 
-  UploadOutlined, 
-  DeleteOutlined, 
-  FileTextOutlined, 
-  SaveOutlined, 
-  InboxOutlined,
-  ExclamationCircleOutlined,
-  ToolOutlined,
-  PlusOutlined,
-  SyncOutlined,
-  DownloadOutlined,
-  EyeOutlined
-} from '@ant-design/icons';
+import { Modal, Form, Input, Button, Tabs, Upload, message, Popconfirm, Spin, Empty, Tag, Table, Row, Col, TimePicker, Select, Tooltip, Flex, Badge, DatePicker } from 'antd';
+import { UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined, InboxOutlined,ExclamationCircleOutlined,ToolOutlined,PlusOutlined,SyncOutlined,DownloadOutlined,EyeOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth';
 
@@ -23,10 +11,13 @@ const EditOperationModal = ({
   open, 
   onCancel, 
   operation, 
+  partId = null,
+  partName = null,
   onUpdate, 
   defaultTab = 'details',
   showAddToolForm = true 
 }) => {
+  const isCreateMode = !operation && partId;
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
@@ -36,6 +27,7 @@ const EditOperationModal = ({
   const [selectedDocForVersion, setSelectedDocForVersion] = useState(null);
   const [uploadVersion, setUploadVersion] = useState('1.0');
   const [uploadType, setUploadType] = useState('Balloon');
+  const [uploadTypeOther, setUploadTypeOther] = useState('');
   const [selectedFileList, setSelectedFileList] = useState([]);
   const [workCenters, setWorkCenters] = useState([]);
   const [allMachines, setAllMachines] = useState([]);
@@ -46,6 +38,10 @@ const EditOperationModal = ({
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewTitle, setPreviewTitle] = useState('');
   const [previewType, setPreviewType] = useState('');
+  const [partTypes, setPartTypes] = useState([]);
+  const [partTypesLoading, setPartTypesLoading] = useState(false);
+  const [workCentersLoading, setWorkCentersLoading] = useState(false);
+  const [machinesLoading, setMachinesLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -54,22 +50,26 @@ const EditOperationModal = ({
   }, [open, defaultTab]);
 
   useEffect(() => {
-    if (open) {
-      // Only fetch workcenters and machines if we are NOT in "Add Tool" mode
-      if (!showAddToolForm) {
-        fetchWorkCenters();
-        fetchMachines();
-      } else {
-        fetchTools();
-      }
+    if (open && showAddToolForm) {
+      fetchTools();
     }
   }, [open, showAddToolForm]);
+
+  useEffect(() => {
+    if (open && isCreateMode) {
+      form.resetFields();
+      form.setFieldsValue({ part_type_id: 1 });
+    }
+  }, [open, isCreateMode, form]);
 
   useEffect(() => {
     if (open && operation) {
       form.setFieldsValue({
         operation_number: operation.operation_number,
         operation_name: operation.operation_name,
+        part_type_id: operation.part_type_id ?? 1,
+        from_date: operation.from_date ? dayjs(operation.from_date) : null,
+        to_date: operation.to_date ? dayjs(operation.to_date) : null,
         setup_time: operation.setup_time ? dayjs(operation.setup_time, 'HH:mm:ss') : null,
         cycle_time: operation.cycle_time ? dayjs(operation.cycle_time, 'HH:mm:ss') : null,
         workcenter_id: operation.workcenter_id,
@@ -172,6 +172,8 @@ const EditOperationModal = ({
   );
 
   const fetchWorkCenters = async () => {
+    if (workCenters.length > 0) return;
+    setWorkCentersLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/workcenters/`);
       if (response.ok) {
@@ -180,18 +182,40 @@ const EditOperationModal = ({
       }
     } catch (error) {
       console.error("Error fetching work centers:", error);
+    } finally {
+      setWorkCentersLoading(false);
+    }
+  };
+
+  const fetchPartTypes = async () => {
+    if (partTypes.length > 0) return;
+    setPartTypesLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/part-types/`);
+      if (response.ok) {
+        const data = await response.json();
+        setPartTypes(data);
+      }
+    } catch (error) {
+      console.error("Error fetching part types:", error);
+    } finally {
+      setPartTypesLoading(false);
     }
   };
 
   const fetchMachines = async () => {
+    if (allMachines.length > 0) return;
+    setMachinesLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/machines/?limit=1000`);
+      const response = await fetch(`${API_BASE_URL}/machines/`);
       if (response.ok) {
         const data = await response.json();
         setAllMachines(data);
       }
     } catch (error) {
       console.error("Error fetching machines:", error);
+    } finally {
+      setMachinesLoading(false);
     }
   };
 
@@ -211,51 +235,55 @@ const EditOperationModal = ({
     }
   };
 
-  const handleDeleteOperation = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/operations/${operation.id}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        message.success("Operation deleted successfully");
-        if (onUpdate) onUpdate(); // Refresh parent
-      } else {
-        message.error("Failed to delete operation");
-      }
-    } catch (error) {
-      console.error("Error deleting operation:", error);
-      message.error("Error deleting operation");
-    }
-  };
-
   const handleUpdateDetails = async (values) => {
     setLoading(true);
     try {
+      const now = dayjs();
       const payload = {
         ...values,
         setup_time: values.setup_time ? values.setup_time.format('HH:mm:ss') : null,
         cycle_time: values.cycle_time ? values.cycle_time.format('HH:mm:ss') : null,
+        from_date: values.from_date
+          ? dayjs(values.from_date).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString()
+          : null,
+        to_date: values.to_date
+          ? dayjs(values.to_date).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString()
+          : null,
       };
 
-      const response = await fetch(`${API_BASE_URL}/operations/${operation.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) {
-        const updatedOp = await response.json();
-        message.success("Operation details updated successfully");
-        if (onUpdate) onUpdate(updatedOp);
+      if (isCreateMode) {
+        const createPayload = { ...payload, part_id: partId };
+        const response = await fetch(`${API_BASE_URL}/operations/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createPayload),
+        });
+        if (response.ok) {
+          const newOp = await response.json();
+          message.success("Operation created successfully");
+          if (onUpdate) onUpdate(newOp);
+          onCancel();
+        } else {
+          message.error("Failed to create operation");
+        }
       } else {
-        message.error("Failed to update operation");
+        const response = await fetch(`${API_BASE_URL}/operations/${operation.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (response.ok) {
+          const updatedOp = await response.json();
+          message.success("Operation details updated successfully");
+          if (onUpdate) onUpdate(updatedOp);
+          onCancel();
+        } else {
+          message.error("Failed to update operation");
+        }
       }
     } catch (error) {
-      console.error("Error updating operation:", error);
-      message.error("Error updating operation");
+      console.error(isCreateMode ? "Error creating operation:" : "Error updating operation:", error);
+      message.error(isCreateMode ? "Error creating operation" : "Error updating operation");
     } finally {
       setLoading(false);
     }
@@ -268,10 +296,18 @@ const EditOperationModal = ({
     }
 
     const file = selectedFileList[0];
+    let effectiveType = uploadType;
+    if (uploadType === 'Other') {
+      if (!uploadTypeOther.trim()) {
+        message.warning("Please enter document type");
+        return;
+      }
+      effectiveType = uploadTypeOther.trim();
+    }
     const formData = new FormData();
     formData.append('operation_id', operation.id);
     formData.append('files', file);
-    formData.append('document_type', uploadType);
+    formData.append('document_type', effectiveType);
     formData.append('document_version', uploadVersion);
     
     if (parentId) {
@@ -291,6 +327,8 @@ const EditOperationModal = ({
         setParentId(null);
         setSelectedDocForVersion(null);
         setUploadVersion('1.0');
+        setUploadType('Balloon');
+        setUploadTypeOther('');
         setSelectedFileList([]); // Clear file list
         fetchDocuments(); // Refresh list
       } else {
@@ -355,9 +393,9 @@ const EditOperationModal = ({
 
     return (
       <div className="flex flex-col h-full">
-        <Row gutter={24}>
+        <Row gutter={[16, 16]}>
           {/* Left Column: Document History */}
-          <Col span={14}>
+          <Col xs={24} lg={14}>
             <div className="flex justify-between items-center mb-4">
               <h4 className="text-sm font-semibold text-gray-800 m-0">Document History</h4>
               <Badge 
@@ -541,8 +579,8 @@ const EditOperationModal = ({
           </Col>
 
           {/* Right Column: Upload Area */}
-          <Col span={10}>
-            <div className="bg-gray-50 p-5 rounded-xl border border-gray-200 sticky top-0">
+          <Col xs={24} lg={10}>
+            <div className="bg-gray-50 p-3 sm:p-5 rounded-xl border border-gray-200">
               <div className="flex justify-between items-center mb-4">
                 <h4 className="text-sm font-semibold text-gray-800 m-0 flex items-center gap-2">
                   <UploadOutlined /> {parentId ? 'Update Version' : 'New Upload'}
@@ -557,6 +595,8 @@ const EditOperationModal = ({
                       setParentId(null);
                       setSelectedDocForVersion(null);
                       setUploadVersion('1.0');
+                      setUploadType('Balloon');
+                      setUploadTypeOther('');
                     }}
                   >
                     Cancel
@@ -595,8 +635,8 @@ const EditOperationModal = ({
                 </Dragger>
               </div>
 
-              <Row gutter={12} className="mb-4">
-                <Col span={14}>
+              <Row gutter={[8, 8]} className="mb-4">
+                <Col xs={24} sm={14}>
                   <div className="text-[11px] font-semibold text-gray-500 mb-1 ml-1 uppercase">Document Type</div>
                   <Select 
                     value={uploadType} 
@@ -609,8 +649,17 @@ const EditOperationModal = ({
                     <Select.Option value="CNC">CNC</Select.Option>
                     <Select.Option value="Other">Other</Select.Option>
                   </Select>
+                  {uploadType === 'Other' && (
+                    <Input
+                      className="mt-2"
+                      placeholder="Enter custom document type"
+                      value={uploadTypeOther}
+                      onChange={(e) => setUploadTypeOther(e.target.value)}
+                      autoComplete="off"
+                    />
+                  )}
                 </Col>
-                <Col span={10}>
+                <Col xs={24} sm={10}>
                   <div className="text-[11px] font-semibold text-gray-500 mb-1 ml-1 uppercase">Version</div>
                   <Input 
                     value={uploadVersion} 
@@ -744,30 +793,84 @@ const EditOperationModal = ({
           layout="vertical"
           onFinish={handleUpdateDetails}
           className="mt-2"
+          autoComplete="off"
         >
-          <Row gutter={16}>
-              <Col span={6}>
+          <Row gutter={[12, 12]}>
+              <Col xs={24} sm={24} md={6} lg={6}>
                   <Form.Item
                   name="operation_number"
                   label="Op Number"
                   rules={[{ required: true, message: 'Req' }]}
                   >
-                  <Input />
+                  <Input autoComplete="off" />
                   </Form.Item>
               </Col>
-              <Col span={18}>
+              <Col xs={24} sm={24} md={18} lg={18}>
                   <Form.Item
                   name="operation_name"
                   label="Operation Name"
                   rules={[{ required: true, message: 'Please enter operation name' }]}
                   >
-                  <Input prefix={<FileTextOutlined className="text-gray-400" />} />
+                  <Input prefix={<FileTextOutlined className="text-gray-400" />} autoComplete="off" />
                   </Form.Item>
               </Col>
           </Row>
 
-          <Row gutter={16}>
-              <Col span={12}>
+          <Form.Item name="part_type_id" label="Part Type" rules={[{ required: true }]}>
+            <Select
+              placeholder="Select type"
+              loading={partTypesLoading}
+              onOpenChange={(open) => { if (open) fetchPartTypes(); }}
+              options={partTypes.map(pt => ({ label: pt.type_name, value: pt.id }))}
+            />
+          </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, curr) => prev.part_type_id !== curr.part_type_id}
+          >
+            {({ getFieldValue }) => {
+              const isOutSource = getFieldValue('part_type_id') === 2;
+              return (
+                <>
+                  {isOutSource && (
+                    <Row gutter={[12, 12]}>
+                      <Col xs={24} sm={12} md={12}>
+                        <Form.Item
+                          name="from_date"
+                          label="From Date"
+                          rules={[{ required: true, message: 'Required for Out-Source' }]}
+                        >
+                          <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} sm={12} md={12}>
+                        <Form.Item
+                          name="to_date"
+                          label="To Date"
+                          rules={[{ required: true, message: 'Required for Out-Source' }]}
+                        >
+                          <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                  )}
+                </>
+              );
+            }}
+          </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, curr) => prev.part_type_id !== curr.part_type_id}
+          >
+            {({ getFieldValue }) => {
+              const isInHouse = getFieldValue('part_type_id') === 1 || !getFieldValue('part_type_id');
+              if (!isInHouse) return null;
+              return (
+                <>
+          <Row gutter={[12, 12]}>
+              <Col xs={12} sm={12} md={6} lg={6}>
                   <Form.Item
                   name="setup_time"
                   label="Setup Time"
@@ -775,7 +878,7 @@ const EditOperationModal = ({
                   <TimePicker style={{ width: '100%' }} format="HH:mm:ss" />
                   </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col xs={12} sm={12} md={6} lg={6}>
                   <Form.Item
                   name="cycle_time"
                   label="Cycle Time"
@@ -785,14 +888,16 @@ const EditOperationModal = ({
               </Col>
           </Row>
 
-          <Row gutter={16}>
-              <Col span={12}>
+          <Row gutter={[12, 12]}>
+              <Col xs={24} sm={12} md={12} lg={12}>
                   <Form.Item
                   name="workcenter_id"
                   label="Workcenter"
                   >
                   <Select 
                       placeholder="Select WC"
+                      loading={workCentersLoading}
+                      onOpenChange={(open) => { if (open) fetchWorkCenters(); }}
                       onChange={() => {
                           // Clear machine selection when workcenter changes
                           form.setFieldValue('machine_id', undefined);
@@ -806,7 +911,7 @@ const EditOperationModal = ({
                   </Select>
                   </Form.Item>
               </Col>
-              <Col span={12}>
+              <Col xs={24} sm={12} md={12} lg={12}>
                   <Form.Item
                   noStyle
                   shouldUpdate={(prevValues, currentValues) => prevValues.workcenter_id !== currentValues.workcenter_id}
@@ -823,6 +928,8 @@ const EditOperationModal = ({
                           <Select 
                           placeholder={workcenterId ? "Select Machine" : "Select WC First"}
                           disabled={!workcenterId}
+                          loading={machinesLoading}
+                          onOpenChange={(open) => { if (open) fetchMachines(); }}
                           allowClear
                           >
                           {filteredMachines.map(m => (
@@ -851,27 +958,22 @@ const EditOperationModal = ({
           >
             <TextArea rows={3} placeholder="Additional notes..." />
           </Form.Item>
+                </>
+              );
+            }}
+          </Form.Item>
 
-          <div className="flex justify-between mt-4 pt-4 border-t">
-            <Popconfirm
-              title="Delete Operation"
-              description="Are you sure you want to delete this operation?"
-              onConfirm={handleDeleteOperation}
-              okText="Yes"
-              cancelText="No"
-            >
-              <Button danger icon={<DeleteOutlined />}>Delete Operation</Button>
-            </Popconfirm>
-            <div className="flex gap-2">
-              <Button onClick={onCancel}>Cancel</Button>
+          <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4 pt-4 border-t">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button onClick={onCancel} className="w-full sm:w-auto">Cancel</Button>
               <Button 
                   type="primary" 
                   htmlType="submit" 
                   loading={loading}
                   icon={<SaveOutlined />}
-                  className="no-hover-btn"
+                  className="no-hover-btn w-full sm:w-auto"
               >
-                  Save Changes
+                  {isCreateMode ? 'Create Operation' : 'Save Changes'}
               </Button>
             </div>
           </div>
@@ -890,23 +992,31 @@ const EditOperationModal = ({
     }
   ];
 
-  const filteredTabItems = showAddToolForm 
-    ? tabItems.filter(item => item.key === 'tools') 
-    : tabItems.filter(item => item.key !== 'tools');
+  const filteredTabItems = isCreateMode
+    ? tabItems.filter(item => item.key === 'details')
+    : showAddToolForm 
+      ? tabItems.filter(item => item.key === 'tools') 
+      : tabItems.filter(item => item.key !== 'tools');
 
   return (
     <Modal
       title={
         <div className="flex items-center gap-2">
           <ToolOutlined className="text-blue-600" />
-          <span>{showAddToolForm ? 'Assign Tools' : 'Edit Operation'}</span>
+          <span>
+            {isCreateMode ? 'Add Operation' : showAddToolForm ? 'Assign Tools' : 'Edit Operation'}
+          </span>
+          {isCreateMode && partName && (
+            <span className="text-xs font-normal text-gray-500">(for {partName})</span>
+          )}
         </div>
       }
       open={open}
       onCancel={onCancel}
       footer={null}
-      width={activeTab === 'details' ? 800 : 1000}
-      destroyOnClose
+      width="95%"
+      style={{ maxWidth: activeTab === 'details' ? 800 : 1000 }}
+      destroyOnHidden
     >
       <style>
         {`
@@ -943,9 +1053,9 @@ const EditOperationModal = ({
             Close
           </Button>
         ]}
-        width={1000}
-        style={{ top: 20 }}
-        bodyStyle={{ height: '80vh', padding: 0 }}
+        width="95%"
+        style={{ maxWidth: 1000, top: 20 }}
+        styles={{ body: { height: '75vh', padding: 0 } }}
       >
         {previewType === 'image' ? (
           <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">

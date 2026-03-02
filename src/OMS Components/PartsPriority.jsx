@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Table, Card, Typography, message, Spin, InputNumber, Button, Space, Tag, Empty, Modal, Tabs } from "antd";
+import { useSearchParams } from "react-router-dom";
+import { Table, Card, Typography, message, Spin, InputNumber, Button, Space, Tag, Empty, Modal, Tabs, Input } from "antd";
 import { ExclamationCircleOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -12,6 +13,7 @@ import {
   SaveOutlined,
   HolderOutlined
 } from "@ant-design/icons";
+import { PartWisePriorityPdfDownload, OrderWisePriorityPdfDownload } from "../DownloadReports/PartsPriorityPdfDownload";
 
 const Row = (props) => {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -30,6 +32,7 @@ const Row = (props) => {
 };
 
 const PartsPriority = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [partData, setPartData] = useState([]);
   const [partLoading, setPartLoading] = useState(false);
   const [orderData, setOrderData] = useState([]);
@@ -39,9 +42,15 @@ const PartsPriority = () => {
   const [messageApi, contextHolder] = message.useMessage();
   const [editingId, setEditingId] = useState(null);
   const [editPriorityValue, setEditPriorityValue] = useState(null);
-  const [activeTab, setActiveTab] = useState("part-wise");
+  const activeTab = searchParams.get("tab") || "part-wise";
   const hasFetchedPartWise = useRef(false);
   const hasFetchedOrderWise = useRef(false);
+  const [partSearchText, setPartSearchText] = useState("");
+  const [orderSearchText, setOrderSearchText] = useState("");
+
+  const setActiveTab = (tab) => {
+    setSearchParams({ tab });
+  };
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -57,7 +66,12 @@ const PartsPriority = () => {
       const response = await fetch(`${API_BASE_URL}/orders/part-priorities/all`);
       if (response.ok) {
         const result = await response.json();
-        setPartData(result);
+        const filtered = result.filter(
+          (item) =>
+            item.part_type_name &&
+            item.part_type_name.toLowerCase() === "in-house"
+        );
+        setPartData(filtered);
       } else {
         messageApi.error("Failed to fetch priority data");
       }
@@ -103,6 +117,32 @@ const PartsPriority = () => {
     };
     loadData();
   }, [activeTab]);
+
+  const handlePartSearch = (value) => {
+    setPartSearchText(value);
+  };
+  const handleOrderSearch = (value) => {
+    setOrderSearchText(value);
+  };
+
+  const filteredPartData = partData.filter((row) => {
+    if (!partSearchText) return true;
+    const q = partSearchText.toLowerCase();
+    const so = String(row.sale_order_number || "").toLowerCase();
+    const pn = String(row.project_name || "").toLowerCase();
+    const prod = String(row.product_name || "").toLowerCase();
+    const part = String(row.part_name || "").toLowerCase();
+    return so.includes(q) || pn.includes(q) || prod.includes(q) || part.includes(q);
+  });
+
+  const filteredOrderData = orderData.filter((row) => {
+    if (!orderSearchText) return true;
+    const q = orderSearchText.toLowerCase();
+    const so = String(row.sale_order_number || "").toLowerCase();
+    const pn = String(row.project_name || "").toLowerCase();
+    const prod = String(row.product_name || "").toLowerCase();
+    return so.includes(q) || pn.includes(q) || prod.includes(q);
+  });
 
   const handleUpdatePriority = async (id, newPriority) => {
     if (!newPriority || newPriority < 1) return;
@@ -452,40 +492,59 @@ const PartsPriority = () => {
     }
 
     return (
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onPartDragEnd}>
-        <SortableContext items={partData.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-          <Table
-            components={{
-              body: {
-                row: Row,
-              },
-            }}
-            columns={columns}
-            dataSource={partData}
-            rowKey="id"
-            pagination={{
-              current: partPagination.current,
-              pageSize: partPagination.pageSize,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-              pageSizeOptions: ['10', '20', '50', '100'],
-              position: ['bottomCenter'],
-            }}
-            onChange={(paginationConfig) => {
-              setPartPagination({
-                current: paginationConfig.current,
-                pageSize: paginationConfig.pageSize,
-              });
-            }}
-            size="small"
-            bordered
-            className="modern-table"
-            locale={{ emptyText: <Empty description="No parts priority data found" /> }}
-            scroll={{ x: "max-content" }}
-          />
-        </SortableContext>
-      </DndContext>
+      <div className="p-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 sm:px-4 pt-2 pb-3 gap-2">
+          <Typography.Text className="font-semibold text-gray-700 text-sm sm:text-base">
+            Part Wise Priority
+          </Typography.Text>
+          <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
+            <Input.Search
+              placeholder="Search..."
+              allowClear
+              size="middle"
+              className="w-full sm:w-64"
+              onSearch={handlePartSearch}
+              onChange={(e) => handlePartSearch(e.target.value)}
+            />
+            <PartWisePriorityPdfDownload data={partData} />
+          </Space>
+        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onPartDragEnd}>
+          <SortableContext items={partData.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+            <Table
+              components={{
+                body: {
+                  row: Row,
+                },
+              }}
+              columns={columns}
+              dataSource={filteredPartData}
+              rowKey="id"
+              pagination={{
+                current: partPagination.current,
+                pageSize: partPagination.pageSize,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                placement: 'bottom',
+                responsive: true,
+              }}
+              onChange={(paginationConfig) => {
+                setPartPagination({
+                  current: paginationConfig.current,
+                  pageSize: paginationConfig.pageSize,
+                });
+              }}
+              size="small"
+              bordered
+              className="modern-table"
+              locale={{ emptyText: <Empty description={partSearchText ? "No parts found matching your search" : "No parts priority data found"} /> }}
+              scroll={{ x: 1200 }}
+            />
+          </SortableContext>
+        </DndContext>
+      </div>
     );
   };
 
@@ -499,40 +558,59 @@ const PartsPriority = () => {
     }
 
     return (
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onOrderDragEnd}>
-        <SortableContext items={orderData.map((i) => i.order_id)} strategy={verticalListSortingStrategy}>
-          <Table
-            components={{
-              body: {
-                row: Row,
-              },
-            }}
-            columns={orderColumns}
-            dataSource={orderData}
-            rowKey="order_id"
-            pagination={{
-              current: orderPagination.current,
-              pageSize: orderPagination.pageSize,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-              pageSizeOptions: ['10', '20', '50', '100'],
-              position: ['bottomCenter'],
-            }}
-            onChange={(paginationConfig) => {
-              setOrderPagination({
-                current: paginationConfig.current,
-                pageSize: paginationConfig.pageSize,
-              });
-            }}
-            size="small"
-            bordered
-            className="modern-table"
-            locale={{ emptyText: <Empty description="No order-wise priority data found" /> }}
-            scroll={{ x: "max-content" }}
-          />
-        </SortableContext>
-      </DndContext>
+      <div className="p-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 sm:px-4 pt-2 pb-3 gap-2">
+          <Typography.Text className="font-semibold text-gray-700 text-sm sm:text-base">
+            Order Wise Priority
+          </Typography.Text>
+          <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
+            <Input.Search
+              placeholder="Search..."
+              allowClear
+              size="middle"
+              className="w-full sm:w-64"
+              onSearch={handleOrderSearch}
+              onChange={(e) => handleOrderSearch(e.target.value)}
+            />
+            <OrderWisePriorityPdfDownload data={orderData} />
+          </Space>
+        </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onOrderDragEnd}>
+          <SortableContext items={orderData.map((i) => i.order_id)} strategy={verticalListSortingStrategy}>
+            <Table
+              components={{
+                body: {
+                  row: Row,
+                },
+              }}
+              columns={orderColumns}
+              dataSource={filteredOrderData}
+              rowKey="order_id"
+              pagination={{
+                current: orderPagination.current,
+                pageSize: orderPagination.pageSize,
+                showSizeChanger: true,
+                showQuickJumper: true,
+                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                placement: 'bottom',
+                responsive: true,
+              }}
+              onChange={(paginationConfig) => {
+                setOrderPagination({
+                  current: paginationConfig.current,
+                  pageSize: paginationConfig.pageSize,
+                });
+              }}
+              size="small"
+              bordered
+              className="modern-table"
+              locale={{ emptyText: <Empty description={orderSearchText ? "No orders found matching your search" : "No order-wise priority data found"} /> }}
+              scroll={{ x: 1200 }}
+            />
+          </SortableContext>
+        </DndContext>
+      </div>
     );
   };
 
@@ -558,7 +636,7 @@ const PartsPriority = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-2 sm:p-4 lg:p-6">
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
@@ -571,25 +649,39 @@ const PartsPriority = () => {
         .modern-table .ant-table-tbody > tr > td {
           border-bottom: 1px solid #f0f0f0;
         }
+        @media (max-width: 768px) {
+          .ant-table {
+            font-size: 12px;
+          }
+          .ant-table-thead > tr > th,
+          .ant-table-tbody > tr > td {
+            padding: 8px 4px;
+          }
+        }
       `}</style>
 
       {contextHolder}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
-        <div className="flex items-center justify-between">
-            <div>
-                <Typography.Title level={2} style={{ margin: 0, fontSize: '24px' }} className="flex items-center gap-3 text-gray-800">
+      <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="w-full sm:w-auto">
+                <Typography.Title 
+                  level={2} 
+                  style={{ margin: 0, fontSize: 'clamp(18px, 4vw, 24px)' }} 
+                  className="flex items-center gap-2 sm:gap-3 text-gray-800"
+                >
                     <OrderedListOutlined className="text-blue-600" />
-                    Parts Priority Management
+                    <span className="hidden sm:inline">Parts Priority Management</span>
+                    <span className="sm:hidden">Parts Priority</span>
                 </Typography.Title>
-                <Typography.Text className="text-gray-500 mt-1 block">
+                <Typography.Text className="text-gray-500 mt-1 block text-xs sm:text-sm">
                     Manage and reorder manufacturing priorities for all parts across projects
                 </Typography.Text>
             </div>
         </div>
       </div>
 
-      <Card className="shadow-sm rounded-xl border border-gray-100" bodyStyle={{ padding: 0 }}>
+      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }}>
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}

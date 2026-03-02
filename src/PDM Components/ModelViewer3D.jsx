@@ -1,14 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Spin, Empty, Typography } from "antd";
 import { API_BASE_URL } from "../Config/auth";
 
 const { Text } = Typography;
 
-const ModelViewer3D = ({ documentId, height = 160 }) => {
+const modelCache = new Map();
+
+const ModelViewer3D = ({ documentId, height = 160, showControls = false }) => {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
+  const rendererRef = useRef(null);
+  const sceneRef = useRef(null);
+  const cameraRef = useRef(null);
+  const modelRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const controlsRef = useRef(null);
+  const baseDistanceRef = useRef(3);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -17,12 +27,6 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
       return;
     }
 
-    let renderer;
-    let scene;
-    let camera;
-    let controls;
-    let animationFrame;
-    let model;
     let objectUrl;
     let mounted = true;
 
@@ -37,18 +41,21 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
       const width = rect.width || 300;
       const heightPx = rect.height || height;
 
-      renderer = new THREE.WebGLRenderer({
+      const renderer = new THREE.WebGLRenderer({
         canvas,
         antialias: true,
         alpha: true,
       });
       renderer.setPixelRatio(window.devicePixelRatio || 1);
       renderer.setSize(width, heightPx, false);
+      rendererRef.current = renderer;
 
-      scene = new THREE.Scene();
+      const scene = new THREE.Scene();
+      sceneRef.current = scene;
 
-      camera = new THREE.PerspectiveCamera(45, width / heightPx, 0.1, 5000);
+      const camera = new THREE.PerspectiveCamera(45, width / heightPx, 0.1, 5000);
       camera.position.set(0, 0, 3);
+      cameraRef.current = camera;
 
       const ambient = new THREE.AmbientLight(0xffffff, 0.8);
       scene.add(ambient);
@@ -61,17 +68,42 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
       grid.position.y = -1;
       scene.add(grid);
 
+      if (showControls) {
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.enablePan = false;
+        controlsRef.current = controls;
+      }
+
       const loader = new GLTFLoader();
 
       const loadModel = async () => {
         try {
           setLoading(true);
           setError("");
-          const response = await fetch(`${API_BASE_URL}/documents/${documentId}/3d`);
-          if (!response.ok) {
-            throw new Error("Failed to load 3D model");
+
+          let arrayBuffer;
+          if (modelCache.has(documentId)) {
+            arrayBuffer = modelCache.get(documentId);
+          } else {
+            const response = await fetch(`${API_BASE_URL}/documents/${documentId}/3d`);
+            if (!response.ok) {
+              let message = "Unable to load 3D model";
+              try {
+                const data = await response.json();
+                if (data && data.detail) {
+                  message = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+                } else if (response.status === 404) {
+                  message = "No 3D preview available for this document";
+                }
+              } catch (e) {}
+              throw new Error(message);
+            }
+            arrayBuffer = await response.arrayBuffer();
+            modelCache.set(documentId, arrayBuffer);
           }
-          const arrayBuffer = await response.arrayBuffer();
+
           const blob = new Blob([arrayBuffer], { type: "model/gltf-binary" });
           objectUrl = URL.createObjectURL(blob);
 
@@ -81,8 +113,15 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
               if (!mounted) {
                 return;
               }
-              model = gltf.scene;
-              scene.add(model);
+              const sceneLocal = sceneRef.current;
+              const cameraLocal = cameraRef.current;
+              if (!sceneLocal || !cameraLocal) {
+                return;
+              }
+
+              const model = gltf.scene;
+              modelRef.current = model;
+              sceneLocal.add(model);
 
               const box = new THREE.Box3().setFromObject(model);
               let size = box.getSize(new THREE.Vector3());
@@ -103,16 +142,37 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
               model.position.z += model.position.z - center.z;
 
               const finalMaxDim = Math.max(size.x, size.y, size.z) || 1;
-              const fov = (camera.fov * Math.PI) / 180;
+              const fov = (cameraLocal.fov * Math.PI) / 180;
               let cameraZ = finalMaxDim / (2 * Math.tan(fov / 2));
               cameraZ *= 1.8;
-              camera.near = Math.max(cameraZ / 100, 0.1);
-              camera.far = cameraZ * 10;
-              camera.updateProjectionMatrix();
-              camera.position.set(0, 0, cameraZ);
-              camera.lookAt(new THREE.Vector3(0, 0, 0));
+              cameraLocal.near = Math.max(cameraZ / 100, 0.1);
+              cameraLocal.far = cameraZ * 10;
+              cameraLocal.updateProjectionMatrix();
+              cameraLocal.position.set(0, 0, cameraZ);
+              cameraLocal.lookAt(new THREE.Vector3(0, 0, 0));
+              baseDistanceRef.current = cameraZ;
 
               setLoading(false);
+
+              const renderScene = () => {
+                animationFrameRef.current = requestAnimationFrame(renderScene);
+                const currentModel = modelRef.current;
+                const currentCamera = cameraRef.current;
+                const currentScene = sceneRef.current;
+                const currentRenderer = rendererRef.current;
+                const currentControls = controlsRef.current;
+                if (!currentCamera || !currentScene || !currentRenderer) {
+                  return;
+                }
+                if (!showControls && currentModel) {
+                  currentModel.rotation.y += 0.0025;
+                }
+                if (currentControls) {
+                  currentControls.update();
+                }
+                currentRenderer.render(currentScene, currentCamera);
+              };
+
               renderScene();
             },
             undefined,
@@ -129,23 +189,18 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
             return;
           }
           setLoading(false);
-          setError("Unable to load 3D model");
+          setError(e && e.message ? e.message : "Unable to load 3D model");
         }
-      };
-
-      const renderScene = () => {
-        animationFrame = requestAnimationFrame(renderScene);
-        if (model) {
-          model.rotation.y += 0.0025;
-        }
-        renderer.render(scene, camera);
       };
 
       const handleResize = () => {
-        if (!renderer || !camera || !container) {
+        const renderer = rendererRef.current;
+        const camera = cameraRef.current;
+        const containerResize = containerRef.current;
+        if (!renderer || !camera || !containerResize) {
           return;
         }
-        const rectResize = container.getBoundingClientRect();
+        const rectResize = containerResize.getBoundingClientRect();
         const widthResize = rectResize.width || 300;
         const heightResize = rectResize.height || height;
         camera.aspect = widthResize / heightResize;
@@ -163,9 +218,11 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
 
     const cleanup = () => {
       mounted = false;
-      if (animationFrame) {
-        cancelAnimationFrame(animationFrame);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
+      const scene = sceneRef.current;
       if (scene) {
         scene.traverse(child => {
           if (child.isMesh) {
@@ -178,9 +235,17 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
           }
         });
       }
+      const renderer = rendererRef.current;
       if (renderer) {
         renderer.dispose();
+        rendererRef.current = null;
       }
+      const controls = controlsRef.current;
+      if (controls) {
+        controls.dispose();
+        controlsRef.current = null;
+      }
+      modelRef.current = null;
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
       }
@@ -191,7 +256,7 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
     return () => {
       cleanup();
     };
-  }, [documentId, height]);
+  }, [documentId, height, showControls]);
 
   if (!documentId) {
     return (
@@ -205,12 +270,14 @@ const ModelViewer3D = ({ documentId, height = 160 }) => {
     <div
       ref={containerRef}
       className="w-full h-full bg-white rounded border border-gray-200 overflow-hidden relative"
-      style={{ minHeight: height }}
+      style={{ minHeight: height, maxWidth: '100%' }}
     >
-      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
+      <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block", maxWidth: '100%' }} />
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/70">
-          <Spin tip="Loading 3D model..." />
+          <Spin>
+            <span className="text-sm text-gray-700">Loading 3D model...</span>
+          </Spin>
         </div>
       )}
       {error && !loading && (

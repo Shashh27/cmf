@@ -1,42 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { API_BASE_URL } from "../Config/auth";
-import { 
-  Table, 
-  Button, 
-  Tabs, 
-  Badge, 
-  Modal, 
-  Form, 
-  Input, 
-  InputNumber,
-  Select, 
-  Typography, 
-  Space, 
-  Spin, 
-  Empty, 
-  message,
-  Checkbox,
-  Row,
-  Col,
-  Tooltip,
-  Card,
-  Tag
-} from "antd";
-import { 
-  CaretDownOutlined,
-  CaretRightOutlined,
-  AppstoreOutlined,
-  CodeSandboxOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  PlusOutlined,
-  BlockOutlined,
-  FileTextOutlined,
-  InfoCircleOutlined,
-  ExperimentOutlined,
-  LinkOutlined,
-  SafetyCertificateOutlined
-} from "@ant-design/icons";
+import { Table, Button, Tabs, Badge, Modal, Form, Input, InputNumber,Select, Typography, Space, Spin, Empty, 
+  message, Checkbox, Row, Col, Tooltip, Card, Tag } from "antd";
+import { CaretDownOutlined,CaretRightOutlined,AppstoreOutlined,CodeSandboxOutlined,EditOutlined,DeleteOutlined,PlusOutlined,
+  BlockOutlined,FileTextOutlined,InfoCircleOutlined,ExperimentOutlined,LinkOutlined,SafetyCertificateOutlined,CheckOutlined,CloseOutlined,SearchOutlined } from "@ant-design/icons";
+import { RawMaterialsInventoryPdfDownload, PartsWithRawMaterialsStatusPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -64,7 +32,6 @@ const RawMaterials = () => {
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [hasFetchedOrders, setHasFetchedOrders] = useState(false);
   const [hasFetchedRawMaterials, setHasFetchedRawMaterials] = useState(false);
-  const [hasFetchedLinkedMaterials, setHasFetchedLinkedMaterials] = useState(false);
 
   // Refs to track ongoing fetches
   const fetchingRawMaterials = useRef(false);
@@ -73,6 +40,13 @@ const RawMaterials = () => {
 
   const [rawMaterialsPagination, setRawMaterialsPagination] = useState({ current: 1, pageSize: 15 });
   const [linkedMaterialsPagination, setLinkedMaterialsPagination] = useState({ current: 1, pageSize: 15 });
+  const [inlineEditRow, setInlineEditRow] = useState(null);
+  const [statusEditRowId, setStatusEditRowId] = useState(null);
+  const [statusEditValue, setStatusEditValue] = useState(null);
+  const [orderValuesByMaterial, setOrderValuesByMaterial] = useState({});
+  const [searchText, setSearchText] = useState("");
+  const [orderSearchText, setOrderSearchText] = useState("");
+  const [linkedMaterialsSearchText, setLinkedMaterialsSearchText] = useState("");
 
   useEffect(() => {
     const loadData = async () => {
@@ -91,10 +65,7 @@ const RawMaterials = () => {
           setHasFetchedRawMaterials(true);
         }
       } else if (activeTab === "order-status") {
-        if (!hasFetchedLinkedMaterials) {
-          await fetchLinkedMaterials();
-          setHasFetchedLinkedMaterials(true);
-        }
+        await fetchLinkedMaterials();
       }
     };
     loadData();
@@ -125,49 +96,16 @@ const RawMaterials = () => {
     if (fetchingRawMaterials.current) return;
     fetchingRawMaterials.current = true;
     setLoading(true);
-    
     try {
-      try {
-        const response = await fetch(`${API_BASE_URL}/rawmaterials/?skip=0&limit=100`);
-        
-        if (response.ok) {
-          const data = await response.json();
-          
-          if (Array.isArray(data)) {
-            setRawMaterials(data);
-            return;
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching raw materials:', error);
+      const response = await fetch(`${API_BASE_URL}/rawmaterials/`);
+      if (response.ok) {
+        const data = await response.json();
+        setRawMaterials(Array.isArray(data) ? data : []);
+      } else {
+        setRawMaterials([]);
       }
-      
-      const endpoints = ["rawmaterials/", "raw-materials/", "raw_materials/"];
-      for (const endpoint of endpoints) {
-        try {
-          const response = await fetch(`${API_BASE_URL}/${endpoint}`);
-          if (response.ok) {
-            const data = await response.json();
-            let materials = [];
-            if (Array.isArray(data)) {
-              materials = data;
-            } else if (data?.results) {
-              materials = data.results;
-            } else if (data?.data) {
-              materials = Array.isArray(data.data) ? data.data : [];
-            } else if (data?.raw_materials) {
-              materials = data.raw_materials;
-            } else if (data?.id) {
-              materials = [data];
-            }
-            setRawMaterials(materials);
-            return;
-          }
-        } catch (error) {
-          console.error(`Error fetching raw materials from ${endpoint}:`, error);
-        }
-      }
-      
+    } catch (error) {
+      console.error("Error fetching raw materials:", error);
       setRawMaterials([]);
     } finally {
       setLoading(false);
@@ -210,7 +148,6 @@ const RawMaterials = () => {
       stock_type: material.stock_type || "",
       quantity: material.quantity ?? "",
       stock_dimensions: material.stock_dimensions || "",
-      status: material.status || "",
     });
     setRawMaterialModalOpen(true);
   };
@@ -239,7 +176,6 @@ const RawMaterials = () => {
         stock_type: values.stock_type,
         quantity: values.quantity === "" ? 0 : Number(values.quantity) || 0,
         stock_dimensions: values.stock_dimensions,
-        status: values.status,
       };
 
       const response = await fetch(url, {
@@ -265,6 +201,91 @@ const RawMaterials = () => {
     } finally {
       setSavingRawMaterial(false);
     }
+  };
+
+  const startInlineEdit = (record) => {
+    if (!record?.id) return;
+    const existing = orderValuesByMaterial[record.id] || {};
+    setInlineEditRow({
+      id: record.id,
+      mass: existing.order_mass ?? record.mass ?? 0,
+      quantity: existing.order_quantity ?? 0,
+    });
+  };
+
+  const cancelInlineEdit = () => {
+    setInlineEditRow(null);
+  };
+
+  const changeInlineEdit = (field, value) => {
+    setInlineEditRow((prev) => (prev ? { ...prev, [field]: value } : prev));
+  };
+
+  const saveInlineEdit = (record) => {
+    if (!inlineEditRow || inlineEditRow.id !== record.id || !record?.id) return;
+
+    const order_mass =
+      inlineEditRow.mass === "" ||
+      inlineEditRow.mass === null ||
+      inlineEditRow.mass === undefined
+        ? 0
+        : Number(inlineEditRow.mass) || 0;
+
+    const order_quantity =
+      inlineEditRow.quantity === "" ||
+      inlineEditRow.quantity === null ||
+      inlineEditRow.quantity === undefined
+        ? 0
+        : Number(inlineEditRow.quantity) || 0;
+
+    setOrderValuesByMaterial((prev) => ({
+      ...prev,
+      [record.id]: {
+        order_mass,
+        order_quantity,
+      },
+    }));
+
+    setInlineEditRow(null);
+    message.success("Order Kg and Qty captured for this material");
+  };
+
+  const handleDeleteLinkGroup = (record) => {
+    const ids = record.linkage_ids || [];
+    if (!ids.length) {
+      message.warning("No linked records found to delete.");
+      return;
+    }
+
+    Modal.confirm({
+      title: 'Confirm Delete',
+      content: 'Are you sure you want to remove this material from the order and parts?',
+      okText: 'Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          const responses = await Promise.all(
+            ids.map((id) =>
+              fetch(`${API_BASE_URL}/order-parts-raw-material-linked/${id}`, {
+                method: "DELETE",
+              })
+            )
+          );
+
+          const allOk = responses.every((res) => res.ok);
+          if (allOk) {
+            await fetchLinkedMaterials();
+            message.success("Linked material removed successfully");
+          } else {
+            message.error("Failed to delete linked material");
+          }
+        } catch (error) {
+          console.error("Error deleting linked material:", error);
+          message.error("Error deleting linked material");
+        }
+      },
+    });
   };
 
   const handleDeleteRawMaterial = async (material) => {
@@ -350,6 +371,10 @@ const RawMaterials = () => {
   const renderPart = (partDetails, level = 0, orderId) => {
     const part = partDetails.part || partDetails;
     if (!part || !part.id) return null;
+    
+    // Filter out Out-Source parts, only show IN-House parts
+    if (part.type_name === "Out-Source") return null;
+    
     const isSelected = selectedPartsByOrder[orderId]?.[part.id];
     return (
       <div
@@ -465,7 +490,7 @@ const RawMaterials = () => {
   const renderOrderTree = () => {
     return (
       <div className="p-2 space-y-1">
-        {orders.map((order) => {
+        {filteredOrders.map((order) => {
           const isExpanded = expandedOrders[order.id];
           const hasProduct = !!order.product_id;
 
@@ -500,8 +525,8 @@ const RawMaterials = () => {
             </div>
           );
         })}
-        {orders.length === 0 && !ordersLoading && (
-          <Empty description="No orders found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        {filteredOrders.length === 0 && !ordersLoading && (
+          <Empty description={orderSearchText ? "No orders found matching your search" : "No orders found"} image={Empty.PRESENTED_IMAGE_SIMPLE} />
         )}
         {ordersLoading && (
           <div className="py-12 flex justify-center">
@@ -513,42 +538,39 @@ const RawMaterials = () => {
   };
 
   const handleSubmitLinks = async () => {
-    const activeOrderIds = Object.keys(selectedPartsByOrder).filter((orderId) => {
-      const map = selectedPartsByOrder[orderId];
-      return map && Object.values(map).some(Boolean);
-    });
+    const orderPartSelections = Object.entries(selectedPartsByOrder || {})
+      .map(([orderId, partMap]) => {
+        const partIds = Object.keys(partMap || {})
+          .filter((id) => partMap[id])
+          .map((id) => Number(id));
+        return {
+          orderId: Number(orderId),
+          partIds,
+        };
+      })
+      .filter((item) => item.partIds.length > 0);
 
-    if (activeOrderIds.length === 0) {
+    if (!orderPartSelections.length) {
       message.warning("Please select at least one part.");
       return;
     }
-
-    if (activeOrderIds.length > 1) {
-      message.warning("Please select parts from only one order at a time.");
-      return;
-    }
-
-    const orderId = Number(activeOrderIds[0]);
-    const partMap = selectedPartsByOrder[orderId] || {};
-    const partIds = Object.keys(partMap)
-      .filter((id) => partMap[id])
-      .map((id) => Number(id));
 
     const rawMaterialIds = Object.keys(selectedRawMaterialIds)
       .filter((id) => selectedRawMaterialIds[id])
       .map((id) => Number(id));
-
-    if (partIds.length === 0) {
-      message.warning("Please select at least one part.");
-      return;
-    }
 
     if (rawMaterialIds.length === 0) {
       message.warning("Please select at least one raw material.");
       return;
     }
 
-    const isManyParts = partIds.length > 1;
+    const allPartIds = [];
+    orderPartSelections.forEach((item) => {
+      allPartIds.push(...item.partIds);
+    });
+    const uniquePartIds = Array.from(new Set(allPartIds));
+
+    const isManyParts = uniquePartIds.length > 1;
     const isManyMaterials = rawMaterialIds.length > 1;
 
     if (isManyParts && isManyMaterials) {
@@ -556,24 +578,53 @@ const RawMaterials = () => {
       return;
     }
 
+    const order_quantities = {};
+    const order_masses = {};
+
+    rawMaterialIds.forEach((id) => {
+      const vals = orderValuesByMaterial[id];
+      if (vals) {
+        if (vals.order_quantity !== undefined && vals.order_quantity !== null) {
+          order_quantities[id] = Number(vals.order_quantity) || 0;
+        }
+        if (vals.order_mass !== undefined && vals.order_mass !== null) {
+          order_masses[id] = Number(vals.order_mass) || 0;
+        }
+      }
+    });
+
     setLinking(true);
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/order-parts-raw-material-linked/bulk`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            raw_material_ids: rawMaterialIds,
-            part_ids: partIds,
-            order_id: orderId,
-          }),
-        }
+      const responses = await Promise.all(
+        orderPartSelections.map(({ orderId, partIds }) => {
+          if (!partIds.length) {
+            return null;
+          }
+          return fetch(
+            `${API_BASE_URL}/order-parts-raw-material-linked/bulk`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                raw_material_ids: rawMaterialIds,
+                part_ids: partIds,
+                order_id: orderId,
+                order_quantities,
+                order_masses,
+              }),
+            }
+          );
+        })
       );
 
-      if (response.ok) {
+      const validResponses = responses.filter((res) => !!res);
+      const allOk =
+        validResponses.length > 0 &&
+        validResponses.every((res) => res && res.ok);
+
+      if (allOk) {
         message.success("Raw Materials added Successfully.");
       } else {
         message.error("Adding failed. Please check your selections and try again.");
@@ -587,30 +638,76 @@ const RawMaterials = () => {
   };
 
   const renderLinkedMaterialsTable = () => {
+    const groupedMap = {};
+    filteredLinkedMaterials.forEach((item) => {
+      if (!item) return;
+      const materialId = item.raw_material_id ?? "no-material";
+      const orderId = item.order_id ?? "no-order";
+      const key = `${materialId}-${orderId}`;
+
+      if (!groupedMap[key]) {
+        groupedMap[key] = {
+          id: `${materialId}-${orderId}`,
+          raw_material_id: item.raw_material_id,
+          order_id: item.order_id,
+          sale_order_number: item.sale_order_number,
+          project_name: item.project_name,
+          material_name: item.material_name,
+          quantity: item.order_quantity,
+          mass: item.mass,
+          material_status: item.material_status,
+          part_numbers: [],
+          part_names: [],
+          linkage_ids: [],
+        };
+      }
+
+      if (item.part_number) {
+        groupedMap[key].part_numbers.push(item.part_number);
+      }
+      if (item.part_name) {
+        groupedMap[key].part_names.push(item.part_name);
+      }
+      if (item.id != null) {
+        groupedMap[key].linkage_ids.push(item.id);
+      }
+    });
+
+    const groupedData = Object.values(groupedMap).sort((a, b) => {
+      const aMat = a.raw_material_id ?? 0;
+      const bMat = b.raw_material_id ?? 0;
+      if (aMat !== bMat) return aMat - bMat;
+      const aOrder = a.order_id ?? 0;
+      const bOrder = b.order_id ?? 0;
+      return aOrder - bOrder;
+    });
+
+    const getMaterialRowSpan = (record, index) => {
+      if (!groupedData.length) return 1;
+      if (index === 0 || groupedData[index - 1].raw_material_id !== record.raw_material_id) {
+        const currentId = record.raw_material_id;
+        let rowSpan = 1;
+        for (let i = index + 1; i < groupedData.length; i += 1) {
+          if (groupedData[i].raw_material_id === currentId) {
+            rowSpan += 1;
+          } else {
+            break;
+          }
+        }
+        return rowSpan;
+      }
+      return 0;
+    };
+
     const columns = [
       {
         title: <span className="font-semibold text-gray-700">SL NO</span>,
-        dataIndex: 'index',
         key: 'index',
         width: 80,
         render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
       },
       {
-        title: <span className="font-semibold text-gray-700">Material Name</span>,
-        dataIndex: 'material_name',
-        key: 'material_name',
-        ellipsis: true,
-        render: (text) => <span className="font-medium text-gray-800">{text}</span>
-      },
-      {
-        title: <span className="font-semibold text-gray-700">Part Name</span>,
-        dataIndex: 'part_name',
-        key: 'part_name',
-        ellipsis: true,
-        render: (text) => text ? <Tag color="blue">{text}</Tag> : <span className="text-gray-400">-</span>,
-      },
-      {
-        title: <span className="font-semibold text-gray-700">Sale Order</span>,
+        title: <span className="font-semibold text-gray-700">Project Number</span>,
         dataIndex: 'sale_order_number',
         key: 'sale_order_number',
         render: (text) => <span className="font-mono text-gray-700">{text}</span>
@@ -623,33 +720,220 @@ const RawMaterials = () => {
         render: (text) => text || <span className="text-gray-400">-</span>,
       },
       {
+        title: <span className="font-semibold text-gray-700">Part Number</span>,
+        dataIndex: 'part_numbers',
+        key: 'part_number',
+        ellipsis: true,
+        render: (values) => {
+          if (!values || values.length === 0) {
+            return <span className="text-gray-400">-</span>;
+          }
+          return (
+            <Space size="small" wrap>
+              {values.map((val, idx) => (
+                <Tag key={idx} color="geekblue">
+                  {val}
+                </Tag>
+              ))}
+            </Space>
+          );
+        },
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Part Name</span>,
+        dataIndex: 'part_names',
+        key: 'part_name',
+        ellipsis: true,
+        render: (values) => {
+          if (!values || values.length === 0) {
+            return <span className="text-gray-400">-</span>;
+          }
+          return (
+            <Space size="small" wrap>
+              {values.map((val, idx) => (
+                <Tag key={idx} color="blue">
+                  {val}
+                </Tag>
+              ))}
+            </Space>
+          );
+        },
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Material Name</span>,
+        dataIndex: 'material_name',
+        key: 'material_name',
+        ellipsis: true,
+        render: (text) => <span className="font-medium text-gray-800">{text}</span>,
+        onCell: (record, index) => ({
+          rowSpan: getMaterialRowSpan(record, index),
+        }),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Quantity</span>,
+        dataIndex: 'quantity',
+        key: 'quantity',
+        render: (value) =>
+          value !== null && value !== undefined ? value : <span className="text-gray-400">-</span>,
+        onCell: (record, index) => ({
+          rowSpan: getMaterialRowSpan(record, index),
+        }),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Kg</span>,
+        dataIndex: 'mass',
+        key: 'mass',
+        render: (value) =>
+          value !== null && value !== undefined
+            ? <span className="font-mono text-gray-700">{value}</span>
+            : <span className="text-gray-400">-</span>,
+        onCell: (record, index) => ({
+          rowSpan: getMaterialRowSpan(record, index),
+        }),
+      },
+      {
         title: <span className="font-semibold text-gray-700">Status</span>,
         dataIndex: 'material_status',
         key: 'material_status',
-        render: (status) => {
-            let color = 'default';
-            if (status === 'Completed') color = 'success';
-            if (status === 'In Progress') color = 'processing';
-            return <Tag color={color}>{status || "-"}</Tag>
+        render: (status, record) => {
+          const isEditing = statusEditRowId === record.id;
+          if (isEditing) {
+            return (
+              <Select
+                value={statusEditValue}
+                onChange={setStatusEditValue}
+                style={{ width: '100%' }}
+                size="small"
+              >
+                <Option value="available">Available</Option>
+                <Option value="purchase request">Purchase Request</Option>
+                <Option value="purchase order">Purchase Order</Option>
+              </Select>
+            );
+          }
+          let color = 'default';
+          if (status === 'available') color = 'success';
+          if (status === 'purchase order') color = 'processing';
+          if (status === 'purchase request') color = 'warning';
+          return <Tag color={color}>{status || "-"}</Tag>;
+        },
+        onCell: (record, index) => ({
+          rowSpan: getMaterialRowSpan(record, index),
+        }),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Actions</span>,
+        key: 'status_actions',
+        render: (_, record) => {
+          const isEditing = statusEditRowId === record.id;
+          if (isEditing) {
+            return (
+              <Space>
+                <Tooltip title="Save">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CheckOutlined />}
+                    className="text-green-600 hover:bg-green-50"
+                    onClick={async () => {
+                      if (!statusEditValue || !record.order_id || !record.raw_material_id) return;
+                      try {
+                        const response = await fetch(
+                          `${API_BASE_URL}/order-parts-raw-material-linked/status/order/${record.order_id}/raw-material/${record.raw_material_id}`,
+                          {
+                            method: "PUT",
+                            headers: {
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({ material_status: statusEditValue }),
+                          }
+                        );
+                        if (response.ok) {
+                          await fetchLinkedMaterials();
+                          message.success("Status updated successfully");
+                          setStatusEditRowId(null);
+                          setStatusEditValue(null);
+                        } else {
+                          message.error("Failed to update status");
+                        }
+                      } catch (error) {
+                        console.error("Error updating status:", error);
+                        message.error("Error updating status");
+                      }
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title="Cancel">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CloseOutlined />}
+                    className="text-gray-500 hover:bg-gray-100"
+                    onClick={() => {
+                      setStatusEditRowId(null);
+                      setStatusEditValue(null);
+                    }}
+                  />
+                </Tooltip>
+              </Space>
+            );
+          }
+          return (
+            <Space>
+              <Tooltip title="Edit Status">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  className="text-blue-600 hover:bg-blue-50"
+                  onClick={() => {
+                    setStatusEditRowId(record.id);
+                    setStatusEditValue(record.material_status || "available");
+                  }}
+                />
+              </Tooltip>
+              <Tooltip title="Delete Link">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  className="text-red-500 hover:bg-red-50"
+                  onClick={() => handleDeleteLinkGroup(record)}
+                />
+              </Tooltip>
+            </Space>
+          );
         },
       },
-      
     ];
 
     return (
-       <Card 
-        className="shadow-sm rounded-xl border border-gray-100" 
-        bodyStyle={{ padding: 0 }}
+      <Card 
+        className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" 
+        styles={{ body: { padding: 0 } }}
         title={
-            <div className="flex items-center gap-2">
-                <SafetyCertificateOutlined className="text-blue-500" />
-                <span className="font-bold text-gray-800">Parts with Raw Materials Status</span>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
+                <div className="flex items-center gap-2">
+                    <SafetyCertificateOutlined className="text-blue-500" />
+                    <span className="font-bold text-gray-800 text-sm sm:text-base">Parts with Raw Materials Status</span>
+                </div>
+                <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
+                    <Input.Search
+                        placeholder="Search..."
+                        allowClear
+                        onSearch={handleLinkedMaterialsSearch}
+                        onChange={(e) => handleLinkedMaterialsSearch(e.target.value)}
+                        className="w-full sm:w-64"
+                        size="middle"
+                    />
+                    <PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} />
+                </Space>
             </div>
         }
        >
         <Table
             columns={columns}
-            dataSource={linkedMaterials}
+            dataSource={groupedData}
             rowKey="id"
             size="small"
             bordered
@@ -660,7 +944,8 @@ const RawMaterials = () => {
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
               pageSizeOptions: ['10', '20', '50', '100'],
-              position: ['bottomCenter'],
+              placement: 'bottom',
+              responsive: true,
             }}
             onChange={(paginationConfig) => {
               setLinkedMaterialsPagination({
@@ -670,10 +955,74 @@ const RawMaterials = () => {
             }}
             locale={{ emptyText: <Empty description="No linked materials found" /> }}
             className="modern-table"
+            scroll={{ x: 1200 }}
         />
       </Card>
     );
   };
+
+  const handleSearch = (value) => {
+    setSearchText(value);
+  };
+
+  const handleOrderSearch = (value) => {
+    setOrderSearchText(value);
+  };
+
+  const handleLinkedMaterialsSearch = (value) => {
+    setLinkedMaterialsSearchText(value);
+  };
+
+  const filteredLinkedMaterials = (linkedMaterials || []).filter(item => {
+    if (!linkedMaterialsSearchText) return true;
+    
+    const searchLower = linkedMaterialsSearchText.toLowerCase();
+    const saleOrderNumber = (item.sale_order_number || "").toLowerCase();
+    const projectName = (item.project_name || "").toLowerCase();
+    const materialName = (item.material_name || "").toLowerCase();
+    const partNumber = (item.part_number || "").toLowerCase();
+    const partName = (item.part_name || "").toLowerCase();
+    const materialStatus = (item.material_status || "").toLowerCase();
+    
+    return (
+      saleOrderNumber.includes(searchLower) ||
+      projectName.includes(searchLower) ||
+      materialName.includes(searchLower) ||
+      partNumber.includes(searchLower) ||
+      partName.includes(searchLower) ||
+      materialStatus.includes(searchLower)
+    );
+  });
+
+  const filteredOrders = orders.filter(order => {
+    if (!orderSearchText) return true;
+    
+    const searchLower = orderSearchText.toLowerCase();
+    const saleOrderNumber = (order.sale_order_number || "").toLowerCase();
+    const projectName = (order.project_name || "").toLowerCase();
+    
+    return (
+      saleOrderNumber.includes(searchLower) ||
+      projectName.includes(searchLower)
+    );
+  });
+
+  const filteredMaterials = rawMaterials.filter(material => {
+    if (!searchText) return true;
+    
+    const searchLower = searchText.toLowerCase();
+    const materialName = (material.material_name || "").toLowerCase();
+    const materialSpec = (material.material_specification || "").toLowerCase();
+    const stockType = (material.stock_type || "").toLowerCase();
+    const stockDimensions = (material.stock_dimensions || "").toLowerCase();
+    
+    return (
+      materialName.includes(searchLower) ||
+      materialSpec.includes(searchLower) ||
+      stockType.includes(searchLower) ||
+      stockDimensions.includes(searchLower)
+    );
+  });
 
   const renderMaterialsTable = ({ showSelection = false, showActions = false } = {}) => {
     const columns = [
@@ -706,88 +1055,185 @@ const RawMaterials = () => {
           </Tooltip>
         ),
       },
-      {
-        title: <span className="font-semibold text-gray-700">Mass</span>,
-        dataIndex: 'mass',
-        key: 'mass',
-        render: (text) => text || "-",
-      },
-      {
-        title: <span className="font-semibold text-gray-700">Density</span>,
-        dataIndex: 'density',
-        key: 'density',
-        render: (text) => text || "-",
-      },
-      {
-        title: <span className="font-semibold text-gray-700">Volume</span>,
-        dataIndex: 'volume',
-        key: 'volume',
-        render: (text) => text || "-",
-      },
-      {
-        title: <span className="font-semibold text-gray-700">Stock Type</span>,
-        dataIndex: 'stock_type',
-        key: 'stock_type',
-        render: (text) => text ? <Tag>{text}</Tag> : "-",
-      },
-      {
-        title: <span className="font-semibold text-gray-700">Qty</span>,
-        dataIndex: 'quantity',
-        key: 'quantity',
-        render: (text) => text || "-",
-      },
-      {
-        title: <span className="font-semibold text-gray-700">Dimensions</span>,
-        dataIndex: 'stock_dimensions',
-        key: 'stock_dimensions',
-        ellipsis: true,
-        render: (text) => (
-          <Tooltip title={text}>
-            <span className="text-gray-600 font-mono text-xs">{text || "-"}</span>
-          </Tooltip>
-        ),
-      },
-      {
+    ];
+
+    // Add additional columns only for main Raw Materials tab (not for Link Materials)
+    if (!showSelection) {
+      columns.push(
+        {
+          title: <span className="font-semibold text-gray-700">kg</span>,
+          dataIndex: 'mass',
+          key: 'mass',
+          render: (text) => text || "-",
+        },
+        {
+          title: <span className="font-semibold text-gray-700">Density</span>,
+          dataIndex: 'density',
+          key: 'density',
+          render: (text) => text || "-",
+        },
+        {
+          title: <span className="font-semibold text-gray-700">Volume</span>,
+          dataIndex: 'volume',
+          key: 'volume',
+          render: (text) => text || "-",
+        },
+        {
+          title: <span className="font-semibold text-gray-700">Stock Type</span>,
+          dataIndex: 'stock_type',
+          key: 'stock_type',
+          render: (text) => text ? <Tag>{text}</Tag> : "-",
+        },
+        {
+          title: <span className="font-semibold text-gray-700">Qty</span>,
+          dataIndex: 'quantity',
+          key: 'quantity',
+          render: (text) => text !== null && text !== undefined ? text : "-",
+        },
+        {
+          title: <span className="font-semibold text-gray-700">Dimensions</span>,
+          dataIndex: 'stock_dimensions',
+          key: 'stock_dimensions',
+          ellipsis: true,
+          render: (text) => (
+            <Tooltip title={text}>
+              <span className="text-gray-600 font-mono text-xs">{text || "-"}</span>
+            </Tooltip>
+          ),
+        }
+      );
+    } else {
+      columns.push(
+        {
+          title: <span className="font-semibold text-gray-700">Available Kg</span>,
+          dataIndex: 'mass',
+          key: 'available_mass',
+          render: (value) => value || "-",
+        },
+        {
+          title: <span className="font-semibold text-gray-700">Order Kg</span>,
+          key: 'order_mass',
+          render: (value, record) => {
+            const stored = orderValuesByMaterial[record.id]?.order_mass;
+            const isEditing = inlineEditRow && inlineEditRow.id === record.id;
+            if (!isEditing) {
+              return stored !== undefined ? stored : "-";
+            }
+            return (
+              <InputNumber
+                min={0}
+                step="any"
+                style={{ width: '100%' }}
+                value={inlineEditRow.mass}
+                onChange={(val) => changeInlineEdit('mass', val)}
+              />
+            );
+          },
+        },
+        {
+          title: <span className="font-semibold text-gray-700">Order Qty</span>,
+          key: 'order_quantity',
+          render: (value, record) => {
+            const stored = orderValuesByMaterial[record.id]?.order_quantity;
+            const isEditing = inlineEditRow && inlineEditRow.id === record.id;
+            if (!isEditing) {
+              return stored !== undefined ? stored : "-";
+            }
+            return (
+              <InputNumber
+                min={0}
+                step="any"
+                style={{ width: '100%' }}
+                value={inlineEditRow.quantity}
+                onChange={(val) => changeInlineEdit('quantity', val)}
+              />
+            );
+          },
+        }
+      );
+    }
+
+    // Add Status column only for main Raw Materials tab (not for Link Materials)
+    if (!showSelection) {
+      columns.push({
         title: <span className="font-semibold text-gray-700">Status</span>,
         dataIndex: 'status',
         key: 'status',
-        render: (status) => {
-            let color = 'default';
-            if (status === 'available') color = 'success';
-            if (status === 'purchase order') color = 'processing';
-            if (status === 'purchase request') color = 'warning';
-            return <Tag color={color}>{status ? status.toUpperCase() : "-"}</Tag>
+        render: (_, record) => {
+          const qty = record.quantity ?? 0;
+          const text = qty > 0 ? 'AVAILABLE' : 'NOT AVAILABLE';
+          const color = qty > 0 ? 'success' : 'error';
+          return <Tag color={color}>{text}</Tag>;
         },
-      },
-    ];
+      });
+    }
 
-    if (showActions) {
+    // Add Actions column
+    if (showActions || showSelection) {
       columns.push({
         title: <span className="font-semibold text-gray-700">Actions</span>,
         key: 'actions',
-        width: 100,
-        render: (_, record) => (
-          <Space>
-            <Tooltip title="Edit">
+        width: 140,
+        render: (_, record) => {
+          const isEditing = inlineEditRow && inlineEditRow.id === record.id;
+          const isLinkTabRow = showSelection;
+
+          if (isLinkTabRow && isEditing) {
+            return (
+              <Space>
+                <Tooltip title="Save">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CheckOutlined />}
+                    className="text-green-600 hover:bg-green-50"
+                    onClick={() => saveInlineEdit(record)}
+                  />
+                </Tooltip>
+                <Tooltip title="Cancel">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<CloseOutlined />}
+                    className="text-gray-500 hover:bg-gray-50"
+                    onClick={cancelInlineEdit}
+                  />
+                </Tooltip>
+              </Space>
+            );
+          }
+
+          return (
+            <Space>
+              <Tooltip title="Edit">
                 <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined />}
-                className="text-blue-500 hover:bg-blue-50"
-                onClick={() => openEditRawMaterial(record)}
+                  type="text"
+                  size="small"
+                  icon={<EditOutlined />}
+                  className="text-blue-500 hover:bg-blue-50"
+                  onClick={() => {
+                    if (isLinkTabRow) {
+                      startInlineEdit(record);
+                    } else {
+                      openEditRawMaterial(record);
+                    }
+                  }}
                 />
-            </Tooltip>
-            <Tooltip title="Delete">
-                <Button
-                type="text"
-                size="small"
-                icon={<DeleteOutlined />}
-                className="text-red-500 hover:bg-red-50"
-                onClick={() => handleDeleteRawMaterial(record)}
-                />
-            </Tooltip>
-          </Space>
-        ),
+              </Tooltip>
+              {!isLinkTabRow && (
+                <Tooltip title="Delete">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    className="text-red-500 hover:bg-red-50"
+                    onClick={() => handleDeleteRawMaterial(record)}
+                  />
+                </Tooltip>
+              )}
+            </Space>
+          );
+        },
       });
     }
 
@@ -802,37 +1248,51 @@ const RawMaterials = () => {
 
     return (
       <Card 
-        className="shadow-sm rounded-xl border border-gray-100" 
-        bodyStyle={{ padding: 0 }}
+        className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" 
+        styles={{ body: { padding: 0 } }}
         title={
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
                 <div className="flex items-center gap-2">
                     <ExperimentOutlined className="text-purple-600" />
-                    <span className="font-bold text-gray-800">Raw Materials Inventory</span>
+                    <span className="font-bold text-gray-800 text-sm sm:text-base">Raw Materials Inventory</span>
                 </div>
-                {showActions && (
-                    <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={openCreateRawMaterial}
-                    size="large"
-                    style={{ backgroundColor: '#2563eb' }}
-                    className="border-none shadow-md no-hover-btn"
-                    >
-                    Add Raw Material
-                    </Button>
+                {showActions && !showSelection && (
+                  <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
+                    <Input.Search
+                      placeholder="Search..."
+                      allowClear
+                      onSearch={handleSearch}
+                      onChange={(e) => handleSearch(e.target.value)}
+                      className="w-full sm:w-64"
+                      size="middle"
+                    />
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <RawMaterialsInventoryPdfDownload rawMaterials={rawMaterials} />
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={openCreateRawMaterial}
+                        size="middle"
+                        style={{ backgroundColor: '#2563eb' }}
+                        className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
+                      >
+                        <span className="hidden sm:inline">Add Raw Material</span>
+                        <span className="sm:hidden">Add</span>
+                      </Button>
+                    </div>
+                  </Space>
                 )}
             </div>
         }
       >
         <Table
             columns={columns}
-            dataSource={rawMaterials}
+            dataSource={filteredMaterials}
             rowKey="id"
             size="small"
             bordered
             rowSelection={rowSelection || undefined}
-            scroll={{ x: 'max-content' }}
+            scroll={{ x: 1200 }}
             pagination={{
               current: rawMaterialsPagination.current,
               pageSize: rawMaterialsPagination.pageSize,
@@ -840,7 +1300,8 @@ const RawMaterials = () => {
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
               pageSizeOptions: ['10', '20', '50', '100'],
-              position: ['bottomCenter'],
+              placement: 'bottom',
+              responsive: true,
             }}
           onChange={(paginationConfig) => {
             setRawMaterialsPagination({
@@ -848,7 +1309,7 @@ const RawMaterials = () => {
               pageSize: paginationConfig.pageSize,
             });
           }}
-            locale={{ emptyText: <Empty description="No raw materials found" /> }}
+            locale={{ emptyText: <Empty description={searchText ? "No raw materials found matching your search" : "No raw materials found"} /> }}
             className="modern-table"
         />
       </Card>
@@ -884,26 +1345,43 @@ const RawMaterials = () => {
         </span>
       ),
       children: (
-        <div className="mt-4">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="mt-2 sm:mt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
             {/* Left side - Orders tree */}
             <div className="lg:col-span-1">
                 <Card 
                     title={
-                        <div className="flex items-center gap-2">
-                            <BlockOutlined className="text-blue-600" />
-                            <span className="font-bold text-gray-800">Order Structure</span>
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                                <BlockOutlined className="text-blue-600" />
+                                <span className="font-bold text-gray-800 text-sm sm:text-base">Order Structure</span>
+                            </div>
+                            <Input.Search
+                                placeholder="Search..."
+                                allowClear
+                                onSearch={handleOrderSearch}
+                                onChange={(e) => handleOrderSearch(e.target.value)}
+                                className="w-full sm:w-48"
+                                size="small"
+                            />
                         </div>
                     }
-                    className="shadow-sm rounded-xl border border-gray-100 h-full"
-                    bodyStyle={{ padding: '12px', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}
+                    className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100 h-full"
+                    styles={{ 
+                      body: { 
+                        padding: 'clamp(8px, 2vw, 12px)', 
+                        maxHeight: 'calc(100vh - 280px)', 
+                        overflowY: 'auto' 
+                      },
+                      header: { padding: 'clamp(12px, 2vw, 16px)' }
+                    }}
                 >
                     {renderOrderTree()}
                 </Card>
             </div>
 
             {/* Right side - Raw Materials table */}
-            <div className="lg:col-span-2 space-y-4">
+            <div className="lg:col-span-2 space-y-3 sm:space-y-4">
                 {renderMaterialsTable({ showSelection: true, showActions: false })}
                 <div className="flex justify-end pt-2">
                     <Button
@@ -913,9 +1391,10 @@ const RawMaterials = () => {
                         loading={linking}
                         size="large"
                         style={{ backgroundColor: '#2563eb' }}
-                        className="border-none shadow-md no-hover-btn px-8"
+                        className="border-none shadow-md no-hover-btn px-6 sm:px-8 w-full sm:w-auto"
                     >
-                        Submit Selections
+                        <span className="hidden sm:inline">Submit Selections</span>
+                        <span className="sm:hidden">Submit</span>
                     </Button>
                 </div>
             </div>
@@ -935,7 +1414,7 @@ const RawMaterials = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-2 sm:p-4 lg:p-6">
       <style>{`
         .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
           background-color: #2563eb !important;
@@ -964,29 +1443,43 @@ const RawMaterials = () => {
             border-bottom: 1px solid #f0f0f0;
             min-height: 56px;
         }
+        @media (max-width: 768px) {
+          .ant-table {
+            font-size: 12px;
+          }
+          .ant-table-thead > tr > th,
+          .ant-table-tbody > tr > td {
+            padding: 8px 4px;
+          }
+        }
       `}</style>
 
       {/* Header */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
-        <div className="flex items-center justify-between">
-            <div>
-                <Title level={2} style={{ margin: 0, fontSize: '24px' }} className="flex items-center gap-3 text-gray-800">
+      <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="w-full sm:w-auto">
+                <Title 
+                  level={2} 
+                  style={{ margin: 0, fontSize: 'clamp(18px, 4vw, 24px)' }} 
+                  className="flex items-center gap-2 sm:gap-3 text-gray-800"
+                >
                     <ExperimentOutlined className="text-blue-600" />
-                    Raw Materials Management
+                    <span className="hidden sm:inline">Raw Materials Management</span>
+                    <span className="sm:hidden">Raw Materials</span>
                 </Title>
-                <Text className="text-gray-500 mt-1 block">Manage raw materials, inventory, and order linking</Text>
+                <Text className="text-gray-500 mt-1 block text-xs sm:text-sm">Manage raw materials, inventory, and order linking</Text>
             </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-2">
+      <div className="bg-white rounded-lg lg:rounded-xl shadow-lg border border-gray-100 p-1 sm:p-2">
         <Tabs 
             activeKey={activeTab} 
             onChange={setActiveTab} 
             items={tabItems}
             type="card"
             className="custom-tabs"
-            tabBarStyle={{ margin: 0, padding: '8px 8px 0 8px' }}
+            tabBarStyle={{ margin: 0, padding: '4px 4px 0 4px' }}
         />
       </div>
 
@@ -994,105 +1487,105 @@ const RawMaterials = () => {
       <Modal
         open={rawMaterialModalOpen}
         onCancel={closeRawMaterialModal}
-        width={800}
+        width="95%"
+        style={{ maxWidth: 800 }}
         title={
             <div className="flex items-center gap-2">
                 {editingRawMaterial ? <EditOutlined className="text-blue-500" /> : <PlusOutlined className="text-blue-500" />}
-                <span className="font-bold text-gray-800">{editingRawMaterial ? "Edit Raw Material" : "Add New Raw Material"}</span>
+                <span className="font-bold text-gray-800 text-sm sm:text-base">{editingRawMaterial ? "Edit Raw Material" : "Add New Raw Material"}</span>
             </div>
         }
         footer={null}
         destroyOnHidden
         className="rounded-xl overflow-hidden"
       >
+        <style>{`
+          @media (max-width: 768px) {
+            .ant-modal-body {
+              padding: 16px;
+            }
+          }
+        `}</style>
         <Form
           form={form}
           layout="vertical"
           onFinish={handleSaveRawMaterial}
           className="pt-4"
         >
-          <Row gutter={24}>
-            <Col span={12}>
+          <Row gutter={[12, 0]}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 name="material_name"
-                label={<span className="font-semibold text-gray-700">Material Name</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Material Name</span>}
                 rules={[{ required: true, message: 'Please enter material name' }]}
               >
-                <Input placeholder="Enter material name" size="large" className="rounded-md" />
+                <Input placeholder="Enter material name" size="large" className="rounded-md" autoComplete="off" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 name="material_specification"
-                label={<span className="font-semibold text-gray-700">Specification</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Specification</span>}
               >
-                <Input placeholder="Enter specification" size="large" className="rounded-md" />
+                <Input placeholder="Enter specification" size="large" className="rounded-md" autoComplete="off" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col xs={12} sm={8}>
               <Form.Item
                 name="mass"
-                label={<span className="font-semibold text-gray-700">Mass</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Mass</span>}
               >
                 <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col xs={12} sm={8}>
               <Form.Item
                 name="density"
-                label={<span className="font-semibold text-gray-700">Density</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Density</span>}
               >
                 <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col xs={12} sm={8}>
               <Form.Item
                 name="volume"
-                label={<span className="font-semibold text-gray-700">Volume</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Volume</span>}
               >
                 <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={12} sm={12}>
               <Form.Item
                 name="stock_type"
-                label={<span className="font-semibold text-gray-700">Stock Type</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Stock Type</span>}
               >
-                <Input placeholder="e.g. Sheet, Bar, Rod" size="large" className="rounded-md" />
+                <Input placeholder="e.g. Sheet, Bar, Rod" size="large" className="rounded-md" autoComplete="off" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={12} sm={12}>
               <Form.Item
                 name="quantity"
-                label={<span className="font-semibold text-gray-700">Quantity</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Quantity</span>}
               >
-                <InputNumber style={{ width: '100%' }} step="any" placeholder="0" size="large" className="rounded-md" />
+                <InputNumber style={{ width: '100%' }} step="any" placeholder="0" size="large" className="rounded-md" autoComplete="off" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 name="stock_dimensions"
-                label={<span className="font-semibold text-gray-700">Dimensions</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Dimensions</span>}
               >
-                <Input placeholder="L x W x H" size="large" className="rounded-md" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="status"
-                label={<span className="font-semibold text-gray-700">Status</span>}
-              >
-                <Select placeholder="Select status" size="large" className="rounded-md">
-                  <Option value="purchase request">Purchase Request</Option>
-                  <Option value="purchase order">Purchase Order</Option>
-                  <Option value="available">Available</Option>
-                </Select>
+                <Input placeholder="L x W x H" size="large" className="rounded-md" autoComplete="off" />
               </Form.Item>
             </Col>
           </Row>
           
-          <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
-            <Button onClick={closeRawMaterialModal} size="large" className="rounded-md">
+          <div className="flex flex-col sm:flex-row justify-end gap-3 mt-6 sm:mt-8 pt-4 border-t border-gray-100">
+            <Button 
+              onClick={closeRawMaterialModal} 
+              size="large" 
+              className="rounded-md w-full sm:w-auto"
+            >
               Cancel
             </Button>
             <Button 
@@ -1101,7 +1594,7 @@ const RawMaterials = () => {
               loading={savingRawMaterial} 
               size="large" 
               style={{ backgroundColor: '#2563eb' }}
-              className="rounded-md border-none shadow-md no-hover-btn"
+              className="rounded-md border-none shadow-md no-hover-btn w-full sm:w-auto"
             >
               {savingRawMaterial ? "Saving..." : (editingRawMaterial ? "Update Material" : "Create Material")}
             </Button>

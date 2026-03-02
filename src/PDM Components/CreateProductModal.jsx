@@ -20,10 +20,20 @@ const CreateProductModal = ({
   const hasFetchedRawMaterials = useRef(false);
 
   // Initial form values
+  const storedUser = (() => {
+    try {
+      const s = localStorage.getItem('user');
+      return s ? JSON.parse(s) : null;
+    } catch {
+      return null;
+    }
+  })();
   const [formData, setFormData] = useState({
     product_number: '',
     product_name: '',
     product_version: '1.0',
+    user_name_display: storedUser?.user_name || '',
+    user_id: storedUser?.id ?? null,
     assembly_number: '',
     assembly_name: '',
     part_number: '',
@@ -120,6 +130,26 @@ const CreateProductModal = ({
     }
   }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open]);
 
+  // Pre-fill user info for product creation
+  useEffect(() => {
+    if (open && createType === 'product') {
+      try {
+        const stored = localStorage.getItem('user');
+        if (stored) {
+          const u = JSON.parse(stored);
+          const userName = u?.user_name || '';
+          const userId = u?.id ?? null;
+          form.setFieldsValue({
+            user_name_display: userName,
+            user_id: userId != null ? String(userId) : null
+          });
+        }
+      } catch (e) {
+        console.error('Failed to parse user from localStorage', e);
+      }
+    }
+  }, [open, createType, form]);
+
   // Fetch part types when createType becomes 'part'
   useEffect(() => {
     if (createType === 'part' && !hasFetchedPartTypes.current) {
@@ -190,10 +220,20 @@ const CreateProductModal = ({
       if (createType === 'product') {
         url = `${API_BASE_URL}/products${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
         method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
+        // Get user_id from localStorage
+        let uid = null;
+        try {
+          const stored = localStorage.getItem('user');
+          if (stored) {
+            const u = JSON.parse(stored);
+            uid = u?.id ?? null;
+          }
+        } catch {}
         payload = {
           product_number: values.product_number,
           product_name: values.product_name,
-          product_version: values.product_version
+          product_version: values.product_version,
+          user_id: uid
         };
       } else if (createType === 'assembly') {
         url = `${API_BASE_URL}/assemblies${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
@@ -250,8 +290,12 @@ const CreateProductModal = ({
       title={getTitle()}
       open={open}
       onCancel={onCancel}
+      maskClosable={false}
+      keyboard={false}
       footer={null}
       destroyOnHidden
+      width="95%"
+      style={{ maxWidth: 600 }}
     >
       <style>
         {`
@@ -262,13 +306,18 @@ const CreateProductModal = ({
             border: none !important;
             box-shadow: none !important;
           }
+          @media (max-width: 768px) {
+            .ant-modal-body {
+              padding: 16px;
+            }
+          }
         `}
       </style>
       {(createType === 'assembly' || createType === 'part') && (
         <div style={{ marginBottom: 16 }}>
           <Badge 
             count={`Creating under: ${selectedProduct?.product_name || 'Selected Product'}`} 
-            style={{ backgroundColor: '#f0f0f0', color: '#000', padding: '0 8px' }} 
+            style={{ backgroundColor: '#f0f0f0', color: '#000', padding: '0 8px', fontSize: 'clamp(10px, 2.5vw, 12px)' }} 
           />
         </div>
       )}
@@ -282,25 +331,42 @@ const CreateProductModal = ({
         {createType === 'product' && (
           <>
             <Form.Item
+              name="user_name_display"
+              label={<span className="text-xs sm:text-sm">User</span>}
+            >
+              <Input 
+                placeholder="-" 
+                autoComplete="off" 
+                readOnly 
+                disabled
+                size="large"
+                style={{ 
+                  backgroundColor: '#f5f5f5', 
+                  color: '#6b7280', 
+                  borderColor: '#e5e7eb' 
+                }} 
+              />
+            </Form.Item>
+            <Form.Item
               name="product_number"
-              label="Product Number"
+              label={<span className="text-xs sm:text-sm">Product Number</span>}
               rules={[{ required: true, message: 'Please input product number!' }]}
             >
-              <Input placeholder="e.g., PRD-001" autoComplete="off" />
+              <Input placeholder="e.g., PRD-001" autoComplete="off" size="large" />
             </Form.Item>
             <Form.Item
               name="product_name"
-              label="Product Name"
+              label={<span className="text-xs sm:text-sm">Product Name</span>}
               rules={[{ required: true, message: 'Please input product name!' }]}
             >
-              <Input placeholder="e.g., Main Product" autoComplete="off" />
+              <Input placeholder="e.g., Main Product" autoComplete="off" size="large" />
             </Form.Item>
             <Form.Item
               name="product_version"
-              label="Product Version"
+              label={<span className="text-xs sm:text-sm">Product Version</span>}
               rules={[{ required: true, message: 'Please input product version!' }]}
             >
-              <Input placeholder="e.g., 1.0" autoComplete="off" />
+              <Input placeholder="e.g., 1.0" autoComplete="off" size="large" />
             </Form.Item>
           </>
         )}
@@ -309,17 +375,17 @@ const CreateProductModal = ({
           <>
             <Form.Item
               name="assembly_number"
-              label="Assembly Number"
+              label={<span className="text-xs sm:text-sm">Assembly Number</span>}
               rules={[{ required: true, message: 'Please input assembly number!' }]}
             >
-              <Input placeholder="e.g., ASM-001" autoComplete="off" />
+              <Input placeholder="e.g., ASM-001" autoComplete="off" size="large" />
             </Form.Item>
             <Form.Item
               name="assembly_name"
-              label="Assembly Name"
+              label={<span className="text-xs sm:text-sm">Assembly Name</span>}
               rules={[{ required: true, message: 'Please input assembly name!' }]}
             >
-              <Input placeholder="e.g., Main Assembly" autoComplete="off" />
+              <Input placeholder="e.g., Main Assembly" autoComplete="off" size="large" />
             </Form.Item>
           </>
         )}
@@ -328,24 +394,24 @@ const CreateProductModal = ({
           <>
             <Form.Item
               name="part_number"
-              label="Part Number"
+              label={<span className="text-xs sm:text-sm">Part Number</span>}
               rules={[{ required: true, message: 'Please input part number!' }]}
             >
-              <Input placeholder="e.g., PRT-001" autoComplete="off" />
+              <Input placeholder="e.g., PRT-001" autoComplete="off" size="large" />
             </Form.Item>
             <Form.Item
               name="part_name"
-              label="Part Name"
+              label={<span className="text-xs sm:text-sm">Part Name</span>}
               rules={[{ required: true, message: 'Please input part name!' }]}
             >
-              <Input placeholder="e.g., Component Part" autoComplete="off" />
+              <Input placeholder="e.g., Component Part" autoComplete="off" size="large" />
             </Form.Item>
             <Form.Item
               name="type_id"
-              label="Part Type"
+              label={<span className="text-xs sm:text-sm">Part Type</span>}
               rules={[{ required: true, message: 'Please select part type!' }]}
             >
-              <Select placeholder="Select a part type">
+              <Select placeholder="Select a part type" size="large">
                 {partTypes.map(type => (
                   <Select.Option key={type.id} value={type.id}>
                     {type.type_name}
@@ -356,10 +422,10 @@ const CreateProductModal = ({
 
             <Form.Item
               name="raw_material_id"
-              label="Raw Material"
+              label={<span className="text-xs sm:text-sm">Raw Material</span>}
               rules={[{ required: false, message: 'Please select raw material!' }]}
             >
-              <Select placeholder="Select raw material" allowClear showSearch optionFilterProp="children">
+              <Select placeholder="Select raw material" allowClear showSearch optionFilterProp="children" size="large">
                 {rawMaterials.map(material => (
                   <Select.Option key={material.id} value={material.id}>
                     {material.material_name}
@@ -370,11 +436,11 @@ const CreateProductModal = ({
           </>
         )}
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
-          <Button onClick={onCancel}>
+        <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 mt-6">
+          <Button onClick={onCancel} size="large" className="w-full sm:w-auto">
             Cancel
           </Button>
-          <Button type="primary" htmlType="submit" loading={loading} className="no-hover-btn">
+          <Button type="primary" htmlType="submit" loading={loading} className="no-hover-btn w-full sm:w-auto" size="large">
             {mode === 'edit' ? 'Save Changes' : 'Create'}
           </Button>
         </div>

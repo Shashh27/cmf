@@ -1,13 +1,24 @@
 import React, { useState, useEffect, useRef } from "react";
-import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined } from "@ant-design/icons";
+import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
 import { Input, Button, message, Modal, Tooltip, Empty, Spin, Tag, Typography } from "antd";
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
+import { useLocation } from "react-router-dom";
+import ProductBOMPdfDownload from "../DownloadReports/ProductBOMPdfDownload";
 
 const BillOfMaterials = ({ onItemSelected }) => {
+  const location = useLocation();
+  const getRolePrefix = () => {
+    const path = location.pathname;
+    if (path.startsWith('/admin')) return '/admin';
+    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
+    if (path.startsWith('/operator')) return '/operator';
+    return '';
+  };
+  const prefix = getRolePrefix();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
@@ -25,24 +36,48 @@ const BillOfMaterials = ({ onItemSelected }) => {
   const [activeItemId, setActiveItemId] = useState(null);
   const hasFetchedData = useRef(false);
 
-  const getTypeIcon = (type) => {
-    const icons = {
-      product: <DeploymentUnitOutlined className="text-purple-600" />,
-      assembly: <ClusterOutlined className="text-blue-500" />,
-      part: <FileTextOutlined className="text-green-500" />,
-      make: <ToolOutlined className="text-orange-500" />
-    };
-    return icons[type?.toLowerCase()] || <FileTextOutlined className="text-gray-500" />;
+  const getExpandKey = (type, id) => `${type}-${id}`;
+
+  const getTypeIcon = (type, level = 0) => {
+    const normalized = (type || "").toString().toLowerCase();
+    // Product: purple (deployment/root)
+    if (normalized === "product") {
+      return <DeploymentUnitOutlined className="text-purple-600" />;
+    }
+    // Top-level assembly (direct under product): blue – cluster of units
+    if (normalized === "assembly" && level <= 1) {
+      return <ClusterOutlined className="text-blue-500" />;
+    }
+    // Subassembly (nested): indigo – single block to show it's one level down
+    if (normalized === "assembly" && level > 1) {
+      return <BlockOutlined className="text-indigo-600" />;
+    }
+    const inHouseTypes = ["make", "in-house", "in house", "inhouse"];
+    const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
+    // In-house part: emerald – component/box (made here)
+    if (inHouseTypes.includes(normalized)) {
+      return <CodeSandboxOutlined className="text-emerald-600" />;
+    }
+    // Outsource part: amber – external/supplied
+    if (outSourceTypes.includes(normalized)) {
+      return <CodepenOutlined className="text-amber-600" />;
+    }
+    if (normalized === "part") {
+      return <FileTextOutlined className="text-gray-500" />;
+    }
+    return <FileTextOutlined className="text-gray-500" />;
   };
 
   const getTypeColor = (type) => {
-    const colors = {
-      product: 'purple',
-      assembly: 'blue',
-      part: 'green',
-      make: 'green'
-    };
-    return colors[type?.toLowerCase()] || 'default';
+    const normalized = (type || "").toString().toLowerCase();
+    const inHouseTypes = ["make", "in-house", "in house", "inhouse", "part"];
+    const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
+
+    if (normalized === "product") return 'purple';
+    if (normalized === "assembly") return 'blue';
+    if (inHouseTypes.includes(normalized)) return 'green';
+    if (outSourceTypes.includes(normalized)) return 'orange';
+    return 'default';
   };
 
   useEffect(() => {
@@ -54,12 +89,110 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
   const fetchProducts = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/products/`);
+      // Filter by logged-in user's id for Project Coordinator
+      let url = `${API_BASE_URL}/products/`;
+      if (prefix === '/project_coordinator') {
+        try {
+          const stored = localStorage.getItem('user');
+          const u = stored ? JSON.parse(stored) : null;
+          if (u?.id) {
+            url = `${API_BASE_URL}/products/?user_id=${u.id}`;
+          }
+        } catch (e) {
+          console.error('Failed to parse user from localStorage', e);
+        }
+      }
+      const response = await fetch(url);
       if (response.ok) setProducts(await response.json());
     } catch (error) {
       console.error('Error fetching products:', error);
       message.error('Failed to fetch products');
     }
+  };
+
+  const flattenBOMForExport = (data) => {
+    const assemblies = [];
+    const parts = [];
+    const operations = [];
+    const documents = [];
+
+    const addPartNode = (wrapper, parentAssembly = null) => {
+      if (!wrapper) return;
+      const part = wrapper.part || wrapper;
+      if (!part) return;
+
+      parts.push({
+        id: part.id,
+        part_number: part.part_number,
+        part_name: part.part_name,
+        type_name: part.type_name,
+        parent_assembly_id: parentAssembly?.id || null,
+        parent_assembly_number: parentAssembly?.assembly_number || null,
+        parent_assembly_name: parentAssembly?.assembly_name || null,
+      });
+
+      (wrapper.operations || []).forEach((op, index) => {
+        operations.push({
+          id: op.id || `${part.id}-op-${index}`,
+          part_id: part.id,
+          part_number: part.part_number,
+          part_name: part.part_name,
+          operation_number: op.operation_number,
+          operation_name: op.operation_name,
+          setup_time: op.setup_time,
+          cycle_time: op.cycle_time,
+          work_center_name: op.work_center_name || op.workcenter_name || "",
+          workcenter_id: op.workcenter_id || null,
+          machine_name: op.machine_name || "",
+          machine_id: op.machine_id || null,
+          work_instructions: op.work_instructions || "",
+          notes: op.notes || "",
+        });
+      });
+
+      (wrapper.documents || []).forEach((doc, index) => {
+        documents.push({
+          id: doc.id || `${part.id}-doc-${index}`,
+          part_id: part.id,
+          part_number: part.part_number,
+          part_name: part.part_name,
+          document_type: doc.document_type,
+          document_name: doc.document_name,
+          document_version: doc.document_version,
+        });
+      });
+    };
+
+    const processAssemblyWrapper = (wrapper, parentAssembly = null) => {
+      if (!wrapper) return;
+      const assembly = wrapper.assembly || wrapper;
+
+      if (assembly) {
+        assemblies.push({
+          id: assembly.id,
+          assembly_number: assembly.assembly_number,
+          assembly_name: assembly.assembly_name,
+          parent_assembly_id: parentAssembly?.id || null,
+          parent_assembly_number: parentAssembly?.assembly_number || null,
+          parent_assembly_name: parentAssembly?.assembly_name || null,
+        });
+      }
+
+      (wrapper.parts || []).forEach((p) => addPartNode(p, assembly));
+      (wrapper.subassemblies || []).forEach((sub) =>
+        processAssemblyWrapper(sub, assembly)
+      );
+    };
+
+    (data.assemblies || []).forEach((asm) => processAssemblyWrapper(asm, null));
+    (data.direct_parts || []).forEach((p) => addPartNode(p, null));
+
+    return {
+      assemblies,
+      parts,
+      operations,
+      documents,
+    };
   };
 
   const fetchProductHierarchy = async (productId, forceRefresh = false) => {
@@ -69,14 +202,25 @@ const BillOfMaterials = ({ onItemSelected }) => {
       const response = await fetch(`${API_BASE_URL}/products/${productId}/hierarchical`);
       if (response.ok) {
         const data = await response.json();
+        const bomExport = flattenBOMForExport(data);
         const transformedData = {
           ...data,
-          parts: data.direct_parts?.map(item => item.part) || [],
-          assemblies: data.assemblies?.map(assembly => ({
-            ...assembly.assembly,
-            parts: assembly.parts?.map(part => part.part) || [],
-            child_assemblies: transformSubassemblies(assembly.subassemblies || [])
-          })) || []
+          parts: (data.direct_parts || [])
+            .slice()
+            .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
+            .map(item => item.part),
+          assemblies: (data.assemblies || [])
+            .slice()
+            .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
+            .map(assembly => ({
+              ...assembly.assembly,
+              parts: (assembly.parts || [])
+                .slice()
+                .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
+                .map(part => part.part),
+              child_assemblies: transformSubassemblies(assembly.subassemblies || [])
+            })),
+          bomExport,
         };
         setHierarchicalData(prev => ({ ...prev, [productId]: transformedData }));
         return transformedData;
@@ -88,22 +232,28 @@ const BillOfMaterials = ({ onItemSelected }) => {
   };
 
   const transformSubassemblies = (subassemblies) => {
-    return subassemblies.map(sub => ({
-      ...sub.assembly,
-      parts: sub.parts?.map(part => part.part) || [],
-      child_assemblies: transformSubassemblies(sub.subassemblies || [])
-    }));
+    return (subassemblies || [])
+      .slice()
+      .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
+      .map(sub => ({
+        ...sub.assembly,
+        parts: (sub.parts || [])
+          .slice()
+          .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
+          .map(part => part.part),
+        child_assemblies: transformSubassemblies(sub.subassemblies || [])
+      }));
   };
 
-  const toggleExpand = (itemId) => {
-    setExpandedItems(prev => ({ ...prev, [itemId]: !prev[itemId] }));
+  const toggleExpand = (key) => {
+    setExpandedItems(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleExpandProduct = async (product) => {
     if (!hierarchicalData[product.id]) {
       await fetchProductHierarchy(product.id);
     }
-    toggleExpand(product.id);
+    toggleExpand(getExpandKey('product', product.id));
   };
 
   const openModal = (type, product = null, assembly = null, edit = false, item = null) => {
@@ -117,9 +267,12 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
   const handleCreateProduct = () => openModal('product');
   const handleCreateAssembly = (product) => openModal('assembly', product);
-  const handleCreatePart = async (product, assembly = null) => {
-    if (!hierarchicalData[product.id]) await fetchProductHierarchy(product.id);
+  const handleCreatePart = (product, assembly = null) => {
+    if (!product) return;
     openModal('part', product, assembly);
+    if (!hierarchicalData[product.id]) {
+      fetchProductHierarchy(product.id);
+    }
   };
   const handleCreateSubAssembly = (assembly) => openModal('assembly', { id: assembly.product_id }, assembly);
   const handleEditProduct = (product) => openModal('product', product, null, true, product);
@@ -172,8 +325,8 @@ const BillOfMaterials = ({ onItemSelected }) => {
       await fetchProductHierarchy(newItem.product_id, true);
       setExpandedItems(prev => ({
         ...prev,
-        [newItem.product_id]: true,
-        ...(newItem.assembly_id && { [newItem.assembly_id]: true })
+        [getExpandKey('product', newItem.product_id)]: true,
+        ...(newItem.assembly_id && { [getExpandKey('assembly', newItem.assembly_id)]: true })
       }));
     }
     message.success(messages[type]);
@@ -205,12 +358,18 @@ const BillOfMaterials = ({ onItemSelected }) => {
               await fetchProductHierarchy(item.product_id, true);
               setExpandedItems(prev => ({
                 ...prev,
-                [item.product_id]: true,
-                ...(item.assembly_id && type === 'part' && { [item.assembly_id]: true })
+                [getExpandKey('product', item.product_id)]: true,
+                ...(item.assembly_id && type === 'part' && { [getExpandKey('assembly', item.assembly_id)]: true })
               }));
             }
           } else {
-            message.error(`Failed to delete ${type} "${names[type]}".`);
+            // Try to get detailed error message from backend
+            try {
+              const errorData = await response.json();
+              message.error(errorData.detail || `Failed to delete ${type} "${names[type]}".`);
+            } catch (e) {
+              message.error(`Failed to delete ${type} "${names[type]}".`);
+            }
           }
         } catch (error) {
           console.error(`Error deleting ${type}:`, error);
@@ -222,17 +381,15 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
   const handleItemClick = async (item, type, productId) => {
     setActiveItemId(item.id);
-    
-    // For products, ensure hierarchy is fetched before expanding
+
     if (type === 'product') {
-        if (!hierarchicalData[item.id]) {
-            await fetchProductHierarchy(item.id);
-        }
+      if (!hierarchicalData[item.id]) {
+        await fetchProductHierarchy(item.id);
+      }
     }
-    
-    toggleExpand(item.id); // Expand the tree node
-    
-    // Ensure item has type property for downstream consumers
+
+    toggleExpand(getExpandKey(type, item.id));
+
     const itemWithMeta = { ...item, itemType: type, productId };
     if (onItemSelected) {
       onItemSelected(itemWithMeta);
@@ -276,7 +433,9 @@ const BillOfMaterials = ({ onItemSelected }) => {
     return [];
   };
 
-  const ActionButtons = ({ item, type }) => {
+  const ActionButtons = ({ item, type, tagName, tagColor }) => {
+    const productHierarchy = type === 'product' ? hierarchicalData[item.id] : null;
+    const bomExport = productHierarchy?.bomExport;
     const buttons = {
       part: [
         { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit" },
@@ -284,7 +443,12 @@ const BillOfMaterials = ({ onItemSelected }) => {
       ],
       assembly: [
         { icon: PartitionOutlined, onClick: () => handleCreateSubAssembly(item), title: "Add Sub-Assembly" },
-        { icon: ToolOutlined, onClick: () => handleCreatePart(selectedProduct, item), title: "Add Part" },
+        { icon: ToolOutlined, onClick: () => {
+            const product = products.find(p => p.id === item.product_id);
+            if (product) {
+              handleCreatePart(product, item);
+            }
+          }, title: "Add Part" },
         { icon: EditOutlined, onClick: () => handleEditAssembly(item), title: "Edit" },
         { icon: DeleteOutlined, onClick: () => handleDelete(item, 'assembly'), danger: true, title: "Delete" }
       ],
@@ -296,19 +460,31 @@ const BillOfMaterials = ({ onItemSelected }) => {
       ]
     };
     return (
-      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-        {buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
-          <Tooltip key={idx} title={title}>
-            <Button 
-              type="text" 
-              size="small" 
-              danger={danger}
-              onClick={(e) => { e.stopPropagation(); onClick(); }} 
-              icon={<Icon style={{ fontSize: '14px' }} />}
-              style={{ padding: 4, minWidth: 24, height: 24 }}
-            />
-          </Tooltip>
-        ))}
+      <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+        <div className="hidden lg:flex lg:w-[100px] justify-start lg:mr-4">
+          {tagName && (
+            <Tag color={tagColor} className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
+              {tagName.toUpperCase()}
+            </Tag>
+          )}
+        </div>
+        <div className="flex-shrink-0 flex gap-1 justify-start lg:w-[130px]">
+          {buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
+            <Tooltip key={idx} title={title}>
+              <Button 
+                type="text" 
+                size="small" 
+                danger={danger}
+                onClick={(e) => { e.stopPropagation(); onClick(); }} 
+                icon={<Icon style={{ fontSize: '14px' }} />}
+                style={{ padding: 4, minWidth: 24, height: 24 }}
+              />
+            </Tooltip>
+          ))}
+          {type === 'product' && (
+            <ProductBOMPdfDownload product={item} bomExport={bomExport} />
+          )}
+        </div>
       </div>
     );
   };
@@ -317,16 +493,21 @@ const BillOfMaterials = ({ onItemSelected }) => {
     const isSelected = activeItemId === part.id;
     return (
       <div
-        key={part.id}
+        key={`part-${part.id}`}
         className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
         style={{ marginLeft: `${level * 14}px` }}
         onClick={() => handleItemClick(part, 'part')}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
-          <Text className={`text-xs font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{part.part_name}</Text>
+          <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{part.part_name}</Text>
         </div>
-        <ActionButtons item={part} type="part" />
+        <ActionButtons 
+          item={part} 
+          type="part" 
+          tagName={part.type_name || 'part'} 
+          tagColor={getTypeColor(part.type_name || 'part')} 
+        />
       </div>
     );
   };
@@ -334,12 +515,16 @@ const BillOfMaterials = ({ onItemSelected }) => {
   const renderAssemblyTree = (assembly, level = 0) => {
     const childAssemblies = getNestedAssemblies(assembly.id);
     const assemblyParts = getPartsForAssembly(assembly.id);
-    const isExpanded = expandedItems[assembly.id];
-    const hasChildren = childAssemblies.length > 0 || assemblyParts.length > 0;
+    const combinedChildren = [
+      ...assemblyParts.map(p => ({ ...p, __childType: 'part' })),
+      ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
+    ].sort((a, b) => (a.id || 0) - (b.id || 0));
+    const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
+    const hasChildren = combinedChildren.length > 0;
     const isSelected = activeItemId === assembly.id;
 
     return (
-      <div key={assembly.id} className="select-none">
+      <div key={`assembly-${assembly.id}`} className="select-none">
         <div
           className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
           style={{ marginLeft: `${level * 14}px` }}
@@ -349,17 +534,28 @@ const BillOfMaterials = ({ onItemSelected }) => {
             <div className="flex-shrink-0 w-5 flex justify-center">
               {hasChildren ? (
                 <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-                  onClick={(e) => { e.stopPropagation(); toggleExpand(assembly.id); }}
+                  onClick={(e) => { e.stopPropagation(); toggleExpand(getExpandKey('assembly', assembly.id)); }}
                   className="w-5 h-5 flex items-center justify-center p-0 text-slate-500 hover:bg-slate-200 rounded" />
               ) : <div className="w-5" />}
             </div>
-            <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly')}</span>
-            <Text className={`text-xs font-medium truncate flex-1 min-w-0 ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{assembly.assembly_name}</Text>
+            <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly', level)}</span>
+            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{assembly.assembly_name}</Text>
           </div>
-          <ActionButtons item={assembly} type="assembly" />
+          <ActionButtons 
+            item={assembly} 
+            type="assembly" 
+            tagName={level > 1 ? 'SUB-ASSEMBLY' : 'ASSEMBLY'}
+            tagColor={getTypeColor('assembly')}
+          />
         </div>
         {isExpanded && hasChildren && (
-          <div className="mt-0.5">{assemblyParts.map(part => renderPartInTree(part, level + 1))}{childAssemblies.map(child => renderAssemblyTree(child, level + 1))}</div>
+          <div className="mt-0.5">
+            {combinedChildren.map(child =>
+              child.__childType === 'part'
+                ? renderPartInTree(child, level + 1)
+                : renderAssemblyTree(child, level + 1)
+            )}
+          </div>
         )}
       </div>
     );
@@ -370,8 +566,12 @@ const BillOfMaterials = ({ onItemSelected }) => {
     const hasData = !!productHierarchy;
     const childAssemblies = productHierarchy?.assemblies || [];
     const directParts = productHierarchy?.parts || [];
-    const isExpanded = expandedItems[product.id];
-    const hasChildren = childAssemblies.length > 0 || directParts.length > 0;
+    const combinedChildren = [
+      ...directParts.map(p => ({ ...p, __childType: 'part' })),
+      ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
+    ].sort((a, b) => (a.id || 0) - (b.id || 0));
+    const isExpanded = expandedItems[getExpandKey('product', product.id)];
+    const hasChildren = combinedChildren.length > 0;
     const showArrow = !hasData || hasChildren;
     const isSelected = activeItemId === product.id;
 
@@ -390,14 +590,22 @@ const BillOfMaterials = ({ onItemSelected }) => {
               ) : <div className="w-5" />}
             </div>
             <span className="flex-shrink-0 text-sm">{getTypeIcon('product')}</span>
-            <Text className={`text-xs font-semibold truncate flex-1 min-w-0 ${isSelected ? 'text-indigo-800' : 'text-slate-800'}`}>{product.product_name}</Text>
+            <Text className={`text-sm font-semibold truncate ${isSelected ? 'text-indigo-800' : 'text-slate-800'}`}>{product.product_name}</Text>
           </div>
-          <ActionButtons item={product} type="product" />
+          <ActionButtons 
+            item={product} 
+            type="product" 
+            tagName="product"
+            tagColor={getTypeColor('product')}
+          />
         </div>
         {isExpanded && hasChildren && (
           <div className="mt-0.5 ml-2 border-l border-slate-200 pl-1">
-            {directParts.map(part => renderPartInTree(part, 1))}
-            {childAssemblies.map(assembly => renderAssemblyTree(assembly, 1))}
+            {combinedChildren.map(child =>
+              child.__childType === 'part'
+                ? renderPartInTree(child, 1)
+                : renderAssemblyTree(child, 1)
+            )}
           </div>
         )}
       </div>
@@ -428,16 +636,26 @@ const BillOfMaterials = ({ onItemSelected }) => {
         `}
       </style>
       <div className="flex flex-col h-full bg-slate-50/50">
-        <div className="p-3 border-b border-slate-200 bg-white shrink-0">
-          <div className="flex justify-between items-center gap-2 mb-3">
-            <div className="flex items-center gap-2">
-              <div className="p-1.5 bg-indigo-100 rounded-lg">
-                <AppstoreOutlined className="text-indigo-600 text-base" />
+        <div className="p-2 sm:p-3 border-b border-slate-200 bg-white shrink-0">
+          <div className="flex justify-between items-center gap-2 mb-2 sm:mb-3">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <div className="p-1 sm:p-1.5 bg-indigo-100 rounded-lg shrink-0">
+                <AppstoreOutlined className="text-indigo-600 text-sm sm:text-base" />
               </div>
-              <h2 className="text-sm font-semibold text-slate-800 m-0">Bill of Materials</h2>
+              <h2 className="text-xs sm:text-sm font-semibold text-slate-800 m-0 truncate">
+                <span className="hidden sm:inline">Bill of Materials</span>
+                <span className="sm:hidden">BOM</span>
+              </h2>
             </div>
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateProduct} className="bom-primary-btn">
-              New Product
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={handleCreateProduct}
+              className="bom-primary-btn shrink-0"
+            >
+              <span className="hidden sm:inline">New Product</span>
+              <span className="sm:hidden">New</span>
             </Button>
           </div>
           <Input prefix={<SearchOutlined className="text-slate-400" />} placeholder="Search products..." value={searchTerm}
