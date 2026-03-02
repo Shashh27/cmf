@@ -10,6 +10,7 @@ import { useLocation } from "react-router-dom";
 import ProductBOMPdfDownload from "../DownloadReports/ProductBOMPdfDownload";
 
 const BillOfMaterials = ({ onItemSelected }) => {
+  
   const location = useLocation();
   const getRolePrefix = () => {
     const path = location.pathname;

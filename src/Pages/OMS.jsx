@@ -219,11 +219,11 @@ const OMS = () => {
     if (!searchText) return true;
     
     const searchLower = searchText.toLowerCase();
-    const customerName = getCustomerName(order.customer_id).toLowerCase();
-    const productName = getProductName(order.product_id).toLowerCase();
-    const projectName = (order.project_name || "").toLowerCase();
-    const saleOrderNumber = (order.sale_order_number || "").toLowerCase();
-    const userName = (order.user_name || "").toLowerCase();
+    const customerName = String(getCustomerName(order.customer_id, order) || "").toLowerCase();
+    const productName = String(getProductName(order.product_id, order) || "").toLowerCase();
+    const projectName = String(order.project_name || "").toLowerCase();
+    const saleOrderNumber = String(order.sale_order_number || "").toLowerCase();
+    const userName = String(order.user_name || "").toLowerCase();
     
     return (
       projectName.includes(searchLower) ||

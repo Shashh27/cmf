@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, message, Input, Select, Card, Row, Col, Statistic } from 'antd';
-import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, MonitorOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useRef } from 'react';
+import { Table, Button, Space, message, Input, Select, Card, Row, Col } from 'antd';
+import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined } from '@ant-design/icons';
 import config from '../../Config/config';
+import ToolsHistory from './ToolsHistory';
 
 const { Option } = Select;
 const { Search } = Input;
@@ -21,15 +22,27 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     consumables: 0,
     nonConsumables: 0,
   });
+  const [historyVisible, setHistoryVisible] = useState(false);
+  const [historyTool, setHistoryTool] = useState(null);
+
+  // Prevent multiple API calls with a ref
+  const isFetchingRef = useRef(false);
 
   // Mock data - replace with actual API call
   useEffect(() => {
-    fetchTools();
+    if (!isFetchingRef.current) {
+      fetchTools();
+    }
   }, []);
 
+  // Debounced filter and KPI calculation
   useEffect(() => {
-    filterData();
-    calculateKPI();
+    const timeoutId = setTimeout(() => {
+      filterData();
+      calculateKPI();
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
   }, [tools, searchText, activeFilter]);
 
   const calculateKPI = () => {
@@ -45,16 +58,48 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   };
 
   const fetchTools = async () => {
+    if (isFetchingRef.current) return; // Prevent multiple calls
+    
+    isFetchingRef.current = true;
+    setLoading(true);
+    
     try {
       const response = await fetch(`${config.API_BASE_URL}/tools-list/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      setTools(data);
+      const sortedData = Array.isArray(data)
+        ? [...data].sort((a, b) => (a.id || 0) - (b.id || 0))
+        : [];
+      
+      // Check if any tools have null total_quantity and migrate if needed
+      const needsMigration = sortedData.some(tool => tool.total_quantity === null);
+      if (needsMigration) {
+        console.log('Detected tools with null total_quantity, running migration...');
+        try {
+          const migrateResponse = await fetch(`${config.API_BASE_URL}/tools-list/migrate-total-quantity`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          if (migrateResponse.ok) {
+            const migrateResult = await migrateResponse.json();
+            console.log('Migration completed:', migrateResult);
+            // Refetch tools after migration
+            return fetchTools(); // Recursive call to get updated data
+          }
+        } catch (migrationError) {
+          console.error('Migration failed:', migrationError);
+        }
+      }
+      
+      setTools(sortedData);
     } catch (error) {
       console.error('Failed to fetch tools:', error);
       message.error('Failed to fetch tools: ' + error.message);
+    } finally {
+      setLoading(false);
+      isFetchingRef.current = false; // Reset the ref
     }
   };
 
@@ -100,6 +145,16 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     });
   };
 
+  const openToolHistory = (tool) => {
+    setHistoryTool(tool);
+    setHistoryVisible(true);
+  };
+
+  const handleCloseHistory = () => {
+    setHistoryVisible(false);
+    setHistoryTool(null);
+  };
+
   const columns = [
     {
       title: 'SL NO',
@@ -118,6 +173,15 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       fixed: 'left',
       ellipsis: true,
       className: 'table-header-styled',
+      render: (text, record) => (
+        <Button
+          type="link"
+          style={{ padding: 0, fontWeight: 500 }}
+          onClick={() => openToolHistory(record)}
+        >
+          {text}
+        </Button>
+      ),
     },
     {
       title: 'Range',
@@ -144,12 +208,30 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       className: 'table-header-styled',
     },
     {
-      title: 'Quantity',
-      dataIndex: 'quantity',
-      key: 'quantity',
+      title: 'Total Qty',
+      dataIndex: 'total_quantity',
+      key: 'total_quantity',
       width: 90,
       align: 'center',
       className: 'table-header-styled',
+      render: (totalQty, record) => totalQty || record.quantity || 0
+    },
+    {
+      title: 'Available Qty',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      width: 140,
+      align: 'center',
+      className: 'table-header-styled',
+    },
+    {
+      title: 'Issue Qty',
+      dataIndex: 'issues_qty',
+      key: 'issues_qty',
+      width: 110,
+      align: 'center',
+      className: 'table-header-styled',
+      render: (issuesQty) => issuesQty || 0
     },
     {
       title: 'Location',
@@ -380,7 +462,26 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         }}
         onChange={handleTableChange}
         size="small"
-        scroll={{ x: 1300 }}
+        components={{
+          header: {
+            cell: (props) => (
+              <th
+                {...props}
+                style={{
+                  ...(props.style || {}),
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                }}
+              />
+            ),
+          },
+        }}
+        scroll={{ x: 'max-content' }}
+      />
+      <ToolsHistory
+        tool={historyTool}
+        visible={historyVisible}
+        onClose={handleCloseHistory}
       />
     </div>
   );

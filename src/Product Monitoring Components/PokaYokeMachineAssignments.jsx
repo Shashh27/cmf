@@ -30,11 +30,12 @@ const { Option } = Select;
 
 const PokaYokeMachineAssignments = () => {
   const [machines, setMachines] = useState([]);
-  const [assignments, setAssignments] = useState([]);
   const [checklists, setChecklists] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -344,11 +345,20 @@ const PokaYokeMachineAssignments = () => {
             size="small"
             scroll={{ x: 800 }}
             pagination={{
-              pageSize: 10,
+              current: pagination.current,
+              pageSize: pagination.pageSize,
               showSizeChanger: true,
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
               pageSizeOptions: ['10', '20', '50', '100'],
+              onChange: (page, pageSize) => {
+                setPagination({ current: page, pageSize: pageSize });
+                console.log('Page changed to:', page, 'Page size:', pageSize);
+              },
+              onShowSizeChange: (current, size) => {
+                setPagination({ current: 1, pageSize: size });
+                console.log('Page size changed to:', size);
+              },
             }}
             locale={{
               emptyText: (

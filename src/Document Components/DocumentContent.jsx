@@ -17,12 +17,32 @@ import config from '../Config/config';
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-const DocumentContent = ({ selectedNode }) => {
+const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, documentsRefreshKey = 0 }) => {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingDocument, setEditingDocument] = useState(null);
   const [newDocumentName, setNewDocumentName] = useState('');
+  
+  // Helper function to notify parent of document changes
+  const notifyDocumentsChange = () => {
+    // For machine folders, refresh only the specific machine tree to preserve expansion
+    if (
+      selectedNode &&
+      selectedNode.type === 'machine-folder' &&
+      documentTreeRef &&
+      documentTreeRef.current &&
+      typeof documentTreeRef.current.refreshMachineFolders === 'function'
+    ) {
+      documentTreeRef.current.refreshMachineFolders(selectedNode.machineId);
+      return;
+    }
+
+    // For all other types, use the generic callback (updates general tree, etc.)
+    if (onDocumentsChange && typeof onDocumentsChange === 'function') {
+      onDocumentsChange();
+    }
+  };
   
   // Version selection state - tracks selected version ID for each document family
   const [selectedVersions, setSelectedVersions] = useState({});
@@ -38,18 +58,27 @@ const DocumentContent = ({ selectedNode }) => {
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewingDocument, setPreviewingDocument] = useState(null);
 
+  // // Add Document state
+  // const [addModalVisible, setAddModalVisible] = useState(false);
+  // const [addFileList, setAddFileList] = useState([]);
+  // const [addUploading, setAddUploading] = useState(false);
+  // const [addDocType, setAddDocType] = useState('CNC');
+
   // Add Document state
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [addFileList, setAddFileList] = useState([]);
   const [addUploading, setAddUploading] = useState(false);
   const [addDocType, setAddDocType] = useState('CNC');
 
-  // Fetch documents when a folder is selected
   useEffect(() => {
     if (selectedNode) {
       if (selectedNode.type === 'general-folder' || 
+          selectedNode.type === 'common-folder' ||
+          selectedNode.type === 'common-root' ||
           selectedNode.type === 'part-category' || 
           selectedNode.type === 'operation-folder' ||
+          selectedNode.type === 'machine-folder' ||
+          selectedNode.type === 'machine' ||
           (selectedNode.type === 'folder' && selectedNode.category === 'Reports')) {
         fetchDocuments();
       } else {
@@ -58,7 +87,7 @@ const DocumentContent = ({ selectedNode }) => {
     } else {
       setDocuments([]);
     }
-  }, [selectedNode]);
+  }, [selectedNode, documentsRefreshKey]);
 
   const fetchDocuments = async () => {
     if (!selectedNode) return;
@@ -68,12 +97,20 @@ const DocumentContent = ({ selectedNode }) => {
       let url = '';
       if (selectedNode.type === 'general-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${selectedNode.folderId}/documents`;
+      } else if (selectedNode.type === 'common-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders/${selectedNode.folderId}/documents`;
+      } else if (selectedNode.type === 'common-root') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/all/documents`;
       } else if (selectedNode.type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
       } else if (selectedNode.type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/operation/${selectedNode.operationId}`;
       } else if (selectedNode.type === 'folder' && selectedNode.category === 'Reports') {
         url = `${config.API_BASE_URL}/order-documents/order/${selectedNode.orderId}`;
+      } else if (selectedNode.type === 'machine-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/folders/${selectedNode.folderId}/documents`;
+      } else if (selectedNode.type === 'machine') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/machines/${selectedNode.machineId}/documents`;
       }
 
       if (!url) {
@@ -107,7 +144,16 @@ const DocumentContent = ({ selectedNode }) => {
         file_name: doc.file_name || doc.document_name,
         version: doc.version || doc.document_version,
         url: doc.document_url || doc.url, // Ensure we have a URL for preview
-        doc_source_type: selectedNode.type // Keep track of where it came from
+        doc_source_type: selectedNode.type, // Keep track of where it came from
+        general_folder_id: doc.general_folder_id || selectedNode.folderId,
+        machine_folder_id: doc.machine_folder_id || selectedNode.folderId,
+        // For machine documents and common documents, use the versions array from backend
+        versions: (
+          selectedNode.type === 'machine-folder' || 
+          selectedNode.type === 'machine' || 
+          selectedNode.type === 'common-folder' ||
+          selectedNode.type === 'common-root'
+        ) && doc.versions ? doc.versions : undefined
       }));
 
       // Reset selected versions when new documents are fetched
@@ -125,15 +171,38 @@ const DocumentContent = ({ selectedNode }) => {
     const groups = {};
     
     documents.forEach(doc => {
-      // Create a unique key for the document family
-      // All document types use parent_id if it exists, otherwise they use their own id as the family root
-      const familyId = doc.parent_id || doc.id;
-      const familyKey = `${doc.doc_source_type}-${familyId}`;
+      // For machine and common documents, each document already represents a family with versions array
+      if (
+        (doc.doc_source_type === 'machine-folder' || 
+         doc.doc_source_type === 'common-folder' ||
+         doc.doc_source_type === 'common-root') 
+        && doc.versions
+      ) {
+        // Use the document's family ID (parent_id or id) as the key
+        const familyId = doc.parent_id || doc.id;
+        const familyKey = `${doc.doc_source_type}-${familyId}`;
+        
+        if (!groups[familyKey]) {
+          groups[familyKey] = doc.versions.map(version => ({
+            ...version,
+            file_name: version.file_name || version.document_name,
+            version: version.version,
+            url: version.document_url || version.url,
+            doc_source_type: doc.doc_source_type,
+            general_folder_id: doc.general_folder_id,
+            machine_folder_id: doc.machine_folder_id
+          }));
+        }
+      } else {
+        // For other document types, group by parent_id/id as before
+        const familyId = doc.parent_id || doc.id;
+        const familyKey = `${doc.doc_source_type}-${familyId}`;
 
-      if (!groups[familyKey]) {
-        groups[familyKey] = [];
+        if (!groups[familyKey]) {
+          groups[familyKey] = [];
+        }
+        groups[familyKey].push(doc);
       }
-      groups[familyKey].push(doc);
     });
 
     // For each group, sort by version descending
@@ -385,6 +454,12 @@ const DocumentContent = ({ selectedNode }) => {
       } else if (editingDocument.doc_source_type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
+      } else if (editingDocument.doc_source_type === 'machine-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${editingDocument.id}`;
+        body = { document_name: newDocumentName.trim() };
+      } else if (editingDocument.doc_source_type === 'common-folder' || editingDocument.doc_source_type === 'common-root') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/documents/${editingDocument.id}`;
+        body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'folder') {
         url = `${config.API_BASE_URL}/order-documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
@@ -407,6 +482,9 @@ const DocumentContent = ({ selectedNode }) => {
       setEditingDocument(null);
       setNewDocumentName('');
       
+      // Notify parent of document change
+      notifyDocumentsChange();
+      
       // Refresh documents
       fetchDocuments();
     } catch (error) {
@@ -424,6 +502,8 @@ const DocumentContent = ({ selectedNode }) => {
       downloadUrl = `${config.API_BASE_URL}/operation-documents/${document.id}/download`;
     } else if (document.doc_source_type === 'folder') {
       downloadUrl = `${config.API_BASE_URL}/order-documents/download/${document.id}`;
+    } else if (document.doc_source_type === 'machine-folder') {
+      downloadUrl = document.url;
     }
 
     if (downloadUrl) {
@@ -436,7 +516,25 @@ const DocumentContent = ({ selectedNode }) => {
 
   const fetchNextVersion = async (document) => {
     try {
-      // Find all versions for this document family from the grouped data
+      // For general folders, we need to fetch all versions from the backend
+      if (document.doc_source_type === 'general-folder') {
+        const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${document.general_folder_id}/documents`);
+        if (response.ok) {
+          const allDocs = await response.json();
+          const familyDocs = allDocs.filter(doc => 
+            doc.id === document.parent_id || doc.parent_id === document.parent_id || doc.id === document.id
+          );
+          
+          if (familyDocs.length > 0) {
+            const versions = familyDocs.map(v => parseFloat(v.version) || 0);
+            const latestVersion = Math.max(...versions, 0);
+            setNextVersion((latestVersion + 1.0).toFixed(1));
+            return;
+          }
+        }
+      }
+      
+      // For other document types, use the existing logic
       const family = groupedDocuments.find(g => g.familyId === document.familyId);
       const allVersions = family ? family.allVersions : [document];
       
@@ -486,7 +584,17 @@ const DocumentContent = ({ selectedNode }) => {
         formData.append('folder_id', uploadingDocument.general_folder_id.toString());
         // Use the actual uploaded file name instead of parent document name
         formData.append('file_name', file.name);
-        formData.append('parent_id', uploadingDocument.id.toString());
+        formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+      } else if (uploadingDocument.doc_source_type === 'machine-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
+        formData.append('folder_id', (uploadingDocument.machine_folder_id || selectedNode.folderId).toString());
+        formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+      } else if (uploadingDocument.doc_source_type === 'common-folder' || uploadingDocument.doc_source_type === 'common-root') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
+        if (uploadingDocument.folder_id !== null && uploadingDocument.folder_id !== undefined) {
+          formData.append('folder_id', uploadingDocument.folder_id.toString());
+        }
+        formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
       } else if (uploadingDocument.doc_source_type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/`;
         formData.append('document_name', file.name); // Use the name of the new file
@@ -535,8 +643,11 @@ const DocumentContent = ({ selectedNode }) => {
       setVersionFileList([]);
       setUploadingDocument(null);
       
-      // Refresh documents
-      fetchDocuments();
+      // Refresh documents to get the updated version list
+      await fetchDocuments();
+      
+      // Notify parent of document change
+      notifyDocumentsChange();
     } catch (error) {
       console.error('Version upload error:', error);
       message.error('Failed to upload new version: ' + error.message);
@@ -565,6 +676,44 @@ const DocumentContent = ({ selectedNode }) => {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('file_name', file.name);
+      } else if (selectedNode.type === 'common-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
+        formData.append('folder_id', selectedNode.folderId.toString());
+        console.log('Uploading common document:', {
+          url,
+          folderId: selectedNode.folderId,
+          fileName: file.name,
+          fileSize: file.size
+        });
+      } else if (selectedNode.type === 'common-root') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
+        console.log('Uploading common document to root:', {
+          url,
+          folderId: null,
+          fileName: file.name,
+          fileSize: file.size
+        });
+      } else if (selectedNode.type === 'machine-folder') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
+        formData.append('folder_id', selectedNode.folderId.toString());
+        // For machine documents, parent_id is optional - if not provided, creates a new document (version 1.0)
+        // We don't append parent_id here so it creates a new document instead of a version
+        console.log('Uploading machine document:', {
+          url,
+          folderId: selectedNode.folderId,
+          fileName: file.name,
+          fileSize: file.size
+        });
+      } else if (selectedNode.type === 'machine') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
+        formData.append('machine_id', selectedNode.machineId.toString());
+        // For direct machine uploads, folder_id is null and machine_id is provided
+        console.log('Uploading machine document directly to machine:', {
+          url,
+          machineId: selectedNode.machineId,
+          fileName: file.name,
+          fileSize: file.size
+        });
       } else if (selectedNode.type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/`;
         formData.append('document_name', file.name);
@@ -594,13 +743,31 @@ const DocumentContent = ({ selectedNode }) => {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(errorText || 'Failed to add document');
+        console.error('Upload failed response:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorText,
+          url
+        });
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { detail: errorText };
+        }
+        throw new Error(errorData.detail || `Failed to add document: ${response.status} ${response.statusText}`);
       }
+
+      const responseData = await response.json();
+      console.log('Upload successful:', responseData);
 
       message.success('Document added successfully');
       setAddModalVisible(false);
       setAddFileList([]);
       fetchDocuments();
+      
+      // Notify parent of document change
+      notifyDocumentsChange();
     } catch (error) {
       message.error('Failed to add document: ' + error.message);
     } finally {
@@ -624,6 +791,10 @@ const DocumentContent = ({ selectedNode }) => {
             url = `${config.API_BASE_URL}/documents/${document.id}`;
           } else if (document.doc_source_type === 'operation-folder') {
             url = `${config.API_BASE_URL}/operation-documents/${document.id}`;
+          } else if (document.doc_source_type === 'machine-folder') {
+            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${document.id}`;
+          } else if (document.doc_source_type === 'common-folder' || document.doc_source_type === 'common-root') {
+            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'folder') {
             url = `${config.API_BASE_URL}/order-documents/${document.id}`;
           }
@@ -640,6 +811,9 @@ const DocumentContent = ({ selectedNode }) => {
           
           // Refresh documents
           fetchDocuments();
+          
+          // Notify parent of document change
+          notifyDocumentsChange();
         } catch (error) {
           message.error('Failed to delete document: ' + error.message);
         }
@@ -660,8 +834,12 @@ const DocumentContent = ({ selectedNode }) => {
 
   const isSupportedNodeType = 
     selectedNode.type === 'general-folder' || 
+    selectedNode.type === 'common-folder' ||
+    selectedNode.type === 'common-root' ||
     selectedNode.type === 'part-category' || 
     selectedNode.type === 'operation-folder' ||
+    selectedNode.type === 'machine-folder' ||
+    selectedNode.type === 'machine' ||
     (selectedNode.type === 'folder' && selectedNode.category === 'Reports');
 
   if (!isSupportedNodeType) {
@@ -676,6 +854,9 @@ const DocumentContent = ({ selectedNode }) => {
   }
 
   const getHeaderIcon = () => {
+    if (selectedNode.type === 'general-folder') return <FolderOutlined style={{ color: '#722ed1', fontSize: '20px' }} />;
+    if (selectedNode.type === 'common-folder') return <FolderOutlined style={{ color: '#eb2f96', fontSize: '20px' }} />;
+    if (selectedNode.type === 'machine-folder' || selectedNode.type === 'machine') return <FolderOutlined style={{ color: '#52c41a', fontSize: '20px' }} />;
     if (selectedNode.type === 'part-category') return <FileOutlined style={{ color: '#1890ff', fontSize: '20px' }} />;
     if (selectedNode.type === 'operation-folder') return <FileOutlined style={{ color: '#faad14', fontSize: '20px' }} />;
     if (selectedNode.category === 'Reports') return <FileOutlined style={{ color: '#52c41a', fontSize: '20px' }} />;
@@ -686,6 +867,10 @@ const DocumentContent = ({ selectedNode }) => {
     if (selectedNode.type === 'part-category') return `${selectedNode.partName} - ${selectedNode.category}`;
     if (selectedNode.type === 'operation-folder') return `Operation: ${selectedNode.operationName}`;
     if (selectedNode.category === 'Reports') return `Reports - Order: ${selectedNode.orderId}`;
+    if (selectedNode.type === 'machine-folder') return `${selectedNode.machineName} - ${selectedNode.folderName}`;
+    if (selectedNode.type === 'machine') return `${selectedNode.machineName}`;
+    if (selectedNode.type === 'general-folder') return selectedNode.folderName;
+    if (selectedNode.type === 'common-folder') return selectedNode.folderName;
     return selectedNode.folderName;
   };
 

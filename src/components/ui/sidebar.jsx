@@ -105,11 +105,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       label: 'Product Monitoring',
       icon: <MonitorOutlined />,
       children: [
-        { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`} onClick={() => setMobileDrawerOpen(false)}>Live Monitoring</Link> },
-        { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link> },
-        { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`} onClick={() => setMobileDrawerOpen(false)}>Order Tracking</Link> },
-        { key: `${prefix}/product-monitoring/maintenance`, label: <Link to={`${prefix}/product-monitoring/maintenance`} onClick={() => setMobileDrawerOpen(false)}>Maintenance</Link> },
-        { key: `${prefix}/product-monitoring/pokayoke-checklists`, label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>PokaYoke Checklists</Link> },
+        { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`}>Live Monitoring</Link> },
+        { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`}>Planned vs Actual</Link> },
+        { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`}>Order Tracking</Link> },
+        { key: `${prefix}/product-monitoring/maintenance`, label: <Link to={`${prefix}/product-monitoring/maintenance`}>Maintenance</Link> },
+        { key: `${prefix}/product-monitoring/pokayoke-checklists`, label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`}>PokaYoke Checklists</Link> },
       ],
     },
     {
@@ -279,3 +279,4 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 };
 
 export default Sidebar;
+

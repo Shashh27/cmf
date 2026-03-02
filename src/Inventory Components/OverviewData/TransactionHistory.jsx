@@ -9,7 +9,11 @@ import {
   Spin,
   Empty,
   Input,
-  Button
+  Button,
+  Row,
+  Col,
+  DatePicker,
+  Select
 } from 'antd';
 import { 
   HistoryOutlined, 
@@ -19,12 +23,15 @@ import {
 import config from '../../Config/config';
 
 const { Title, Text } = Typography;
+const { RangePicker } = DatePicker;
 
 const TransactionHistory = () => {
   const [allTransactionsLoading, setAllTransactionsLoading] = useState(false);
   const [allTransactionsData, setAllTransactionsData] = useState(null);
   const [error, setError] = useState(null);
   const [searchProjectNumber, setSearchProjectNumber] = useState('');
+  const [dateRange, setDateRange] = useState([null, null]);
+  const [typeFilter, setTypeFilter] = useState('all'); // all | requests | returns
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -133,7 +140,7 @@ const TransactionHistory = () => {
       title: 'Requested Qty',
       dataIndex: 'requested_qty',
       key: 'requested_qty',
-      width: 110,
+      width: 150,
       align: 'center',
       className: 'table-header-styled',
       render: (text) => text || '-',
@@ -166,7 +173,7 @@ const TransactionHistory = () => {
       title: 'Request Status',
       dataIndex: 'request_status',
       key: 'request_status',
-      width: 120,
+      width: 160,
       align: 'center',
       className: 'table-header-styled',
       render: (status) => (
@@ -179,7 +186,7 @@ const TransactionHistory = () => {
       title: 'Returned Qty',
       dataIndex: 'returned_qty',
       key: 'returned_qty',
-      width: 110,
+      width: 150,
       align: 'center',
       className: 'table-header-styled',
       render: (text) => text || '-',
@@ -292,6 +299,24 @@ const TransactionHistory = () => {
       }
     });
     
+    // Type filter
+    if (typeFilter === 'requests') {
+      allRows = allRows.filter(r => !r.return_status);
+    } else if (typeFilter === 'returns') {
+      allRows = allRows.filter(r => !!r.return_status);
+    }
+    // Date range filter
+    const [start, end] = dateRange || [];
+    if (start && end) {
+      const s = start.startOf('day').toDate();
+      const e = end.endOf('day').toDate();
+      allRows = allRows.filter(r => {
+        const d = r.return_status ? r.return_created_at : r.request_created_at;
+        if (!d) return false;
+        const dt = new Date(d);
+        return dt >= s && dt <= e;
+      });
+    }
     return allRows;
   };
 
@@ -307,24 +332,56 @@ const TransactionHistory = () => {
           }
           style={{ marginBottom: '24px' }}
         >
-          {/* Search Bar */}
-          <div style={{ marginBottom: '20px' }}>
-            <Space.Compact style={{ width: '70%', maxWidth: '400px' }}>
-              <Input
-                placeholder="Search by Project Number"
-                value={searchProjectNumber}
-                onChange={(e) => setSearchProjectNumber(e.target.value)}
-                prefix={<SearchOutlined />}
-                size="large"
-                allowClear
-              />
-              <Button 
-                type="primary" 
-                size="large"
-                icon={<SearchOutlined />}
-              >
-              </Button>
-            </Space.Compact>
+          <div style={{ marginBottom: 12 }}>
+            <Row gutter={[12, 12]} align="middle">
+              <Col xs={24} sm={12} md={10} lg={8} xl={6}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Date Range</span>
+                  <RangePicker
+                    style={{ width: '100%' }}
+                    value={dateRange}
+                    onChange={(vals) => setDateRange(vals)}
+                    allowClear
+                  />
+                </div>
+              </Col>
+              <Col xs={24} sm={12} md={6} lg={6} xl={4}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Type</span>
+                  <Select
+                    value={typeFilter}
+                    onChange={setTypeFilter}
+                    style={{ width: '100%' }}
+                    options={[
+                      { value: 'all', label: 'All Types' },
+                      { value: 'requests', label: 'Requests' },
+                      { value: 'returns', label: 'Returns' },
+                    ]}
+                  />
+                </div>
+              </Col>
+              <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Search</span>
+                  <Input.Search
+                    placeholder="Search by Project Number"
+                    value={searchProjectNumber}
+                    onChange={(e) => setSearchProjectNumber(e.target.value)}
+                    prefix={<SearchOutlined />}
+                    allowClear
+                  />
+                </div>
+              </Col>
+              <Col xs="auto">
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>&nbsp;</span>
+                  <Space>
+                    <Button onClick={fetchAllTransactions}>Refresh</Button>
+                    <Button onClick={() => { setDateRange([null, null]); setTypeFilter('all'); setSearchProjectNumber(''); }}>Clear</Button>
+                  </Space>
+                </div>
+              </Col>
+            </Row>
           </div>
           {error && (
             <Alert
@@ -345,6 +402,7 @@ const TransactionHistory = () => {
           {!allTransactionsLoading && allTransactionsData && (
             <div>             
               <Table
+                className="inventory-history-table"
                 columns={combinedTransactionColumns}
                 dataSource={getCombinedTableData()}
                 rowKey="key"
@@ -367,6 +425,20 @@ const TransactionHistory = () => {
                       current: 1,
                       pageSize: size,
                     });
+                  },
+                }}
+                components={{
+                  header: {
+                    cell: (props) => (
+                      <th
+                        {...props}
+                        style={{
+                          ...(props.style || {}),
+                          paddingTop: 10,
+                          paddingBottom: 10,
+                        }}
+                      />
+                    ),
                   },
                 }}
                 size="small"
