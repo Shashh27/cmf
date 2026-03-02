@@ -27,10 +27,11 @@ from routers import (
     login_router,
     inventory_requests_router,
     inventory_return_requests_router,
-    inventory_requests_router,
-    inventory_return_requests_router,
     transaction_history_router,
 )
+
+# Import Pokayoke checklists router
+from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
 
 # Import general documents router
 from document_routers.general_documents import router as general_documents_router
@@ -118,6 +119,8 @@ app.include_router(tools_list_router, prefix="/api/v1")
 app.include_router(inventory_requests_router, prefix="/api/v1")
 app.include_router(inventory_return_requests_router, prefix="/api/v1")
 app.include_router(transaction_history_router, prefix="/api/v1")
+app.include_router(pokayoke_checklists_router, prefix="/api/v1")
+app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -198,3 +201,16 @@ if __name__ == "__main__":
         port=8000,
         log_level="info"
     )
+
+
+
+
+
+
+
+
+
+
+
+
+#  uvicorn main:app --reload --host 172.18.7.86 --port 8000

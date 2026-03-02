@@ -311,8 +311,10 @@ async def upload_document(
         )
         
         # Create database record
+        # Use the actual uploaded file's filename for storage, not the form file_name parameter
+        # The file_name parameter is used for MinIO object naming, but file.filename is the real file name
         db_document = GeneralDocument(
-            file_name=file_name,
+            file_name=file.filename,
             url=document_url,
             version=version,
             general_folder_id=folder_id,
@@ -427,6 +429,38 @@ def get_document_versions(document_id: int, db: Session = Depends(get_db)):
             parent_id=v.parent_id
         ) for v in versions
     ]
+
+@router.get("/documents/{document_id}/preview")
+async def preview_document(document_id: int, db: Session = Depends(get_db)):
+    """Preview document file from MinIO"""
+    from fastapi.responses import StreamingResponse
+    
+    document = db.query(GeneralDocument).filter(GeneralDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with id {document_id} not found"
+        )
+    
+    try:
+        # Extract object name from URL
+        minio_client = get_minio_client()
+        object_name = document.url.split(f"/{minio_client.bucket_name}/")[1]
+        
+        # Download from MinIO
+        file_data = minio_client.download_file(object_name)
+        
+        # Return file as streaming response for preview
+        return StreamingResponse(
+            io.BytesIO(file_data),
+            media_type=get_content_type(document.file_name)
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to preview document: {str(e)}"
+        )
 
 @router.get("/documents/{document_id}/download")
 async def download_document(document_id: int, db: Session = Depends(get_db)):

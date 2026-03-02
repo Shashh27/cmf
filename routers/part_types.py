@@ -23,10 +23,9 @@ def create_part_type(part_type: PartTypeCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=List[PartType])
-def get_part_types(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all part types with pagination"""
-    part_types = db.query(PartTypeModel).offset(skip).limit(limit).all()
-    return part_types
+def get_part_types(db: Session = Depends(get_db)):
+    """Get all part types"""
+    return db.query(PartTypeModel).order_by(PartTypeModel.id.asc()).all()
 
 
 @router.get("/{part_type_id}", response_model=PartType)

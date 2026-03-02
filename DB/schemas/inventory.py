@@ -37,6 +37,8 @@ class RawMaterialUpdate(BaseModel):
 
 class RawMaterial(RawMaterialBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -125,6 +127,7 @@ class InventoryRequest(InventoryRequestBase):
 
 class InventoryRequestWithDetails(InventoryRequest):
     tool_name: Optional[str] = None
+    tool_type: Optional[str] = None
     operator_name: Optional[str] = None
     admin_name: Optional[str] = None
     project_name: Optional[str] = None

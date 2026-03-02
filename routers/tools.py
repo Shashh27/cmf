@@ -23,10 +23,9 @@ def create_tool_with_part(tool: ToolWithPartCreate, db: Session = Depends(get_db
 
 
 @router.get("/", response_model=List[ToolWithPart])
-def get_tools_with_parts(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all tool-part associations with pagination"""
-    tools = db.query(ToolWithPartModel).offset(skip).limit(limit).all()
-    return tools
+def get_tools_with_parts(db: Session = Depends(get_db)):
+    """Get all tool-part associations"""
+    return db.query(ToolWithPartModel).order_by(ToolWithPartModel.id.asc()).all()
 
 
 @router.get("/{tool_with_part_id}", response_model=ToolWithPart)

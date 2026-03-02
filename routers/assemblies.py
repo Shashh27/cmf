@@ -3,7 +3,17 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from DB.database import get_db
-from DB.models.oms import Assembly as AssemblyModel, Part as PartModel
+from DB.models.oms import (
+    Assembly as AssemblyModel,
+    Part as PartModel,
+    Operation as OperationModel,
+    Document as DocumentModel,
+    ToolWithPart as ToolWithPartModel,
+    OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
+    OrderPartPriority as OrderPartPriorityModel,
+    Order as OrderModel,
+    OperationDocument as OperationDocumentModel,
+)
 from DB.schemas.oms import Assembly, AssemblyCreate, AssemblyUpdate
 
 router = APIRouter(
@@ -23,10 +33,9 @@ def create_assembly(assembly: AssemblyCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=List[Assembly])
-def get_assemblies(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all assemblies with pagination"""
-    assemblies = db.query(AssemblyModel).offset(skip).limit(limit).all()
-    return assemblies
+def get_assemblies(db: Session = Depends(get_db)):
+    """Get all assemblies"""
+    return db.query(AssemblyModel).order_by(AssemblyModel.id.asc()).all()
 
 
 @router.get("/{assembly_id}", response_model=Assembly)
@@ -84,27 +93,100 @@ def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
             detail=f"Assembly with id {assembly_id} not found"
         )
 
-    def delete_assembly_recursive(assembly_id_to_delete):
-        """Recursively delete assembly and all its children"""
-        # First, find all child assemblies
-        child_assemblies = db.query(AssemblyModel).filter(AssemblyModel.parent_id == assembly_id_to_delete).all()
-        
-        # Recursively delete all child assemblies
+    assembly_ids: list[int] = []
+
+    def collect_assembly_ids(assembly_id_to_collect: int) -> None:
+        assembly_ids.append(assembly_id_to_collect)
+        child_assemblies = (
+            db.query(AssemblyModel)
+            .filter(AssemblyModel.parent_id == assembly_id_to_collect)
+            .all()
+        )
+        for child in child_assemblies:
+            collect_assembly_ids(child.id)
+
+    collect_assembly_ids(assembly_id)
+
+    parts_under_assemblies = []
+    if assembly_ids:
+        parts_under_assemblies = (
+            db.query(PartModel)
+            .filter(PartModel.assembly_id.in_(assembly_ids))
+            .all()
+        )
+    part_ids = [p.id for p in parts_under_assemblies]
+
+    if part_ids:
+        linked_priorities = (
+            db.query(OrderPartPriorityModel)
+            .filter(OrderPartPriorityModel.part_id.in_(part_ids))
+            .all()
+        )
+        if linked_priorities:
+            order_ids = {p.order_id for p in linked_priorities}
+            orders = db.query(OrderModel).filter(OrderModel.id.in_(order_ids)).all()
+            order_numbers = [o.sale_order_number for o in orders]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "This assembly cannot be deleted because its parts are linked to "
+                    f"orders: {', '.join(order_numbers)}. Please delete or update the "
+                    "related orders first."
+                ),
+            )
+
+    if part_ids:
+        operations = (
+            db.query(OperationModel)
+            .filter(OperationModel.part_id.in_(part_ids))
+            .all()
+        )
+        operation_ids = [op.id for op in operations]
+
+        if operation_ids:
+            db.query(OperationDocumentModel).filter(
+                OperationDocumentModel.operation_id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+
+        if operation_ids:
+            db.query(OperationModel).filter(
+                OperationModel.id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+
+        db.query(DocumentModel).filter(
+            DocumentModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        db.query(ToolWithPartModel).filter(
+            ToolWithPartModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        db.query(OrderPartsRawMaterialLinkedModel).filter(
+            OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        db.query(PartModel).filter(PartModel.id.in_(part_ids)).delete(
+            synchronize_session=False
+        )
+
+    def delete_assembly_recursive(assembly_id_to_delete: int) -> None:
+        child_assemblies = (
+            db.query(AssemblyModel)
+            .filter(AssemblyModel.parent_id == assembly_id_to_delete)
+            .all()
+        )
         for child_assembly in child_assemblies:
             delete_assembly_recursive(child_assembly.id)
-        
-        # Delete all parts that belong to this assembly
-        parts_under_assembly = db.query(PartModel).filter(PartModel.assembly_id == assembly_id_to_delete).all()
-        for part in parts_under_assembly:
-            db.delete(part)
-        
-        # Delete the assembly itself
-        assembly_to_delete = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id_to_delete).first()
+
+        assembly_to_delete = (
+            db.query(AssemblyModel)
+            .filter(AssemblyModel.id == assembly_id_to_delete)
+            .first()
+        )
         if assembly_to_delete:
             db.delete(assembly_to_delete)
-    
-    # Start the recursive deletion
+
     delete_assembly_recursive(assembly_id)
-    
+
     db.commit()
     return None
