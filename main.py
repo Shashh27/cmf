@@ -10,7 +10,7 @@ from routers import (
     machines, 
     shift_hours,
     capacity_planning,
-    machine_scheduling
+    machine_scheduling,
 )
 
 
@@ -38,6 +38,7 @@ app.include_router(machines.router, prefix="/api/v1")
 app.include_router(shift_hours.router, prefix="/api/v1")
 app.include_router(capacity_planning.router, prefix="/api/v1")
 app.include_router(machine_scheduling_router, prefix="/api/v1")
+# app.include_router(machine_scheduling_engine_router, prefix="/api/v1")
 
 
 @app.on_event("startup")

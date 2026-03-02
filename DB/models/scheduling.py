@@ -231,3 +231,22 @@ class MachineSchedule(Base):
 
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+# class MachineProductionLog(Base):
+#     __tablename__ = "machine_production_log"
+#     __table_args__ = {"schema": "execution"}
+
+#     id = Column(Integer, primary_key=True)
+
+#     machine_schedule_id = Column(Integer, ForeignKey("scheduling.machine_schedule.id"), nullable=False)
+
+#     actual_start_time = Column(DateTime, nullable=True)
+#     actual_end_time = Column(DateTime, nullable=True)
+
+#     produced_quantity = Column(Integer, nullable=True)
+#     # rejected_quantity = Column(Integer, nullable=True)
+
+#     operator_id = Column(Integer, ForeignKey("users.users.id"))
+
+#     status = Column(String)  # running/completed/paused

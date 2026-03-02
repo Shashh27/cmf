@@ -36,3 +36,23 @@ class OrderScheduleStatusResponse(BaseModel):
     model_config = {
         "from_attributes": True   # Pydantic v2 replacement for orm_mode
     }
+
+
+# class StartOperationRequest(BaseModel):
+#     operator_id: Optional[int] = None
+
+
+# class CompleteOperationRequest(BaseModel):
+#     produced_quantity: int
+#     rejected_quantity: int = 0
+
+
+# class ProductionLogResponse(BaseModel):
+#     id: int
+#     machine_schedule_id: int
+#     status: str
+#     actual_start_time: Optional[datetime]
+#     actual_end_time: Optional[datetime]
+
+#     class Config:
+#         from_attributes = True
