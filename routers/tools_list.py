@@ -26,7 +26,12 @@ def create_tool(tool: ToolsListCreate, db: Session = Depends(get_db)):
             detail=f"Tool with identification code {tool.identification_code} already exists"
         )
     
-    db_tool = ToolsListModel(**tool.model_dump())
+    # Ensure total_quantity is set to quantity if not provided
+    tool_data = tool.model_dump()
+    if tool_data.get('total_quantity') is None:
+        tool_data['total_quantity'] = tool_data.get('quantity', 0)
+    
+    db_tool = ToolsListModel(**tool_data)
     db.add(db_tool)
     db.commit()
     db.refresh(db_tool)
@@ -164,6 +169,7 @@ async def upload_tools_excel(
                 'range': range_val,
                 'make': make_val,
                 'quantity': quantity_val,
+                'total_quantity': quantity_val,  # Set total_quantity = quantity initially
                 'location': location_val,
                 'gauge': gauge_val,
                 'remarks': remarks_val,
@@ -249,6 +255,15 @@ def update_tool(tool_id: int, tool_update: ToolsListUpdate, db: Session = Depend
             )
     
     update_data = tool_update.model_dump(exclude_unset=True)
+    
+    # Handle total_quantity logic
+    if 'quantity' in update_data and 'total_quantity' not in update_data:
+        # If quantity is being updated but total_quantity is not provided, keep existing total_quantity
+        pass  # Don't modify total_quantity
+    elif 'total_quantity' in update_data:
+        # If total_quantity is explicitly provided, use it
+        pass  # Use the provided total_quantity
+    
     for field, value in update_data.items():
         setattr(db_tool, field, value)
     
@@ -277,6 +292,26 @@ def get_tools_by_type(tool_type: str, db: Session = Depends(get_db)):
     """Get all tools by type"""
     tools = db.query(ToolsListModel).filter(ToolsListModel.type == tool_type).all()
     return tools
+
+
+@router.post("/migrate-total-quantity", response_model=dict)
+def migrate_total_quantity(db: Session = Depends(get_db)):
+    """Migrate existing tools to set total_quantity = quantity for null values"""
+    tools_to_update = db.query(ToolsListModel).filter(
+        ToolsListModel.total_quantity.is_(None)
+    ).all()
+    
+    updated_count = 0
+    for tool in tools_to_update:
+        tool.total_quantity = tool.quantity if tool.quantity is not None else 0
+        updated_count += 1
+    
+    db.commit()
+    
+    return {
+        "message": f"Successfully migrated {updated_count} tools",
+        "updated_count": updated_count
+    }
 
 
 @router.get("/location/{location}", response_model=List[ToolsList])

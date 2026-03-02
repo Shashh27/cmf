@@ -224,6 +224,7 @@ class PokayokeCompletedLogBase(BaseModel):
     machine_id: int
     operator_id: int
     production_order_id: Optional[int] = None
+    part_id: Optional[int] = None
     completed_at: datetime
     all_items_passed: bool
     comments: Optional[str] = None
@@ -270,6 +271,7 @@ class PokayokeCompletedLogUpdate(BaseModel):
     machine_id: Optional[int] = None
     operator_id: Optional[int] = None
     production_order_id: Optional[int] = None
+    part_id: Optional[int] = None
     all_items_passed: Optional[bool] = None
     comments: Optional[str] = None
     read: Optional[bool] = None

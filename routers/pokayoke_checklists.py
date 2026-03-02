@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import re
 from sqlalchemy.orm import Session
 from DB.database import get_db
@@ -44,6 +44,8 @@ completed_logs_router = APIRouter(
     tags=["pokayoke-completed-logs"]
 )
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
 def validate_expected_value(item_type: str, expected_value: str) -> bool:
     """Validate expected_value based on item_type"""
     if not expected_value:
@@ -85,7 +87,9 @@ def validate_expected_value(item_type: str, expected_value: str) -> bool:
 @router.post("/", response_model=PokayokeChecklistSchema, status_code=status.HTTP_201_CREATED)
 def create_checklist(checklist: PokayokeChecklistCreate, db: Session = Depends(get_db)):
     """Create a new Pokayoke checklist"""
-    db_checklist = PokayokeChecklist(**checklist.model_dump())
+    checklist_data = checklist.model_dump()
+    checklist_data["created_at"] = datetime.now(IST).replace(tzinfo=None)
+    db_checklist = PokayokeChecklist(**checklist_data)
     db.add(db_checklist)
     db.commit()
     db.refresh(db_checklist)
@@ -214,6 +218,7 @@ def create_checklist_item(checklist_id: int, item: PokayokeChecklistItemCreate, 
     item_data = item.model_dump()
     item_data['checklist_id'] = checklist_id
     item_data['sequence_number'] = next_sequence
+    item_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
     
     db_item = PokayokeChecklistItem(**item_data)
     db.add(db_item)
@@ -340,6 +345,7 @@ def create_machine_assignment(checklist_id: int, assignment: PokayokeMachineAssi
     # Create assignment with checklist_id from URL
     assignment_data = assignment.model_dump()
     assignment_data['checklist_id'] = checklist_id
+    assignment_data['assigned_at'] = datetime.now(IST).replace(tzinfo=None)
     
     db_assignment = PokayokeMachineAssignment(**assignment_data)
     db.add(db_assignment)
@@ -420,10 +426,10 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
             detail=f"Machine with id {log.machine_id} not found"
         )
     
-    # Set completed_at to datetime.now() if not provided
+    # Set completed_at to current IST time if not provided
     log_data = log.model_dump()
     if not log_data.get('completed_at'):
-        log_data['completed_at'] = datetime.now()
+        log_data['completed_at'] = datetime.now(IST).replace(tzinfo=None)
     
     db_log = PokayokeCompletedLog(**log_data)
     db.add(db_log)
@@ -460,6 +466,7 @@ def get_completed_log(log_id: int, db: Session = Depends(get_db)):
         machine_id=log.machine_id,
         operator_id=log.operator_id,
         production_order_id=log.production_order_id,
+        part_id=log.part_id,
         completed_at=log.completed_at,
         all_items_passed=log.all_items_passed,
         comments=log.comments,
@@ -542,10 +549,10 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
             detail=f"Checklist item with id {response.item_id} not found"
         )
     
-    # Set timestamp to datetime.now() if not provided
+    # Set timestamp to current IST time if not provided
     response_data = response.model_dump()
     if not response_data.get('timestamp'):
-        response_data['timestamp'] = datetime.now()
+        response_data['timestamp'] = datetime.now(IST).replace(tzinfo=None)
     
     db_response = PokayokeItemResponse(**response_data)
     db.add(db_response)

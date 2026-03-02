@@ -130,6 +130,7 @@ class PokayokeCompletedLog(Base):
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=True)
     completed_at = Column(TIMESTAMP, nullable=False)
     all_items_passed = Column(Boolean, nullable=False)
     comments = Column(Text, nullable=True)
@@ -138,6 +139,7 @@ class PokayokeCompletedLog(Base):
     # Relationships
     checklist = relationship("PokayokeChecklist")
     machine = relationship("Machine")
+    part = relationship("DB.models.oms.Part")
     item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
 
 
