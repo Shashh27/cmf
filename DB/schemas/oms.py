@@ -13,6 +13,7 @@ class ProductBase(BaseModel):
     product_name: str
     product_number: str
     product_version: str
+    user_id: int
 
 
 class ProductCreate(ProductBase):
@@ -23,10 +24,12 @@ class ProductUpdate(BaseModel):
     product_name: Optional[str] = None
     product_number: Optional[str] = None
     product_version: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class Product(ProductBase):
     id: int
+    user_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -336,6 +339,7 @@ class OrderBase(BaseModel):
     order_date: Optional[datetime] = None
     customer_id: int
     product_id: int
+    user_id: int
     quantity: int
     due_date: datetime
     status: str
@@ -351,6 +355,7 @@ class OrderUpdate(BaseModel):
     order_date: Optional[datetime] = None
     customer_id: Optional[int] = None
     product_id: Optional[int] = None
+    user_id: Optional[int] = None
     quantity: Optional[int] = None
     due_date: Optional[datetime] = None
     status: Optional[str] = None
@@ -360,6 +365,7 @@ class Order(OrderBase):
     id: int
     company_name: Optional[str] = None
     product_name: Optional[str] = None
+    user_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -368,6 +374,7 @@ class Order(OrderBase):
 class OrderWithCustomerAndProduct(Order):
     company_name: Optional[str] = None
     product_name: Optional[str] = None
+    user_name: Optional[str] = None
 
     class Config:
         from_attributes = True

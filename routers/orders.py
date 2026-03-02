@@ -7,6 +7,7 @@ from datetime import datetime
 from DB.database import get_db
 from DB.models.oms import Order, Product, OrderDocument, Part, OrderPartPriority
 from DB.models.configuration import Customer
+from DB.models.access_control import AccessUser
 from DB.schemas.oms import (
     Order as OrderResponse,
     OrderCreate,
@@ -32,6 +33,10 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+    # Check if user exists
+    user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
     
     db_order = Order(**order.dict())
     db.add(db_order)
@@ -58,15 +63,20 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     return db_order
 
 @router.get("/", response_model=List[OrderWithCustomerAndProduct])
-def get_orders(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all orders with company_name and product_name"""
-    orders = db.query(Order).order_by(Order.id.asc()).offset(skip).limit(limit).all()
+def get_orders(skip: int = 0, limit: int = 100, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get orders with company_name, product_name, and user_name. If user_id is provided, filter by that owner."""
+    query = db.query(Order).order_by(Order.id.asc())
+    if user_id is not None:
+        query = query.filter(Order.user_id == user_id)
+    orders = query.offset(skip).limit(limit).all()
     result = []
     for order in orders:
         customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
         company_name = customer.company_name if customer else None
         product = db.query(Product).filter(Product.id == order.product_id).first()
         product_name = product.product_name if product else None
+        user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
+        user_name = user.user_name if user else None
         order_dict = {
             "id": order.id,
             "sale_order_number": order.sale_order_number,
@@ -74,11 +84,13 @@ def get_orders(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
             "order_date": order.order_date,
             "customer_id": order.customer_id,
             "product_id": order.product_id,
+            "user_id": order.user_id or 0,
             "quantity": order.quantity,
             "due_date": order.due_date,
             "status": order.status,
             "company_name": company_name,
-            "product_name": product_name
+            "product_name": product_name,
+            "user_name": user_name
         }
         result.append(order_dict)
     return result
@@ -90,6 +102,8 @@ def get_orders_with_customers(skip: int = 0, limit: int = 100, db: Session = Dep
     orders = db.query(Order).options(joinedload(Order.customer)).order_by(Order.id.asc()).offset(skip).limit(limit).all()
     result = []
     for order in orders:
+        user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
+        user_name = user.user_name if user else None
         order_dict = {
             "id": order.id,
             "sale_order_number": order.sale_order_number,
@@ -97,9 +111,11 @@ def get_orders_with_customers(skip: int = 0, limit: int = 100, db: Session = Dep
             "order_date": order.order_date,
             "customer_id": order.customer_id,
             "product_id": order.product_id,
+            "user_id": order.user_id or 0,
             "quantity": order.quantity,
             "due_date": order.due_date,
             "status": order.status,
+            "user_name": user_name,
             "customer": {
                 "id": order.customer.id,
                 "company_name": order.customer.company_name,
@@ -124,6 +140,8 @@ def get_order_hierarchical_data(order_id: int, db: Session = Depends(get_db)):
     company_name = customer.company_name if customer else None
     product = db.query(Product).filter(Product.id == order.product_id).first()
     product_name = product.product_name if product else None
+    user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
+    user_name = user.user_name if user else None
     
     # Fetch hierarchy using the helper from products router
     hierarchy = fetch_product_hierarchy(db, order.product_id)
@@ -152,11 +170,13 @@ def get_order_hierarchical_data(order_id: int, db: Session = Depends(get_db)):
         "order_date": order.order_date,
         "customer_id": order.customer_id,
         "product_id": order.product_id,
+        "user_id": order.user_id or 0,
         "quantity": order.quantity,
         "due_date": order.due_date,
         "status": order.status,
         "company_name": company_name,
         "product_name": product_name,
+        "user_name": user_name,
         "product_hierarchy": hierarchy
     }
 
@@ -171,6 +191,8 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
     company_name = customer.company_name if customer else None
     product = db.query(Product).filter(Product.id == order.product_id).first()
     product_name = product.product_name if product else None
+    user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
+    user_name = user.user_name if user else None
     order_dict = {
         "id": order.id,
         "sale_order_number": order.sale_order_number,
@@ -178,11 +200,13 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
         "order_date": order.order_date,
         "customer_id": order.customer_id,
         "product_id": order.product_id,
+        "user_id": order.user_id or 0,
         "quantity": order.quantity,
         "due_date": order.due_date,
         "status": order.status,
         "company_name": company_name,
-        "product_name": product_name
+        "product_name": product_name,
+        "user_name": user_name
     }
     return order_dict
 
@@ -191,6 +215,24 @@ def get_orders_by_customer(customer_id: int, db: Session = Depends(get_db)):
     """Get all orders for a specific customer"""
     orders = db.query(Order).filter(Order.customer_id == customer_id).order_by(Order.id.asc()).all()
     return orders
+
+@router.get("/sale-order/{sale_order_number}/parts")
+def get_parts_by_sale_order(sale_order_number: str, db: Session = Depends(get_db)):
+    """Get parts for the product associated with a given sale_order_number"""
+    order = db.query(Order).filter(Order.sale_order_number == sale_order_number).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    parts = db.query(Part).filter(Part.product_id == order.product_id).order_by(Part.id.asc()).all()
+    return [
+        {
+            "id": p.id,
+            "part_name": p.part_name,
+            "part_number": p.part_number,
+            "assembly_id": p.assembly_id,
+            "product_id": p.product_id,
+        }
+        for p in parts
+    ]
 
 @router.get("/{order_id}/part-priorities", response_model=List[OrderPartPrioritySchema])
 def get_order_part_priorities(order_id: int, db: Session = Depends(get_db)):
@@ -450,6 +492,7 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
         "order_date": order.order_date,
         "customer_id": order.customer_id,
         "product_id": order.product_id,
+        "user_id": order.user_id,
         "quantity": order.quantity,
         "due_date": order.due_date,
         "status": order.status,

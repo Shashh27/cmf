@@ -5,7 +5,14 @@ from typing import List
 
 from DB.database import get_db
 from DB.models.configuration import Machine as MachineModel, WorkCenter as WorkCenterModel
-from DB.schemas.configuration import Machine, MachineCreate, MachineUpdate, MachineWithWorkCenter
+from DB.schemas.configuration import (
+    Machine,
+    MachineCreate,
+    MachineUpdate,
+    MachineWithWorkCenter,
+    MachinePublic,
+    MachineWithWorkCenterPublic,
+)
 
 router = APIRouter(
     prefix="/machines",
@@ -13,7 +20,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", response_model=Machine, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=MachinePublic, status_code=status.HTTP_201_CREATED)
 def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     """Create a new machine"""
     # Check if work center exists
@@ -31,21 +38,21 @@ def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     return db_machine
 
 
-@router.get("/", response_model=List[Machine])
+@router.get("/", response_model=List[MachinePublic])
 def get_machines(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """Get all machines with pagination"""
     machines = db.query(MachineModel).offset(skip).limit(limit).all()
     return machines
 
 
-@router.get("/with-work-center", response_model=List[MachineWithWorkCenter])
+@router.get("/with-work-center", response_model=List[MachineWithWorkCenterPublic])
 def get_machines_with_work_center(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """Get all machines with their work center information"""
     machines = db.query(MachineModel).join(WorkCenterModel).offset(skip).limit(limit).all()
     return machines
 
 
-@router.get("/verify", response_model=Machine)
+@router.get("/verify", response_model=MachinePublic)
 def verify_machine(machine_id: int, password: str, db: Session = Depends(get_db)):
     """Verify machine ID and password and return machine details if valid"""
     machine = db.query(MachineModel).filter(
@@ -61,7 +68,7 @@ def verify_machine(machine_id: int, password: str, db: Session = Depends(get_db)
     return machine
 
 
-@router.get("/{machine_id}", response_model=Machine)
+@router.get("/{machine_id}", response_model=MachinePublic)
 def get_machine(machine_id: int, db: Session = Depends(get_db)):
     """Get a specific machine by ID"""
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
@@ -73,7 +80,7 @@ def get_machine(machine_id: int, db: Session = Depends(get_db)):
     return machine
 
 
-@router.get("/{machine_id}/with-work-center", response_model=MachineWithWorkCenter)
+@router.get("/{machine_id}/with-work-center", response_model=MachineWithWorkCenterPublic)
 def get_machine_with_work_center(machine_id: int, db: Session = Depends(get_db)):
     """Get a specific machine with its work center information"""
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
@@ -85,7 +92,7 @@ def get_machine_with_work_center(machine_id: int, db: Session = Depends(get_db))
     return machine
 
 
-@router.put("/{machine_id}", response_model=Machine)
+@router.put("/{machine_id}", response_model=MachinePublic)
 def update_machine(machine_id: int, machine: MachineUpdate, db: Session = Depends(get_db)):
     """Update a machine"""
     db_machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()

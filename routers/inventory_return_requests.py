@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timedelta, timezone
 from DB.database import get_db
-from DB.models.inventory import InventoryReturnRequest, InventoryRequest
+from DB.models.inventory import InventoryReturnRequest, InventoryRequest, ToolIssue
 from DB.models.access_control import AccessUser
 from DB.schemas.inventory import (
     InventoryReturnRequest as InventoryReturnRequestSchema,
@@ -62,9 +62,14 @@ def create_inventory_return_request(
         InventoryReturnRequest.requested_id == return_request.requested_id
     ).all()
     
-    # Calculate total already returned
+    # Calculate total already returned and total marked as issue (pending or approved)
     total_returned_so_far = sum(r.returned_qty for r in existing_returns)
-    remaining_qty = total_requested_qty - total_returned_so_far
+    total_issues = db.query(ToolIssue).filter(
+        ToolIssue.request_id == return_request.requested_id,
+        ToolIssue.status.in_(["pending", "approved"])
+    ).all()
+    total_issued_as_issue = sum(t.tool_issue_qty for t in total_issues)
+    remaining_qty = total_requested_qty - total_returned_so_far - total_issued_as_issue
     
     # Validate the new return quantity
     if return_request.returned_qty <= 0:
@@ -333,51 +338,33 @@ def update_inventory_return_request_status(
         from DB.models.inventory import ToolsList
         tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
         if tool:
-            print(f"=== STATUS UPDATE START ===")
-            print(f"DEBUG: API URL Parameter Return Request ID: {return_request_id}")
-            print(f"DEBUG: Frontend Table ID Parameter: {table_id}")
-            print(f"DEBUG: Found Return Request - Table ID: {db_return_request.id}")
-            print(f"DEBUG: Return Request Details - Operator: {db_return_request.operator_id}, Returned Qty: {db_return_request.returned_qty}")
-            print(f"DEBUG: Requested ID (Inventory Request): {db_return_request.requested_id}")
-            print(f"DEBUG: Inventory Request Tool ID: {inventory_request.tool_id}")
-            print(f"DEBUG: Tool Found - ID: {tool.id}, Name: {tool.item_description}")
-            print(f"DEBUG: Status Change: {db_return_request.status} → {status}")
-            print(f"DEBUG: Tool Quantity: {tool.quantity} → (will change by {db_return_request.returned_qty})")
-            print(f"=== STATUS UPDATE END ===")
             
-            # Handle inventory quantity based on status change for THIS specific return request
+            # Handle inventory quantity based on status change - ONE-WAY LOGIC
             if status == 'collected':
-                # If marking as collected (from pending)
-                if db_return_request.status != 'collected':
-                    # Restore tool quantity only if it wasn't already collected
-                    print(f"DEBUG: Adding {db_return_request.returned_qty} to tool quantity for Return Request {db_return_request.id}")
-                    tool.quantity += db_return_request.returned_qty
-                    print(f"DEBUG: New tool quantity after adding: {tool.quantity}")
-                # If already collected, no change to inventory (just updating admin_id)
+                # Can only mark as collected from pending status
+                if db_return_request.status != 'pending':
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot mark return request as collected that is already {db_return_request.status}. Status can only change from pending to collected."
+                    )
+                # Restore tool quantity when collected
+                print(f"DEBUG: Adding {db_return_request.returned_qty} to tool quantity for Return Request {db_return_request.id}")
+                tool.quantity += db_return_request.returned_qty
+                print(f"DEBUG: New tool quantity after adding: {tool.quantity}")
             
             elif status == 'pending':
-                # If marking as pending (from collected)
-                if db_return_request.status == 'collected':
-                    # Remove tool quantity if it was previously collected
-                    if tool.quantity >= db_return_request.returned_qty:
-                        print(f"DEBUG: Subtracting {db_return_request.returned_qty} from tool quantity for Return Request {db_return_request.id}")
-                        tool.quantity -= db_return_request.returned_qty
-                        print(f"DEBUG: New tool quantity after subtracting: {tool.quantity}")
-                    else:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Insufficient quantity to remove. Available: {tool.quantity}, Required: {db_return_request.returned_qty}"
-                        )
-                # If already pending, no change to inventory
+                # Cannot change back to pending once collected
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot change collected return request back to pending. Status change is one-way only: pending → collected."
+                )
             
             db.commit()
             print(f"DEBUG: Final tool quantity after commit: {tool.quantity}")
     
-    # Update the return request with admin_id (only for collected status), status, and updated_at
+    # Update the return request with admin_id, status, and updated_at
     if status == 'collected':
         db_return_request.admin_id = admin_id
-    elif status == 'pending':
-        db_return_request.admin_id = None  # Clear admin_id when marking as pending
     db_return_request.status = status
     db_return_request.updated_at = datetime.now(IST).replace(tzinfo=None)
     

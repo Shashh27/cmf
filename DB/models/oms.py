@@ -25,10 +25,12 @@ class Product(Base):
     product_name = Column(String, nullable=False)
     product_number = Column(String, unique=True, nullable=False)
     product_version = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
 
     assemblies = relationship("Assembly", back_populates="product")
     parts = relationship("Part", back_populates="product")
     orders = relationship("Order", back_populates="product")
+    user = relationship("AccessUser")
 
 
 # =======================
@@ -169,12 +171,14 @@ class Order(Base):
     order_date = Column(TIMESTAMP, nullable=True)
     customer_id = Column(Integer, ForeignKey("configuration.customers.id"), nullable=False)
     product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     due_date = Column(TIMESTAMP, nullable=False)
     status = Column(String, nullable=False)
 
     customer = relationship("Customer", back_populates="orders")
     product = relationship("Product", back_populates="orders")
+    user = relationship("AccessUser")
     order_documents = relationship("OrderDocument", back_populates="order")
     raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order")
     part_priorities = relationship("OrderPartPriority", back_populates="order")

@@ -16,6 +16,7 @@ from DB.models.oms import (
 )
 from DB.models.configuration import WorkCenter as WorkCenterModel
 from DB.models.inventory import RawMaterial as RawMaterialModel
+from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.oms import (
     Product, 
     ProductCreate, 
@@ -47,26 +48,59 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
-    return db_product
+    user = db.query(AccessUserModel).filter(AccessUserModel.id == db_product.user_id).first()
+    return {
+        "id": db_product.id,
+        "product_name": db_product.product_name,
+        "product_number": db_product.product_number,
+        "product_version": db_product.product_version,
+        "user_id": db_product.user_id,
+        "user_name": user.user_name if user else None,
+    }
 
 
 @router.get("/", response_model=List[Product])
-def get_products(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def get_products(skip: int = 0, limit: int = 100, user_id: int | None = None, db: Session = Depends(get_db)):
     """Get all products with pagination"""
-    products = db.query(ProductModel).offset(skip).limit(limit).all()
-    return products
+    query = db.query(ProductModel).options(joinedload(ProductModel.user))
+    if user_id is not None:
+        query = query.filter(ProductModel.user_id == user_id)
+    products = query.offset(skip).limit(limit).all()
+    return [
+        {
+            "id": p.id,
+            "product_name": p.product_name,
+            "product_number": p.product_number,
+            "product_version": p.product_version,
+            "user_id": p.user_id,
+            "user_name": (p.user.user_name if getattr(p, "user", None) else None),
+        }
+        for p in products
+    ]
 
 
 @router.get("/{product_id}", response_model=Product)
 def get_product(product_id: int, db: Session = Depends(get_db)):
     """Get a specific product by ID"""
-    product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+    product = (
+        db.query(ProductModel)
+        .options(joinedload(ProductModel.user))
+        .filter(ProductModel.id == product_id)
+        .first()
+    )
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with id {product_id} not found"
         )
-    return product
+    return {
+        "id": product.id,
+        "product_name": product.product_name,
+        "product_number": product.product_number,
+        "product_version": product.product_version,
+        "user_id": product.user_id,
+        "user_name": (product.user.user_name if getattr(product, "user", None) else None),
+    }
 
 
 @router.put("/{product_id}", response_model=Product)
@@ -85,7 +119,15 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
 
     db.commit()
     db.refresh(db_product)
-    return db_product
+    user = db.query(AccessUserModel).filter(AccessUserModel.id == db_product.user_id).first()
+    return {
+        "id": db_product.id,
+        "product_name": db_product.product_name,
+        "product_number": db_product.product_number,
+        "product_version": db_product.product_version,
+        "user_id": db_product.user_id,
+        "user_name": user.user_name if user else None,
+    }
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
