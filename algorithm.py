@@ -108,10 +108,10 @@ class SchedulerEngine:
         
         # Check if end time exceeds shift end
         if end_time > day_end:
-            # Move to next day start
+            # Move entire operation to next day start
             next_day_start = self._get_next_working_day_start(start_time)
-            end_time = next_day_start + timedelta(hours=duration_hours)
             start_time = next_day_start
+            end_time = next_day_start + timedelta(hours=duration_hours)
         
         # Create schedule item
         schedule_item = PlannedScheduleItem(
@@ -132,8 +132,9 @@ class SchedulerEngine:
         return schedule_item
     
     def _get_active_orders_fifo(self) -> List[Dict]:
-        """Get active orders sorted by FIFO (earliest due date first)"""
+        """Get active orders sorted by activation_time → due_date → priority"""
         try:
+            # Query ACTIVE ORDERS only (not just active parts)
             active_parts = (
                 self.db.query(PartScheduleStatus, Part, Order, Product)
                 .join(Part, Part.id == PartScheduleStatus.part_id)
@@ -141,11 +142,14 @@ class SchedulerEngine:
                 .join(Product, Product.id == Order.product_id)
                 .filter(
                     and_(
-                        PartScheduleStatus.status == "active",
+                        PartScheduleStatus.status == "active",  # Only ACTIVE parts
                         Part.type_id == 1  # IN-HOUSE parts only
                     )
                 )
-                .order_by(Order.due_date.asc(), Order.id.asc())  # FIFO by due date, then by order ID
+                .order_by(
+                    Order.due_date.asc(),               # 1. due_date (earliest due date first)
+                    PartScheduleStatus.start_date.asc()    # 2. activation_time
+                )
                 .all()
             )
             
@@ -161,7 +165,6 @@ class SchedulerEngine:
                     'part_name': part.part_name,
                     'quantity': order.quantity,
                     'due_date': order.due_date,
-                    'priority': getattr(order, 'priority', 1),
                     'activated_date': part_status.start_date or datetime.now()
                 })
             
