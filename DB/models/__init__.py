@@ -1,4 +1,5 @@
 from ..database import Base
+from .access_control import AccessUser
 from .oms import (
     Product,
     Assembly,
@@ -7,11 +8,11 @@ from .oms import (
     Operation,
     ProcessPlan,
     Document,
-    ToolWithPart,
     Order,
     OrderDocument,
     OperationDocument,
-    OrderPartsRawMaterialLinked
+    OrderPartsRawMaterialLinked,
+    OrderPartPriority
 )
 from .configuration import (
     WorkCenter,
@@ -38,7 +39,6 @@ __all__ = [
     "Operation",
     "ProcessPlan",
     "Document",
-    "ToolWithPart",
     "Order",
     "OrderDocument",
     "OperationDocument",
@@ -52,5 +52,8 @@ __all__ = [
     "MachineStatus",
     "MachineDowntime",
     "ShiftHoursConfiguration",
-    "Base"
+    "Base",
+    "AccessUser",
+    "OrderPartPriority",
+    "PartScheduleStatus"
 ]

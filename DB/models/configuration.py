@@ -48,6 +48,7 @@ class Machine(Base):
     remarks = Column(String)
     calibration_date = Column(TIMESTAMP)
     calibration_due_date = Column(TIMESTAMP)
+    password = Column(String, nullable=False)
 
     work_center = relationship("WorkCenter", back_populates="machines")
     # status = relationship("MachineStatus", back_populates="machine")
@@ -67,5 +68,8 @@ class Customer(Base):
     email = Column(String, nullable=False)
     contact_number = Column(String, nullable=False)
     contact_person = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
 
     orders = relationship("Order", back_populates="customer")

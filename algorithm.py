@@ -1,338 +1,851 @@
-from datetime import datetime, timedelta, time
-from typing import List, Dict, Optional, Tuple
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+"""
+algorithm.py
+============
+FIFO-based Machine Scheduling Engine.
 
-from DB.database import get_db
-from DB.models.oms import Order, Part, Product, Operation
-from DB.models.configuration import Machine, WorkCenter
-from DB.models.scheduling import (
-    PartScheduleStatus, 
-    ScheduleHistory, 
-    PlannedScheduleItem,
-    ShiftHoursConfiguration,
-    MachineDowntime,
-    EfficiencyFactor
+Called by the router as:
+    from algorithm import generate_machine_schedule
+    result = generate_machine_schedule(db, start_date, end_date)
+
+Return keys used by the /generate-schedule endpoint:
+    success, message, schedule_history_id, operations_scheduled,
+    start_date, end_date, parts_processed   ← must match router expectation
+"""
+
+from datetime import datetime, timedelta, time, timezone
+from typing import Dict, List, Optional, Tuple
+
+from sqlalchemy.orm import Session
+from sqlalchemy import and_
+
+# ── OMS models ────────────────────────────────────────────────────────────
+from DB.models.oms import (
+    Order,                        # id, sale_order_number, product_id, quantity, due_date, status
+    Part,                         # id, part_number, part_name, type_id (1=IN-House), product_id
+    Product,                      # id, product_name
+    Operation,                    # id, operation_number, setup_time (TIME), cycle_time (TIME),
+                                  # workcenter_id (plain Integer – no FK), part_id
+    OrderPartPriority,            # id, order_id, part_id, product_id, priority
+    OrderPartsRawMaterialLinked,  # id, order_id, part_id, raw_material_id  +  .raw_material rel.
 )
 
+# ── Configuration models ──────────────────────────────────────────────────
+from DB.models.configuration import (
+    Machine,      # id, work_center_id, type, make, model, …
+    WorkCenter,   # id, work_center_name, code, is_schedulable
+)
+
+# ── Scheduling models ─────────────────────────────────────────────────────
+from DB.models.scheduling import (
+    OrderScheduleStatus,     # order_id, product_id, status, activated_at (DateTime, tz-aware)
+    ScheduleHistory,         # id, version, is_active, generated_at
+    PlannedScheduleItem,     # all schedule output rows
+    ShiftHoursConfiguration, # date (Date), working_day (Boolean), number_of_shifts (Integer)
+    MachineStatus,           # machine_id, status_id (1=ON / 2=OFF), available_from, available_to
+    EfficiencyFactor,        # efficiency_factor (Float)
+)
+
+# ── Constants ─────────────────────────────────────────────────────────────
+SHIFT_START_HOUR    = 9   # 09:00 – default shift start when no config row exists
+SHIFT_HOURS_PER_DAY = 8   # hours per shift segment
+STATUS_OFF          = 2   # MachineStatus.status_id value meaning OFF
+IN_HOUSE_TYPE_ID    = 1   # Part.type_id value for IN-House parts
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+def _strip_tz(dt: Optional[datetime]) -> Optional[datetime]:
+    """
+    Remove timezone info from a datetime so it can be safely compared
+    with naive datetimes throughout the scheduler.
+
+    activated_at is stored as datetime.now(timezone.utc) by the router,
+    so it arrives as a timezone-aware value and must be normalised.
+    """
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
+# =============================================================================
+# Scheduler Engine
+# =============================================================================
 
 class SchedulerEngine:
     """
-    FIFO-based Machine Scheduling Engine for Active IN-HOUSE Parts
+    FIFO Machine Scheduling Engine for Active IN-HOUSE Parts.
+
+    Scheduling order
+    ----------------
+    Orders are processed strictly sequentially — Order M+1 starts only after
+    Order M's last part finishes.  Within an order, parts run in
+    OrderPartPriority sequence; within a part, operations are sequential.
+    Machine utilisation is tracked via self.machine_end_time so no two
+    operations on the same machine ever overlap.
     """
-    
+
+    # ------------------------------------------------------------------ #
+    #  Construction                                                        #
+    # ------------------------------------------------------------------ #
+
     def __init__(self, db: Session):
         self.db = db
-        self.efficiency_factor = self._get_efficiency_factor()
-        
-    def _get_efficiency_factor(self) -> float:
-        """Get efficiency factor from database"""
-        efficiency_record = self.db.query(EfficiencyFactor).first()
-        return efficiency_record.efficiency_factor if efficiency_record else 0.85
-    
-    def _is_working_day(self, date: datetime) -> bool:
-        """Check if given date is a working day"""
-        return date.weekday() < 5  # Monday=0, Friday=4
-    
-    def _get_shift_hours(self, date: datetime) -> Tuple[time, time]:
-        """Get shift start and end times for given date"""
-        return time(9, 0), time(17, 0)  # 9AM to 5PM
-    
-    def _get_next_working_day_start(self, current_time: datetime) -> datetime:
-        """Get the start time of the next working day"""
-        next_day = current_time + timedelta(days=1)
-        while not self._is_working_day(next_day):
-            next_day += timedelta(days=1)
-        
-        shift_start, _ = self._get_shift_hours(next_day)
-        return next_day.replace(
-            hour=shift_start.hour, 
-            minute=shift_start.minute, 
-            second=0, 
-            microsecond=0
+        self.efficiency_factor: float              = self._load_efficiency()
+        self.machine_end_time:  Dict[int, datetime] = {}   # machine_id → earliest free
+
+    def _load_efficiency(self) -> float:
+        record = self.db.query(EfficiencyFactor).first()
+        return record.efficiency_factor if record else 0.85
+
+    # ------------------------------------------------------------------ #
+    #  Working-calendar helpers                                            #
+    # ------------------------------------------------------------------ #
+
+    def _is_working_day(self, dt: datetime) -> bool:
+        """
+        Reads ShiftHoursConfiguration.working_day for dt's date.
+        Falls back to Mon–Fri (weekday < 5) when no config row exists.
+        """
+        cfg = (
+            self.db.query(ShiftHoursConfiguration)
+            .filter(ShiftHoursConfiguration.date == dt.date())
+            .first()
         )
-    
-    def _calculate_operation_time(self, operation: Operation, quantity: int, is_first_unit: bool = True) -> float:
-        """Calculate operation duration in hours"""
-        setup_seconds = 0
-        cycle_seconds = 0
-        
-        # Handle setup time (only for first unit)
-        if operation.setup_time and is_first_unit:
-            setup_seconds = (
-                operation.setup_time.hour * 3600 + 
-                operation.setup_time.minute * 60 + 
-                operation.setup_time.second
-            )
-        
-        # Handle cycle time
-        if operation.cycle_time:
-            cycle_seconds = (
-                operation.cycle_time.hour * 3600 + 
-                operation.cycle_time.minute * 60 + 
-                operation.cycle_time.second
-            )
-        
-        # Total time = setup (only for first unit) + (cycle_time × quantity)
-        total_seconds = setup_seconds + (cycle_seconds * quantity)
-        total_hours = total_seconds / 3600.0
-        
-        # Apply efficiency factor
-        return total_hours / self.efficiency_factor
-    
-    def _schedule_operation(
-        self, 
-        operation: Operation, 
-        machine: Machine, 
-        quantity: int, 
-        start_time: datetime,
-        schedule_history_id: int,
-        part_data: Dict
-    ) -> PlannedScheduleItem:
-        """Schedule a complete operation with shift boundary handling"""
-        
-        # Calculate duration
-        duration_hours = self._calculate_operation_time(operation, quantity, True)
-        
-        # Get shift boundaries
-        shift_start, shift_end = self._get_shift_hours(start_time)
-        day_end = start_time.replace(
-            hour=shift_end.hour, 
-            minute=shift_end.minute, 
-            second=0, 
-            microsecond=0
+        return bool(cfg.working_day) if cfg is not None else (dt.weekday() < 5)
+
+    def _shift_end_hour(self, dt: datetime) -> int:
+        """
+        shift_end_hour = SHIFT_START_HOUR + number_of_shifts × SHIFT_HOURS_PER_DAY.
+        Defaults to a single 8-hour shift when no config row exists.
+        """
+        cfg = (
+            self.db.query(ShiftHoursConfiguration)
+            .filter(ShiftHoursConfiguration.date == dt.date())
+            .first()
         )
-        
-        # Calculate end time
-        end_time = start_time + timedelta(hours=duration_hours)
-        
-        # Check if end time exceeds shift end
-        if end_time > day_end:
-            # Move entire operation to next day start
-            next_day_start = self._get_next_working_day_start(start_time)
-            start_time = next_day_start
-            end_time = next_day_start + timedelta(hours=duration_hours)
-        
-        # Create schedule item
-        schedule_item = PlannedScheduleItem(
-            part_id=part_data['part_id'],
-            part_number=part_data['part_number'],
-            sale_order_id=part_data['order_id'],
-            sale_order_number=part_data['sale_order_number'],
-            operation_id=operation.id,
-            machine_id=machine.id,
-            planned_start_time=start_time,
-            planned_end_time=end_time,
-            total_quantity=quantity,
-            remaining_quantity=0,
-            status='pending',
-            schedule_history_id=schedule_history_id
+        n = cfg.number_of_shifts if (cfg and cfg.number_of_shifts) else 1
+        return SHIFT_START_HOUR + n * SHIFT_HOURS_PER_DAY
+
+    def _shift_start_dt(self, dt: datetime) -> datetime:
+        return dt.replace(hour=SHIFT_START_HOUR, minute=0, second=0, microsecond=0)
+
+    def _shift_end_dt(self, dt: datetime) -> datetime:
+        return dt.replace(hour=self._shift_end_hour(dt), minute=0, second=0, microsecond=0)
+
+    def _next_shift_start(self, dt: datetime) -> datetime:
+        """Shift-start datetime of the next working day after dt."""
+        candidate = dt + timedelta(days=1)
+        for _ in range(730):                          # guard: ~2 years
+            if self._is_working_day(candidate):
+                return self._shift_start_dt(candidate)
+            candidate += timedelta(days=1)
+        raise RuntimeError(
+            "No working day found in the next 730 days — "
+            "check ShiftHoursConfiguration."
         )
-        
-        return schedule_item
-    
-    def _get_active_orders_fifo(self) -> List[Dict]:
-        """Get active orders sorted by activation_time → due_date → priority"""
-        try:
-            # Query ACTIVE ORDERS only (not just active parts)
-            active_parts = (
-                self.db.query(PartScheduleStatus, Part, Order, Product)
-                .join(Part, Part.id == PartScheduleStatus.part_id)
-                .join(Order, Order.id == PartScheduleStatus.sale_order_id)
-                .join(Product, Product.id == Order.product_id)
+
+    def adjust_to_shift(self, dt: datetime) -> datetime:
+        """
+        Snap dt forward to the nearest valid working-shift moment.
+
+        Rules (applied in order, repeated until stable):
+          1. Non-working day     → jump to next shift start.
+          2. Before shift start  → set to shift start of that day.
+          3. At/after shift end  → jump to next shift start.
+        """
+        for _ in range(1460):                         # guard: ~4 years
+            if not self._is_working_day(dt):
+                dt = self._next_shift_start(dt)
+                continue
+
+            s = self._shift_start_dt(dt)
+            e = self._shift_end_dt(dt)
+
+            if dt < s:
+                return s
+            if dt >= e:
+                dt = self._next_shift_start(dt)
+                continue
+            return dt
+
+        raise RuntimeError("adjust_to_shift: could not find a valid shift window.")
+
+    # ------------------------------------------------------------------ #
+    #  Machine-availability helpers                                        #
+    # ------------------------------------------------------------------ #
+
+    def _machine_next_available(
+        self, machine: Machine, from_time: datetime
+    ) -> Optional[datetime]:
+        """
+        Earliest datetime >= from_time when machine is ON and inside a shift.
+
+        MachineStatus holds ONE row per machine (updated in-place by the
+        machine_status router).  We check whether from_time falls inside
+        an OFF window (status_id=2, available_from ≤ t < available_to).
+
+        Returns None when available_to is NULL (permanently OFF).
+        """
+        candidate = from_time
+        for _ in range(1000):                         # guard
+            off = (
+                self.db.query(MachineStatus)
                 .filter(
                     and_(
-                        PartScheduleStatus.status == "active",  # Only ACTIVE parts
-                        Part.type_id == 1  # IN-HOUSE parts only
+                        MachineStatus.machine_id     == machine.id,
+                        MachineStatus.status_id      == STATUS_OFF,
+                        MachineStatus.available_from <= candidate,
+                        (
+                            (MachineStatus.available_to == None) |
+                            (MachineStatus.available_to  > candidate)
+                        ),
                     )
                 )
-                .order_by(
-                    Order.due_date.asc(),               # 1. due_date (earliest due date first)
-                    PartScheduleStatus.start_date.asc()    # 2. activation_time
+                .first()
+            )
+            if off:
+                if off.available_to is None:
+                    return None                       # permanently OFF
+                candidate = self.adjust_to_shift(off.available_to)
+                continue
+
+            return self.adjust_to_shift(candidate)
+
+        raise RuntimeError(
+            f"Cannot resolve availability for machine {machine.id}."
+        )
+
+    def _pick_best_machine(
+        self,
+        workcenter_id:      int,
+        machines_by_wc:     Dict[int, List[Machine]],
+        op_candidate_start: datetime,
+    ) -> Tuple[Optional[Machine], datetime]:
+        """
+        Pick the machine in workcenter_id with the earliest actual start time:
+          actual_start = max(op_candidate_start, machine_end_time[m.id])
+                         → adjusted for OFF windows.
+
+        Returns (machine, actual_start) or (None, op_candidate_start) when
+        no machine is usable.
+        """
+        best_machine: Optional[Machine]  = None
+        best_start:   Optional[datetime] = None
+
+        for m in machines_by_wc.get(workcenter_id, []):
+            machine_free = self.machine_end_time.get(m.id, op_candidate_start)
+            earliest     = max(op_candidate_start, machine_free)
+            avail        = self._machine_next_available(m, earliest)
+            if avail is None:
+                continue                             # permanently OFF
+            if best_start is None or avail < best_start:
+                best_start   = avail
+                best_machine = m
+
+        return best_machine, (best_start or op_candidate_start)
+
+    # ------------------------------------------------------------------ #
+    #  Duration                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _operation_duration_hours(
+        self, operation: Operation, quantity: int
+    ) -> float:
+        """
+        Adjusted duration (hours):
+          = (setup_seconds + cycle_seconds × quantity) / 3600 / efficiency_factor
+
+        Setup applied once per batch.
+        Returns 0.0 when both setup_time and cycle_time are null/zero.
+
+        Operation.setup_time / cycle_time → Python datetime.time objects
+        (stored as SQL TIME columns).
+        """
+        def _secs(t: Optional[time]) -> int:
+            if t is None:
+                return 0
+            return t.hour * 3600 + t.minute * 60 + t.second
+
+        total_sec = _secs(operation.setup_time) + _secs(operation.cycle_time) * quantity
+        if total_sec == 0:
+            return 0.0
+        return (total_sec / 3600.0) / self.efficiency_factor
+
+    # ------------------------------------------------------------------ #
+    #  Single-operation scheduler                                          #
+    # ------------------------------------------------------------------ #
+
+    def _schedule_operation_blocks(
+        self,
+        operation:           Operation,
+        machine:             Machine,
+        quantity:            int,
+        op_start:            datetime,
+        schedule_history_id: int,
+        part_data:           Dict,
+    ) -> Tuple[List[PlannedScheduleItem], datetime]:
+        """
+        Place operation on machine starting at op_start.
+
+        Produces one PlannedScheduleItem per contiguous working segment.
+        A new segment begins whenever the duration hits:
+          • the end of the current shift, or
+          • the start of an upcoming machine OFF window.
+
+        Returns (list_of_items, op_end_time).
+        """
+        remaining_hours = self._operation_duration_hours(operation, quantity)
+        items: List[PlannedScheduleItem] = []
+        cur = op_start
+
+        while remaining_hours > 1e-9:              # float guard
+            shift_end = self._shift_end_dt(cur)
+
+            # Machine OFF window starting after cur but before shift_end
+            next_off = (
+                self.db.query(MachineStatus)
+                .filter(
+                    and_(
+                        MachineStatus.machine_id    == machine.id,
+                        MachineStatus.status_id     == STATUS_OFF,
+                        MachineStatus.available_from >  cur,
+                        MachineStatus.available_from <  shift_end,
+                    )
+                )
+                .order_by(MachineStatus.available_from.asc())
+                .first()
+            )
+
+            window_end   = min(shift_end, next_off.available_from) if next_off else shift_end
+            window_hours = (window_end - cur).total_seconds() / 3600.0
+
+            if window_hours <= 1e-9:
+                # Advance past the obstruction
+                if next_off and window_end == next_off.available_from:
+                    if next_off.available_to:
+                        cur = self.adjust_to_shift(next_off.available_to)
+                    else:
+                        break                       # machine permanently OFF
+                else:
+                    cur = self._next_shift_start(cur)
+                continue
+
+            segment_hours = min(remaining_hours, window_hours)
+            segment_end   = cur + timedelta(hours=segment_hours)
+
+            items.append(
+                PlannedScheduleItem(
+                    part_id             = part_data['part_id'],
+                    part_number         = part_data['part_number'],
+                    sale_order_id       = part_data['order_id'],
+                    sale_order_number   = part_data['sale_order_number'],
+                    operation_id        = operation.id,
+                    machine_id          = machine.id,
+                    planned_start_time  = cur,
+                    planned_end_time    = segment_end,
+                    total_quantity      = quantity,
+                    remaining_quantity  = 0,
+                    status              = 'pending',
+                    schedule_history_id = schedule_history_id,
+                )
+            )
+            remaining_hours -= segment_hours
+
+            if remaining_hours > 1e-9:
+                if next_off and segment_end >= next_off.available_from:
+                    if next_off.available_to:
+                        cur = self.adjust_to_shift(next_off.available_to)
+                    else:
+                        break
+                else:
+                    cur = self._next_shift_start(segment_end)
+
+        op_end = items[-1].planned_end_time if items else op_start
+        return items, op_end
+
+    # ------------------------------------------------------------------ #
+    #  Phase A – data loaders                                              #
+    # ------------------------------------------------------------------ #
+
+    def _load_active_orders(self) -> List[Dict]:
+        """
+        Phase A1 + A2.
+
+        Fetches orders where OrderScheduleStatus.status = 'active'
+        AND activated_at IS NOT NULL.
+
+        activated_at is stored as a tz-aware datetime (UTC); it is
+        stripped to naive before use to avoid comparison crashes.
+
+        Sorted: due_date ASC → order.id ASC (deterministic tie-break).
+        """
+        try:
+            rows = (
+                self.db.query(Order, OrderScheduleStatus, Product)
+                .join(OrderScheduleStatus,
+                      OrderScheduleStatus.order_id == Order.id)
+                .join(Product,
+                      Product.id == Order.product_id)
+                .filter(
+                    and_(
+                        OrderScheduleStatus.status       == 'active',
+                        OrderScheduleStatus.activated_at != None,
+                    )
+                )
+                .order_by(Order.due_date.asc(), Order.id.asc())
+                .all()
+            )
+
+            return [
+                {
+                    'order_id':          o.id,
+                    'sale_order_number': o.sale_order_number,
+                    'product_id':        p.id,
+                    'product_name':      p.product_name,
+                    'quantity':          o.quantity,
+                    'due_date':          o.due_date,
+                    # Strip timezone – activated_at is stored as UTC-aware datetime
+                    'activation_time':   _strip_tz(oss.activated_at),
+                }
+                for o, oss, p in rows
+            ]
+
+        except Exception as e:
+            print(f"[ERROR] _load_active_orders: {e}")
+            return []
+
+    def _load_parts_for_order(self, order: Dict) -> List[Dict]:
+        """
+        Phase A3.
+
+        Returns IN-HOUSE parts (type_id = IN_HOUSE_TYPE_ID = 1) of the
+        order's product in execution order:
+          • OrderPartPriority sorted by priority ASC  (primary)
+          • Part.id ASC fallback when no priority rows exist
+
+        Raw-material availability:
+          Looks up OrderPartsRawMaterialLinked → RawMaterial.status.
+          RawMaterial has no available_from field; the gate is purely
+          status == 'Available'.
+        """
+        try:
+            order_id   = order['order_id']
+            product_id = order['product_id']
+
+            parts = (
+                self.db.query(Part)
+                .filter(
+                    and_(
+                        Part.product_id == product_id,
+                        Part.type_id    == IN_HOUSE_TYPE_ID,
+                    )
                 )
                 .all()
             )
-            
+            if not parts:
+                return []
+
+            part_map = {p.id: p for p in parts}
+
+            # ── Execution order ──────────────────────────────────────── #
+            priorities = (
+                self.db.query(OrderPartPriority)
+                .filter(OrderPartPriority.order_id == order_id)
+                .order_by(OrderPartPriority.priority.asc())
+                .all()
+            )
+
+            if priorities:
+                ordered_ids = [opp.part_id for opp in priorities
+                               if opp.part_id in part_map]
+                covered = set(ordered_ids)
+                # Safety-net: include any IN-HOUSE parts missing from priority table
+                for p in sorted(parts, key=lambda x: x.id):
+                    if p.id not in covered:
+                        ordered_ids.append(p.id)
+            else:
+                ordered_ids = [p.id for p in sorted(parts, key=lambda x: x.id)]
+
+            # ── Raw-material gate ────────────────────────────────────── #
+            # OrderPartsRawMaterialLinked.raw_material → RawMaterial
+            # RawMaterial.status (String): 'Available' | other
+            # RawMaterial has NO available_from column.
+            rm_links = (
+                self.db.query(OrderPartsRawMaterialLinked)
+                .filter(
+                    and_(
+                        OrderPartsRawMaterialLinked.order_id == order_id,
+                        OrderPartsRawMaterialLinked.part_id.in_(list(part_map.keys())),
+                    )
+                )
+                .all()
+            )
+            # part_id → raw material status
+            rm_status_map: Dict[int, str] = {}
+            for link in rm_links:
+                rm = link.raw_material           # SQLAlchemy relationship – no extra query
+                if rm:
+                    rm_status_map[link.part_id] = getattr(rm, 'status', 'Available') or 'Available'
+
+            # ── Build result list ────────────────────────────────────── #
             result = []
-            for part_status, part, order, product in active_parts:
+            for pid in ordered_ids:
+                p = part_map[pid]
+                rm_stat = rm_status_map.get(pid, 'Available')   # no link → treat as Available
                 result.append({
-                    'order_id': order.id,
-                    'sale_order_number': order.sale_order_number,
-                    'product_id': product.id,
-                    'product_name': product.product_name,
-                    'part_id': part.id,
-                    'part_number': part.part_number,
-                    'part_name': part.part_name,
-                    'quantity': order.quantity,
-                    'due_date': order.due_date,
-                    'activated_date': part_status.start_date or datetime.now()
+                    'part_id':                     p.id,
+                    'part_number':                 p.part_number,
+                    'part_name':                   p.part_name,
+                    'order_id':                    order_id,
+                    'sale_order_number':            order['sale_order_number'],
+                    'quantity':                    order['quantity'],
+                    'raw_material_ok':             rm_stat == 'Available',
+                    # RawMaterial has no available_from column → always None
+                    'raw_material_available_from': None,
                 })
-            
             return result
+
         except Exception as e:
-            print(f"Error in _get_active_orders_fifo: {e}")
+            print(f"[ERROR] _load_parts_for_order (order {order['order_id']}): {e}")
             return []
-    
-    def _get_operations_for_parts(self, part_ids: List[int]) -> Dict[int, List[Operation]]:
-        """Get all operations for given part IDs in sequence"""
+
+    def _load_operations(self, part_ids: List[int]) -> Dict[int, List[Operation]]:
+        """
+        Phase A4.
+
+        Operations grouped by part_id, sorted by operation_number ASC.
+
+        Key fields used:
+          id, operation_number (String), setup_time (TIME), cycle_time (TIME),
+          workcenter_id (plain Integer – no FK to work_centers table).
+        """
         try:
-            operations = (
+            ops = (
                 self.db.query(Operation)
                 .filter(Operation.part_id.in_(part_ids))
                 .order_by(Operation.part_id, Operation.operation_number.asc())
                 .all()
             )
-            
-            # Group by part_id
-            result = {}
-            for op in operations:
+            result: Dict[int, List[Operation]] = {}
+            for op in ops:
                 result.setdefault(op.part_id, []).append(op)
-            
             return result
         except Exception as e:
-            print(f"Error in _get_operations_for_parts: {e}")
+            print(f"[ERROR] _load_operations: {e}")
             return {}
-    
-    def _get_machines_by_workcenter(self) -> Dict[int, List[Machine]]:
-        """Get all machines grouped by workcenter"""
+
+    def _load_machines_by_workcenter(self) -> Dict[int, List[Machine]]:
+        """
+        Phase A4.
+
+        Schedulable machines grouped by work_center_id.
+        Excludes work centers where is_schedulable = False.
+        Excludes work centers named 'Default' (PPT edge-case requirement).
+        """
         try:
             machines = (
                 self.db.query(Machine)
-                .join(WorkCenter)
-                .filter(WorkCenter.is_schedulable == True)
+                .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
+                .filter(
+                    and_(
+                        WorkCenter.is_schedulable   == True,
+                        WorkCenter.work_center_name != 'Default',
+                    )
+                )
                 .all()
             )
-            
-            result = {}
-            for machine in machines:
-                result.setdefault(machine.work_center_id, []).append(machine)
-            
+            result: Dict[int, List[Machine]] = {}
+            for m in machines:
+                result.setdefault(m.work_center_id, []).append(m)
             return result
         except Exception as e:
-            print(f"Error in _get_machines_by_workcenter: {e}")
+            print(f"[ERROR] _load_machines_by_workcenter: {e}")
             return {}
-    
-    def clear_existing_schedule(self):
-        """Clear existing schedule data"""
+
+    # ------------------------------------------------------------------ #
+    #  Schedule management                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _clear_existing_schedule(self) -> None:
+        """
+        Delete PlannedScheduleItem rows first (FK → ScheduleHistory),
+        then ScheduleHistory rows.
+        """
         try:
             self.db.query(PlannedScheduleItem).delete()
             self.db.query(ScheduleHistory).delete()
             self.db.commit()
         except Exception as e:
-            print(f"Error in clear_existing_schedule: {e}")
+            print(f"[ERROR] _clear_existing_schedule: {e}")
             self.db.rollback()
             raise
-    
+
+    # ------------------------------------------------------------------ #
+    #  Main entry-point                                                    #
+    # ------------------------------------------------------------------ #
+
     def generate_schedule(
-        self, 
-        start_date: Optional[datetime] = None, 
-        end_date: Optional[datetime] = None
+        self,
+        start_date: Optional[datetime] = None,
+        end_date:   Optional[datetime] = None,
     ) -> Dict:
         """
-        Generate FIFO-based machine schedule for active IN-HOUSE parts
+        Generate a FIFO machine schedule.
+
+        Return dict keys (must match /generate-schedule endpoint):
+            success, message, schedule_history_id,
+            operations_scheduled, start_date, end_date,
+            parts_processed,   ← total parts that had operations scheduled
+            orders_scheduled, skipped_orders, skipped_parts
         """
+        skipped_orders:           List[str]  = []
+        skipped_parts:            List[str]  = []
+        parts_without_operations: List[Dict] = []   # structured: part_id, part_number, order
+        all_items:                List[PlannedScheduleItem] = []
+        parts_processed = 0
+
         try:
-            if not start_date:
-                start_date = datetime.now()
-            if not end_date:
-                end_date = start_date + timedelta(days=30)
-            
-            # Clear existing schedule
-            self.clear_existing_schedule()
-            
-            # Create new schedule history
-            schedule_history = ScheduleHistory(
-                version=1,
-                is_active=True,
-                generated_at=datetime.now()
-            )
-            self.db.add(schedule_history)
-            self.db.flush()
-            
-            # Get active orders in FIFO sequence
-            active_orders_parts = self._get_active_orders_fifo()
-            
-            if not active_orders_parts:
+            # ── Phase A1 + A2 ─────────────────────────────────────────── #
+            active_orders = self._load_active_orders()
+
+            if not active_orders:
+                # Do NOT clear existing schedule when nothing replaces it
                 return {
-                    'success': False,
-                    'message': 'No active IN-HOUSE parts found for scheduling',
-                    'schedule_history_id': schedule_history.id
+                    'success':             False,
+                    'message':             'No active orders with a valid activation time found.',
+                    'schedule_history_id': None,
+                    'operations_scheduled': 0,
+                    'parts_processed':     0,
+                    'orders_scheduled':    0,
+                    'start_date':          start_date,
+                    'end_date':            None,
+                    'skipped_orders':             [],
+                    'skipped_parts':              [],
+                    'parts_without_operations':   [],
                 }
-            
-            # Get operations and machines
-            part_ids = [item['part_id'] for item in active_orders_parts]
-            operations_by_part = self._get_operations_for_parts(part_ids)
-            machines_by_workcenter = self._get_machines_by_workcenter()
-            
-            schedule_items = []
-            current_time = start_date
-            
-            # Process orders in FIFO sequence
-            for part_data in active_orders_parts:
-                part_id = part_data['part_id']
-                operations = operations_by_part.get(part_id, [])
-                
-                if not operations:
-                    continue
-                
-                # Process operations in sequence
-                for operation in operations:
-                    # Find machines for this operation's workcenter
-                    available_machines = machines_by_workcenter.get(operation.workcenter_id, [])
-                    
-                    if not available_machines:
-                        continue  # Skip if no machines available
-                    
-                    # Use the first available machine
-                    machine = available_machines[0]
-                    
-                    # Schedule the operation
-                    schedule_item = self._schedule_operation(
-                        operation=operation,
-                        machine=machine,
-                        quantity=part_data['quantity'],
-                        start_time=current_time,
-                        schedule_history_id=schedule_history.id,
-                        part_data=part_data
-                    )
-                    
-                    schedule_items.append(schedule_item)
-                    
-                    # Update current_time to the end of the last scheduled item
-                    current_time = schedule_item.planned_end_time
-            
-            # Bulk insert schedule items
-            if schedule_items:
-                self.db.add_all(schedule_items)
-                self.db.commit()
-            
-            return {
-                'success': True,
-                'message': f'FIFO schedule generated for {len(active_orders_parts)} active IN-HOUSE parts',
-                'schedule_history_id': schedule_history.id,
-                'operations_scheduled': len(schedule_items),
-                'start_date': start_date,
-                'end_date': end_date,
-                'parts_processed': len(active_orders_parts)
+
+            # Clear only after confirming there is new work
+            self._clear_existing_schedule()
+
+            # Create ScheduleHistory row
+            history = ScheduleHistory(
+                version      = 1,
+                is_active    = True,
+                generated_at = datetime.now(),
+            )
+            self.db.add(history)
+            self.db.flush()
+            history_id: int = history.id
+
+            # ── Phase A3: parts per order ──────────────────────────────── #
+            all_part_ids:    List[int]             = []
+            order_parts_map: Dict[int, List[Dict]] = {}
+
+            for order in active_orders:
+                parts = self._load_parts_for_order(order)
+                order_parts_map[order['order_id']] = parts
+                all_part_ids.extend(p['part_id'] for p in parts)
+
+            # ── Phase A4: operations + machines ───────────────────────── #
+            ops_by_part    = self._load_operations(all_part_ids)
+            machines_by_wc = self._load_machines_by_workcenter()
+
+            # Flat machine_id → Machine lookup for pinned-machine resolution
+            # (avoids extra DB query per operation)
+            all_machines: Dict[int, Machine] = {
+                m.id: m
+                for wc_machines in machines_by_wc.values()
+                for m in wc_machines
             }
-            
+
+            # ── Phase B: initialise global clock ──────────────────────── #
+            first_activation = active_orders[0]['activation_time']
+            clock_seed       = max(start_date or first_activation, first_activation)
+            current_time     = self.adjust_to_shift(clock_seed)
+
+            # ── Phase C: main loop ─────────────────────────────────────── #
+            orders_scheduled = 0
+
+            for order in active_orders:
+                order_id = order['order_id']
+                quantity = order['quantity']
+
+                # Edge case: zero quantity
+                if quantity == 0:
+                    skipped_orders.append(
+                        f"Order {order['sale_order_number']}: quantity=0, skipped."
+                    )
+                    continue
+
+                parts = order_parts_map.get(order_id, [])
+
+                # Edge case: no in-house parts
+                if not parts:
+                    skipped_orders.append(
+                        f"Order {order['sale_order_number']}: no in-house parts, skipped."
+                    )
+                    continue
+
+                # C1: enforce order activation time + shift
+                current_time = self.adjust_to_shift(
+                    max(current_time, order['activation_time'])
+                )
+
+                # C2: iterate parts in execution order
+                for part_data in parts:
+
+                    # C2.1: part start = current_time after previous part/order
+                    part_start = current_time
+
+                    # Raw-material gate (RawMaterial.status != 'Available')
+                    if not part_data['raw_material_ok']:
+                        skipped_parts.append(
+                            f"Part {part_data['part_number']} "
+                            f"(order {order['sale_order_number']}): "
+                            "raw material not Available — part skipped."
+                        )
+                        continue                      # do NOT advance current_time
+
+                    # C2.2: operations for this part
+                    operations = ops_by_part.get(part_data['part_id'], [])
+                    if not operations:
+                        parts_without_operations.append({
+                            'part_id':           part_data['part_id'],
+                            'part_number':       part_data['part_number'],
+                            'part_name':         part_data['part_name'],
+                            'order_id':          order['order_id'],
+                            'sale_order_number': order['sale_order_number'],
+                            'reason':            'No operations defined for this part',
+                        })
+                        continue                      # do NOT advance current_time
+
+                    # C2.3: schedule each operation sequentially
+                    op_cursor = part_start
+
+                    for operation in operations:
+
+                        # ── Machine selection (3-tier priority) ──────────── #
+                        #
+                        # Tier 1: operation.machine_id is set AND that machine
+                        #         is in a schedulable work center
+                        #         → use that exact machine (respect OFF windows)
+                        #
+                        # Tier 2: operation.machine_id is set BUT the machine
+                        #         is not schedulable (e.g. Default WC)
+                        #         → fall back to earliest-free in workcenter_id
+                        #
+                        # Tier 3: operation.machine_id is None
+                        #         → earliest-free in workcenter_id (original FIFO)
+
+                        if operation.machine_id and operation.machine_id in all_machines:
+                            # Tier 1 – pinned machine
+                            pinned = all_machines[operation.machine_id]
+                            machine_free = self.machine_end_time.get(
+                                pinned.id, op_cursor
+                            )
+                            earliest = max(op_cursor, machine_free)
+                            avail    = self._machine_next_available(pinned, earliest)
+
+                            if avail is None:
+                                # Pinned machine is permanently OFF – skip op
+                                skipped_parts.append(
+                                    f"Part {part_data['part_number']}, "
+                                    f"Op {operation.operation_number}: "
+                                    f"pinned machine {operation.machine_id} is "
+                                    f"permanently OFF — skipped."
+                                )
+                                continue
+
+                            machine, cand_start = pinned, avail
+
+                        else:
+                            # Tier 2 / 3 – earliest-free within the work center
+                            machine, cand_start = self._pick_best_machine(
+                                operation.workcenter_id, machines_by_wc, op_cursor
+                            )
+
+                        if machine is None:
+                            skipped_parts.append(
+                                f"Part {part_data['part_number']}, "
+                                f"Op {operation.operation_number}: "
+                                f"no schedulable machine in WC "
+                                f"{operation.workcenter_id} — skipped."
+                            )
+                            continue                  # op_cursor unchanged
+
+                        # Schedule with shift / machine-OFF splitting
+                        blocks, op_end = self._schedule_operation_blocks(
+                            operation           = operation,
+                            machine             = machine,
+                            quantity            = quantity,
+                            op_start            = cand_start,
+                            schedule_history_id = history_id,
+                            part_data           = part_data,
+                        )
+                        all_items.extend(blocks)
+
+                        # Update machine clock and op cursor
+                        self.machine_end_time[machine.id] = op_end
+                        op_cursor = op_end
+
+                    # C2.4: part complete → advance global clock
+                    current_time = op_cursor
+                    parts_processed += 1
+
+                orders_scheduled += 1
+
+            # ── Phase D: persist ──────────────────────────────────────── #
+            if all_items:
+                self.db.add_all(all_items)
+            self.db.commit()
+
+            return {
+                'success':              True,
+                'message': (
+                    f'Schedule generated for {orders_scheduled} order(s), '
+                    f'{parts_processed} part(s), '
+                    f'{len(all_items)} operation block(s).'
+                ),
+                'schedule_history_id':       history_id,
+                'operations_scheduled':      len(all_items),
+                'orders_scheduled':          orders_scheduled,
+                'parts_processed':           parts_processed,
+                'start_date':                start_date,
+                'end_date':                  current_time,
+                'skipped_orders':            skipped_orders,
+                'skipped_parts':             skipped_parts,
+                'parts_without_operations':  parts_without_operations,
+            }
+
         except Exception as e:
             self.db.rollback()
-            print(f"Error in generate_schedule: {e}")
+            print(f"[ERROR] generate_schedule: {e}")
             return {
-                'success': False,
-                'message': f'Scheduling failed: {str(e)}',
-                'schedule_history_id': None
+                'success':             False,
+                'message':             f'Scheduling failed: {str(e)}',
+                'schedule_history_id': None,
+                'operations_scheduled': 0,
+                'parts_processed':     0,
+                'orders_scheduled':    0,
+                'start_date':          start_date,
+                'end_date':            None,
+                'skipped_orders':            skipped_orders,
+                'skipped_parts':             skipped_parts,
+                'parts_without_operations':  parts_without_operations,
             }
 
 
+# =============================================================================
+# Public wrapper  (called by /generate-schedule via `from algorithm import …`)
+# =============================================================================
+
 def generate_machine_schedule(
-    db: Session, 
-    start_date: Optional[datetime] = None, 
-    end_date: Optional[datetime] = None
+    db:         Session,
+    start_date: Optional[datetime] = None,
+    end_date:   Optional[datetime] = None,
 ) -> Dict:
-    """
-    Main function to generate FIFO-based machine schedule
-    """
-    scheduler = SchedulerEngine(db)
-    return scheduler.generate_schedule(start_date, end_date)
+    """Instantiate SchedulerEngine and run generate_schedule."""
+    return SchedulerEngine(db).generate_schedule(start_date, end_date)
+    

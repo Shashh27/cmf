@@ -24,18 +24,6 @@ from typing import Optional, List, Dict, Tuple
 import calendar
 
 
-# from services.scheduler_engine import run_scheduler
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -524,158 +512,89 @@ def get_order_summary(sale_order_id: int, db: Session = Depends(get_db)):
 
     return summary
 
-
-# @router.post("/run-scheduler")
-# def execute_scheduler(db: Session = Depends(get_db)):
-#     """
-#     Generate ADMIN planned schedule
-#     """
-#     return run_scheduler(db)
-
-
-
-# @router.get("/planned-schedule")
-# def get_planned_schedule(db: Session = Depends(get_db)):
-
-#     schedules = (
-#         db.query(MachineSchedule)
-#         .order_by(
-#             MachineSchedule.machine_id,
-#             MachineSchedule.start_time
-#         )
-#         .all()
-#     )
-
-#     return [
-#         {
-#             "schedule_id": s.id,
-#             "order_id": s.sale_order_id,
-#             "part_id": s.part_id,
-#             "operation_id": s.operation_id,
-#             "machine_id": s.machine_id,
-#             "start_time": s.start_time,
-#             "end_time": s.end_time,
-#             "status": s.status,
-#         }
-#         for s in schedules
-#     ]
-
-
-
-  
-
-
-# @router.get("/planned")
-# def get_planned_schedule(db: Session = Depends(get_db)):
-#     """
-#     Returns planned schedule for Gantt chart
-#     """
-
-#     schedules = (
-#         db.query(MachineSchedule, Machine, Operation, Part, Order)
-#         .join(Machine, Machine.id == MachineSchedule.machine_id)
-#         .join(Operation, Operation.id == MachineSchedule.operation_id)
-#         .join(Part, Part.id == MachineSchedule.part_id)
-#         .join(Order, Order.id == MachineSchedule.order_id)
-#         .order_by(MachineSchedule.start_time)
-#         .all()
-#     )
-
-#     result = []
-
-#     for sched, machine, op, part, order in schedules:
-#         result.append({
-#             "schedule_id": sched.id,
-#             "machine": machine.make,
-#             "part_number": part.part_number,
-#             "operation": op.operation_name,
-#             "sale_order": order.sale_order_number,
-#             "start_time": sched.start_time,
-#             "end_time": sched.end_time,
-#             "status": sched.status
-#         })
-
-#     return result
-
-
 # =========================================================
 # OPTIMIZED SCHEDULE GENERATION FOR ACTIVE IN-HOUSE PARTS
 # =========================================================
 
-def _get_efficiency_factor(db: Session) -> float:
-    """Get efficiency factor from database"""
-    efficiency_record = db.query(EfficiencyFactor).first()
-    return efficiency_record.efficiency_factor if efficiency_record else 0.85
+# Now commented (5/3/26)
 
-def _calculate_operation_duration(operation: Operation, quantity: int, efficiency_factor: float) -> float:
-    """Calculate operation duration in hours including setup and cycle time"""
-    setup_seconds = 0
-    cycle_seconds = 0
+# def _get_efficiency_factor(db: Session) -> float:
+#     """Get efficiency factor from database"""
+#     efficiency_record = db.query(EfficiencyFactor).first()
+#     return efficiency_record.efficiency_factor if efficiency_record else 0.85
+
+# def _calculate_operation_duration(operation: Operation, quantity: int, efficiency_factor: float) -> float:
+#     """Calculate operation duration in hours including setup and cycle time"""
+#     setup_seconds = 0
+#     cycle_seconds = 0
     
-    if operation.setup_time:
-        setup_seconds = (
-            operation.setup_time.hour * 3600 + 
-            operation.setup_time.minute * 60 + 
-            operation.setup_time.second
-        )
+#     if operation.setup_time:
+#         setup_seconds = (
+#             operation.setup_time.hour * 3600 + 
+#             operation.setup_time.minute * 60 + 
+#             operation.setup_time.second
+#         )
     
-    if operation.cycle_time:
-        cycle_seconds = (
-            operation.cycle_time.hour * 3600 + 
-            operation.cycle_time.minute * 60 + 
-            operation.cycle_time.second
-        )
+#     if operation.cycle_time:
+#         cycle_seconds = (
+#             operation.cycle_time.hour * 3600 + 
+#             operation.cycle_time.minute * 60 + 
+#             operation.cycle_time.second
+#         )
     
-    total_seconds = setup_seconds + (cycle_seconds * quantity)
-    total_hours = total_seconds / 3600.0
+#     total_seconds = setup_seconds + (cycle_seconds * quantity)
+#     total_hours = total_seconds / 3600.0
     
-    return total_hours / efficiency_factor
+#     return total_hours / efficiency_factor
+#################################################
 
 @router.post("/generate-schedule")
 def generate_schedule_endpoint(
     start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
+    end_date:   Optional[datetime] = None,
     db: Session = Depends(get_db)
 ):
     """
-    FIFO-based machine schedule generation for active IN-HOUSE parts
-    
-    Features:
-    - Strict FIFO ordering (earliest due date first)
-    - Proper operation sequencing
-    - Setup time only for first unit
-    - Shift boundary handling (9AM-5PM)
-    - Parts continue next day if not completed
-    - Workcenter-based machine assignment
+    Runs the FIFO scheduling algorithm over all active IN-HOUSE orders.
+    Clears any existing schedule and replaces it with a fresh one.
+
+    Parts with no operations defined are NOT scheduled and are listed
+    in parts_without_operations.
     """
     try:
         from algorithm import generate_machine_schedule
-        
+
         result = generate_machine_schedule(db, start_date, end_date)
-        
-        if not result.get('success', False):
+
+        if not result.get("success", False):
             return {
-                "message": result.get('message', 'Scheduling failed'),
-                "schedule_history_id": result.get('schedule_history_id'),
-                "operations_scheduled": 0,
-                "success": False
+                "success":                   False,
+                "message":                   result.get("message", "Scheduling failed"),
+                "schedule_history_id":       result.get("schedule_history_id"),
+                "operations_scheduled":      0,
+                "parts_processed":           0,
+                "orders_scheduled":          0,
+                "skipped_orders":            result.get("skipped_orders", []),
+                "skipped_parts":             result.get("skipped_parts", []),
+                "parts_without_operations":  result.get("parts_without_operations", []),
             }
-        
+
         return {
-            "message": result['message'],
-            "schedule_history_id": result['schedule_history_id'],
-            "operations_scheduled": result['operations_scheduled'],
-            "start_date": result['start_date'],
-            "end_date": result['end_date'],
-            "success": True,
-            "parts_processed": result['parts_processed']
+            "success":                   True,
+            "message":                   result["message"],
+            "schedule_history_id":       result["schedule_history_id"],
+            "operations_scheduled":      result["operations_scheduled"],
+            "parts_processed":           result["parts_processed"],
+            "orders_scheduled":          result["orders_scheduled"],
+            "start_date":                result["start_date"],
+            "end_date":                  result["end_date"],
+            "skipped_orders":            result.get("skipped_orders", []),
+            "skipped_parts":             result.get("skipped_parts", []),
+            "parts_without_operations":  result.get("parts_without_operations", []),
         }
-        
+
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Scheduling failed: {str(e)}"
-        )
+        raise HTTPException(500, f"Scheduling failed: {str(e)}")
 
 # =========================================================
 # VIEW GENERATED SCHEDULE
@@ -684,126 +603,355 @@ def generate_schedule_endpoint(
 @router.get("/view-schedule")
 def view_schedule(db: Session = Depends(get_db)):
     """
-    View the current generated schedule
-    
-    Returns all planned schedule items with details
+    Flat chronological list of all items in the latest schedule,
+    enriched with operation name and machine details.
     """
     try:
-        # Get the latest schedule history
-        latest_schedule = (
+        latest = (
             db.query(ScheduleHistory)
             .order_by(ScheduleHistory.generated_at.desc())
             .first()
         )
-        
-        if not latest_schedule:
+
+        if not latest:
             return {
-                "message": "No schedule found. Please generate a schedule first.",
+                "message":             "No schedule found. Please generate a schedule first.",
                 "schedule_history_id": None,
-                "schedule_items": [],
-                "total_operations": 0
+                "schedule_items":      [],
+                "total_operations":    0
             }
-        
-        # Get all schedule items for the latest schedule
-        schedule_items = (
-            db.query(PlannedScheduleItem)
-            .filter(PlannedScheduleItem.schedule_history_id == latest_schedule.id)
+
+        rows = (
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter)
+            .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .join(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .filter(PlannedScheduleItem.schedule_history_id == latest.id)
             .order_by(PlannedScheduleItem.planned_start_time)
             .all()
         )
-        
-        # Format the response
-        result = []
-        for item in schedule_items:
-            result.append({
-                "schedule_id": item.id,
-                "part_id": item.part_id,
-                "part_number": item.part_number,
-                "sale_order_id": item.sale_order_id,
-                "sale_order_number": item.sale_order_number,
-                "operation_id": item.operation_id,
-                "machine_id": item.machine_id,
+
+        result = [
+            {
+                "schedule_id":        item.id,
+                "sale_order_id":      item.sale_order_id,
+                "sale_order_number":  item.sale_order_number,
+                "part_id":            item.part_id,
+                "part_number":        item.part_number,
+                "operation_id":       item.operation_id,
+                "operation_number":   op.operation_number,
+                "operation_name":     op.operation_name,
+                "machine_id":         item.machine_id,
+                "machine_make":       machine.make,
+                "machine_model":      machine.model,
+                "machine_type":       machine.type,
+                "work_center_id":     wc.id,
+                "work_center_name":   wc.work_center_name,
                 "planned_start_time": item.planned_start_time,
-                "planned_end_time": item.planned_end_time,
-                "total_quantity": item.total_quantity,
+                "planned_end_time":   item.planned_end_time,
+                "duration_hours":     round(
+                    (item.planned_end_time - item.planned_start_time)
+                    .total_seconds() / 3600.0, 4
+                ),
+                "total_quantity":     item.total_quantity,
                 "remaining_quantity": item.remaining_quantity,
-                "status": item.status,
-                "duration_hours": (item.planned_end_time - item.planned_start_time).total_seconds() / 3600.0
-            })
-        
+                "status":             item.status,
+            }
+            for item, op, machine, wc in rows
+        ]
+
         return {
-            "message": f"Schedule found with {len(result)} operations",
-            "schedule_history_id": latest_schedule.id,
-            "schedule_version": latest_schedule.version,
-            "generated_at": latest_schedule.generated_at,
-            "is_active": latest_schedule.is_active,
-            "schedule_items": result,
-            "total_operations": len(result)
+            "message":             f"Schedule found with {len(result)} operation blocks",
+            "schedule_history_id": latest.id,
+            "schedule_version":    latest.version,
+            "generated_at":        latest.generated_at,
+            "is_active":           latest.is_active,
+            "total_operations":    len(result),
+            "schedule_items":      result,
         }
-        
+
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to view schedule: {str(e)}"
-        )
+        raise HTTPException(500, f"Failed to view schedule: {str(e)}")
+
+
+# =========================================================
+# VIEW SCHEDULE  (flat list – by history ID)
+# =========================================================
 
 @router.get("/view-schedule/{schedule_history_id}")
 def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db)):
     """
-    View a specific schedule by history ID
+    Flat chronological list for a specific schedule version,
+    enriched with operation name and machine details.
     """
     try:
-        # Check if schedule history exists
-        schedule_history = (
+        history = (
             db.query(ScheduleHistory)
             .filter(ScheduleHistory.id == schedule_history_id)
             .first()
         )
-        
-        if not schedule_history:
+        if not history:
             raise HTTPException(404, "Schedule history not found")
-        
-        # Get all schedule items for this schedule
-        schedule_items = (
-            db.query(PlannedScheduleItem)
+
+        rows = (
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter)
+            .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .join(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
             .filter(PlannedScheduleItem.schedule_history_id == schedule_history_id)
             .order_by(PlannedScheduleItem.planned_start_time)
             .all()
         )
-        
-        # Format the response
-        result = []
-        for item in schedule_items:
-            result.append({
-                "schedule_id": item.id,
-                "part_id": item.part_id,
-                "part_number": item.part_number,
-                "sale_order_id": item.sale_order_id,
-                "sale_order_number": item.sale_order_number,
-                "operation_id": item.operation_id,
-                "machine_id": item.machine_id,
+
+        result = [
+            {
+                "schedule_id":        item.id,
+                "sale_order_id":      item.sale_order_id,
+                "sale_order_number":  item.sale_order_number,
+                "part_id":            item.part_id,
+                "part_number":        item.part_number,
+                "operation_id":       item.operation_id,
+                "operation_number":   op.operation_number,
+                "operation_name":     op.operation_name,
+                "machine_id":         item.machine_id,
+                "machine_make":       machine.make,
+                "machine_model":      machine.model,
+                "machine_type":       machine.type,
+                "work_center_id":     wc.id,
+                "work_center_name":   wc.work_center_name,
                 "planned_start_time": item.planned_start_time,
-                "planned_end_time": item.planned_end_time,
-                "total_quantity": item.total_quantity,
+                "planned_end_time":   item.planned_end_time,
+                "duration_hours":     round(
+                    (item.planned_end_time - item.planned_start_time)
+                    .total_seconds() / 3600.0, 4
+                ),
+                "total_quantity":     item.total_quantity,
                 "remaining_quantity": item.remaining_quantity,
-                "status": item.status,
-                "duration_hours": (item.planned_end_time - item.planned_start_time).total_seconds() / 3600.0
-            })
-        
+                "status":             item.status,
+            }
+            for item, op, machine, wc in rows
+        ]
+
         return {
-            "message": f"Schedule {schedule_history_id} found with {len(result)} operations",
-            "schedule_history_id": schedule_history.id,
-            "schedule_version": schedule_history.version,
-            "generated_at": schedule_history.generated_at,
-            "is_active": schedule_history.is_active,
-            "schedule_items": result,
-            "total_operations": len(result)
+            "message":             f"Schedule {schedule_history_id} — {len(result)} operation blocks",
+            "schedule_history_id": history.id,
+            "schedule_version":    history.version,
+            "generated_at":        history.generated_at,
+            "is_active":           history.is_active,
+            "total_operations":    len(result),
+            "schedule_items":      result,
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to view schedule: {str(e)}"
+        raise HTTPException(500, f"Failed to view schedule: {str(e)}")
+
+
+
+# =========================================================
+# GANTT CHART DATA  (latest active schedule)
+# =========================================================
+
+@router.get("/gantt-data")
+def get_gantt_data(db: Session = Depends(get_db)):
+    """
+    Schedule items enriched with machine / work-center / operation details,
+    grouped by machine. Intended for Gantt chart rendering.
+    """
+    try:
+        latest = (
+            db.query(ScheduleHistory)
+            .order_by(ScheduleHistory.generated_at.desc())
+            .first()
         )
+
+        if not latest:
+            return {
+                "message":             "No schedule found. Please generate a schedule first.",
+                "schedule_history_id": None,
+                "generated_at":        None,
+                "gantt":               []
+            }
+
+        items = (
+            db.query(PlannedScheduleItem, Machine, WorkCenter, Operation)
+            .join(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .filter(PlannedScheduleItem.schedule_history_id == latest.id)
+            .order_by(PlannedScheduleItem.machine_id, PlannedScheduleItem.planned_start_time)
+            .all()
+        )
+
+        machines_map: Dict[int, dict] = {}
+
+        for item, machine, wc, op in items:
+            mid = machine.id
+            if mid not in machines_map:
+                machines_map[mid] = {
+                    "machine_id":       machine.id,
+                    "machine_type":     machine.type,
+                    "machine_make":     machine.make,
+                    "machine_model":    machine.model,
+                    "work_center_id":   wc.id,
+                    "work_center_name": wc.work_center_name,
+                    "work_center_code": wc.code,
+                    "tasks": []
+                }
+            machines_map[mid]["tasks"].append({
+                "schedule_item_id":   item.id,
+                "sale_order_id":      item.sale_order_id,
+                "sale_order_number":  item.sale_order_number,
+                "part_id":            item.part_id,
+                "part_number":        item.part_number,
+                "operation_id":       item.operation_id,
+                "operation_number":   op.operation_number,
+                "operation_name":     op.operation_name,
+                "planned_start_time": item.planned_start_time,
+                "planned_end_time":   item.planned_end_time,
+                "duration_hours":     round(
+                    (item.planned_end_time - item.planned_start_time)
+                    .total_seconds() / 3600.0, 4
+                ),
+                "total_quantity":     item.total_quantity,
+                "status":             item.status,
+            })
+
+        return {
+            "message":             f"Gantt data for schedule {latest.id}",
+            "schedule_history_id": latest.id,
+            "schedule_version":    latest.version,
+            "generated_at":        latest.generated_at,
+            "is_active":           latest.is_active,
+            "total_machines":      len(machines_map),
+            "total_tasks":         sum(len(v["tasks"]) for v in machines_map.values()),
+            "gantt":               list(machines_map.values()),
+        }
+
+    except Exception as e:
+        raise HTTPException(500, f"Failed to build Gantt data: {str(e)}")
+
+
+# =========================================================
+# GANTT CHART DATA  (specific history version)
+# =========================================================
+
+@router.get("/gantt-data/{schedule_history_id}")
+def get_gantt_data_by_id(schedule_history_id: int, db: Session = Depends(get_db)):
+    """Gantt chart data for a specific schedule version."""
+    try:
+        history = (
+            db.query(ScheduleHistory)
+            .filter(ScheduleHistory.id == schedule_history_id)
+            .first()
+        )
+        if not history:
+            raise HTTPException(404, f"Schedule history {schedule_history_id} not found")
+
+        items = (
+            db.query(PlannedScheduleItem, Machine, WorkCenter, Operation)
+            .join(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .filter(PlannedScheduleItem.schedule_history_id == schedule_history_id)
+            .order_by(PlannedScheduleItem.machine_id, PlannedScheduleItem.planned_start_time)
+            .all()
+        )
+
+        machines_map: Dict[int, dict] = {}
+
+        for item, machine, wc, op in items:
+            mid = machine.id
+            if mid not in machines_map:
+                machines_map[mid] = {
+                    "machine_id":       machine.id,
+                    "machine_type":     machine.type,
+                    "machine_make":     machine.make,
+                    "machine_model":    machine.model,
+                    "work_center_id":   wc.id,
+                    "work_center_name": wc.work_center_name,
+                    "work_center_code": wc.code,
+                    "tasks": []
+                }
+            machines_map[mid]["tasks"].append({
+                "schedule_item_id":   item.id,
+                "sale_order_id":      item.sale_order_id,
+                "sale_order_number":  item.sale_order_number,
+                "part_id":            item.part_id,
+                "part_number":        item.part_number,
+                "operation_id":       item.operation_id,
+                "operation_number":   op.operation_number,
+                "operation_name":     op.operation_name,
+                "planned_start_time": item.planned_start_time,
+                "planned_end_time":   item.planned_end_time,
+                "duration_hours":     round(
+                    (item.planned_end_time - item.planned_start_time)
+                    .total_seconds() / 3600.0, 4
+                ),
+                "total_quantity":     item.total_quantity,
+                "status":             item.status,
+            })
+
+        return {
+            "message":             f"Gantt data for schedule {schedule_history_id}",
+            "schedule_history_id": history.id,
+            "schedule_version":    history.version,
+            "generated_at":        history.generated_at,
+            "is_active":           history.is_active,
+            "total_machines":      len(machines_map),
+            "total_tasks":         sum(len(v["tasks"]) for v in machines_map.values()),
+            "gantt":               list(machines_map.values()),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to build Gantt data: {str(e)}")
+
+
+# =========================================================
+# SCHEDULE HISTORY  (list all versions)
+# =========================================================
+
+@router.get("/schedule-history")
+def get_schedule_history(db: Session = Depends(get_db)):
+    """All schedule versions newest first, with operation block count per version."""
+    try:
+        from sqlalchemy import func
+
+        # Single query: join ScheduleHistory with a count subquery
+        count_sub = (
+            db.query(
+                PlannedScheduleItem.schedule_history_id,
+                func.count(PlannedScheduleItem.id).label("block_count")
+            )
+            .group_by(PlannedScheduleItem.schedule_history_id)
+            .subquery()
+        )
+
+        rows = (
+            db.query(ScheduleHistory, count_sub.c.block_count)
+            .outerjoin(count_sub, count_sub.c.schedule_history_id == ScheduleHistory.id)
+            .order_by(ScheduleHistory.generated_at.desc())
+            .all()
+        )
+
+        result = [
+            {
+                "schedule_history_id":    h.id,
+                "version":                h.version,
+                "is_active":              h.is_active,
+                "generated_at":           h.generated_at,
+                "total_operation_blocks": block_count or 0,
+            }
+            for h, block_count in rows
+        ]
+
+        return {
+            "total_versions": len(result),
+            "history":        result,
+        }
+
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch schedule history: {str(e)}")
