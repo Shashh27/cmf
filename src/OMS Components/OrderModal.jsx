@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE_URL } from "../Config/auth";
-import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse } from "antd";
+import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber } from "antd";
 import { FileTextOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
 import { message } from "antd";
+import dayjs from "dayjs";
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -11,6 +12,103 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
+  const [decimalWarnings, setDecimalWarnings] = useState({});
+
+  const limitDecimals = (value, fieldName, precision = 3) => {
+    if (value === null || value === undefined || value === '') return value;
+    // Remove any character that is not a digit or a decimal point
+    const cleaned = String(value).replace(/[^0-9.]/g, '');
+    let str = cleaned;
+    
+    // For whole numbers (precision = 0), remove any decimal point
+    if (precision === 0) {
+      str = str.replace(/\./g, '');
+      // Enforce max 5 digits for quantity-like fields
+      if (str.length > 5) {
+        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
+        return str.slice(0, 5);
+      }
+      return str;
+    }
+
+    if (str.includes('.')) {
+      const [int, dec] = str.split('.');
+      if (dec.length > precision) {
+        showDecimalWarning(fieldName, precision);
+        return `${int}.${dec.slice(0, precision)}`;
+      }
+      return str;
+    }
+    return str;
+  };
+
+  const showDecimalWarning = (fieldName, precision, customMsg) => {
+    if (!fieldName) return;
+    const msg = customMsg ?? (precision === 0 ? "Only whole numbers allowed" : `Max ${precision} decimal places allowed`);
+    setDecimalWarnings(prev => ({ ...prev, [fieldName]: msg }));
+    // Auto-clear warning after 3 seconds
+    setTimeout(() => {
+      setDecimalWarnings(prev => ({ ...prev, [fieldName]: null }));
+    }, 3000);
+  };
+
+  const blockExtraDecimals = (e, fieldName, precision = 3) => {
+    const { value } = e.target;
+    
+    // 1. Strictly block negative sign and common symbols/letters
+    const forbiddenKeys = ['-', '+', 'e', 'E', '@', '#', '$', '%', '&', '*', '(', ')', '_', '=', '<', '>', '/', '?', ';', ':', '"', "'", '[', ']', '{', '}', '|', '\\', '`', '~'];
+    if (forbiddenKeys.includes(e.key)) {
+      e.preventDefault();
+      return;
+    }
+
+    // 2. Block decimal point if precision is 0 (whole numbers only)
+    if (precision === 0 && e.key === '.') {
+      showDecimalWarning(fieldName, 0);
+      e.preventDefault();
+      return;
+    }
+
+    // 3. If precision is 0, enforce max 5 digits in real-time
+    if (precision === 0 && /[0-9]/.test(e.key)) {
+      const digitsOnly = String(value).replace(/\D/g, '');
+      const hasSelection = e.target.selectionStart !== e.target.selectionEnd;
+      if (digitsOnly.length >= 5 && !hasSelection) {
+        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Allow navigation, delete, backspace, etc.
+    const allowedKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Control', '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    
+    // If it's not an allowed key and not a combo (Ctrl+C, etc.), block it
+    if (!allowedKeys.includes(e.key) && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      return;
+    }
+
+    if (e.key === '.' && value.includes('.')) {
+      e.preventDefault(); // Block multiple dots
+      return;
+    }
+
+    if (value.includes('.')) {
+      const parts = value.split('.');
+      const selectionStart = e.target.selectionStart;
+      const dotIndex = value.indexOf('.');
+      
+      // If typing after the dot and already at precision limit
+      if (selectionStart > dotIndex && parts[1].length >= precision) {
+        // Check if there is a text selection that would be replaced
+        if (e.target.selectionStart === e.target.selectionEnd) {
+          showDecimalWarning(fieldName, precision);
+          e.preventDefault();
+        }
+      }
+    }
+  };
 
   // Fetch data on demand
   const handleCustomerDropdown = (open) => {
@@ -34,8 +132,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           customer_id: editingOrder.customer_id?.toString() ?? "",
           product_id: editingOrder.product_id?.toString() ?? "",
           quantity: editingOrder.quantity?.toString() ?? "",
-          due_date: editingOrder.due_date ? editingOrder.due_date.split("T")[0] : "",
-          order_date: editingOrder.order_date ? editingOrder.order_date.split("T")[0] : "",
+          due_date: editingOrder.due_date ? dayjs(editingOrder.due_date) : null,
+          order_date: editingOrder.order_date ? dayjs(editingOrder.order_date) : null,
           user_id: editingOrder.user_id?.toString() ?? "",
         });
       } else {
@@ -74,6 +172,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       
       const payload = {
         ...values,
+        sale_order_number: values.sale_order_number?.trim(),
         quantity: parseInt(values.quantity),
         customer_id: parseInt(values.customer_id),
         product_id: parseInt(values.product_id),
@@ -82,7 +181,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
       if (values.due_date) {
         try {
-          payload.due_date = new Date(values.due_date).toISOString();
+          payload.due_date = dayjs(values.due_date).toISOString();
         } catch {
           delete payload.due_date;
         }
@@ -92,7 +191,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
       if (values.order_date) {
         try {
-          payload.order_date = new Date(values.order_date).toISOString();
+          payload.order_date = dayjs(values.order_date).toISOString();
         } catch {
           delete payload.order_date;
         }
@@ -128,7 +227,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         onOrderCreated(result);
         handleClose();
       } else {
-        message.error("Failed to save order");
+        const errorData = await response.json();
+        message.error(errorData.detail || "Failed to save order");
       }
     } catch (error) {
       console.error("Error saving order:", error);
@@ -334,8 +434,19 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Quantity</span>}
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-0"
+                validateStatus={decimalWarnings['quantity'] ? 'warning' : ''}
+                help={decimalWarnings['quantity']}
               >
-                <Input type="number" placeholder="Qty" className="h-10 rounded-md border-gray-300" />
+                <InputNumber 
+                  placeholder="Qty" 
+                  className="h-10 rounded-md border-gray-300 w-full" 
+                  min={1} 
+                  max={99999}
+                  precision={0}
+                  stringMode
+                  parser={(val) => limitDecimals(val, 'quantity', 0)}
+                  onKeyDown={(e) => blockExtraDecimals(e, 'quantity', 0)}
+                />
               </Form.Item>
             </Col>
             <Col xs={12} sm={9} md={5}>
@@ -344,7 +455,11 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Order Date</span>}
                 className="mb-0"
               >
-                <Input type="date" className="h-10 rounded-md border-gray-300" />
+                <DatePicker 
+                  className="h-10 rounded-md border-gray-300 w-full" 
+                  format="DD-MM-YYYY"
+                  placeholder="DD-MM-YYYY"
+                />
               </Form.Item>
             </Col>
             <Col xs={12} sm={9} md={5}>
@@ -354,7 +469,11 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-0"
               >
-                <Input type="date" className="h-10 rounded-md border-gray-300" />
+                <DatePicker 
+                  className="h-10 rounded-md border-gray-300 w-full" 
+                  format="DD-MM-YYYY"
+                  placeholder="DD-MM-YYYY"
+                />
               </Form.Item>
             </Col>
             <Col xs={12} sm={6} md={4}>

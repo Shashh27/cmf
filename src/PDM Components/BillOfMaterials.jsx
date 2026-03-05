@@ -462,14 +462,14 @@ const BillOfMaterials = ({ onItemSelected }) => {
     };
     return (
       <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
-        <div className="hidden lg:flex lg:w-[100px] justify-start lg:mr-4">
+        <div className="flex-shrink-0 flex gap-1 justify-start lg:w-[180px]">
           {tagName && (
-            <Tag color={tagColor} className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
-              {tagName.toUpperCase()}
-            </Tag>
+            <span className="hidden lg:inline-block">
+              <Tag color={tagColor} className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
+                {tagName.toUpperCase()}
+              </Tag>
+            </span>
           )}
-        </div>
-        <div className="flex-shrink-0 flex gap-1 justify-start lg:w-[130px]">
           {buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
             <Tooltip key={idx} title={title}>
               <Button 

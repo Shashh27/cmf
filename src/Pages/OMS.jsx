@@ -1,13 +1,19 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input } from "antd";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
 import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
-  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined } from "@ant-design/icons";
+  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import ProductBOMView from "../OMS Components/ProductBOMView";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
+import dayjs from "dayjs";
+import isBetween from "dayjs/plugin/isBetween";
+
+dayjs.extend(isBetween);
+
+const { RangePicker } = DatePicker;
 
 const OMS = () => {
   const navigate = useNavigate();
@@ -23,6 +29,7 @@ const OMS = () => {
   const [editingOrder, setEditingOrder] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [searchText, setSearchText] = useState("");
+  const [dateRange, setDateRange] = useState(null);
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
@@ -130,8 +137,7 @@ const OMS = () => {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
-    const date = new Date(dateStr);
-    return date.toLocaleDateString();
+    return dayjs(dateStr).format("DD/MM/YYYY");
   };
 
 
@@ -215,21 +221,70 @@ const OMS = () => {
     setSearchText(value);
   };
 
-  const filteredOrders = orders.filter(order => {
+  const handleDateRangeChange = (dates) => {
+    setDateRange(dates);
+  };
+
+  const filteredOrders = orders.filter((order, index) => {
+    // 1. Date Range Filter
+    if (dateRange && dateRange[0] && dateRange[1]) {
+      const start = dateRange[0].startOf('day');
+      const end = dateRange[1].endOf('day');
+      const orderDate = order.order_date ? dayjs(order.order_date) : null;
+      const dueDate = order.due_date ? dayjs(order.due_date) : null;
+
+      // Strict containment: If a date exists, it MUST be within the [start, end] range.
+      // If it's "beyond" (before start or after end), hide the row.
+      if (orderDate && (orderDate.isBefore(start) || orderDate.isAfter(end))) return false;
+      if (dueDate && (dueDate.isBefore(start) || dueDate.isAfter(end))) return false;
+      
+      // If no date exists at all, hide it when filtering
+      if (!orderDate && !dueDate) return false;
+    }
+
+    // 2. Global Search Filter (Table Headers)
     if (!searchText) return true;
     
     const searchLower = searchText.toLowerCase();
-    const customerName = String(getCustomerName(order.customer_id, order) || "").toLowerCase();
-    const productName = String(getProductName(order.product_id, order) || "").toLowerCase();
-    const projectName = String(order.project_name || "").toLowerCase();
+    
+    // SL NO (index + 1)
+    const slNo = String(index + 1);
+    
+    // Project Number
     const saleOrderNumber = String(order.sale_order_number || "").toLowerCase();
-    const userName = String(order.user_name || "").toLowerCase();
+    
+    // Project Name
+    const projectName = String(order.project_name || "").toLowerCase();
+    
+    // Customer
+    const customerName = String(getCustomerName(order.customer_id, order) || "").toLowerCase();
+    
+    // Product
+    const productName = String(getProductName(order.product_id, order) || "").toLowerCase();
+    
+    // Qty
+    const quantity = String(order.quantity || "");
+    
+    // Dates (formatted)
+    const formattedOrderDate = formatDate(order.order_date).toLowerCase();
+    const formattedDueDate = formatDate(order.due_date).toLowerCase();
+    
+    // Status
+    const status = String(order.status || "").toLowerCase();
+    
+    // Project Coordinator
+    const userName = String(order.user_name || order.user_id || "").toLowerCase();
     
     return (
+      slNo.includes(searchLower) ||
       projectName.includes(searchLower) ||
       saleOrderNumber.includes(searchLower) ||
       customerName.includes(searchLower) ||
       productName.includes(searchLower) ||
+      quantity.includes(searchLower) ||
+      formattedOrderDate.includes(searchLower) ||
+      formattedDueDate.includes(searchLower) ||
+      status.includes(searchLower) ||
       userName.includes(searchLower)
     );
   });
@@ -510,8 +565,14 @@ const OMS = () => {
                 </Typography.Text>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+              <RangePicker
+                onChange={handleDateRangeChange}
+                className="w-full sm:w-64"
+                format="DD/MM/YYYY"
+                placeholder={["Start Date", "End Date"]}
+              />
               <Input.Search
-                placeholder="Search orders..."
+                placeholder="Search by any field..."
                 allowClear
                 onSearch={handleSearch}
                 onChange={(e) => handleSearch(e.target.value)}

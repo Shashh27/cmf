@@ -48,6 +48,17 @@ const RawMaterials = () => {
   const [orderSearchText, setOrderSearchText] = useState("");
   const [linkedMaterialsSearchText, setLinkedMaterialsSearchText] = useState("");
 
+  const [statusEditOrderKg, setStatusEditOrderKg] = useState(null);
+  const [statusEditOrderQty, setStatusEditOrderQty] = useState(null);
+  const [statusEditCurrentLinkages, setStatusEditCurrentLinkages] = useState([]);
+  const [statusEditPartsToRemove, setStatusEditPartsToRemove] = useState([]);
+  const [statusEditPartsToAdd, setStatusEditPartsToAdd] = useState([]);
+  const [statusEditAvailableParts, setStatusEditAvailableParts] = useState([]);
+  const [orderHierarchyMap, setOrderHierarchyMap] = useState({});
+  const [decimalWarnings, setDecimalWarnings] = useState({});
+  const [selectedStockType, setSelectedStockType] = useState("");
+  const [isCustomStockType, setIsCustomStockType] = useState(false);
+
   useEffect(() => {
     const loadData = async () => {
       if (activeTab === "raw-materials") {
@@ -133,19 +144,25 @@ const RawMaterials = () => {
 
   const openCreateRawMaterial = () => {
     setEditingRawMaterial(null);
+    setSelectedStockType("");
+    setIsCustomStockType(false);
     form.resetFields();
     setRawMaterialModalOpen(true);
   };
 
   const openEditRawMaterial = (material) => {
     setEditingRawMaterial(material);
+    const stockType = material.stock_type || "";
+    const isCustom = !["Sheet Metal", "Rod", "Solid Bar"].includes(stockType);
+    setSelectedStockType(isCustom ? "Other" : stockType);
+    setIsCustomStockType(isCustom);
     form.setFieldsValue({
       material_name: material.material_name || "",
       material_specification: material.material_specification || "",
       mass: material.mass ?? "",
       density: material.density ?? "",
       volume: material.volume ?? "",
-      stock_type: material.stock_type || "",
+      stock_type: isCustom ? stockType : stockType,
       quantity: material.quantity ?? "",
       stock_dimensions: material.stock_dimensions || "",
     });
@@ -155,6 +172,84 @@ const RawMaterials = () => {
   const closeRawMaterialModal = () => {
     setRawMaterialModalOpen(false);
     setEditingRawMaterial(null);
+    setSelectedStockType("");
+    setIsCustomStockType(false);
+  };
+
+  const limitDecimals = (value, fieldName, precision = 3) => {
+    if (value === null || value === undefined || value === '') return value;
+    const cleaned = String(value).replace(/[^0-9.]/g, '');
+    let str = cleaned;
+    if (precision === 0) {
+      str = str.replace(/\./g, '');
+      if (str.length > 5) {
+        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
+        return str.slice(0, 5);
+      }
+      return str;
+    }
+
+    if (str.includes('.')) {
+      const [int, dec] = str.split('.');
+      if (dec.length > precision) {
+        showDecimalWarning(fieldName, precision);
+        return `${int}.${dec.slice(0, precision)}`;
+      }
+      return str;
+    }
+    return str;
+  };
+
+  const showDecimalWarning = (fieldName, precision, customMsg) => {
+    if (!fieldName) return;
+    const msg = customMsg ?? (precision === 0 ? "Only whole numbers allowed" : `Max ${precision} decimal places allowed`);
+    setDecimalWarnings(prev => ({ ...prev, [fieldName]: msg }));
+    setTimeout(() => {
+      setDecimalWarnings(prev => ({ ...prev, [fieldName]: null }));
+    }, 3000);
+  };
+
+  const blockExtraDecimals = (e, fieldName, precision = 3) => {
+    const { value } = e.target;
+    const forbiddenKeys = ['-', '+', 'e', 'E', '@', '#', '$', '%', '&', '*', '(', ')', '_', '=', '<', '>', '/', '?', ';', ':', '"', "'", '[', ']', '{', '}', '|', '\\', '`', '~'];
+    if (forbiddenKeys.includes(e.key)) {
+      e.preventDefault();
+      return;
+    }
+    if (precision === 0 && e.key === '.') {
+      showDecimalWarning(fieldName, 0);
+      e.preventDefault();
+      return;
+    }
+    if (precision === 0 && /[0-9]/.test(e.key)) {
+      const digitsOnly = String(value).replace(/\D/g, '');
+      const hasSelection = e.target.selectionStart !== e.target.selectionEnd;
+      if (digitsOnly.length >= 5 && !hasSelection) {
+        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
+        e.preventDefault();
+        return;
+      }
+    }
+    const allowedKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Control', '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    if (!allowedKeys.includes(e.key) && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      return;
+    }
+    if (e.key === '.' && value.includes('.')) {
+      e.preventDefault();
+      return;
+    }
+    if (value.includes('.')) {
+      const parts = value.split('.');
+      const selectionStart = e.target.selectionStart;
+      const dotIndex = value.indexOf('.');
+      if (selectionStart > dotIndex && parts[1].length >= precision) {
+        if (e.target.selectionStart === e.target.selectionEnd) {
+          showDecimalWarning(fieldName, precision);
+          e.preventDefault();
+        }
+      }
+    }
   };
 
   const handleSaveRawMaterial = async (values) => {
@@ -287,6 +382,39 @@ const RawMaterials = () => {
       },
     });
   };
+
+  // Flatten all IN-House parts for an order from /orders/{id}/hierarchical response
+  const flattenPartsFromOrderHierarchy = (orderHierarchy) => {
+    if (!orderHierarchy || !orderHierarchy.product_hierarchy) return [];
+    const { assemblies = [], direct_parts = [] } = orderHierarchy.product_hierarchy || {};
+    const parts = [];
+
+    const visitAssemblies = (assemblyDetailsList) => {
+      (assemblyDetailsList || []).forEach((ad) => {
+        const assemblyParts = ad.parts || [];
+        assemblyParts.forEach((pd) => {
+          const p = pd.part || pd;
+          if (p && p.id && (!p.type_name || p.type_name === "IN-House")) {
+            parts.push(p);
+          }
+        });
+        const subs = ad.subassemblies || [];
+        if (subs.length) visitAssemblies(subs);
+      });
+    };
+
+    visitAssemblies(assemblies);
+
+    (direct_parts || []).forEach((pd) => {
+      const p = pd.part || pd;
+      if (p && p.id && (!p.type_name || p.type_name === "IN-House")) {
+        parts.push(p);
+      }
+    });
+
+    return parts;
+  };
+
 
   const handleDeleteRawMaterial = async (material) => {
     Modal.confirm({
@@ -595,6 +723,9 @@ const RawMaterials = () => {
 
     setLinking(true);
     try {
+      const linkageGroupId = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID().replace(/-/g, "")
+        : `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
       const responses = await Promise.all(
         orderPartSelections.map(({ orderId, partIds }) => {
           if (!partIds.length) {
@@ -613,6 +744,7 @@ const RawMaterials = () => {
                 order_id: orderId,
                 order_quantities,
                 order_masses,
+                linkage_group_id: linkageGroupId,
               }),
             }
           );
@@ -643,13 +775,16 @@ const RawMaterials = () => {
       if (!item) return;
       const materialId = item.raw_material_id ?? "no-material";
       const orderId = item.order_id ?? "no-order";
-      const key = `${materialId}-${orderId}`;
+      const groupId = item.linkage_group_id || null;
+      const groupKey = groupId ? `${groupId}-${orderId}` : `order-${orderId}`;
+      const key = `${materialId}-${groupKey}`;
 
       if (!groupedMap[key]) {
         groupedMap[key] = {
-          id: `${materialId}-${orderId}`,
+          id: key,
           raw_material_id: item.raw_material_id,
           order_id: item.order_id,
+          linkage_group_id: item.linkage_group_id || null,
           sale_order_number: item.sale_order_number,
           project_name: item.project_name,
           material_name: item.material_name,
@@ -659,21 +794,26 @@ const RawMaterials = () => {
           part_numbers: [],
           part_names: [],
           linkage_ids: [],
+          first_created_at: item.created_at || null,
         };
       }
 
-      if (item.part_number) {
-        groupedMap[key].part_numbers.push(item.part_number);
+      const g = groupedMap[key];
+      if (item.part_number && !g.part_numbers.includes(item.part_number)) {
+        g.part_numbers.push(item.part_number);
       }
-      if (item.part_name) {
-        groupedMap[key].part_names.push(item.part_name);
+      if (item.part_name && !g.part_names.includes(item.part_name)) {
+        g.part_names.push(item.part_name);
       }
       if (item.id != null) {
-        groupedMap[key].linkage_ids.push(item.id);
+        g.linkage_ids.push(item.id);
       }
     });
 
     const groupedData = Object.values(groupedMap).sort((a, b) => {
+      const aTime = a.first_created_at ? new Date(a.first_created_at).getTime() : 0;
+      const bTime = b.first_created_at ? new Date(b.first_created_at).getTime() : 0;
+      if (aTime !== bTime) return aTime - bTime;
       const aMat = a.raw_material_id ?? 0;
       const bMat = b.raw_material_id ?? 0;
       if (aMat !== bMat) return aMat - bMat;
@@ -684,19 +824,19 @@ const RawMaterials = () => {
 
     const getMaterialRowSpan = (record, index) => {
       if (!groupedData.length) return 1;
-      if (index === 0 || groupedData[index - 1].raw_material_id !== record.raw_material_id) {
-        const currentId = record.raw_material_id;
-        let rowSpan = 1;
-        for (let i = index + 1; i < groupedData.length; i += 1) {
-          if (groupedData[i].raw_material_id === currentId) {
-            rowSpan += 1;
-          } else {
-            break;
-          }
+      const prev = groupedData[index - 1];
+      const sameBatch = prev && prev.raw_material_id === record.raw_material_id && prev.linkage_group_id === record.linkage_group_id;
+      if (sameBatch) return 0;
+      let rowSpan = 1;
+      for (let i = index + 1; i < groupedData.length; i++) {
+        const next = groupedData[i];
+        if (next.raw_material_id === record.raw_material_id && next.linkage_group_id === record.linkage_group_id) {
+          rowSpan++;
+        } else {
+          break;
         }
-        return rowSpan;
       }
-      return 0;
+      return rowSpan;
     };
 
     const columns = [
@@ -724,18 +864,83 @@ const RawMaterials = () => {
         dataIndex: 'part_numbers',
         key: 'part_number',
         ellipsis: true,
-        render: (values) => {
-          if (!values || values.length === 0) {
-            return <span className="text-gray-400">-</span>;
+        render: (values, record) => {
+          const isEditing = statusEditRowId === record.id;
+          if (!isEditing) {
+            if (!values || values.length === 0) {
+              return <span className="text-gray-400">-</span>;
+            }
+            return (
+              <Space size="small" wrap>
+                {values.map((val, idx) => (
+                  <Tag key={idx} color="geekblue">
+                    {val}
+                  </Tag>
+                ))}
+              </Space>
+            );
           }
+
+          const currentParts = statusEditCurrentLinkages.filter(
+            (l) =>
+              l.raw_material_id === record.raw_material_id &&
+              l.order_id === record.order_id &&
+              (l.linkage_group_id || null) === (record.linkage_group_id || null) &&
+              !statusEditPartsToRemove.includes(l.id)
+          );
+
           return (
-            <Space size="small" wrap>
-              {values.map((val, idx) => (
-                <Tag key={idx} color="geekblue">
-                  {val}
-                </Tag>
-              ))}
-            </Space>
+            <div className="flex flex-col gap-2" style={{ minWidth: 220 }}>
+              <div className="flex flex-wrap gap-1">
+                {currentParts.map((l) => (
+                  <Tag
+                    key={l.id}
+                    color="geekblue"
+                    closable
+                    onClose={(e) => {
+                      e.preventDefault();
+                      setStatusEditPartsToRemove((prev) =>
+                        prev.includes(l.id) ? prev : [...prev, l.id]
+                      );
+                    }}
+                    className="flex items-center text-xs"
+                  >
+                    {l.part_number}
+                    <Tooltip title={l.part_name}><span className="ml-1 font-mono text-gray-500">({l.part_name.slice(0,5)}...)</span></Tooltip>
+                  </Tag>
+                ))}
+                {currentParts.length === 0 && (
+                  <span className="text-gray-400 text-xs italic">No parts linked</span>
+                )}
+              </div>
+              
+              {statusEditAvailableParts.length > 0 && (
+                <div className="border-t border-gray-200 pt-2 mt-1">
+                  <span className="text-gray-500 text-xs font-semibold block mb-1.5">
+                    Add parts from order:
+                  </span>
+                  <Select
+                    mode="multiple"
+                    size="small"
+                    style={{ width: '100%' }}
+                    placeholder="Select parts to add"
+                    value={statusEditPartsToAdd}
+                    onChange={(vals) => setStatusEditPartsToAdd(vals)}
+                    dropdownMatchSelectWidth={false}
+                    popupClassName="w-auto min-w-[250px]"
+                  >
+                    {statusEditAvailableParts.map((p) => (
+                      <Option key={p.id} value={p.id}>
+                        <div className="flex flex-col leading-tight">
+                          <span className="font-medium">{p.part_number}</span>
+                          <span className="text-gray-500 text-xs">{p.part_name}</span>
+                        </div>
+                      </Option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+            </div>
           );
         },
       },
@@ -770,23 +975,76 @@ const RawMaterials = () => {
         }),
       },
       {
-        title: <span className="font-semibold text-gray-700">Quantity</span>,
-        dataIndex: 'quantity',
-        key: 'quantity',
-        render: (value) =>
-          value !== null && value !== undefined ? value : <span className="text-gray-400">-</span>,
+        title: <span className="font-semibold text-gray-700">Mass (kg)</span>,
+        dataIndex: 'mass',
+        key: 'mass',
+        render: (value, record) => {
+          const isEditing = statusEditRowId === record.id;
+          if (isEditing) {
+            const fieldKey = `status-mass-${record.id}`;
+            return (
+              <div className="flex flex-col">
+                <InputNumber
+                  min={0}
+                  precision={3}
+                  step={0.001}
+                  size="small"
+                  style={{ width: '100%' }}
+                  value={statusEditOrderKg}
+                  stringMode
+                  parser={(val) => limitDecimals(val, fieldKey, 3)}
+                  onKeyDown={(e) => blockExtraDecimals(e, fieldKey, 3)}
+                  onChange={(v) => setStatusEditOrderKg(v)}
+                />
+                {decimalWarnings[fieldKey] && (
+                  <span className="text-[10px] text-orange-500 leading-none mt-1 animate-pulse">
+                    {decimalWarnings[fieldKey]}
+                  </span>
+                )}
+              </div>
+            );
+          }
+          return value !== null && value !== undefined
+            ? <span className="font-mono text-gray-700">{value}</span>
+            : <span className="text-gray-400">-</span>;
+        },
         onCell: (record, index) => ({
           rowSpan: getMaterialRowSpan(record, index),
         }),
       },
       {
-        title: <span className="font-semibold text-gray-700">Kg</span>,
-        dataIndex: 'mass',
-        key: 'mass',
-        render: (value) =>
-          value !== null && value !== undefined
-            ? <span className="font-mono text-gray-700">{value}</span>
-            : <span className="text-gray-400">-</span>,
+        title: <span className="font-semibold text-gray-700">Quantity</span>,
+        dataIndex: 'quantity',
+        key: 'quantity',
+        render: (value, record) => {
+          const isEditing = statusEditRowId === record.id;
+          if (isEditing) {
+            const fieldKey = `status-qty-${record.id}`;
+            return (
+              <div className="flex flex-col">
+                <InputNumber
+                  min={0}
+                  precision={0}
+                  step={1}
+                  max={99999}
+                  size="small"
+                  style={{ width: '100%' }}
+                  value={statusEditOrderQty}
+                  stringMode
+                  parser={(val) => limitDecimals(val, fieldKey, 0)}
+                  onKeyDown={(e) => blockExtraDecimals(e, fieldKey, 0)}
+                  onChange={(v) => setStatusEditOrderQty(v)}
+                />
+                {decimalWarnings[fieldKey] && (
+                  <span className="text-[10px] text-orange-500 leading-none mt-1 animate-pulse">
+                    {decimalWarnings[fieldKey]}
+                  </span>
+                )}
+              </div>
+            );
+          }
+          return value !== null && value !== undefined ? value : <span className="text-gray-400">-</span>;
+        },
         onCell: (record, index) => ({
           rowSpan: getMaterialRowSpan(record, index),
         }),
@@ -836,29 +1094,153 @@ const RawMaterials = () => {
                     icon={<CheckOutlined />}
                     className="text-green-600 hover:bg-green-50"
                     onClick={async () => {
-                      if (!statusEditValue || !record.order_id || !record.raw_material_id) return;
                       try {
-                        const response = await fetch(
-                          `${API_BASE_URL}/order-parts-raw-material-linked/status/order/${record.order_id}/raw-material/${record.raw_material_id}`,
-                          {
-                            method: "PUT",
-                            headers: {
-                              "Content-Type": "application/json",
-                            },
-                            body: JSON.stringify({ material_status: statusEditValue }),
-                          }
-                        );
-                        if (response.ok) {
-                          await fetchLinkedMaterials();
-                          message.success("Status updated successfully");
-                          setStatusEditRowId(null);
-                          setStatusEditValue(null);
-                        } else {
-                          message.error("Failed to update status");
+                        const ids = (record.linkage_ids && record.linkage_ids.length)
+                          ? record.linkage_ids
+                          : (record.id != null ? [record.id] : []);
+                        if (!ids.length) {
+                          message.warning("No linkage IDs found for this row.");
+                          return;
                         }
+
+                        const newStatus = statusEditValue || record.material_status || "available";
+                        const newQty =
+                          statusEditOrderQty != null
+                            ? Number(statusEditOrderQty)
+                            : record.quantity ?? 0;
+                        const newKg =
+                          statusEditOrderKg != null
+                            ? Number(statusEditOrderKg)
+                            : record.mass ?? 0;
+
+                        const groupId = record.linkage_group_id || null;
+
+                        // 1) Update existing linkages (status + qty/kg)
+                        // For grouped records we will update status/qty/kg AFTER
+                        // deletions/additions so all current parts in the batch share
+                        // the same values.
+                        if (!groupId) {
+                          // Fallback: update individual linkages when there is no group id
+                          const updates = await Promise.all(
+                            ids.map((id) => {
+                              const linkage = (linkedMaterials || []).find((l) => l.id === id);
+                              if (!linkage) return null;
+                              const body = {
+                                raw_material_id: linkage.raw_material_id,
+                                part_id: linkage.part_id,
+                                order_id: linkage.order_id,
+                                order_quantity: newQty,
+                                mass: newKg,
+                                material_status: newStatus,
+                                linkage_group_id: linkage.linkage_group_id || null,
+                              };
+                              return fetch(
+                                `${API_BASE_URL}/order-parts-raw-material-linked/${id}`,
+                                {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify(body),
+                                }
+                              );
+                            })
+                          );
+
+                          const validResponses = updates.filter((res) => !!res);
+                          const allOk =
+                            validResponses.length > 0 &&
+                            validResponses.every((res) => res && res.ok);
+
+                          if (!allOk) {
+                            message.error("Failed to update one or more linkages");
+                            return;
+                          }
+                        }
+
+                        // 2) Remove selected parts (delete specific linkages)
+                        if (statusEditPartsToRemove.length > 0) {
+                          const delResponses = await Promise.all(
+                            statusEditPartsToRemove.map((id) =>
+                              fetch(
+                                `${API_BASE_URL}/order-parts-raw-material-linked/${id}`,
+                                { method: "DELETE" }
+                              )
+                            )
+                          );
+                          const delOk =
+                            delResponses.length > 0 &&
+                            delResponses.every((res) => res && res.ok);
+                          if (!delOk) {
+                            message.error("Failed to remove some parts from batch");
+                            return;
+                          }
+                        }
+
+                        // 3) Add new parts into same batch/order
+                        if (statusEditPartsToAdd.length > 0) {
+                          const rawMaterialId = record.raw_material_id;
+                          const orderId = record.order_id;
+                          const linkageGroupId =
+                            (statusEditCurrentLinkages[0] &&
+                              statusEditCurrentLinkages[0].linkage_group_id) ||
+                            record.linkage_group_id ||
+                            null;
+
+                          const addBody = {
+                            raw_material_ids: [rawMaterialId],
+                            part_ids: statusEditPartsToAdd,
+                            order_id: orderId,
+                            order_quantities: { [rawMaterialId]: newQty },
+                            order_masses: { [rawMaterialId]: newKg },
+                            linkage_group_id: linkageGroupId,
+                          };
+                          const addRes = await fetch(
+                            `${API_BASE_URL}/order-parts-raw-material-linked/bulk`,
+                            {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify(addBody),
+                            }
+                          );
+                          if (!addRes.ok) {
+                            message.error("Failed to add some parts to batch");
+                            return;
+                          }
+                        }
+
+                        // 4) For grouped records, now update status + qty/kg
+                        // for the final set of parts in this batch.
+                        if (groupId) {
+                          const statusRes = await fetch(
+                            `${API_BASE_URL}/order-parts-raw-material-linked/status/group/${groupId}`,
+                            {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                material_status: newStatus,
+                                order_quantity: newQty,
+                                mass: newKg,
+                              }),
+                            }
+                          );
+                          if (!statusRes.ok) {
+                            message.error("Failed to update status/quantities for this batch");
+                            return;
+                          }
+                        }
+
+                        await fetchLinkedMaterials();
+                        message.success("Updated successfully");
+                        setStatusEditRowId(null);
+                        setStatusEditValue(null);
+                        setStatusEditOrderKg(null);
+                        setStatusEditOrderQty(null);
+                        setStatusEditCurrentLinkages([]);
+                        setStatusEditPartsToRemove([]);
+                        setStatusEditPartsToAdd([]);
+                        setStatusEditAvailableParts([]);
                       } catch (error) {
-                        console.error("Error updating status:", error);
-                        message.error("Error updating status");
+                        console.error("Error updating linkages:", error);
+                        message.error("Error updating linkages");
                       }
                     }}
                   />
@@ -872,6 +1254,12 @@ const RawMaterials = () => {
                     onClick={() => {
                       setStatusEditRowId(null);
                       setStatusEditValue(null);
+                      setStatusEditOrderKg(null);
+                      setStatusEditOrderQty(null);
+                      setStatusEditCurrentLinkages([]);
+                      setStatusEditPartsToRemove([]);
+                      setStatusEditPartsToAdd([]);
+                      setStatusEditAvailableParts([]);
                     }}
                   />
                 </Tooltip>
@@ -880,15 +1268,57 @@ const RawMaterials = () => {
           }
           return (
             <Space>
-              <Tooltip title="Edit Status">
+              <Tooltip title="Edit">
                 <Button
                   type="text"
                   size="small"
                   icon={<EditOutlined />}
                   className="text-blue-600 hover:bg-blue-50"
-                  onClick={() => {
+                  onClick={async () => {
                     setStatusEditRowId(record.id);
                     setStatusEditValue(record.material_status || "available");
+                    setStatusEditOrderKg(record.mass ?? 0);
+                    setStatusEditOrderQty(record.quantity ?? 0);
+
+                    // Current linkages for this batch (same order, material, group)
+                    const current = (linkedMaterials || []).filter(
+                      (l) =>
+                        l.raw_material_id === record.raw_material_id &&
+                        l.order_id === record.order_id &&
+                        (l.linkage_group_id || null) === (record.linkage_group_id || null)
+                    );
+                    setStatusEditCurrentLinkages(current);
+                    setStatusEditPartsToRemove([]);
+                    setStatusEditPartsToAdd([]);
+
+                    try {
+                      const orderId = record.order_id;
+                      let hierarchy = orderHierarchyMap[orderId];
+                      if (!hierarchy) {
+                        const res = await fetch(
+                          `${API_BASE_URL}/orders/${orderId}/hierarchical`
+                        );
+                        if (!res.ok) {
+                          setStatusEditAvailableParts([]);
+                          return;
+                        }
+                        hierarchy = await res.json();
+                        setOrderHierarchyMap((prev) => ({
+                          ...prev,
+                          [orderId]: hierarchy,
+                        }));
+                      }
+
+                      const allParts = flattenPartsFromOrderHierarchy(hierarchy) || [];
+                      const existingPartIds = new Set(current.map((l) => l.part_id));
+                      const available = allParts.filter(
+                        (p) => p && p.id && !existingPartIds.has(p.id)
+                      );
+                      setStatusEditAvailableParts(available);
+                    } catch (e) {
+                      console.error("Error loading available parts for edit:", e);
+                      setStatusEditAvailableParts([]);
+                    }
                   }}
                 />
               </Tooltip>
@@ -973,31 +1403,49 @@ const RawMaterials = () => {
     setLinkedMaterialsSearchText(value);
   };
 
-  const filteredLinkedMaterials = (linkedMaterials || []).filter(item => {
+  const filteredLinkedMaterials = (linkedMaterials || []).filter((item, index) => {
     if (!linkedMaterialsSearchText) return true;
     
     const searchLower = linkedMaterialsSearchText.toLowerCase();
+    
+    // SL NO
+    const slNo = String(index + 1);
+    
+    // Project Number & Name
     const saleOrderNumber = (item.sale_order_number || "").toLowerCase();
     const projectName = (item.project_name || "").toLowerCase();
-    const materialName = (item.material_name || "").toLowerCase();
+    
+    // Part details
     const partNumber = (item.part_number || "").toLowerCase();
     const partName = (item.part_name || "").toLowerCase();
+    
+    // Material details
+    const materialName = (item.material_name || "").toLowerCase();
+    const quantity = String(item.order_quantity || "");
+    const mass = String(item.mass || "");
+    
+    // Status
     const materialStatus = (item.material_status || "").toLowerCase();
     
     return (
+      slNo.includes(searchLower) ||
       saleOrderNumber.includes(searchLower) ||
       projectName.includes(searchLower) ||
       materialName.includes(searchLower) ||
       partNumber.includes(searchLower) ||
       partName.includes(searchLower) ||
+      quantity.includes(searchLower) ||
+      mass.includes(searchLower) ||
       materialStatus.includes(searchLower)
     );
   });
 
-  const filteredOrders = orders.filter(order => {
+  const filteredOrders = orders.filter((order, index) => {
     if (!orderSearchText) return true;
     
     const searchLower = orderSearchText.toLowerCase();
+    
+    // Project Number & Name
     const saleOrderNumber = (order.sale_order_number || "").toLowerCase();
     const projectName = (order.project_name || "").toLowerCase();
     
@@ -1007,20 +1455,38 @@ const RawMaterials = () => {
     );
   });
 
-  const filteredMaterials = rawMaterials.filter(material => {
+  const filteredMaterials = rawMaterials.filter((material, index) => {
     if (!searchText) return true;
     
     const searchLower = searchText.toLowerCase();
+    
+    // # (index + 1)
+    const slNo = String(index + 1);
+    
+    // Material basic info
     const materialName = (material.material_name || "").toLowerCase();
     const materialSpec = (material.material_specification || "").toLowerCase();
+    const mass = String(material.mass || "");
+    const density = String(material.density || "");
+    const volume = String(material.volume || "");
     const stockType = (material.stock_type || "").toLowerCase();
+    const quantity = String(material.quantity || "");
     const stockDimensions = (material.stock_dimensions || "").toLowerCase();
     
+    // Status
+    const statusText = (material.quantity ?? 0) > 0 ? 'available' : 'not available';
+    
     return (
+      slNo.includes(searchLower) ||
       materialName.includes(searchLower) ||
       materialSpec.includes(searchLower) ||
+      mass.includes(searchLower) ||
+      density.includes(searchLower) ||
+      volume.includes(searchLower) ||
       stockType.includes(searchLower) ||
-      stockDimensions.includes(searchLower)
+      quantity.includes(searchLower) ||
+      stockDimensions.includes(searchLower) ||
+      statusText.includes(searchLower)
     );
   });
 
@@ -1061,22 +1527,22 @@ const RawMaterials = () => {
     if (!showSelection) {
       columns.push(
         {
-          title: <span className="font-semibold text-gray-700">kg</span>,
+          title: <span className="font-semibold text-gray-700">Mass (kg)</span>,
           dataIndex: 'mass',
           key: 'mass',
-          render: (text) => text || "-",
+          render: (text) => text !== null && text !== undefined ? text : "-",
         },
         {
-          title: <span className="font-semibold text-gray-700">Density</span>,
+          title: <span className="font-semibold text-gray-700">Density (kg/m³)</span>,
           dataIndex: 'density',
           key: 'density',
-          render: (text) => text || "-",
+          render: (text) => text !== null && text !== undefined ? text : "-",
         },
         {
-          title: <span className="font-semibold text-gray-700">Volume</span>,
+          title: <span className="font-semibold text-gray-700">Volume (m³)</span>,
           dataIndex: 'volume',
           key: 'volume',
-          render: (text) => text || "-",
+          render: (text) => text !== null && text !== undefined ? text : "-",
         },
         {
           title: <span className="font-semibold text-gray-700">Stock Type</span>,
@@ -1119,14 +1585,26 @@ const RawMaterials = () => {
             if (!isEditing) {
               return stored !== undefined ? stored : "-";
             }
+            const fieldKey = `inv-mass-${record.id}`;
             return (
-              <InputNumber
-                min={0}
-                step="any"
-                style={{ width: '100%' }}
-                value={inlineEditRow.mass}
-                onChange={(val) => changeInlineEdit('mass', val)}
-              />
+              <div className="flex flex-col">
+                <InputNumber
+                  min={0}
+                  precision={3}
+                  step={0.001}
+                  style={{ width: '100%' }}
+                  value={inlineEditRow.mass}
+                  stringMode
+                  parser={(val) => limitDecimals(val, fieldKey, 3)}
+                  onKeyDown={(e) => blockExtraDecimals(e, fieldKey, 3)}
+                  onChange={(val) => changeInlineEdit('mass', val)}
+                />
+                {decimalWarnings[fieldKey] && (
+                  <span className="text-[10px] text-orange-500 leading-none mt-1 animate-pulse">
+                    {decimalWarnings[fieldKey]}
+                  </span>
+                )}
+              </div>
             );
           },
         },
@@ -1139,14 +1617,27 @@ const RawMaterials = () => {
             if (!isEditing) {
               return stored !== undefined ? stored : "-";
             }
+            const fieldKey = `inv-qty-${record.id}`;
             return (
-              <InputNumber
-                min={0}
-                step="any"
-                style={{ width: '100%' }}
-                value={inlineEditRow.quantity}
-                onChange={(val) => changeInlineEdit('quantity', val)}
-              />
+              <div className="flex flex-col">
+                <InputNumber
+                  min={0}
+                  precision={0}
+                  step={1}
+                  max={99999}
+                  style={{ width: '100%' }}
+                  value={inlineEditRow.quantity}
+                  stringMode
+                  parser={(val) => limitDecimals(val, fieldKey, 0)}
+                  onKeyDown={(e) => blockExtraDecimals(e, fieldKey, 0)}
+                  onChange={(val) => changeInlineEdit('quantity', val)}
+                />
+                {decimalWarnings[fieldKey] && (
+                  <span className="text-[10px] text-orange-500 leading-none mt-1 animate-pulse">
+                    {decimalWarnings[fieldKey]}
+                  </span>
+                )}
+              </div>
             );
           },
         }
@@ -1496,7 +1987,6 @@ const RawMaterials = () => {
             </div>
         }
         footer={null}
-        destroyOnHidden
         className="rounded-xl overflow-hidden"
       >
         <style>{`
@@ -1533,25 +2023,64 @@ const RawMaterials = () => {
             <Col xs={12} sm={8}>
               <Form.Item
                 name="mass"
-                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Mass</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Mass (kg)</span>}
+                validateStatus={decimalWarnings['mass'] ? 'warning' : ''}
+                help={decimalWarnings['mass']}
               >
-                <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
+                <InputNumber 
+                  style={{ width: '100%' }} 
+                  min={0} 
+                  precision={3} 
+                  step={0.001} 
+                  placeholder="0.000 kg" 
+                  size="large" 
+                  className="rounded-md"
+                  stringMode
+                  parser={(val) => limitDecimals(val, 'mass', 3)}
+                  onKeyDown={(e) => blockExtraDecimals(e, 'mass', 3)}
+                />
               </Form.Item>
             </Col>
             <Col xs={12} sm={8}>
               <Form.Item
                 name="density"
-                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Density</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Density (kg/m³)</span>}
+                validateStatus={decimalWarnings['density'] ? 'warning' : ''}
+                help={decimalWarnings['density']}
               >
-                <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
+                <InputNumber 
+                  style={{ width: '100%' }} 
+                  min={0} 
+                  precision={3} 
+                  step={0.001} 
+                  placeholder="0.000 kg/m³" 
+                  size="large" 
+                  className="rounded-md"
+                  stringMode
+                  parser={(val) => limitDecimals(val, 'density', 3)}
+                  onKeyDown={(e) => blockExtraDecimals(e, 'density', 3)}
+                />
               </Form.Item>
             </Col>
             <Col xs={12} sm={8}>
               <Form.Item
                 name="volume"
-                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Volume</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Volume (m³)</span>}
+                validateStatus={decimalWarnings['volume'] ? 'warning' : ''}
+                help={decimalWarnings['volume']}
               >
-                <InputNumber style={{ width: '100%' }} step="any" placeholder="0.00" size="large" className="rounded-md" />
+                <InputNumber 
+                  style={{ width: '100%' }} 
+                  min={0} 
+                  precision={3} 
+                  step={0.001} 
+                  placeholder="0.000 m³" 
+                  size="large" 
+                  className="rounded-md"
+                  stringMode
+                  parser={(val) => limitDecimals(val, 'volume', 3)}
+                  onKeyDown={(e) => blockExtraDecimals(e, 'volume', 3)}
+                />
               </Form.Item>
             </Col>
             <Col xs={12} sm={12}>
@@ -1559,23 +2088,100 @@ const RawMaterials = () => {
                 name="stock_type"
                 label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Stock Type</span>}
               >
-                <Input placeholder="e.g. Sheet, Bar, Rod" size="large" className="rounded-md" autoComplete="off" />
+                {isCustomStockType ? (
+                  <div className="flex gap-2">
+                    <Input 
+                      placeholder="Enter custom stock type" 
+                      size="large" 
+                      className="rounded-md flex-1" 
+                      autoComplete="off"
+                      onChange={(e) => {
+                        form.setFieldValue('stock_type', e.target.value);
+                      }}
+                    />
+                    <Button 
+                      type="default" 
+                      size="large"
+                      onClick={() => {
+                        setIsCustomStockType(false);
+                        setSelectedStockType("");
+                        form.setFieldValue('stock_type', '');
+                        form.setFieldValue('stock_dimensions', '');
+                      }}
+                      className="rounded-md"
+                    >
+                      Back to List
+                    </Button>
+                  </div>
+                ) : (
+                  <Select 
+                    placeholder="Select stock type" 
+                    size="large" 
+                    className="rounded-md" 
+                    value={selectedStockType}
+                    onChange={(value) => {
+                      if (value === "Other") {
+                        setSelectedStockType("Other");
+                        setIsCustomStockType(true);
+                        form.setFieldValue('stock_type', '');
+                      } else {
+                        setSelectedStockType(value);
+                        setIsCustomStockType(false);
+                        form.setFieldValue('stock_type', value);
+                      }
+                      // Clear dimensions when stock type changes
+                      form.setFieldValue('stock_dimensions', '');
+                    }}
+                    allowClear
+                  >
+                    <Option value="Sheet Metal">Sheet Metal</Option>
+                    <Option value="Rod">Rod</Option>
+                    <Option value="Solid Bar">Solid Bar</Option>
+                    <Option value="Other">Other (Custom)</Option>
+                  </Select>
+                )}
               </Form.Item>
             </Col>
             <Col xs={12} sm={12}>
               <Form.Item
                 name="quantity"
                 label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Quantity</span>}
+                validateStatus={decimalWarnings['modal-qty'] ? 'warning' : ''}
+                help={decimalWarnings['modal-qty']}
               >
-                <InputNumber style={{ width: '100%' }} step="any" placeholder="0" size="large" className="rounded-md" autoComplete="off" />
+                <InputNumber 
+                  style={{ width: '100%' }} 
+                  min={0} 
+                  precision={0} 
+                  step={1} 
+                  max={99999}
+                  placeholder="0" 
+                  size="large" 
+                  className="rounded-md" 
+                  autoComplete="off" 
+                  stringMode
+                  parser={(val) => limitDecimals(val, 'modal-qty', 0)}
+                  onKeyDown={(e) => blockExtraDecimals(e, 'modal-qty', 0)}
+                />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item
                 name="stock_dimensions"
-                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Dimensions</span>}
+                label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Dimensions (mm)</span>}
               >
-                <Input placeholder="L x W x H" size="large" className="rounded-md" autoComplete="off" />
+                <Input 
+                  placeholder={
+                    selectedStockType === "Sheet Metal" ? "Length × Width × Thickness (mm)" :
+                    selectedStockType === "Rod" ? "Length × Diameter (mm)" :
+                    selectedStockType === "Solid Bar" ? "Length × Width × Height (mm)" :
+                    isCustomStockType ? "Enter dimensions (mm)" :
+                    "Select stock type first"
+                  } 
+                  size="large" 
+                  className="rounded-md" 
+                  autoComplete="off" 
+                />
               </Form.Item>
             </Col>
           </Row>

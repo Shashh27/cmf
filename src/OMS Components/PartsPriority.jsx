@@ -125,23 +125,70 @@ const PartsPriority = () => {
     setOrderSearchText(value);
   };
 
-  const filteredPartData = partData.filter((row) => {
+  const filteredPartData = partData.filter((row, index) => {
     if (!partSearchText) return true;
     const q = partSearchText.toLowerCase();
-    const so = String(row.sale_order_number || "").toLowerCase();
+    
+    // SL NO (index + 1)
+    const slNo = String(index + 1);
+    
+    // Project Name & Number
     const pn = String(row.project_name || "").toLowerCase();
+    const so = String(row.sale_order_number || "").toLowerCase();
+    
+    // Product Name & Number
     const prod = String(row.product_name || "").toLowerCase();
+    const prodNum = String(row.product_number || "").toLowerCase();
+    
+    // Part Name & Number
     const part = String(row.part_name || "").toLowerCase();
-    return so.includes(q) || pn.includes(q) || prod.includes(q) || part.includes(q);
+    const partNum = String(row.part_number || "").toLowerCase();
+    
+    // Priority
+    const priority = String(row.priority || "");
+    
+    return (
+      slNo.includes(q) ||
+      pn.includes(q) ||
+      so.includes(q) ||
+      prod.includes(q) ||
+      prodNum.includes(q) ||
+      part.includes(q) ||
+      partNum.includes(q) ||
+      priority.includes(q)
+    );
   });
 
-  const filteredOrderData = orderData.filter((row) => {
+  const filteredOrderData = orderData.filter((row, index) => {
     if (!orderSearchText) return true;
     const q = orderSearchText.toLowerCase();
-    const so = String(row.sale_order_number || "").toLowerCase();
+    
+    // SL NO (index + 1)
+    const slNo = String(index + 1);
+    
+    // Project Name & Number
     const pn = String(row.project_name || "").toLowerCase();
+    const so = String(row.sale_order_number || "").toLowerCase();
+    
+    // Product Name & Number
     const prod = String(row.product_name || "").toLowerCase();
-    return so.includes(q) || pn.includes(q) || prod.includes(q);
+    const prodNum = String(row.product_number || "").toLowerCase();
+    
+    // Priority Range
+    const range = `${row.min_priority} - ${row.max_priority}`;
+    
+    // Parts Count
+    const count = String(row.part_count || "");
+    
+    return (
+      slNo.includes(q) ||
+      pn.includes(q) ||
+      so.includes(q) ||
+      prod.includes(q) ||
+      prodNum.includes(q) ||
+      range.includes(q) ||
+      count.includes(q)
+    );
   });
 
   const handleUpdatePriority = async (id, newPriority) => {
@@ -254,28 +301,45 @@ const PartsPriority = () => {
       render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
     },
     {
+      title: <span className="font-semibold text-gray-700">Project Name</span>,
+      dataIndex: "project_name",
+      key: "project_name",
+      ellipsis: true,
+      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
+    },
+    {
       title: <span className="font-semibold text-gray-700">Project Number</span>,
       dataIndex: "sale_order_number",
       key: "sale_order_number",
       render: (text) => <span className="font-medium text-gray-800">{text || "-"}</span>,
     },
     {
-      title: <span className="font-semibold text-gray-700">Project Name</span>,
-      dataIndex: "project_name",
-      key: "project_name",
-      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
-    },
-    {
       title: <span className="font-semibold text-gray-700">Product Name</span>,
       dataIndex: "product_name",
       key: "product_name",
+      ellipsis: true,
       render: (text) => <span className="text-blue-600 font-medium">{text || "-"}</span>,
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Product Number</span>,
+      dataIndex: "product_number",
+      key: "product_number",
+      ellipsis: true,
+      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Part Name</span>,
       dataIndex: "part_name",
       key: "part_name",
+      ellipsis: true,
       render: (text) => <span className="text-gray-700">{text || "-"}</span>,
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Part Number</span>,
+      dataIndex: "part_number",
+      key: "part_number",
+      ellipsis: true,
+      render: (text) => <span className="text-gray-600 font-medium">{text || "-"}</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Priority</span>,
@@ -375,22 +439,31 @@ const PartsPriority = () => {
       render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
     },
     {
+      title: <span className="font-semibold text-gray-700">Project Name</span>,
+      dataIndex: "project_name",
+      key: "project_name",
+      ellipsis: true,
+      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
+    },
+    {
       title: <span className="font-semibold text-gray-700">Project Number</span>,
       dataIndex: "sale_order_number",
       key: "sale_order_number",
       render: (text) => <span className="font-medium text-gray-800">{text || "-"}</span>,
     },
     {
-      title: <span className="font-semibold text-gray-700">Project Name</span>,
-      dataIndex: "project_name",
-      key: "project_name",
-      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
-    },
-    {
       title: <span className="font-semibold text-gray-700">Product Name</span>,
       dataIndex: "product_name",
       key: "product_name",
+      ellipsis: true,
       render: (text) => <span className="text-blue-600 font-medium">{text || "-"}</span>,
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Product Number</span>,
+      dataIndex: "product_number",
+      key: "product_number",
+      ellipsis: true,
+      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Priority Range</span>,

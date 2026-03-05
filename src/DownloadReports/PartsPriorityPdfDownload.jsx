@@ -98,18 +98,21 @@ const styles = StyleSheet.create({
 
 const partWiseColumnWidths = {
   slNo: 30,
-  projectNumber: 80,
-  projectName: 120,
-  productName: 120,
-  partName: 140,
-  priority: 60,
+  projectNumber: 60,
+  projectName: 100,
+  productNumber: 80,
+  productName: 100,
+  partNumber: 80,
+  partName: 120,
+  priority: 50,
 };
 
 const orderWiseColumnWidths = {
   slNo: 30,
-  projectNumber: 80,
-  projectName: 120,
-  productName: 140,
+  projectNumber: 70,
+  projectName: 110,
+  productNumber: 90,
+  productName: 130,
   priorityRange: 80,
   partCount: 60,
 };
@@ -139,17 +142,23 @@ const PartWisePriorityPdfDocument = ({ data }) => {
             <Text style={[styles.headerCell, { width: partWiseColumnWidths.slNo }]}>
               SL NO
             </Text>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.projectNumber }]}>
-              PROJECT NO
-            </Text>
             <Text style={[styles.headerCell, { width: partWiseColumnWidths.projectName }]}>
               PROJECT NAME
+            </Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.projectNumber }]}>
+              PROJECT NO
             </Text>
             <Text style={[styles.headerCell, { width: partWiseColumnWidths.productName }]}>
               PRODUCT NAME
             </Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.productNumber }]}>
+              PRODUCT NO
+            </Text>
             <Text style={[styles.headerCell, { width: partWiseColumnWidths.partName }]}>
               PART NAME
+            </Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.partNumber }]}>
+              PART NO
             </Text>
             <Text style={[styles.headerCell, { width: partWiseColumnWidths.priority }]}>
               PRIORITY
@@ -161,17 +170,23 @@ const PartWisePriorityPdfDocument = ({ data }) => {
               <Text style={[styles.cell, { width: partWiseColumnWidths.slNo }]}>
                 {index + 1}
               </Text>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.projectNumber }]}>
-                {row.sale_order_number || "-"}
-              </Text>
               <Text style={[styles.cell, { width: partWiseColumnWidths.projectName }]}>
                 {row.project_name || "-"}
+              </Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.projectNumber }]}>
+                {row.sale_order_number || "-"}
               </Text>
               <Text style={[styles.cell, { width: partWiseColumnWidths.productName }]}>
                 {row.product_name || "-"}
               </Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.productNumber }]}>
+                {row.product_number || "-"}
+              </Text>
               <Text style={[styles.cell, { width: partWiseColumnWidths.partName }]}>
                 {row.part_name || "-"}
+              </Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.partNumber }]}>
+                {row.part_number || "-"}
               </Text>
               <Text style={[styles.cell, { width: partWiseColumnWidths.priority }]}>
                 {row.priority != null ? String(row.priority) : "-"}
@@ -213,14 +228,17 @@ const OrderWisePriorityPdfDocument = ({ data }) => {
             <Text style={[styles.headerCell, { width: orderWiseColumnWidths.slNo }]}>
               SL NO
             </Text>
-            <Text style={[styles.headerCell, { width: orderWiseColumnWidths.projectNumber }]}>
-              PROJECT NO
-            </Text>
             <Text style={[styles.headerCell, { width: orderWiseColumnWidths.projectName }]}>
               PROJECT NAME
             </Text>
+            <Text style={[styles.headerCell, { width: orderWiseColumnWidths.projectNumber }]}>
+              PROJECT NO
+            </Text>
             <Text style={[styles.headerCell, { width: orderWiseColumnWidths.productName }]}>
               PRODUCT NAME
+            </Text>
+            <Text style={[styles.headerCell, { width: orderWiseColumnWidths.productNumber }]}>
+              PRODUCT NO
             </Text>
             <Text style={[styles.headerCell, { width: orderWiseColumnWidths.priorityRange }]}>
               PRIORITY RANGE
@@ -235,14 +253,17 @@ const OrderWisePriorityPdfDocument = ({ data }) => {
               <Text style={[styles.cell, { width: orderWiseColumnWidths.slNo }]}>
                 {index + 1}
               </Text>
-              <Text style={[styles.cell, { width: orderWiseColumnWidths.projectNumber }]}>
-                {row.sale_order_number || "-"}
-              </Text>
               <Text style={[styles.cell, { width: orderWiseColumnWidths.projectName }]}>
                 {row.project_name || "-"}
               </Text>
+              <Text style={[styles.cell, { width: orderWiseColumnWidths.projectNumber }]}>
+                {row.sale_order_number || "-"}
+              </Text>
               <Text style={[styles.cell, { width: orderWiseColumnWidths.productName }]}>
                 {row.product_name || "-"}
+              </Text>
+              <Text style={[styles.cell, { width: orderWiseColumnWidths.productNumber }]}>
+                {row.product_number || "-"}
               </Text>
               <Text style={[styles.cell, { width: orderWiseColumnWidths.priorityRange }]}>
                 {row.min_priority != null && row.max_priority != null
@@ -290,10 +311,12 @@ export const PartWisePriorityPdfDownload = ({
     // Add table headers
     const headers = [
       "SL NO",
-      "PROJECT NO",
       "PROJECT NAME",
+      "PROJECT NO",
       "PRODUCT NAME",
+      "PRODUCT NO",
       "PART NAME",
+      "PART NO",
       "PRIORITY"
     ];
 
@@ -329,11 +352,13 @@ export const PartWisePriorityPdfDownload = ({
     data.forEach((row, index) => {
       const rowData = [
         index + 1,                                    // Column A: SL NO
-        row.sale_order_number || "-",                 // Column B: PROJECT NO
-        row.project_name || "-",                      // Column C: PROJECT NAME
+        row.project_name || "-",                      // Column B: PROJECT NAME
+        row.sale_order_number || "-",                 // Column C: PROJECT NO
         row.product_name || "-",                      // Column D: PRODUCT NAME
-        row.part_name || "-",                         // Column E: PART NAME
-        row.priority != null ? row.priority : "-"     // Column F: PRIORITY
+        row.product_number || "-",                    // Column E: PRODUCT NO
+        row.part_name || "-",                         // Column F: PART NAME
+        row.part_number || "-",                       // Column G: PART NO
+        row.priority != null ? row.priority : "-"     // Column H: PRIORITY
       ];
       
       // Write each row individually to ensure proper alignment
@@ -346,7 +371,9 @@ export const PartWisePriorityPdfDownload = ({
       { wch: 8 },   // SL NO
       { wch: 15 },  // PROJECT NO
       { wch: 20 },  // PROJECT NAME
+      { wch: 15 },  // PRODUCT NO
       { wch: 20 },  // PRODUCT NAME
+      { wch: 15 },  // PART NO
       { wch: 25 },  // PART NAME
       { wch: 12 }   // PRIORITY
     ];
@@ -454,9 +481,10 @@ export const OrderWisePriorityPdfDownload = ({
     // Add table headers
     const headers = [
       "SL NO",
-      "PROJECT NO",
       "PROJECT NAME",
+      "PROJECT NO",
       "PRODUCT NAME",
+      "PRODUCT NO",
       "PRIORITY RANGE",
       "PARTS COUNT"
     ];
@@ -497,11 +525,12 @@ export const OrderWisePriorityPdfDownload = ({
       
       const rowData = [
         index + 1,                                    // Column A: SL NO
-        row.sale_order_number || "-",                 // Column B: PROJECT NO
-        row.project_name || "-",                      // Column C: PROJECT NAME
+        row.project_name || "-",                      // Column B: PROJECT NAME
+        row.sale_order_number || "-",                 // Column C: PROJECT NO
         row.product_name || "-",                      // Column D: PRODUCT NAME
-        priorityRange,                                 // Column E: PRIORITY RANGE
-        row.part_count != null ? row.part_count : "-" // Column F: PARTS COUNT
+        row.product_number || "-",                    // Column E: PRODUCT NO
+        priorityRange,                                 // Column F: PRIORITY RANGE
+        row.part_count != null ? row.part_count : "-" // Column G: PARTS COUNT
       ];
       
       // Write each row individually to ensure proper alignment
@@ -514,6 +543,7 @@ export const OrderWisePriorityPdfDownload = ({
       { wch: 8 },   // SL NO
       { wch: 15 },  // PROJECT NO
       { wch: 20 },  // PROJECT NAME
+      { wch: 15 },  // PRODUCT NO
       { wch: 20 },  // PRODUCT NAME
       { wch: 18 },  // PRIORITY RANGE
       { wch: 12 }   // PARTS COUNT

@@ -795,8 +795,8 @@ const EditOperationModal = ({
           className="mt-2"
           autoComplete="off"
         >
-          <Row gutter={[12, 12]}>
-              <Col xs={24} sm={24} md={6} lg={6}>
+          <Row gutter={[12, 0]}>
+              <Col xs={24} sm={8} md={4} lg={4}>
                   <Form.Item
                   name="operation_number"
                   label="Op Number"
@@ -805,7 +805,7 @@ const EditOperationModal = ({
                   <Input autoComplete="off" />
                   </Form.Item>
               </Col>
-              <Col xs={24} sm={24} md={18} lg={18}>
+              <Col xs={24} sm={16} md={12} lg={12}>
                   <Form.Item
                   name="operation_name"
                   label="Operation Name"
@@ -814,16 +814,17 @@ const EditOperationModal = ({
                   <Input prefix={<FileTextOutlined className="text-gray-400" />} autoComplete="off" />
                   </Form.Item>
               </Col>
+              <Col xs={24} sm={24} md={8} lg={8}>
+                  <Form.Item name="part_type_id" label="Part Type" rules={[{ required: true }]}>
+                    <Select
+                      placeholder="Select type"
+                      loading={partTypesLoading}
+                      onOpenChange={(open) => { if (open) fetchPartTypes(); }}
+                      options={partTypes.map(pt => ({ label: pt.type_name, value: pt.id }))}
+                    />
+                  </Form.Item>
+              </Col>
           </Row>
-
-          <Form.Item name="part_type_id" label="Part Type" rules={[{ required: true }]}>
-            <Select
-              placeholder="Select type"
-              loading={partTypesLoading}
-              onOpenChange={(open) => { if (open) fetchPartTypes(); }}
-              options={partTypes.map(pt => ({ label: pt.type_name, value: pt.id }))}
-            />
-          </Form.Item>
 
           <Form.Item
             noStyle
@@ -834,7 +835,7 @@ const EditOperationModal = ({
               return (
                 <>
                   {isOutSource && (
-                    <Row gutter={[12, 12]}>
+                    <Row gutter={[12, 0]}>
                       <Col xs={24} sm={12} md={12}>
                         <Form.Item
                           name="from_date"
@@ -869,7 +870,7 @@ const EditOperationModal = ({
               if (!isInHouse) return null;
               return (
                 <>
-          <Row gutter={[12, 12]}>
+          <Row gutter={[12, 0]}>
               <Col xs={12} sm={12} md={6} lg={6}>
                   <Form.Item
                   name="setup_time"
@@ -886,10 +887,7 @@ const EditOperationModal = ({
                   <TimePicker style={{ width: '100%' }} format="HH:mm:ss" />
                   </Form.Item>
               </Col>
-          </Row>
-
-          <Row gutter={[12, 12]}>
-              <Col xs={24} sm={12} md={12} lg={12}>
+              <Col xs={24} sm={12} md={6} lg={6}>
                   <Form.Item
                   name="workcenter_id"
                   label="Workcenter"
@@ -911,7 +909,7 @@ const EditOperationModal = ({
                   </Select>
                   </Form.Item>
               </Col>
-              <Col xs={24} sm={12} md={12} lg={12}>
+              <Col xs={24} sm={12} md={6} lg={6}>
                   <Form.Item
                   noStyle
                   shouldUpdate={(prevValues, currentValues) => prevValues.workcenter_id !== currentValues.workcenter_id}
@@ -948,35 +946,22 @@ const EditOperationModal = ({
           <Form.Item
             name="work_instructions"
             label="Work Instructions"
+            className="mb-2"
           >
-            <TextArea rows={6} placeholder="Enter detailed work instructions..." />
+            <TextArea rows={3} placeholder="Enter detailed work instructions..." />
           </Form.Item>
 
           <Form.Item
             name="notes"
             label="Notes"
+            className="mb-2"
           >
-            <TextArea rows={3} placeholder="Additional notes..." />
+            <TextArea rows={2} placeholder="Additional notes..." />
           </Form.Item>
                 </>
               );
             }}
           </Form.Item>
-
-          <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4 pt-4 border-t">
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Button onClick={onCancel} className="w-full sm:w-auto">Cancel</Button>
-              <Button 
-                  type="primary" 
-                  htmlType="submit" 
-                  loading={loading}
-                  icon={<SaveOutlined />}
-                  className="no-hover-btn w-full sm:w-auto"
-              >
-                  {isCreateMode ? 'Create Operation' : 'Save Changes'}
-              </Button>
-            </div>
-          </div>
         </Form>
       )
     },
@@ -1013,9 +998,31 @@ const EditOperationModal = ({
       }
       open={open}
       onCancel={onCancel}
-      footer={null}
+      footer={activeTab === 'details' ? [
+        <Button key="cancel" onClick={onCancel}>Cancel</Button>,
+        <Button 
+          key="submit" 
+          type="primary" 
+          loading={loading} 
+          icon={<SaveOutlined />} 
+          className="no-hover-btn"
+          onClick={() => form.submit()}
+        >
+          {isCreateMode ? 'Create Operation' : 'Save Changes'}
+        </Button>
+      ] : null}
       width="95%"
-      style={{ maxWidth: activeTab === 'details' ? 800 : 1000 }}
+      style={{ maxWidth: activeTab === 'details' ? 850 : 1000, top: 10 }}
+      styles={{ 
+        body: { 
+          maxHeight: 'calc(100vh - 120px)', 
+          overflowY: 'auto', 
+          overflowX: 'hidden', 
+          padding: '8px 16px' 
+        } 
+      }}
+      centered
+      maskClosable={false}
       destroyOnHidden
     >
       <style>

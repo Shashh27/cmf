@@ -471,7 +471,7 @@ const ReturnRequestsTable = () => {
         dataSource={filteredReturnRequests}
         rowKey="id"
         loading={loading}
-        className="modern-table"
+      
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,
