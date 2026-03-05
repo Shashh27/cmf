@@ -1,3 +1,38 @@
-# Default ignored files
-/shelf/
-/workspace.xml
+# ===============================
+# Python
+# ===============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+.env
+
+# Logs
+*.log
+
+# Database
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+workspace.xml
+shelf/
+
+# OS files
+.DS_Store
+Thumbs.db

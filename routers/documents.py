@@ -7,9 +7,11 @@ import io
 import mimetypes
 
 from DB.database import get_db
-from DB.models.oms import Document as DocumentModel
+from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel
 from DB.schemas.oms import Document, DocumentUpdate
 from DB.minio_client import get_minio_client
+from .step_converter import StepConverter
+from .rawmaterial_extract import extract_pdf_data
 
 router = APIRouter(
     prefix="/documents",
@@ -30,7 +32,7 @@ def is_allowed_file(filename: str) -> bool:
     return get_file_extension(filename) in ALLOWED_EXTENSIONS
 
 
-def detect_file_type_from_content(file_content: bytes) -> str:
+def detect_file_type_from_content(file_content: bytes, filename: str | None = None) -> str:
     """Detect file type from file content (magic bytes)"""
     if not file_content:
         return 'application/octet-stream'
@@ -100,7 +102,6 @@ def detect_file_type_from_content(file_content: bytes) -> str:
     except UnicodeDecodeError:
         pass
 
-    # STL/STEP files - check by extension if content detection fails
     if filename:
         ext = get_file_extension(filename)
         if ext == '.stl':
@@ -113,8 +114,7 @@ def detect_file_type_from_content(file_content: bytes) -> str:
 
 def get_content_type_from_detection(file_content: bytes, filename: str = None) -> str:
     """Get content type by detecting from file content first, then fallback to extension"""
-    # Try to detect from content first
-    detected_type = detect_file_type_from_content(file_content)
+    detected_type = detect_file_type_from_content(file_content, filename)
     if detected_type != 'application/octet-stream':
         return detected_type
     
@@ -176,6 +176,7 @@ async def create_document(
 ):
     """
     Create a new document with file upload to MinIO
+    Automatically extracts data from PDF files and stores in database
 
     Args:
         file: File to upload (PDF, DOCX, CSV, XLSX)
@@ -237,6 +238,26 @@ async def create_document(
         db.commit()
         db.refresh(db_document)
 
+        # Extract data from PDF if applicable (2D files)
+        if file_extension.lower() == '.pdf' and document_type.lower() in ['2d', '2d drawing', 'drawing']:
+            try:
+                extracted = extract_pdf_data(file_content)
+                if extracted:
+                    record = DocumentExtractedDataModel(
+                        document_id=db_document.id,
+                        part_id=part_id,
+                        note=extracted.get("Note"),
+                        title=extracted.get("Title"),
+                        stock_size=extracted.get("Stock Size"),
+                        material=extracted.get("Material"),
+                        stocksize_kg=extracted.get("Stocksize KG"),
+                        net_wt_kg=extracted.get("Net WT KG"),
+                    )
+                    db.add(record)
+                    db.commit()
+            except Exception as extract_error:
+                print(f"Error extracting data from PDF: {str(extract_error)}")
+
         return db_document
 
     except Exception as e:
@@ -248,10 +269,9 @@ async def create_document(
 
 
 @router.get("/", response_model=List[Document])
-def get_documents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all documents with pagination"""
-    documents = db.query(DocumentModel).offset(skip).limit(limit).all()
-    return documents
+def get_documents(db: Session = Depends(get_db)):
+    """Get all documents"""
+    return db.query(DocumentModel).order_by(DocumentModel.id.asc()).all()
 
 
 @router.get("/{document_id}", response_model=Document)
@@ -306,6 +326,64 @@ async def preview_document(document_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to preview document: {str(e)}"
+        )
+
+
+@router.get("/{document_id}/3d")
+async def preview_document_3d(document_id: int, db: Session = Depends(get_db)):
+    from fastapi.responses import StreamingResponse
+
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with id {document_id} not found"
+        )
+
+    try:
+        minio_client = get_minio_client()
+        object_name = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        file_extension = get_file_extension(object_name)
+
+        file_data = minio_client.download_file(object_name)
+
+        error_detail = None
+
+        if file_extension in [".step", ".stp"]:
+            glb_data = StepConverter.convert_step_to_glb(file_data)
+            error_detail = "STEP file contains no 3D geometry (empty mesh) or cannot be converted"
+        elif file_extension == ".stl":
+            glb_data = StepConverter.convert_stl_to_glb(file_data)
+            error_detail = "STL file is empty or invalid (empty mesh)"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="3D preview is not available for this document type (only STEP/STL supported)"
+            )
+
+        if not glb_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error_detail or "No 3D geometry in file or conversion failed"
+            )
+
+        filename = f"{document.document_name}.glb"
+
+        return StreamingResponse(
+            io.BytesIO(glb_data),
+            media_type="model/gltf-binary",
+            headers={
+                "Content-Disposition": f"inline; filename={filename}"
+            }
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate 3D preview: {str(e)}"
         )
 
 
@@ -476,6 +554,11 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
         object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
         minio_client.delete_file(object_name)
 
+        # Delete extracted data if exists
+        db.query(DocumentExtractedDataModel).filter(
+            DocumentExtractedDataModel.document_id == document_id
+        ).delete()
+
         # Delete from database
         db.delete(db_document)
         db.commit()
@@ -488,3 +571,71 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete document: {str(e)}"
         )
+
+
+@router.get("/{document_id}/extracted-data")
+def get_document_extracted_data(document_id: int, db: Session = Depends(get_db)):
+    """Get extracted data for a specific document"""
+    document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with id {document_id} not found"
+        )
+
+    rows = db.query(DocumentExtractedDataModel).filter(
+        DocumentExtractedDataModel.document_id == document_id
+    ).all()
+
+    return [
+        {
+            "id": r.id,
+            "document_id": r.document_id,
+            "part_id": r.part_id,
+            "note": r.note,
+            "title": r.title,
+            "stock_size": r.stock_size,
+            "material": r.material,
+            "stocksize_kg": r.stocksize_kg,
+            "net_wt_kg": r.net_wt_kg,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/part/{part_id}/extracted-data")
+def get_part_extracted_data(part_id: int, db: Session = Depends(get_db)):
+    """Get all extracted data for a specific part with document details"""
+    results = db.query(
+        DocumentExtractedDataModel,
+        DocumentModel.document_name,
+        DocumentModel.document_version,
+        DocumentModel.document_type
+    ).join(
+        DocumentModel,
+        DocumentExtractedDataModel.document_id == DocumentModel.id
+    ).filter(
+        DocumentExtractedDataModel.part_id == part_id
+    ).all()
+    
+    # Format the response to include document details and new fields
+    extracted_data = []
+    for extracted, doc_name, doc_version, doc_type in results:
+        extracted_data.append({
+            "id": extracted.id,
+            "document_id": extracted.document_id,
+            "part_id": extracted.part_id,
+            "note": extracted.note,
+            "title": extracted.title,
+            "stock_size": extracted.stock_size,
+            "material": extracted.material,
+            "stocksize_kg": extracted.stocksize_kg,
+            "net_wt_kg": extracted.net_wt_kg,
+            "created_at": extracted.created_at.isoformat() if extracted.created_at else None,
+            "document_name": doc_name,
+            "document_version": doc_version,
+            "document_type": doc_type
+        })
+    
+    return extracted_data

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import re
 from sqlalchemy.orm import Session
 from DB.database import get_db
@@ -30,7 +30,8 @@ from DB.schemas.configuration import (
     PokayokeItemResponseCreate,
     PokayokeItemResponseUpdate,
     PokayokeChecklistWithItems,
-    PokayokeCompletedLogWithResponses
+    PokayokeCompletedLogWithResponses,
+    PokayokeMachineAssignmentWithChecklist
 )
 
 router = APIRouter(
@@ -43,6 +44,8 @@ completed_logs_router = APIRouter(
     prefix="/pokayoke-completed-logs",
     tags=["pokayoke-completed-logs"]
 )
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 def validate_expected_value(item_type: str, expected_value: str) -> bool:
     """Validate expected_value based on item_type"""
@@ -82,17 +85,31 @@ def validate_expected_value(item_type: str, expected_value: str) -> bool:
 # POKAYOKE CHECKLISTS CRUD
 # =======================
 
-@router.post("/", response_model=PokayokeChecklistSchema, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=PokayokeChecklistWithItems, status_code=status.HTTP_201_CREATED)
 def create_checklist(checklist: PokayokeChecklistCreate, db: Session = Depends(get_db)):
-    """Create a new Pokayoke checklist"""
-    db_checklist = PokayokeChecklist(**checklist.model_dump())
+    """Create a new Pokayoke checklist with optional items"""
+    checklist_data = checklist.model_dump(exclude={"items"})
+    checklist_data["created_at"] = datetime.now(IST).replace(tzinfo=None)
+    db_checklist = PokayokeChecklist(**checklist_data)
     db.add(db_checklist)
+    db.flush()  # Get the checklist ID before commit
+    
+    # Create items if provided
+    if checklist.items:
+        for idx, item in enumerate(checklist.items):
+            item_data = item.model_dump()
+            item_data['checklist_id'] = db_checklist.id
+            item_data['sequence_number'] = idx + 1
+            item_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
+            db_item = PokayokeChecklistItem(**item_data)
+            db.add(db_item)
+            
     db.commit()
     db.refresh(db_checklist)
     return db_checklist
 
 
-@router.get("/", response_model=List[PokayokeChecklistSchema])
+@router.get("/", response_model=List[PokayokeChecklistWithItems])
 def get_all_checklists(db: Session = Depends(get_db)):
     """Get all Pokayoke checklists"""
     checklists = db.query(PokayokeChecklist).all()
@@ -214,6 +231,7 @@ def create_checklist_item(checklist_id: int, item: PokayokeChecklistItemCreate, 
     item_data = item.model_dump()
     item_data['checklist_id'] = checklist_id
     item_data['sequence_number'] = next_sequence
+    item_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
     
     db_item = PokayokeChecklistItem(**item_data)
     db.add(db_item)
@@ -340,6 +358,7 @@ def create_machine_assignment(checklist_id: int, assignment: PokayokeMachineAssi
     # Create assignment with checklist_id from URL
     assignment_data = assignment.model_dump()
     assignment_data['checklist_id'] = checklist_id
+    assignment_data['assigned_at'] = datetime.now(IST).replace(tzinfo=None)
     
     db_assignment = PokayokeMachineAssignment(**assignment_data)
     db.add(db_assignment)
@@ -365,7 +384,7 @@ def get_machine_assignments(checklist_id: int, db: Session = Depends(get_db)):
     return assignments
 
 
-@router.get("/machines/{machine_id}/assignments", response_model=List[PokayokeMachineAssignmentSchema])
+@router.get("/machines/{machine_id}/assignments", response_model=List[PokayokeMachineAssignmentWithChecklist])
 def get_machine_checklists(machine_id: int, db: Session = Depends(get_db)):
     """Get all Pokayoke checklists assigned to a specific machine"""
     # Verify machine exists
@@ -420,10 +439,10 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
             detail=f"Machine with id {log.machine_id} not found"
         )
     
-    # Set completed_at to datetime.now() if not provided
+    # Set completed_at to current IST time if not provided
     log_data = log.model_dump()
     if not log_data.get('completed_at'):
-        log_data['completed_at'] = datetime.now()
+        log_data['completed_at'] = datetime.now(IST).replace(tzinfo=None)
     
     db_log = PokayokeCompletedLog(**log_data)
     db.add(db_log)
@@ -432,7 +451,7 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
     return db_log
 
 
-@completed_logs_router.get("/", response_model=List[PokayokeCompletedLogSchema])
+@completed_logs_router.get("/", response_model=List[PokayokeCompletedLogWithResponses])
 def get_all_completed_logs(db: Session = Depends(get_db)):
     """Get all Pokayoke completed logs"""
     logs = db.query(PokayokeCompletedLog).all()
@@ -449,26 +468,11 @@ def get_completed_log(log_id: int, db: Session = Depends(get_db)):
             detail=f"Completed log with id {log_id} not found"
         )
     
-    # Get item responses
-    responses = db.query(PokayokeItemResponse).filter(
-        PokayokeItemResponse.completed_log_id == log_id
-    ).all()
-    
-    return PokayokeCompletedLogWithResponses(
-        id=log.id,
-        checklist_id=log.checklist_id,
-        machine_id=log.machine_id,
-        operator_id=log.operator_id,
-        production_order_id=log.production_order_id,
-        completed_at=log.completed_at,
-        all_items_passed=log.all_items_passed,
-        comments=log.comments,
-        read=log.read,
-        item_responses=responses
-    )
+    # item_responses is already available via relationship in model
+    return log
 
 
-@completed_logs_router.get("/machines/{machine_id}/logs", response_model=List[PokayokeCompletedLogSchema])
+@completed_logs_router.get("/machines/{machine_id}/logs", response_model=List[PokayokeCompletedLogWithResponses])
 def get_machine_completed_logs(machine_id: int, db: Session = Depends(get_db)):
     """Get all completed logs for a specific machine"""
     # Verify machine exists
@@ -542,10 +546,10 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
             detail=f"Checklist item with id {response.item_id} not found"
         )
     
-    # Set timestamp to datetime.now() if not provided
+    # Set timestamp to current IST time if not provided
     response_data = response.model_dump()
     if not response_data.get('timestamp'):
-        response_data['timestamp'] = datetime.now()
+        response_data['timestamp'] = datetime.now(IST).replace(tzinfo=None)
     
     db_response = PokayokeItemResponse(**response_data)
     db.add(db_response)

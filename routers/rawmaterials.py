@@ -16,7 +16,11 @@ router = APIRouter(
 @router.post("/", response_model=RawMaterial, status_code=status.HTTP_201_CREATED)
 def create_raw_material(raw_material: RawMaterialCreate, db: Session = Depends(get_db)):
     """Create a new raw material"""
-    db_raw_material = RawMaterialModel(**raw_material.model_dump())
+    data = raw_material.model_dump()
+    qty = data.get("quantity") or 0
+    data["quantity"] = qty
+    data["status"] = "AVAILABLE" if qty > 0 else "NOT AVAILABLE"
+    db_raw_material = RawMaterialModel(**data)
     db.add(db_raw_material)
     db.commit()
     db.refresh(db_raw_material)
@@ -24,10 +28,9 @@ def create_raw_material(raw_material: RawMaterialCreate, db: Session = Depends(g
 
 
 @router.get("/", response_model=List[RawMaterial])
-def get_raw_materials(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all raw materials with pagination"""
-    raw_materials = db.query(RawMaterialModel).offset(skip).limit(limit).all()
-    return raw_materials
+def get_raw_materials(db: Session = Depends(get_db)):
+    """Get all raw materials"""
+    return db.query(RawMaterialModel).order_by(RawMaterialModel.id.asc()).all()
 
 
 @router.get("/{raw_material_id}", response_model=RawMaterial)
@@ -53,6 +56,12 @@ def update_raw_material(raw_material_id: int, raw_material: RawMaterialUpdate, d
         )
 
     update_data = raw_material.model_dump(exclude_unset=True)
+
+    if "quantity" in update_data:
+        qty = update_data.get("quantity") or 0
+        update_data["quantity"] = qty
+        update_data["status"] = "AVAILABLE" if qty > 0 else "NOT AVAILABLE"
+
     for field, value in update_data.items():
         setattr(db_raw_material, field, value)
 

@@ -212,10 +212,9 @@ async def replace_order_document_with_metadata(
         raise HTTPException(status_code=500, detail=f"Failed to replace document: {str(e)}")
 
 @router.get("/", response_model=List[OrderDocumentResponse])
-def get_order_documents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def get_order_documents(db: Session = Depends(get_db)):
     """Get all order documents"""
-    documents = db.query(OrderDocument).offset(skip).limit(limit).all()
-    return documents
+    return db.query(OrderDocument).order_by(OrderDocument.id.asc()).all()
 
 @router.get("/order/{order_id}", response_model=List[OrderDocumentResponse])
 def get_documents_by_order(order_id: int, db: Session = Depends(get_db)):

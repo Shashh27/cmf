@@ -18,6 +18,16 @@ class RawMaterialBase(BaseModel):
     stock_dimensions: Optional[str] = None
     status: Optional[str] = None
 
+    @field_validator('mass', 'density', 'volume', mode='before')
+    @classmethod
+    def round_to_three_decimal_places(cls, v):
+        if v is None:
+            return None
+        try:
+            return round(float(v), 3)
+        except (ValueError, TypeError):
+            return v
+
 
 class RawMaterialCreate(RawMaterialBase):
     pass
@@ -34,9 +44,21 @@ class RawMaterialUpdate(BaseModel):
     stock_dimensions: Optional[str] = None
     status: Optional[str] = None
 
+    @field_validator('mass', 'density', 'volume', mode='before')
+    @classmethod
+    def round_to_three_decimal_places(cls, v):
+        if v is None:
+            return None
+        try:
+            return round(float(v), 3)
+        except (ValueError, TypeError):
+            return v
+
 
 class RawMaterial(RawMaterialBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -49,7 +71,9 @@ class ToolsListBase(BaseModel):
     range: Optional[str] = None
     identification_code: Optional[str] = None  # Changed to Optional
     make: Optional[str] = None
-    quantity: Optional[int] = None  # Changed to Optional
+    quantity: Optional[int] = None  # Changed to Optional - Available quantity
+    total_quantity: Optional[int] = None  # New field - Total quantity
+    issues_qty: Optional[int] = None  # New field - Issued quantity aggregate
     location: Optional[str] = None
     gauge: Optional[str] = None
     remarks: Optional[str] = None
@@ -67,7 +91,8 @@ class ToolsListUpdate(BaseModel):
     range: Optional[str] = None
     identification_code: Optional[str] = None
     make: Optional[str] = None
-    quantity: Optional[int] = None
+    quantity: Optional[int] = None  # Available quantity
+    total_quantity: Optional[int] = None  # Total quantity
     location: Optional[str] = None
     gauge: Optional[str] = None
     remarks: Optional[str] = None
@@ -193,6 +218,63 @@ class TransactionHistoryBase(BaseModel):
 class TransactionHistoryResponse(BaseModel):
     inventory_request: Optional[InventoryRequestWithDetails] = None
     return_requests: Optional[List[InventoryReturnRequestWithDetails]] = []
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Tool Issues Schemas
+# =======================
+class ToolIssueBase(BaseModel):
+    tool_id: int
+    request_id: int
+    tool_issue_qty: int
+    operator_id: int
+    status: Optional[str] = "pending"
+    issue_category: Optional[str] = None  # "wear and tear", "Calibration Drift", "other"
+    description: Optional[str] = None  # Entered by operator
+    remarks: Optional[str] = None  # Entered by admin
+    document_url: Optional[str] = None  # URL to uploaded document in MinIO
+
+
+class ToolIssueCreate(BaseModel):
+    tool_id: int
+    request_id: int
+    tool_issue_qty: int
+    operator_id: int
+    issue_category: Optional[str] = None  # "wear and tear", "Calibration Drift", "other"
+    description: Optional[str] = None  # Entered by operator
+    # status remains pending on create
+
+
+class ToolIssueUpdate(BaseModel):
+    tool_id: Optional[int] = None
+    request_id: Optional[int] = None
+    tool_issue_qty: Optional[int] = None
+    operator_id: Optional[int] = None
+    issue_category: Optional[str] = None
+    description: Optional[str] = None
+    remarks: Optional[str] = None
+    document_url: Optional[str] = None
+    # status and admin are managed via dedicated endpoint
+
+
+class ToolIssue(ToolIssueBase):
+    id: int
+    admin_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ToolIssueWithDetails(ToolIssue):
+    tool_name: Optional[str] = None
+    operator_name: Optional[str] = None
+    admin_name: Optional[str] = None
+    sale_order_number: Optional[str] = None
 
     class Config:
         from_attributes = True

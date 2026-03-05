@@ -12,6 +12,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from ..database import Base
+from .access_control import AccessUser
+from .oms import Order
 
 
 # =======================
@@ -67,6 +69,8 @@ class Customer(Base):
     email = Column(String, nullable=False)
     contact_number = Column(String, nullable=False)
     contact_person = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     orders = relationship("Order", back_populates="customer")
 
@@ -128,6 +132,7 @@ class PokayokeCompletedLog(Base):
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=True)
     completed_at = Column(TIMESTAMP, nullable=False)
     all_items_passed = Column(Boolean, nullable=False)
     comments = Column(Text, nullable=True)
@@ -136,6 +141,9 @@ class PokayokeCompletedLog(Base):
     # Relationships
     checklist = relationship("PokayokeChecklist")
     machine = relationship("Machine")
+    part = relationship("DB.models.oms.Part")
+    operator = relationship("AccessUser")
+    order = relationship("Order")
     item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
 
 

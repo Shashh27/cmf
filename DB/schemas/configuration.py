@@ -1,7 +1,11 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List, Text
+from typing import Optional, List, Text, TYPE_CHECKING
 from datetime import datetime, time
 from typing_extensions import Self
+from .access_control import AccessUserResponse
+
+if TYPE_CHECKING:
+    from .oms import Part as PartSchema, Order as OrderSchema
 
 
 # =======================
@@ -124,6 +128,8 @@ class CustomerUpdate(BaseModel):
 
 class Customer(CustomerBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -177,12 +183,12 @@ class PokayokeMachineAssignment(PokayokeMachineAssignmentBase):
 
 
 # Create schemas
-class PokayokeChecklistCreate(PokayokeChecklistBase):
-    pass
-
-
 class PokayokeChecklistItemCreate(PokayokeChecklistItemBase):
     pass
+
+
+class PokayokeChecklistCreate(PokayokeChecklistBase):
+    items: List[PokayokeChecklistItemCreate] = []
 
 
 class PokayokeMachineAssignmentCreate(PokayokeMachineAssignmentBase):
@@ -214,6 +220,10 @@ class PokayokeChecklistWithItems(PokayokeChecklist):
     machine_assignments: List[PokayokeMachineAssignment] = []
 
 
+class PokayokeMachineAssignmentWithChecklist(PokayokeMachineAssignment):
+    checklist: PokayokeChecklistWithItems
+
+
 # =======================
 # POKAYOKE COMPLETED LOGS
 # =======================
@@ -222,6 +232,7 @@ class PokayokeCompletedLogBase(BaseModel):
     machine_id: int
     operator_id: int
     production_order_id: Optional[int] = None
+    part_id: Optional[int] = None
     completed_at: datetime
     all_items_passed: bool
     comments: Optional[str] = None
@@ -253,6 +264,10 @@ class PokayokeItemResponse(PokayokeItemResponseBase):
         from_attributes = True
 
 
+class PokayokeItemResponseWithItem(PokayokeItemResponse):
+    item: PokayokeChecklistItem
+
+
 # Create schemas
 class PokayokeCompletedLogCreate(PokayokeCompletedLogBase):
     pass
@@ -268,6 +283,7 @@ class PokayokeCompletedLogUpdate(BaseModel):
     machine_id: Optional[int] = None
     operator_id: Optional[int] = None
     production_order_id: Optional[int] = None
+    part_id: Optional[int] = None
     all_items_passed: Optional[bool] = None
     comments: Optional[str] = None
     read: Optional[bool] = None
@@ -282,4 +298,13 @@ class PokayokeItemResponseUpdate(BaseModel):
 
 # Response with nested data
 class PokayokeCompletedLogWithResponses(PokayokeCompletedLog):
-    item_responses: List[PokayokeItemResponse] = []
+    item_responses: List[PokayokeItemResponseWithItem] = []
+    checklist: Optional[PokayokeChecklist] = None
+    machine: Optional[Machine] = None
+    part: Optional["PartSchema"] = None
+    operator: Optional[AccessUserResponse] = None
+    order: Optional["OrderSchema"] = None
+
+
+from .oms import Part as PartSchema, Order as OrderSchema
+PokayokeCompletedLogWithResponses.model_rebuild()

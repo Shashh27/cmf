@@ -1,9 +1,11 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List, Text
+from typing import Optional, List, Text, TYPE_CHECKING
 from datetime import datetime, time
 from typing_extensions import Self
-from .configuration import Customer
 from .inventory import ToolsList
+
+if TYPE_CHECKING:
+    from .configuration import Customer
 
 
 # =======================
@@ -30,6 +32,8 @@ class ProductUpdate(BaseModel):
 class Product(ProductBase):
     id: int
     user_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -58,6 +62,8 @@ class AssemblyUpdate(BaseModel):
 
 class Assembly(AssemblyBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -80,6 +86,8 @@ class PartTypeUpdate(BaseModel):
 
 class PartType(PartTypeBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -115,6 +123,8 @@ class Part(PartBase):
     type_name: Optional[str] = None
     raw_material_name: Optional[str] = None
     priority: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -126,6 +136,9 @@ class Part(PartBase):
 class OperationBase(BaseModel):
     operation_number: str
     operation_name: str
+    part_type_id: Optional[int] = 1
+    from_date: Optional[datetime] = None
+    to_date: Optional[datetime] = None
     setup_time: Optional[time] = None
     cycle_time: Optional[time] = None
     workcenter_id: Optional[int] = None
@@ -172,6 +185,9 @@ class OperationCreate(OperationBase):
 class OperationUpdate(BaseModel):
     operation_number: Optional[str] = None
     operation_name: Optional[str] = None
+    part_type_id: Optional[int] = None
+    from_date: Optional[datetime] = None
+    to_date: Optional[datetime] = None
     setup_time: Optional[time] = None
     cycle_time: Optional[time] = None
     workcenter_id: Optional[int] = None
@@ -213,9 +229,13 @@ class OperationUpdate(BaseModel):
 
 class Operation(OperationBase):
     id: int
+    part_type_name: Optional[str] = None
     work_center_name: Optional[str] = None
+    machine_name: Optional[str] = None
     operation_documents: List['OperationDocument'] = []
     tools: List['ToolWithPart'] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -274,6 +294,8 @@ class DocumentUpdate(BaseModel):
 class Document(DocumentBase):
     id: int
     document_url: str  # MinIO URL
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -301,6 +323,8 @@ class ToolWithPartUpdate(BaseModel):
 class ToolWithPart(ToolWithPartBase):
     id: int
     tool: Optional[ToolsList] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -366,6 +390,8 @@ class Order(OrderBase):
     company_name: Optional[str] = None
     product_name: Optional[str] = None
     user_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -388,7 +414,11 @@ class OrderWithHierarchy(OrderWithCustomerAndProduct):
 
 
 class OrderWithCustomer(Order):
-    customer: Customer
+    customer: "Customer"
+
+
+from .configuration import Customer
+OrderWithCustomer.model_rebuild()
 
 
 
@@ -421,6 +451,8 @@ class OrderDocumentUpdate(BaseModel):
 class OrderDocument(OrderDocumentBase):
     id: int
     document_url: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -453,6 +485,8 @@ class OperationDocumentUpdate(BaseModel):
 
 class OperationDocument(OperationDocumentBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -476,6 +510,10 @@ class OrderPartsRawMaterialLinkedBase(BaseModel):
     raw_material_id: int
     part_id: int
     order_id: int
+    order_quantity: Optional[int] = None
+    mass: Optional[float] = None
+    material_status: Optional[str] = None
+    linkage_group_id: Optional[str] = None
 
 
 class OrderPartsRawMaterialLinkedCreate(OrderPartsRawMaterialLinkedBase):
@@ -486,11 +524,16 @@ class OrderPartsRawMaterialLinkedUpdate(BaseModel):
     raw_material_id: Optional[int] = None
     part_id: Optional[int] = None
     order_id: Optional[int] = None
+    order_quantity: Optional[int] = None
+    mass: Optional[float] = None
+    material_status: Optional[str] = None
+    linkage_group_id: Optional[str] = None
 
 
 class OrderPartsRawMaterialLinked(OrderPartsRawMaterialLinkedBase):
     id: int
-    created_at: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -499,9 +542,14 @@ class OrderPartsRawMaterialLinked(OrderPartsRawMaterialLinkedBase):
 class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
     material_name: Optional[str] = None
     part_name: Optional[str] = None
+    part_number: Optional[str] = None
+    order_quantity: Optional[int] = None
+    mass: Optional[float] = None
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     material_status: Optional[str] = None
+    linkage_group_id: Optional[str] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -545,6 +593,10 @@ class OrderPartPriority(OrderPartPriorityBase):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
+    product_number: Optional[str] = None
+    part_type_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -555,6 +607,7 @@ class OrderWisePriority(BaseModel):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
+    product_number: Optional[str] = None
     min_priority: int
     max_priority: int
     part_count: int
@@ -564,7 +617,44 @@ class OrderWisePriority(BaseModel):
 
 
 # =======================
-# Out Source Parts Status Schemas
+# Document Extracted Data Schemas
+# =======================
+class DocumentExtractedDataBase(BaseModel):
+    document_id: int
+    part_id: int
+    note: Optional[str] = None
+    title: Optional[str] = None
+    stock_size: Optional[str] = None
+    material: Optional[str] = None
+    stocksize_kg: Optional[str] = None
+    net_wt_kg: Optional[str] = None
+
+
+class DocumentExtractedDataCreate(DocumentExtractedDataBase):
+    pass
+
+
+class DocumentExtractedDataUpdate(BaseModel):
+    document_id: Optional[int] = None
+    part_id: Optional[int] = None
+    note: Optional[str] = None
+    title: Optional[str] = None
+    stock_size: Optional[str] = None
+    material: Optional[str] = None
+    stocksize_kg: Optional[str] = None
+    net_wt_kg: Optional[str] = None
+
+
+class DocumentExtractedData(DocumentExtractedDataBase):
+    id: int
+    created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Out Source Part Status Schemas
 # =======================
 class OutSourcePartStatusBase(BaseModel):
     part_id: int
@@ -588,6 +678,8 @@ class OutSourcePartStatusUpdate(BaseModel):
 
 class OutSourcePartStatus(OutSourcePartStatusBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

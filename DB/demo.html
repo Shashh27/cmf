@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDM — Product Data Management</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700;1,14..32,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --c-bg:        #f8f9fb;
+  --c-white:     #ffffff;
+  --c-sidebar:   #ffffff;
+
+  /* Neutrals */
+  --c-border:    #e8eaed;
+  --c-border2:   #f0f1f4;
+  --c-hover:     #f4f5f8;
+
+  /* Text */
+  --c-t1:        #1a1d23;   /* headings */
+  --c-t2:        #4b5162;   /* body */
+  --c-t3:        #8b8fa8;   /* muted */
+  --c-t4:        #b8bbd0;   /* placeholder */
+
+  /* Brand — used sparingly */
+  --c-brand:     #3d5a99;
+  --c-brand-bg:  #eef2fa;
+  --c-brand-bd:  #c5d3ef;
+
+  /* Semantic — only for data values */
+  --c-amber:     #c77c00;
+  --c-amber-bg:  #fdf6e8;
+  --c-amber-bd:  #f0d990;
+
+  --c-green:     #1d7a4f;
+  --c-green-bg:  #eaf7f1;
+  --c-green-bd:  #96dbb9;
+
+  --c-red:       #c0392b;
+  --c-red-bg:    #fdf0ee;
+  --c-red-bd:    #f0b8b1;
+
+  --shadow-xs:   0 1px 2px rgba(0,0,0,.05);
+  --shadow-sm:   0 1px 4px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:   0 2px 12px rgba(0,0,0,.08);
+}
+
+html, body {
+  height: 100%; overflow: hidden;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 13px; line-height: 1.5;
+  color: var(--c-t2);
+  background: var(--c-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ════════════════════════════════════════
+   TOPBAR
+════════════════════════════════════════ */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: 52px;
+  background: var(--c-white);
+  border-bottom: 1px solid var(--c-border);
+  display: flex; align-items: center;
+  padding: 0 18px; gap: 10px;
+}
+
+.brand {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+
+.brand-logo {
+  width: 30px; height: 30px; border-radius: 8px;
+  background: var(--c-brand);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 13px; font-weight: 700; letter-spacing: -0.5px;
+}
+
+.brand-name {
+  font-size: 14px; font-weight: 700;
+  color: var(--c-t1); letter-spacing: -0.3px;
+}
+
+.topbar-sep {
+  width: 1px; height: 18px;
+  background: var(--c-border); flex-shrink: 0;
+}
+
+.topbar-page {
+  font-size: 13px; font-weight: 400; color: var(--c-t3);
+}
+
+.topbar-right {
+  margin-left: auto; display: flex; align-items: center; gap: 6px;
+}
+
+.tb-btn {
+  width: 32px; height: 32px; border-radius: 7px;
+  border: 1px solid var(--c-border); background: transparent;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--c-t3); font-size: 15px; cursor: pointer;
+  transition: all .15s; position: relative;
+}
+.tb-btn:hover { background: var(--c-hover); color: var(--c-t2); border-color: #d0d4e0; }
+
+.tb-dot {
+  position: absolute; top: 5px; right: 5px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--c-red); border: 1.5px solid var(--c-white);
+}
+
+.tb-avatar {
+  width: 30px; height: 30px; border-radius: 7px;
+  background: var(--c-brand);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+
+.tb-user { margin-left: 2px; }
+.tb-user-name { font-size: 12.5px; font-weight: 600; color: var(--c-t1); line-height: 1.2; }
+.tb-user-role { font-size: 11px; color: var(--c-t3); }
+
+/* ════════════════════════════════════════
+   LAYOUT
+════════════════════════════════════════ */
+.shell {
+  display: grid;
+  grid-template-columns: 252px 1fr;
+  height: 100vh; padding-top: 52px;
+}
+
+/* ════════════════════════════════════════
+   SIDEBAR
+════════════════════════════════════════ */
+.sidebar {
+  background: var(--c-sidebar);
+  border-right: 1px solid var(--c-border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+
+.sb-top {
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--c-border2);
+}
+
+.sb-header-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.sb-label {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .1em;
+  color: var(--c-t4);
+}
+
+.btn-new {
+  height: 28px; padding: 0 11px;
+  border-radius: 7px; border: none;
+  background: var(--c-brand); color: #fff;
+  font-size: 11.5px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  transition: all .15s;
+}
+.btn-new:hover { background: #2e4a88; }
+
+.sb-search {
+  display: flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 10px;
+  background: var(--c-bg); border: 1px solid var(--c-border);
+  border-radius: 8px; transition: all .15s;
+}
+.sb-search:focus-within {
+  border-color: var(--c-brand); background: var(--c-white);
+  box-shadow: 0 0 0 3px rgba(61,90,153,.08);
+}
+.sb-search svg { color: var(--c-t4); flex-shrink: 0; }
+.sb-search input {
+  background: none; border: none; outline: none;
+  font-size: 12.5px; font-family: inherit; color: var(--c-t1); width: 100%;
+}
+.sb-search input::placeholder { color: var(--c-t4); }
+
+/* Tree */
+.tree { flex: 1; overflow-y: auto; padding: 8px 8px; }
+.tree::-webkit-scrollbar { width: 3px; }
+.tree::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 3px; }
+
+.ti {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; border-radius: 7px;
+  cursor: pointer; transition: background .12s;
+  margin-bottom: 1px; border: 1px solid transparent;
+}
+.ti:hover { background: var(--c-hover); }
+.ti.active {
+  background: var(--c-brand-bg);
+  border-color: var(--c-brand-bd);
+}
+
+.ti-chevron { font-size: 8px; color: var(--c-t4); flex-shrink: 0; transition: transform .15s; }
+.ti-chevron.open { transform: rotate(90deg); }
+
+/* Node dot — simple & clean */
+.ti-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.dot-asm  { background: var(--c-brand); }
+.dot-sub  { background: #7e5bbd; }
+.dot-part { background: var(--c-green); }
+.dot-raw  { background: var(--c-t4); }
+
+.ti-name {
+  flex: 1; font-size: 12.5px; font-weight: 500; color: var(--c-t2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ti.active .ti-name { color: var(--c-brand); font-weight: 600; }
+
+.ti-type {
+  font-size: 10px; font-weight: 600; color: var(--c-t4);
+  flex-shrink: 0; letter-spacing: .02em;
+}
+.ti.active .ti-type { color: var(--c-brand); opacity: .7; }
+
+.ti-acts { display: none; gap: 2px; }
+.ti:hover .ti-acts { display: flex; }
+
+.ti-act {
+  width: 20px; height: 20px; border-radius: 5px;
+  border: 1px solid var(--c-border); background: var(--c-white);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; cursor: pointer; color: var(--c-t3);
+  transition: all .12s;
+}
+.ti-act:hover { background: var(--c-brand); color: #fff; border-color: var(--c-brand); }
+.ti-act.del:hover { background: var(--c-red); color: #fff; border-color: var(--c-red); }
+
+.i1 { padding-left: 20px; }
+.i2 { padding-left: 36px; }
+
+/* ════════════════════════════════════════
+   MAIN
+════════════════════════════════════════ */
+.main {
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--c-bg);
+}
+
+/* ── Page header ── */
+.ph {
+  background: var(--c-white); border-bottom: 1px solid var(--c-border);
+  padding: 12px 22px;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px;
+}
+
+.ph-left { display: flex; flex-direction: column; gap: 5px; }
+
+.breadcrumb {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--c-t3);
+}
+.breadcrumb a { color: var(--c-t3); text-decoration: none; }
+.breadcrumb a:hover { color: var(--c-brand); }
+.breadcrumb .sep { color: var(--c-t4); }
+.breadcrumb .cur { color: var(--c-brand); font-weight: 500; }
+
+.ph-row { display: flex; align-items: center; gap: 8px; }
+
+.ph-title {
+  font-size: 19px; font-weight: 700; letter-spacing: -0.4px; color: var(--c-t1);
+}
+
+/* Very subtle tags — not competing with content */
+.stag {
+  font-size: 11px; font-weight: 500;
+  padding: 2px 8px; border-radius: 5px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.stag-part { background: var(--c-brand-bg); color: var(--c-brand); border: 1px solid var(--c-brand-bd); }
+.stag-os   { background: var(--c-red-bg); color: var(--c-red); border: 1px solid var(--c-red-bd); }
+
+.ph-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+
+.btn-ghost {
+  height: 32px; padding: 0 13px;
+  border: 1px solid var(--c-border); border-radius: 7px;
+  background: var(--c-white); color: var(--c-t2);
+  font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; transition: all .15s;
+}
+.btn-ghost:hover { border-color: #c0c8dc; background: var(--c-hover); color: var(--c-t1); }
+
+.btn-solid {
+  height: 32px; padding: 0 14px;
+  border: none; border-radius: 7px;
+  background: var(--c-brand); color: #fff;
+  font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; transition: all .15s;
+  box-shadow: 0 1px 4px rgba(61,90,153,.25);
+}
+.btn-solid:hover { background: #2e4a88; }
+
+/* ── Tabs ── */
+.tabs {
+  background: var(--c-white); border-bottom: 1px solid var(--c-border);
+  display: flex; padding: 0 22px; gap: 0;
+}
+.tab {
+  padding: 10px 14px; font-size: 12.5px; font-weight: 500; color: var(--c-t3);
+  cursor: pointer; border-bottom: 2px solid transparent;
+  display: flex; align-items: center; gap: 5px; transition: all .15s;
+}
+.tab:hover { color: var(--c-t2); }
+.tab.active { color: var(--c-brand); border-bottom-color: var(--c-brand); font-weight: 600; }
+.tab-ct {
+  font-size: 10px; font-weight: 700; padding: 1px 5px;
+  border-radius: 100px; background: var(--c-brand-bg); color: var(--c-brand);
+}
+
+/* ── Stats ── */
+.stats {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 1px; background: var(--c-border);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.stat {
+  background: var(--c-white);
+  padding: 16px 20px;
+  display: flex; align-items: center; gap: 13px;
+}
+
+.stat-icon {
+  width: 36px; height: 36px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0;
+}
+.si-b { background: var(--c-brand-bg); }
+.si-a { background: var(--c-amber-bg); }
+.si-g { background: var(--c-green-bg); }
+.si-n { background: var(--c-hover); }
+
+.stat-body { min-width: 0; }
+.stat-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; color: var(--c-t3); margin-bottom: 3px; }
+.stat-val { font-size: 21px; font-weight: 700; letter-spacing: -0.5px; line-height: 1; }
+.sv-b { color: var(--c-brand); }
+.sv-a { color: var(--c-amber); }
+.sv-g { color: var(--c-green); }
+.sv-n { color: var(--c-t3); }
+.stat-sub { font-size: 10.5px; color: var(--c-t3); margin-top: 2px; }
+
+/* ── Body split ── */
+.body-split {
+  display: grid; grid-template-columns: 1fr 296px;
+  flex: 1; overflow: hidden;
+}
+
+/* ── Operations panel ── */
+.ops {
+  display: flex; flex-direction: column; overflow: hidden;
+  border-right: 1px solid var(--c-border); background: var(--c-white);
+}
+
+.ops-bar {
+  display: flex; align-items: center;
+  padding: 9px 16px; gap: 6px;
+  border-bottom: 1px solid var(--c-border2);
+  background: var(--c-white);
+}
+
+.seg-tab {
+  height: 28px; padding: 0 13px; border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent; color: var(--c-t3);
+  font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer;
+  transition: all .13s;
+}
+.seg-tab:hover { background: var(--c-hover); color: var(--c-t2); }
+.seg-tab.on { background: var(--c-brand); color: #fff; box-shadow: 0 1px 4px rgba(61,90,153,.25); }
+
+.ops-bar-right { margin-left: auto; display: flex; gap: 6px; }
+
+/* Table */
+.t-wrap { flex: 1; overflow-y: auto; }
+.t-wrap::-webkit-scrollbar { width: 3px; }
+.t-wrap::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 3px; }
+
+.t-hint {
+  padding: 6px 18px; font-size: 11px; color: var(--c-t4);
+  border-bottom: 1px solid var(--c-border2);
+  display: flex; align-items: center; gap: 5px;
+  background: #fafbfd;
+}
+.t-hint-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--c-brand); opacity: .4; }
+
+table { width: 100%; border-collapse: collapse; }
+
+thead { position: sticky; top: 0; z-index: 10; }
+thead tr { background: #fafbfd; }
+th {
+  padding: 9px 16px; text-align: left;
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .09em; color: var(--c-t3);
+  border-bottom: 1px solid var(--c-border);
+  white-space: nowrap;
+}
+
+tbody tr {
+  border-bottom: 1px solid var(--c-border2);
+  cursor: pointer; transition: background .1s;
+  animation: rowIn .28s ease both;
+}
+@keyframes rowIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+tbody tr:nth-child(1) { animation-delay: .03s; }
+tbody tr:nth-child(2) { animation-delay: .06s; }
+tbody tr:nth-child(3) { animation-delay: .09s; }
+tbody tr:nth-child(4) { animation-delay: .12s; }
+tbody tr:nth-child(5) { animation-delay: .15s; }
+tbody tr:nth-child(6) { animation-delay: .18s; }
+tbody tr:nth-child(7) { animation-delay: .21s; }
+tbody tr:nth-child(8) { animation-delay: .24s; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: #f7f8fc; }
+
+td { padding: 11px 16px; vertical-align: middle; }
+
+/* OP number — small, not loud */
+.op-num {
+  font-size: 11px; font-weight: 600;
+  color: var(--c-brand); font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+}
+
+/* Operation name — this is the content. Make it read well */
+.op-name { font-size: 13px; font-weight: 500; color: var(--c-t1); }
+
+/* Time values — colored only because they carry meaning, no bold border boxes */
+.tv {
+  font-size: 12.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; padding: 3px 8px;
+  border-radius: 6px; display: inline-block;
+}
+.tv-a { color: var(--c-amber); background: var(--c-amber-bg); }
+.tv-g { color: var(--c-green); background: var(--c-green-bg); }
+
+.na { font-size: 12px; color: var(--c-t4); }
+
+.row-acts { display: flex; gap: 3px; justify-content: flex-end; opacity: 0; transition: opacity .12s; }
+tbody tr:hover .row-acts { opacity: 1; }
+
+.ra {
+  width: 26px; height: 26px; border-radius: 6px;
+  border: 1px solid var(--c-border); background: var(--c-white);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; cursor: pointer; color: var(--c-t3); transition: all .13s;
+}
+.ra:hover { background: var(--c-brand); color: #fff; border-color: var(--c-brand); }
+.ra.del:hover { background: var(--c-red); color: #fff; border-color: var(--c-red); }
+
+/* ════════════════════════════════════════
+   RIGHT — 3D Viewer + Details
+════════════════════════════════════════ */
+.vp {
+  display: flex; flex-direction: column; background: var(--c-white);
+  border-left: 1px solid var(--c-border); overflow: hidden;
+}
+
+.vp-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--c-border2);
+  background: #fafbfd;
+}
+
+.vp-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .09em; color: var(--c-t3);
+}
+
+.vp-live {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--c-green);
+  box-shadow: 0 0 0 2px rgba(29,122,79,.15);
+  animation: lp 2.5s ease infinite;
+}
+@keyframes lp {
+  0%,100% { box-shadow: 0 0 0 2px rgba(29,122,79,.15); }
+  50%      { box-shadow: 0 0 0 5px rgba(29,122,79,.06); }
+}
+
+.ver-sel {
+  height: 26px; padding: 0 9px;
+  border-radius: 6px; border: 1px solid var(--c-border);
+  background: var(--c-white); color: var(--c-t2);
+  font-size: 11px; font-weight: 500; font-family: inherit;
+  cursor: pointer; outline: none; transition: border-color .13s;
+}
+.ver-sel:focus { border-color: var(--c-brand); }
+
+/* ── 3D stage ── */
+.stage {
+  flex: 0 0 200px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 14px; padding: 18px;
+  position: relative; overflow: hidden;
+  background: linear-gradient(160deg, #f7f8fd 0%, #f0f2fa 100%);
+  border-bottom: 1px solid var(--c-border2);
+}
+
+/* Subtle dot pattern */
+.stage::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image: radial-gradient(circle, #d0d4e8 1px, transparent 1px);
+  background-size: 18px 18px; opacity: .5; pointer-events: none;
+}
+
+/* ── Refined 3D cube ── */
+.cube-wrap {
+  width: 100px; height: 100px;
+  position: relative; perspective: 280px;
+}
+
+.cube {
+  width: 54px; height: 54px;
+  position: absolute; top: 50%; left: 50%;
+  transform-style: preserve-3d;
+  animation: spin 9s linear infinite;
+}
+@keyframes spin {
+  from { transform: translate(-50%,-50%) rotateX(22deg) rotateY(0deg); }
+  to   { transform: translate(-50%,-50%) rotateX(22deg) rotateY(360deg); }
+}
+
+.cf {
+  position: absolute; width: 54px; height: 54px;
+  border: 1px solid rgba(61,90,153,.18);
+  border-radius: 2px;
+  background: rgba(61,90,153,.04);
+}
+.cf:nth-child(1) { transform: translateZ(27px); }
+.cf:nth-child(2) { transform: translateZ(-27px) rotateY(180deg); }
+.cf:nth-child(3) { transform: translateX(-27px) rotateY(-90deg); }
+.cf:nth-child(4) { transform: translateX(27px)  rotateY(90deg); }
+.cf:nth-child(5) { transform: translateY(-27px) rotateX(90deg); }
+.cf:nth-child(6) { transform: translateY(27px)  rotateX(-90deg); }
+
+.orbit {
+  position: absolute; top: 50%; left: 50%;
+  border-radius: 50%; border: 1px solid rgba(61,90,153,.1);
+}
+.o1 { width: 86px; height: 30px; margin: -15px 0 0 -43px; animation: orb 6s linear infinite; }
+.o2 { width: 100px; height: 35px; margin: -18px 0 0 -50px; animation: orb 9s linear infinite reverse; border-color: rgba(126,91,189,.08); }
+@keyframes orb {
+  from { transform: rotateX(72deg) rotateZ(0deg); }
+  to   { transform: rotateX(72deg) rotateZ(360deg); }
+}
+
+.cube-shadow {
+  position: absolute; bottom: 6px; left: 50%;
+  width: 46px; height: 6px; border-radius: 50%;
+  background: rgba(61,90,153,.08); filter: blur(3px);
+  transform: translateX(-50%);
+  animation: cs 9s linear infinite;
+}
+@keyframes cs {
+  0%,100% { width: 46px; opacity: .7; }
+  50%      { width: 38px; opacity: .5; }
+}
+
+.stage-msg { text-align: center; position: relative; z-index: 1; }
+.stage-msg p { font-size: 11.5px; color: var(--c-t3); line-height: 1.6; margin-bottom: 10px; }
+
+.upload-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 13px;
+  border: 1px dashed var(--c-brand-bd); border-radius: 8px;
+  background: var(--c-white); color: var(--c-brand);
+  font-size: 11.5px; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: all .15s;
+}
+.upload-btn:hover { background: var(--c-brand-bg); border-color: var(--c-brand); }
+
+/* ── Info section ── */
+.vp-info {
+  flex: 1; overflow-y: auto; padding: 14px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.vp-info::-webkit-scrollbar { width: 3px; }
+.vp-info::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 3px; }
+
+.info-section {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--c-t4);
+  padding: 6px 0 2px;
+}
+
+.info-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 11px;
+  border: 1px solid var(--c-border); border-radius: 8px;
+  background: var(--c-white); transition: border-color .13s;
+}
+.info-row:hover { border-color: var(--c-brand-bd); }
+
+.ir-key { font-size: 11px; font-weight: 500; color: var(--c-t3); }
+.ir-val { font-size: 12px; font-weight: 600; color: var(--c-t1); }
+.ir-val.v-b { color: var(--c-brand); }
+.ir-val.v-g { color: var(--c-green); }
+.ir-val.v-a { color: var(--c-amber); }
+.ir-val.v-r { color: var(--c-red); }
+</style>
+</head>
+<body>
+
+<!-- ═══ TOPBAR ═══ -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-logo">P</div>
+    <div class="brand-name">ProData</div>
+  </div>
+  <div class="topbar-sep"></div>
+  <span class="topbar-page">Product Data Management</span>
+  <div class="topbar-right">
+    <div class="tb-btn">🔔<div class="tb-dot"></div></div>
+    <div class="tb-btn">⚙️</div>
+    <div class="tb-btn">❓</div>
+    <div class="topbar-sep"></div>
+    <div class="tb-avatar">A</div>
+    <div class="tb-user">
+      <div class="tb-user-name">Admin</div>
+      <div class="tb-user-role">Super Admin</div>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <aside class="sidebar">
+    <div class="sb-top">
+      <div class="sb-header-row">
+        <span class="sb-label">Bill of Materials</span>
+        <button class="btn-new">+ New Product</button>
+      </div>
+      <div class="sb-search">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        <input placeholder="Search products…">
+      </div>
+    </div>
+
+    <div class="tree">
+
+      <div class="ti">
+        <span class="ti-chevron open">▶</span>
+        <div class="ti-dot dot-asm"></div>
+        <span class="ti-name">bottle</span>
+        <span class="ti-type">Assembly</span>
+        <div class="ti-acts">
+          <div class="ti-act">⇄</div><div class="ti-act">✎</div><div class="ti-act del">🗑</div>
+        </div>
+      </div>
+
+      <div class="ti i1">
+        <span class="ti-chevron open">▶</span>
+        <div class="ti-dot dot-sub"></div>
+        <span class="ti-name">main body</span>
+        <span class="ti-type">Sub-Asm</span>
+        <div class="ti-acts">
+          <div class="ti-act">⇄</div><div class="ti-act">✎</div><div class="ti-act del">🗑</div>
+        </div>
+      </div>
+
+      <!-- ACTIVE -->
+      <div class="ti i2 active">
+        <div class="ti-dot dot-part"></div>
+        <span class="ti-name">cap</span>
+        <span class="ti-type">Part</span>
+        <div class="ti-acts">
+          <div class="ti-act">✎</div><div class="ti-act del">🗑</div>
+        </div>
+      </div>
+
+      <div class="ti i2">
+        <div class="ti-dot dot-raw"></div>
+        <span class="ti-name">bottle</span>
+        <div class="ti-acts">
+          <div class="ti-act">✎</div><div class="ti-act del">🗑</div>
+        </div>
+      </div>
+
+      <div class="ti">
+        <span class="ti-chevron open">▶</span>
+        <div class="ti-dot dot-asm"></div>
+        <span class="ti-name">gear</span>
+        <span class="ti-type">Assembly</span>
+        <div class="ti-acts">
+          <div class="ti-act">⇄</div><div class="ti-act">✎</div><div class="ti-act del">🗑</div>
+        </div>
+      </div>
+
+      <div class="ti i1">
+        <div class="ti-dot dot-raw"></div>
+        <span class="ti-name">Ring</span>
+        <div class="ti-acts"><div class="ti-act">✎</div><div class="ti-act del">🗑</div></div>
+      </div>
+
+      <div class="ti i1">
+        <div class="ti-dot dot-raw"></div>
+        <span class="ti-name">gauge</span>
+        <div class="ti-acts"><div class="ti-act">✎</div><div class="ti-act del">🗑</div></div>
+      </div>
+
+      <div class="ti">
+        <span class="ti-chevron">▶</span>
+        <div class="ti-dot dot-asm"></div>
+        <span class="ti-name">Ballscrew</span>
+        <span class="ti-type">Assembly</span>
+        <div class="ti-acts">
+          <div class="ti-act">⇄</div><div class="ti-act">✎</div><div class="ti-act del">🗑</div>
+        </div>
+      </div>
+
+      <div class="ti">
+        <span class="ti-chevron">▶</span>
+        <div class="ti-dot dot-asm"></div>
+        <span class="ti-name" style="font-size:12px">Assembly of D-nm components</span>
+        <div class="ti-acts">
+          <div class="ti-act">⇄</div><div class="ti-act">✎</div><div class="ti-act del">🗑</div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+  <!-- ═══ MAIN ═══ -->
+  <main class="main">
+
+    <!-- Page header -->
+    <div class="ph">
+      <div class="ph-left">
+        <div class="breadcrumb">
+          <a href="#">bottle</a>
+          <span class="sep">›</span>
+          <a href="#">main body</a>
+          <span class="sep">›</span>
+          <span class="cur">cap</span>
+        </div>
+        <div class="ph-row">
+          <h1 class="ph-title">cap</h1>
+          <span class="stag stag-part">Part</span>
+          <span class="stag stag-os">Out-Source</span>
+        </div>
+      </div>
+      <div class="ph-actions">
+        <button class="btn-ghost">↓ Export</button>
+        <button class="btn-ghost">⎘ Clone</button>
+        <button class="btn-solid">✎ Edit Part</button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab">Info</div>
+      <div class="tab active">Raw Materials <span class="tab-ct">1</span></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-icon si-b">🔧</div>
+        <div class="stat-body">
+          <div class="stat-label">Operations</div>
+          <div class="stat-val sv-b">8</div>
+          <div class="stat-sub">Total ops defined</div>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat-icon si-a">⏱</div>
+        <div class="stat-body">
+          <div class="stat-label">Setup Time</div>
+          <div class="stat-val sv-a">06:45</div>
+          <div class="stat-sub">Total hrs:mins</div>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat-icon si-g">⚡</div>
+        <div class="stat-body">
+          <div class="stat-label">Cycle Time</div>
+          <div class="stat-val sv-g">01:18</div>
+          <div class="stat-sub">Total hrs:mins</div>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat-icon si-n">🏭</div>
+        <div class="stat-body">
+          <div class="stat-label">Workcenters</div>
+          <div class="stat-val sv-n">—</div>
+          <div class="stat-sub">Not assigned</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Body split -->
+    <div class="body-split">
+
+      <!-- Ops table -->
+      <div class="ops">
+        <div class="ops-bar">
+          <button class="seg-tab on">mBOM</button>
+          <button class="seg-tab">eBOM</button>
+          <div class="ops-bar-right">
+            <button class="btn-ghost">↑ Upload MPP</button>
+            <button class="btn-solid">+ Add Operation</button>
+          </div>
+        </div>
+
+        <div class="t-hint">
+          <div class="t-hint-dot"></div>
+          Click any row to view detailed operation parameters
+        </div>
+
+        <div class="t-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Op #</th>
+                <th>Operation Name</th>
+                <th>Setup Time</th>
+                <th>Cycle Time</th>
+                <th>Workcenter</th>
+                <th>Machine</th>
+                <th style="text-align:right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="op-num">OP-001</span></td>
+                <td><span class="op-name">Raw Material Inspection</span></td>
+                <td><span class="tv tv-a">00:30:00</span></td>
+                <td><span class="tv tv-g">00:15:00</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><div class="row-acts"><div class="ra">✎</div><div class="ra">🔗</div><div class="ra del">🗑</div></div></td>
+              </tr>
+              <tr>
+                <td><span class="op-num">OP-002</span></td>
+                <td><span class="op-name">Facing &amp; Centering</span></td>
+                <td><span class="tv tv-a">00:45:00</span></td>
+                <td><span class="tv tv-g">00:08:00</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><div class="row-acts"><div class="ra">✎</div><div class="ra">🔗</div><div class="ra del">🗑</div></div></td>
+              </tr>
+              <tr>
+                <td><span class="op-num">OP-003</span></td>
+                <td><span class="op-name">Rough Turning (OD)</span></td>
+                <td><span class="tv tv-a">01:00:00</span></td>
+                <td><span class="tv tv-g">00:12:00</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><div class="row-acts"><div class="ra">✎</div><div class="ra">🔗</div><div class="ra del">🗑</div></div></td>
+              </tr>
+              <tr>
+                <td><span class="op-num">OP-004</span></td>
+                <td><span class="op-name">Finish Turning (OD)</span></td>
+                <td><span class="tv tv-a">00:30:00</span></td>
+                <td><span class="tv tv-g">00:10:00</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><div class="row-acts"><div class="ra">✎</div><div class="ra">🔗</div><div class="ra del">🗑</div></div></td>
+              </tr>
+              <tr>
+                <td><span class="op-num">OP-005</span></td>
+                <td><span class="op-name">Drilling (Center Bore)</span></td>
+                <td><span class="tv tv-a">00:45:00</span></td>
+                <td><span class="tv tv-g">00:06:00</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><div class="row-acts"><div class="ra">✎</div><div class="ra">🔗</div><div class="ra del">🗑</div></div></td>
+              </tr>
+              <tr>
+                <td><span class="op-num">OP-007</span></td>
+                <td><span class="op-name">Thread Cutting (External)</span></td>
+                <td><span class="tv tv-a">00:45:00</span></td>
+                <td><span class="tv tv-g">00:07:00</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><div class="row-acts"><div class="ra">✎</div><div class="ra">🔗</div><div class="ra del">🗑</div></div></td>
+              </tr>
+              <tr>
+                <td><span class="op-num">OP-006</span></td>
+                <td><span class="op-name">Boring (ID Finish)</span></td>
+                <td><span class="tv tv-a">00:30:00</span></td>
+                <td><span class="tv tv-g">00:09:00</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><div class="row-acts"><div class="ra">✎</div><div class="ra">🔗</div><div class="ra del">🗑</div></div></td>
+              </tr>
+              <tr>
+                <td><span class="op-num">OP-008</span></td>
+                <td><span class="op-name">Milling (Keyway)</span></td>
+                <td><span class="tv tv-a">01:00:00</span></td>
+                <td><span class="tv tv-g">00:11:00</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><span class="na">N/A</span></td>
+                <td><div class="row-acts"><div class="ra">✎</div><div class="ra">🔗</div><div class="ra del">🗑</div></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Viewer panel -->
+      <div class="vp">
+        <div class="vp-head">
+          <div class="vp-title">
+            <div class="vp-live"></div>
+            3D Model Viewer
+          </div>
+          <select class="ver-sel">
+            <option>0001-2.pdf (v3.0)</option>
+            <option>0001-1.pdf (v2.0)</option>
+          </select>
+        </div>
+
+        <div class="stage">
+          <div class="cube-wrap">
+            <div class="orbit o1"></div>
+            <div class="orbit o2"></div>
+            <div class="cube">
+              <div class="cf"></div>
+              <div class="cf"></div>
+              <div class="cf"></div>
+              <div class="cf"></div>
+              <div class="cf"></div>
+              <div class="cf"></div>
+            </div>
+            <div class="cube-shadow"></div>
+          </div>
+          <div class="stage-msg">
+            <p>3D preview available for<br><strong>STEP</strong> and <strong>STL</strong> files only</p>
+            <label class="upload-btn">
+              ↑ Upload STEP / STL
+              <input type="file" style="display:none" accept=".step,.stp,.stl">
+            </label>
+          </div>
+        </div>
+
+        <div class="vp-info">
+          <div class="info-section">Document</div>
+          <div class="info-row">
+            <span class="ir-key">File</span>
+            <span class="ir-val v-b">0001-2.pdf</span>
+          </div>
+          <div class="info-row">
+            <span class="ir-key">Version</span>
+            <span class="ir-val v-g">v3.0 — Latest</span>
+          </div>
+
+          <div class="info-section">Part</div>
+          <div class="info-row">
+            <span class="ir-key">Type</span>
+            <span class="ir-val">Part</span>
+          </div>
+          <div class="info-row">
+            <span class="ir-key">Source</span>
+            <span class="ir-val v-r">Out-Source</span>
+          </div>
+          <div class="info-row">
+            <span class="ir-key">Raw Materials</span>
+            <span class="ir-val v-a">1 item</span>
+          </div>
+          <div class="info-row">
+            <span class="ir-key">Total Ops</span>
+            <span class="ir-val v-b">8 operations</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+</body>
+</html>

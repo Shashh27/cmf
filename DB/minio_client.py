@@ -1,8 +1,8 @@
 from minio import Minio
 from minio.error import S3Error
 import io
+import threading
 from typing import BinaryIO
-import os
 from datetime import timedelta
 
 
@@ -15,27 +15,18 @@ class MinIOClient:
             bucket_name: str,
             secure: bool = False
     ):
-        """
-        Initialize MinIO client
-
-        Args:
-            endpoint: MinIO server endpoint (e.g., "localhost:9000")
-            access_key: MinIO access key
-            secret_key: MinIO secret key
-            bucket_name: Default bucket name
-            secure: Use HTTPS if True
-        """
+        # Minio client is thread-safe internally; one instance shared across all workers
         self.client = Minio(
             endpoint,
             access_key=access_key,
             secret_key=secret_key,
-            secure=secure
+            secure=secure,
         )
         self.bucket_name = bucket_name
         self.endpoint = endpoint
         self.secure = secure
 
-        # Ensure bucket exists
+        # Ensure bucket exists once at startup
         self._ensure_bucket_exists()
 
     def _ensure_bucket_exists(self):
@@ -192,20 +183,29 @@ class MinIOClient:
             raise
 
 
-# Global MinIO client instance
-minio_client: MinIOClient = None
+# Global MinIO client instance — initialized once at startup, shared across all threads/workers
+_minio_client: MinIOClient = None
+_minio_lock = threading.Lock()
 
 
 def get_minio_client() -> MinIOClient:
-    """Get the global MinIO client instance"""
-    global minio_client
-    if minio_client is None:
-        raise Exception("MinIO client not initialized. Call init_minio_client() first.")
-    return minio_client
+    """Get the global MinIO client instance (thread-safe)."""
+    global _minio_client
+    if _minio_client is None:
+        raise RuntimeError("MinIO client not initialized. Call init_minio_client() at startup.")
+    return _minio_client
 
 
-def init_minio_client(endpoint: str, access_key: str, secret_key: str, bucket_name: str, secure: bool = False):
-    """Initialize the global MinIO client"""
-    global minio_client
-    minio_client = MinIOClient(endpoint, access_key, secret_key, bucket_name, secure)
-    return minio_client
+def init_minio_client(
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    bucket_name: str,
+    secure: bool = False,
+) -> MinIOClient:
+    """Initialize the global MinIO client once at application startup (thread-safe)."""
+    global _minio_client
+    with _minio_lock:
+        if _minio_client is None:
+            _minio_client = MinIOClient(endpoint, access_key, secret_key, bucket_name, secure)
+    return _minio_client

@@ -28,6 +28,7 @@ from routers import (
     inventory_requests_router,
     inventory_return_requests_router,
     transaction_history_router,
+    tool_issues_router,
     out_source_parts_status_router,
 )
 
@@ -36,6 +37,12 @@ from routers.pokayoke_checklists import router as pokayoke_checklists_router, co
 
 # Import general documents router
 from document_routers.general_documents import router as general_documents_router
+
+# Import machine documents router
+from document_routers.machine_documents import router as machine_documents_router
+
+# Import common documents router
+from document_routers.common_documents import router as common_documents_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -111,6 +118,8 @@ app.include_router(order_documents_router, prefix="/api/v1")
 app.include_router(rawmaterials_router, prefix="/api/v1")
 app.include_router(workcenter_router, prefix="/api/v1")
 app.include_router(general_documents_router)
+app.include_router(machine_documents_router)
+app.include_router(common_documents_router)
 app.include_router(access_control_router, prefix="/api/v1")
 app.include_router(login_router, prefix="/api/v1")
 app.include_router(machines_router, prefix="/api/v1")
@@ -122,8 +131,7 @@ app.include_router(inventory_return_requests_router, prefix="/api/v1")
 app.include_router(transaction_history_router, prefix="/api/v1")
 app.include_router(pokayoke_checklists_router, prefix="/api/v1")
 app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
-from routers import maintenance_router
-app.include_router(maintenance_router, prefix="/api/v1")
+app.include_router(tool_issues_router, prefix="/api/v1")
 app.include_router(out_source_parts_status_router, prefix="/api/v1")
 
 
@@ -138,7 +146,8 @@ def root():
             "Document upload to MinIO storage",
             "File download from MinIO",
             "Support for PDF, DOCX, CSV, XLSX, and image files",
-            "General documents with folder structure and versioning"
+            "General documents with folder structure and versioning",
+            "Machine documents with folder structure and versioning"
         ],
         "docs": "/docs",
         "redoc": "/redoc"
@@ -191,6 +200,7 @@ def system_info():
             "tools_list": "/api/v1/tools-list",
             "inventory_requests": "/api/v1/inventory-requests",
             "inventory_return_requests": "/api/v1/inventory-return-requests",
+            "tool_issues": "/api/v1/tool-issues",
             "general_documents": "/general-documents"
         }
     }
@@ -205,3 +215,19 @@ if __name__ == "__main__":
         port=8000,
         log_level="info"
     )
+
+
+
+
+
+
+
+
+
+
+
+
+#  uvicorn main:app --reload --host 172.18.7.86 --port 8000
+
+
+# python -m uvicorn main:app --reload --host 172.18.100.76 --port 8000

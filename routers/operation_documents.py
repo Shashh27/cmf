@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 import os
 import io
@@ -24,6 +24,23 @@ router = APIRouter(
     prefix="/operation-documents",
     tags=["operation-documents"]
 )
+
+
+def _op_doc_to_dict(document: OperationDocumentModel) -> dict:
+    op = document.operation
+    return {
+        "id": document.id,
+        "document_name": document.document_name,
+        "document_url": document.document_url,
+        "document_type": document.document_type,
+        "document_version": document.document_version,
+        "operation_id": document.operation_id,
+        "parent_id": document.parent_id,
+        "operation_name": op.operation_name if op else None,
+        "operation_number": op.operation_number if op else None,
+        "created_at": document.created_at,
+        "updated_at": document.updated_at,
+    }
 
 
 # Helper functions for file handling
@@ -170,56 +187,32 @@ async def upload_operation_documents(
 
 
 @router.get("/", response_model=List[OperationDocumentWithDetails])
-def get_operation_documents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all operation documents with operation details"""
-    documents = db.query(OperationDocumentModel).offset(skip).limit(limit).all()
-    result = []
-    for document in documents:
-        # Get operation details
-        operation = db.query(OperationModel).filter(OperationModel.id == document.operation_id).first()
-        
-        # Create document dict with operation details
-        document_dict = {
-            "id": document.id,
-            "document_name": document.document_name,
-            "document_url": document.document_url,
-            "document_type": document.document_type,
-            "document_version": document.document_version,
-            "operation_id": document.operation_id,
-            "parent_id": document.parent_id,
-            "operation_name": operation.operation_name if operation else None,
-            "operation_number": operation.operation_number if operation else None
-        }
-        result.append(document_dict)
-    return result
+def get_operation_documents(db: Session = Depends(get_db)):
+    """Get all operation documents with operation details (single JOIN query)."""
+    documents = (
+        db.query(OperationDocumentModel)
+        .options(joinedload(OperationDocumentModel.operation))
+        .order_by(OperationDocumentModel.id.asc())
+        .all()
+    )
+    return [_op_doc_to_dict(d) for d in documents]
 
 
 @router.get("/{document_id}", response_model=OperationDocumentWithDetails)
 def get_operation_document(document_id: int, db: Session = Depends(get_db)):
-    """Get a specific operation document by ID with operation details"""
-    document = db.query(OperationDocumentModel).filter(OperationDocumentModel.id == document_id).first()
+    """Get a specific operation document by ID with operation details."""
+    document = (
+        db.query(OperationDocumentModel)
+        .options(joinedload(OperationDocumentModel.operation))
+        .filter(OperationDocumentModel.id == document_id)
+        .first()
+    )
     if not document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation document with id {document_id} not found"
         )
-    
-    # Get operation details
-    operation = db.query(OperationModel).filter(OperationModel.id == document.operation_id).first()
-    
-    # Create document dict with operation details
-    document_dict = {
-        "id": document.id,
-        "document_name": document.document_name,
-        "document_url": document.document_url,
-        "document_type": document.document_type,
-        "document_version": document.document_version,
-        "operation_id": document.operation_id,
-        "parent_id": document.parent_id,
-        "operation_name": operation.operation_name if operation else None,
-        "operation_number": operation.operation_number if operation else None
-    }
-    return document_dict
+    return _op_doc_to_dict(document)
 
 
 @router.get("/{document_id}/download")
@@ -385,29 +378,19 @@ def update_operation_document(document_id: int, document_update: OperationDocume
         setattr(db_document, field, value)
     
     db.commit()
-    db.refresh(db_document)
-    
-    # Get operation details
-    operation = db.query(OperationModel).filter(OperationModel.id == db_document.operation_id).first()
-    
-    # Create document dict with operation details
-    document_dict = {
-        "id": db_document.id,
-        "document_name": db_document.document_name,
-        "document_url": db_document.document_url,
-        "document_type": db_document.document_type,
-        "document_version": db_document.document_version,
-        "operation_id": db_document.operation_id,
-        "parent_id": db_document.parent_id,
-        "operation_name": operation.operation_name if operation else None,
-        "operation_number": operation.operation_number if operation else None
-    }
-    return document_dict
+
+    refreshed = (
+        db.query(OperationDocumentModel)
+        .options(joinedload(OperationDocumentModel.operation))
+        .filter(OperationDocumentModel.id == document_id)
+        .first()
+    )
+    return _op_doc_to_dict(refreshed)
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_operation_document(document_id: int, db: Session = Depends(get_db)):
-    """Delete an operation document"""
+    """Delete an operation document and its file from MinIO"""
     document = db.query(OperationDocumentModel).filter(OperationDocumentModel.id == document_id).first()
     if not document:
         raise HTTPException(
@@ -415,6 +398,25 @@ def delete_operation_document(document_id: int, db: Session = Depends(get_db)):
             detail=f"Operation document with id {document_id} not found"
         )
     
+    try:
+        # Delete from MinIO
+        minio_client = get_minio_client()
+        parsed_url = urlparse(document.document_url)
+        path_parts = parsed_url.path.lstrip('/').split('/', 1)
+        
+        if len(path_parts) < 2:
+            if not parsed_url.netloc and '/' in document.document_url:
+                path_parts = document.document_url.lstrip('/').split('/', 1)
+        
+        if len(path_parts) >= 2:
+            bucket_name = path_parts[0]
+            object_name = path_parts[1]
+            minio_client.delete_file(object_name)
+        
+    except Exception as e:
+        print(f"Warning: Failed to delete operation document from MinIO: {str(e)}")
+    
+    # Delete from database
     db.delete(document)
     db.commit()
     return None
@@ -422,7 +424,7 @@ def delete_operation_document(document_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/operation/{operation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_documents_by_operation(operation_id: int, db: Session = Depends(get_db)):
-    """Delete all documents for a specific operation"""
+    """Delete all documents for a specific operation and their files from MinIO"""
     # Check if operation exists
     operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not operation:
@@ -432,7 +434,26 @@ def delete_documents_by_operation(operation_id: int, db: Session = Depends(get_d
         )
     
     documents = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id).all()
+    minio_client = get_minio_client()
+    
     for document in documents:
+        # Delete from MinIO
+        try:
+            parsed_url = urlparse(document.document_url)
+            path_parts = parsed_url.path.lstrip('/').split('/', 1)
+            
+            if len(path_parts) < 2:
+                if not parsed_url.netloc and '/' in document.document_url:
+                    path_parts = document.document_url.lstrip('/').split('/', 1)
+            
+            if len(path_parts) >= 2:
+                bucket_name = path_parts[0]
+                object_name = path_parts[1]
+                minio_client.delete_file(object_name)
+        except Exception as e:
+            print(f"Warning: Failed to delete operation document from MinIO: {str(e)}")
+        
+        # Delete from database
         db.delete(document)
     
     db.commit()
