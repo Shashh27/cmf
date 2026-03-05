@@ -22,6 +22,11 @@ from .inventory import (
     RawMaterial,
     ToolsList
 )
+from .maintenance import (
+    OEEIssue,
+    MachineBreakdown,
+    ComponentIssue
+)
 
 __all__ = [
     "Product",
@@ -41,5 +46,8 @@ __all__ = [
     "AccessUser",
     "RawMaterial",
     "ToolsList",
+    "OEEIssue",
+    "MachineBreakdown",
+    "ComponentIssue",
     "Base"
 ]

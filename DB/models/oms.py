@@ -258,3 +258,21 @@ class OrderPartPriority(Base):
     order = relationship("Order", back_populates="part_priorities")
     product = relationship("Product")
     part = relationship("Part")
+
+
+# =======================
+# Out Source Parts Status
+# =======================
+class OutSourcePartStatus(Base):
+    __tablename__ = "out_source_parts_status"
+    __table_args__ = {'schema': 'oms'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
+    start_date = Column(TIMESTAMP, nullable=True)
+    to_date = Column(TIMESTAMP, nullable=True)
+    status = Column(String, nullable=False)
+
+    part = relationship("Part")
+    order = relationship("Order")

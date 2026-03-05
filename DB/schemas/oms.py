@@ -561,3 +561,33 @@ class OrderWisePriority(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Out Source Parts Status Schemas
+# =======================
+class OutSourcePartStatusBase(BaseModel):
+    part_id: int
+    order_id: int
+    start_date: Optional[datetime] = None
+    to_date: Optional[datetime] = None
+    status: str
+
+
+class OutSourcePartStatusCreate(OutSourcePartStatusBase):
+    pass
+
+
+class OutSourcePartStatusUpdate(BaseModel):
+    part_id: Optional[int] = None
+    order_id: Optional[int] = None
+    start_date: Optional[datetime] = None
+    to_date: Optional[datetime] = None
+    status: Optional[str] = None
+
+
+class OutSourcePartStatus(OutSourcePartStatusBase):
+    id: int
+
+    class Config:
+        from_attributes = True

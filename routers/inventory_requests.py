@@ -76,8 +76,7 @@ def create_inventory_request(
     create_data['status'] = 'pending'
     create_data['admin_id'] = None  # Admin ID will be set during approval
     if 'created_at' not in create_data or not create_data.get('created_at'):
-        from datetime import datetime
-        create_data['created_at'] = datetime.utcnow()
+        create_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
     
     db_inventory_request = InventoryRequest(**create_data)
     db.add(db_inventory_request)

@@ -20,6 +20,8 @@ from .inventory_requests import router as inventory_requests_router
 from .inventory_return_requests import router as inventory_return_requests_router
 from .transaction_history import router as transaction_history_router
 from .pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
+from .maintenance import router as maintenance_router
+from .out_source_parts_status import router as out_source_parts_status_router
 
 __all__ = [
     "products_router",
@@ -41,5 +43,7 @@ __all__ = [
     "access_control_router",
     "transaction_history_router",
     "pokayoke_checklists_router",
-    "pokayoke_completed_logs_router"
+    "pokayoke_completed_logs_router",
+    "maintenance_router",
+    "out_source_parts_status_router"
 ]
