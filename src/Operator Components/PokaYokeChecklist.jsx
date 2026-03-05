@@ -178,7 +178,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       if (activeStep !== 2) return;
       setOrdersLoading(true);
       try {
-        const res = await fetch(`${config.API_BASE_URL}/orders`, {
+        const res = await fetch(`${config.API_BASE_URL}/orders/`, {
           headers: { accept: 'application/json' },
         });
         const data = await res.json();
@@ -299,7 +299,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       };
       const res = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {

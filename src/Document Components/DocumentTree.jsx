@@ -498,9 +498,14 @@ const buildMachineFoldersTree = (folders, machine) => {
           ),
           titleText: part.part_name,
           key: `part-${part.id}`,
-          selectable: false,
+          selectable: true,
           isLeaf: false,
-          children: []
+          nodeData: { 
+            type: 'part',
+            partId: part.id,
+            partName: part.part_name
+          },
+          children: buildPartNode(part, null, [], false).children
         }))
       },
       {

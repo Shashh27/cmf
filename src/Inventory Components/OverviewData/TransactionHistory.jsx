@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Table, 
-  Card, 
   Space, 
   Tag, 
-  Typography, 
   Alert,
   Spin,
   Empty,
@@ -15,16 +13,9 @@ import {
   DatePicker,
   Select
 } from 'antd';
-import { 
-  HistoryOutlined, 
-  TableOutlined,
-  SearchOutlined
-} from '@ant-design/icons';
+import { SearchOutlined } from '@ant-design/icons';
 import config from '../../Config/config';
-
-const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
-
 const TransactionHistory = () => {
   const [allTransactionsLoading, setAllTransactionsLoading] = useState(false);
   const [allTransactionsData, setAllTransactionsData] = useState(null);
@@ -154,14 +145,6 @@ const TransactionHistory = () => {
       render: (text) => text || '-',
     },
     {
-      title: 'Request Date',
-      dataIndex: 'request_created_at',
-      key: 'request_created_at',
-      width: 150,
-      className: 'table-header-styled',
-      render: (date) => formatDateTime(date),
-    },
-    {
       title: 'Approved By',
       dataIndex: 'approved_by',
       key: 'approved_by',
@@ -190,14 +173,6 @@ const TransactionHistory = () => {
       align: 'center',
       className: 'table-header-styled',
       render: (text) => text || '-',
-    },
-    {
-      title: 'Return Date',
-      dataIndex: 'return_created_at',
-      key: 'return_created_at',
-      width: 150,
-      className: 'table-header-styled',
-      render: (date) => date ? formatDateTime(date) : '-',
     },
     {
       title: 'Collected By',
@@ -323,15 +298,6 @@ const TransactionHistory = () => {
   try {
     return (
       <div style={{ padding: '24px' }}>
-        <Card 
-          title={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <HistoryOutlined style={{ fontSize: '20px', color: '#1890ff' }} />
-              <Title level={4} style={{ margin: 0 }}>Transaction History</Title>
-            </div>
-          }
-          style={{ marginBottom: '24px' }}
-        >
           <div style={{ marginBottom: 12 }}>
             <Row gutter={[12, 12]} align="middle">
               <Col xs={24} sm={12} md={10} lg={8} xl={6}>
@@ -454,7 +420,6 @@ const TransactionHistory = () => {
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           )}
-        </Card>
       </div>
     );
   } catch (err) {

@@ -28,20 +28,15 @@ import config from '../Config/config';
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-const PokaYokeMachineAssignments = () => {
-  const [machines, setMachines] = useState([]);
+const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoading }) => {
   const [checklists, setChecklists] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [checklistsLoading, setChecklistsLoading] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [assignModalVisible, setAssignModalVisible] = useState(false);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [form] = Form.useForm();
-
-  useEffect(() => {
-    fetchMachines();
-    fetchChecklists();
-  }, []);
 
   useEffect(() => {
     if (selectedMachine) {
@@ -49,18 +44,8 @@ const PokaYokeMachineAssignments = () => {
     }
   }, [selectedMachine]);
 
-  const fetchMachines = async () => {
-    try {
-      const response = await fetch(`${config.API_BASE_URL}/machines/?skip=0&limit=100`);
-      if (!response.ok) throw new Error('Failed to fetch machines');
-      const data = await response.json();
-      setMachines(data);
-    } catch (error) {
-      message.error('Failed to fetch machines: ' + error.message);
-    }
-  };
-
   const fetchChecklists = async () => {
+    setChecklistsLoading(true);
     try {
       const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/`);
       if (!response.ok) throw new Error('Failed to fetch checklists');
@@ -68,6 +53,8 @@ const PokaYokeMachineAssignments = () => {
       setChecklists(data);
     } catch (error) {
       message.error('Failed to fetch checklists: ' + error.message);
+    } finally {
+      setChecklistsLoading(false);
     }
   };
 
@@ -78,27 +65,12 @@ const PokaYokeMachineAssignments = () => {
       if (!response.ok) throw new Error('Failed to fetch assignments');
       const data = await response.json();
       
-      // Fetch full checklist details for each assignment
-      const assignmentsWithDetails = await Promise.all(
-        data.map(async (assignment) => {
-          try {
-            const checklistResponse = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}`);
-            if (checklistResponse.ok) {
-              const checklist = await checklistResponse.json();
-              const itemsResponse = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}/items`);
-              const items = itemsResponse.ok ? await itemsResponse.json() : [];
-              return { 
-                ...assignment, 
-                checklistName: checklist.name,
-                itemsCount: items.length
-              };
-            }
-            return { ...assignment, checklistName: 'Unknown', itemsCount: 0 };
-          } catch (error) {
-            return { ...assignment, checklistName: 'Unknown', itemsCount: 0 };
-          }
-        })
-      );
+      // Data now includes nested checklist and items info
+      const assignmentsWithDetails = data.map((assignment) => ({
+        ...assignment,
+        checklistName: assignment.checklist?.name || 'Unknown',
+        itemsCount: assignment.checklist?.items?.length || 0
+      }));
       
       setAssignments(assignmentsWithDetails);
     } catch (error) {
@@ -136,7 +108,7 @@ const PokaYokeMachineAssignments = () => {
 
   const handleDeleteAssignment = async (id) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/assignments/${id}`, {
+      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/assignments/${id}/`, {
         method: 'DELETE',
       });
 
@@ -253,6 +225,8 @@ const PokaYokeMachineAssignments = () => {
                 message.warning('Please select a machine before assigning a checklist');
                 return;
               }
+              // Fetch checklists only when opening the modal
+              fetchChecklists();
               setAssignModalVisible(true);
             }}
             style={{
@@ -283,6 +257,8 @@ const PokaYokeMachineAssignments = () => {
           <div style={{ flex: '0 0 450px' }}>
             <Select
               placeholder="Select a machine to see its assigned checklists"
+              loading={machinesLoading}
+              onFocus={() => fetchMachines()}
               style={{ 
                 width: '100%',
                 borderRadius: '6px'
@@ -407,6 +383,7 @@ const PokaYokeMachineAssignments = () => {
           >
             <Select
               placeholder="Select a checklist to assign"
+              loading={checklistsLoading}
               style={{ 
                 width: '100%',
                 borderRadius: '6px'

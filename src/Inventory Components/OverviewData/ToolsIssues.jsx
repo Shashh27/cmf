@@ -270,28 +270,12 @@ const ToolsIssues = () => {
       ),
     },
     {
-      title: 'Created At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 160,
-      className: 'table-header-styled',
-      render: (date) => formatDate(date),
-    },
-    {
       title: 'Approved By',
       dataIndex: 'admin_name',
       key: 'admin_name',
       width: 140,
       className: 'table-header-styled',
       render: (text) => text || '-',
-    },
-    {
-      title: 'Updated At',
-      dataIndex: 'updated_at',
-      key: 'updated_at',
-      width: 160,
-      className: 'table-header-styled',
-      render: (date) => formatDate(date),
     },
     {
       title: 'Status',

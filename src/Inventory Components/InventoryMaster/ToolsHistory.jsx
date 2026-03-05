@@ -327,75 +327,45 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
     ])
   );
 
-  // Generate download rows - includes ALL history data
+  // Generate download rows in requested format
   const getDownloadRows = () => {
     const rows = [];
+    const approvedByReqId = {};
+    (toolIssuesApproved || []).forEach(it => {
+      if (it.request_id) {
+        approvedByReqId[it.request_id] = (approvedByReqId[it.request_id] || 0) + (it.tool_issue_qty || 0);
+      }
+    });
 
-    // Add inventory requests and returns
-    if (Array.isArray(filteredTransactions) && filteredTransactions.length > 0) {
-      filteredTransactions.forEach(transaction => {
-        const inventoryRequest = transaction.inventory_request || transaction.inventory_request_details || {};
-        const returns = Array.isArray(transaction.return_requests) ? transaction.return_requests : [];
-        const hasReturns = returns.length > 0;
+    const sorted = [...filteredGroupedRequests].sort((a, b) => {
+      const at = a.requested_date ? new Date(a.requested_date).getTime() : 0;
+      const bt = b.requested_date ? new Date(b.requested_date).getTime() : 0;
+      return at - bt;
+    });
 
-        if (!hasReturns) {
-          rows.push({
-            type: 'REQUEST',
-            date: inventoryRequest.created_at,
-            project_name: inventoryRequest.project_name || '-',
-            part_name: inventoryRequest.part_name || '-',
-            operator_name: inventoryRequest.operator_name || '-',
-            requested_qty: inventoryRequest.quantity || 0,
-            returned_qty: '',
-            issue_qty: '',
-            status: inventoryRequest.status || 'PENDING',
-            remarks: inventoryRequest.remarks || '',
-          });
-        }
-
-        if (hasReturns) {
-          returns.forEach(returnRequest => {
-            rows.push({
-              type: 'RETURN',
-              date: returnRequest.created_at,
-              project_name: inventoryRequest.project_name || '-',
-              part_name: inventoryRequest.part_name || '-',
-              operator_name: inventoryRequest.operator_name || '-',
-              requested_qty: inventoryRequest.quantity || 0,
-              returned_qty: returnRequest.returned_qty || 0,
-              issue_qty: '',
-              status: returnRequest.status || '',
-              remarks: returnRequest.remarks || inventoryRequest.remarks || '',
-            });
-          });
-        }
+    sorted.forEach(req => {
+      const issuesRaised = Array.isArray(req.issues) ? req.issues.reduce((s, i) => s + (i.qty || 0), 0) : (req.total_issue_qty || 0) || 0;
+      const issuesApproved = approvedByReqId[req.request_id] || 0;
+      const returnedQty = req.total_returned_qty || 0;
+      let status = '-';
+      if (Array.isArray(req.returns) && req.returns.length > 0) {
+        const hasCollected = req.returns.some(r => (r.status || '').toLowerCase() === 'collected');
+        status = hasCollected ? 'COLLECTED' : 'PENDING';
+      }
+      rows.push({
+        project_name: req.project_name || '-',
+        part_name: req.part_name || '-',
+        requested_by: req.operator_name || '-',
+        requested_qty: req.requested_qty || 0,
+        requested_date: req.requested_date || null,
+        approved_by: req.approved_by || '',
+        approved_date: req.approved_date || null,
+        returned_qty: returnedQty,
+        status,
+        issues_raised_qty: issuesRaised,
+        issues_approved_qty: issuesApproved,
+        remarks: req.remarks || ''
       });
-    }
-
-    // Add tool issues (approved and pending)
-    const allToolIssues = [...(toolIssuesApproved || []), ...(toolIssuesPending || [])];
-    if (allToolIssues.length > 0) {
-      allToolIssues.forEach(issue => {
-        rows.push({
-          type: issue.status === 'approved' ? 'APPROVED ISSUE' : 'PENDING ISSUE',
-          date: issue.created_at,
-          project_name: issue.sale_order_number || '-',
-          part_name: '-',
-          operator_name: issue.operator_name || '-',
-          requested_qty: '',
-          returned_qty: '',
-          issue_qty: issue.tool_issue_qty || 0,
-          status: issue.status.toUpperCase(),
-          remarks: issue.remarks || '',
-        });
-      });
-    }
-
-    // Sort by date
-    rows.sort((a, b) => {
-      const dateA = a.date ? new Date(a.date).getTime() : 0;
-      const dateB = b.date ? new Date(b.date).getTime() : 0;
-      return dateA - dateB;
     });
 
     return rows;
@@ -409,41 +379,50 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
       return;
     }
 
-    const toolName = tool?.item_description || 'Tool History';
+    const toolName = tool?.item_description || 'Tool';
+    const formatDate = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
     const Doc = () => (
       <Document>
         <Page size="A4" style={styles.page}>
-          <Text style={styles.title}>Tool History - {toolName}</Text>
-          <Text style={styles.summary}>Total Qty: {toolTotalQty} | Available: {toolAvailableQty} | In Use: {toolInUseNow} | Issues: {totalApprovedIssues}</Text>
+          <Text style={styles.title}>{toolName} History</Text>
+          <Text style={styles.summary}>Total Qty: {toolTotalQty} | Available: {toolAvailableQty} | In Use Now: {toolInUseNow} | Issues: {totalApprovedIssues}</Text>
           {historyProjectFilter ? <Text style={styles.filter}>Project: {historyProjectFilter}</Text> : null}
           {historyPartFilter ? <Text style={styles.filter}>Part: {historyPartFilter}</Text> : null}
           
-          <View style={styles.headerRow}>
-            <Text style={[styles.cell, styles.cellHeader, styles.wType]}>Type</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wDate]}>Date & Time</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wProject]}>Project</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wPart]}>Part</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wBy]}>Operator</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wQty]}>Req Qty</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wQty]}>Ret Qty</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wQty]}>Issue Qty</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wStatus]}>Status</Text>
-            <Text style={[styles.cell, styles.cellHeader, styles.wRemarks]}>Remarks</Text>
-          </View>
-          {rows.map((row, idx) => (
-            <View key={idx} style={styles.row}>
-              <Text style={[styles.cell, styles.wType]}>{row.type}</Text>
-              <Text style={[styles.cell, styles.wDate]}>{row.date ? new Date(row.date).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</Text>
-              <Text style={[styles.cell, styles.wProject]}>{row.project_name || '-'}</Text>
-              <Text style={[styles.cell, styles.wPart]}>{row.part_name || '-'}</Text>
-              <Text style={[styles.cell, styles.wBy]}>{row.operator_name || '-'}</Text>
-              <Text style={[styles.cell, styles.wQty]}>{row.requested_qty || '-'}</Text>
-              <Text style={[styles.cell, styles.wQty]}>{row.returned_qty || '-'}</Text>
-              <Text style={[styles.cell, styles.wQty]}>{row.issue_qty || '-'}</Text>
-              <Text style={[styles.cell, styles.wStatus]}>{row.status}</Text>
-              <Text style={[styles.cell, styles.wRemarks]}>{row.remarks || '-'}</Text>
+          <View style={styles.table}>
+            <View style={[styles.tableRow, styles.tableHeader]}>
+              <View style={[styles.cellBox, styles.wSL]}><Text style={styles.cellHeaderText}>SL</Text></View>
+              <View style={[styles.cellBox, styles.wProject]}><Text style={styles.cellHeaderText}>Project</Text></View>
+              <View style={[styles.cellBox, styles.wPart]}><Text style={styles.cellHeaderText}>Part</Text></View>
+              <View style={[styles.cellBox, styles.wBy]}><Text style={styles.cellHeaderText}>Requested By</Text></View>
+              <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellHeaderText}>Req Qty</Text></View>
+              <View style={[styles.cellBox, styles.wDate]}><Text style={styles.cellHeaderText}>Req Date</Text></View>
+              <View style={[styles.cellBox, styles.wBy]}><Text style={styles.cellHeaderText}>Approved By</Text></View>
+              <View style={[styles.cellBox, styles.wDate]}><Text style={styles.cellHeaderText}>Appr Date</Text></View>
+              <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellHeaderText}>Ret Qty</Text></View>
+              <View style={[styles.cellBox, styles.wStatus]}><Text style={styles.cellHeaderText}>Status</Text></View>
+              <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellHeaderText}>Issues Raised</Text></View>
+              <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellHeaderText}>Issues Approved</Text></View>
+              <View style={[styles.cellBox, styles.wRemarks]}><Text style={styles.cellHeaderText}>Remarks</Text></View>
             </View>
-          ))}
+            {rows.map((row, idx) => (
+              <View key={idx} style={styles.tableRow}>
+                <View style={[styles.cellBox, styles.wSL]}><Text style={styles.cellText}>{idx + 1}</Text></View>
+                <View style={[styles.cellBox, styles.wProject]}><Text style={styles.cellText}>{row.project_name || '-'}</Text></View>
+                <View style={[styles.cellBox, styles.wPart]}><Text style={styles.cellText}>{row.part_name || '-'}</Text></View>
+                <View style={[styles.cellBox, styles.wBy]}><Text style={styles.cellText}>{row.requested_by || '-'}</Text></View>
+                <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellText}>{String(row.requested_qty)}</Text></View>
+                <View style={[styles.cellBox, styles.wDate]}><Text style={styles.cellText}>{formatDate(row.requested_date)}</Text></View>
+                <View style={[styles.cellBox, styles.wBy]}><Text style={styles.cellText}>{row.approved_by || '-'}</Text></View>
+                <View style={[styles.cellBox, styles.wDate]}><Text style={styles.cellText}>{formatDate(row.approved_date)}</Text></View>
+                <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellText}>{String(row.returned_qty)}</Text></View>
+                <View style={[styles.cellBox, styles.wStatus]}><Text style={styles.cellText}>{row.status || '-'}</Text></View>
+                <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellText}>{String(row.issues_raised_qty)}</Text></View>
+                <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellText}>{String(row.issues_approved_qty)}</Text></View>
+                <View style={[styles.cellBox, styles.wRemarks]}><Text style={styles.cellText}>{row.remarks || '-'}</Text></View>
+              </View>
+            ))}
+          </View>
         </Page>
       </Document>
     );
@@ -461,21 +440,23 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
 
   const styles = StyleSheet.create({
     page: { padding: 30, fontSize: 10, fontFamily: 'Helvetica' },
-    title: { fontSize: 16, marginBottom: 8, fontWeight: 'bold' },
-    summary: { fontSize: 11, marginBottom: 8, color: '#333' },
+    title: { fontSize: 20, marginBottom: 10, fontWeight: 'bold' },
+    summary: { fontSize: 12, marginBottom: 8, color: '#333' },
     filter: { fontSize: 10, marginBottom: 4, color: '#666' },
-    headerRow: { flexDirection: 'row', backgroundColor: '#f0f0f0', paddingVertical: 4, borderBottomWidth: 1, borderColor: '#ccc' },
-    row: { flexDirection: 'row', paddingVertical: 4, borderBottomWidth: 0.5, borderColor: '#eee' },
-    cell: { paddingHorizontal: 4 },
-    cellHeader: { fontWeight: 'bold' },
-    wDate: { width: 100 },
-    wType: { width: 80 },
-    wProject: { width: 70 },
+    table: { marginTop: 6, borderWidth: 1, borderColor: '#cccccc' },
+    tableRow: { flexDirection: 'row' },
+    tableHeader: { backgroundColor: '#f0f0f0' },
+    cellBox: { paddingVertical: 4, paddingHorizontal: 4, borderRightWidth: 0.5, borderBottomWidth: 0.5, borderColor: '#dddddd', justifyContent: 'center' },
+    cellHeaderText: { fontWeight: 'bold' },
+    cellText: { },
+    wSL: { width: 24, textAlign: 'right' },
+    wProject: { width: 78 },
     wPart: { width: 70 },
-    wBy: { width: 70 },
-    wQty: { width: 45, textAlign: 'right' },
-    wStatus: { width: 60 },
-    wRemarks: { width: 120, flexGrow: 1 },
+    wBy: { width: 86 },
+    wQty: { width: 48, textAlign: 'right' },
+    wDate: { width: 94 },
+    wStatus: { width: 68 },
+    wRemarks: { width: 150, flexGrow: 1 },
   });
 
   return (
@@ -488,6 +469,8 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
       }
       open={visible}
       onCancel={onClose}
+      maskClosable={false}
+      keyboard={false}
       footer={null}
       width="90%"
       style={{ maxWidth: 1000, top: 20 }}
@@ -673,6 +656,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
         renderItem={(request) => (
           <List.Item style={{ padding: 0, marginBottom: 16 }}>
             <Card
+              hoverable
               style={{
                 width: '100%',
                 borderRadius: 12,
@@ -682,38 +666,26 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
               }}
               styles={{ body: { padding: 0 } }}
             >
-              {/* Header - Light Yellow Background */}
               <div style={{ 
-                background: '#fffbe6',
-                padding: '14px 18px',
-                borderBottom: '2px solid #ffe58f'
+                background: '#fffdf2',
+                padding: '16px 20px',
+                borderBottom: '1px solid #ffe58f'
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 16, fontWeight: 600, color: '#d48806' }}>
-                      {request.project_name}
-                    </span>
-                    <span style={{ color: '#d9d9d9' }}>|</span>
-                    <span style={{ background: '#fff', padding: '2px 8px', borderRadius: 4, border: '1px solid #d9d9d9', fontSize: 13 }}>
-                      {request.part_name}
-                    </span>
-                    <span style={{ color: '#d9d9d9' }}>|</span>
-                    <span style={{ fontSize: 13, color: '#666' }}>
-                      Operator: <strong>{request.operator_name}</strong>
-                    </span>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 2 }}>Request ID</div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: '#d48806' }}>#{request.request_id}</div>
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ background: '#fffbe6', border: '1px solid #ffe58f', color: '#d48806', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
+                    {request.project_name}
+                  </span>
+                  <span style={{ background: '#ffffff', border: '1px solid #d9d9d9', color: '#595959', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600 }}>
+                    {request.part_name}
+                  </span>
+                  <span style={{ background: '#f5f5f5', border: '1px solid #d9d9d9', color: '#595959', padding: '2px 10px', borderRadius: 12, fontSize: 12 }}>
+                    Operator: <strong>{request.operator_name}</strong>
+                  </span>
                 </div>
               </div>
 
-              {/* Timeline Flow - Visual Connected Steps */}
-              <div style={{ padding: '20px 24px', background: '#fafafa' }}>
-                {/* Step 1: Request Submitted */}
+              <div style={{ padding: '20px 24px', background: '#ffffff' }}>
                 <div style={{ display: 'flex', position: 'relative', marginBottom: 16 }}>
-                  {/* Timeline Line */}
                   <div style={{ 
                     position: 'absolute', 
                     left: 15, 
@@ -724,7 +696,6 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                     zIndex: 0
                   }} />
                   
-                  {/* Icon Circle */}
                   <div style={{ 
                     width: 32, 
                     height: 32, 
@@ -740,8 +711,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                     <span style={{ color: 'white', fontSize: 14, fontWeight: 700 }}>1</span>
                   </div>
                   
-                  {/* Content */}
-                  <div style={{ marginLeft: 16, flex: 1, padding: '10px 14px', background: '#e6f7ff', borderRadius: 8, borderLeft: '3px solid #1890ff' }}>
+                  <div style={{ marginLeft: 16, flex: 1, padding: '12px 14px', background: '#e6f7ff', borderRadius: 10, borderLeft: '4px solid #1890ff', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <span style={{ fontWeight: 600, fontSize: 15, color: '#1890ff' }}>Request Submitted</span>
@@ -749,13 +719,13 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                           Qty: {request.requested_qty}
                         </span>
                       </div>
-                      <div style={{ fontSize: 13, color: '#8c8c8c' }}>
+                      <div style={{ fontSize: 12, color: '#8c8c8c', fontWeight: 500 }}>
                         {request.requested_date ? new Date(request.requested_date).toLocaleString('en-GB', {
                           day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
                         }) : '-'}
                       </div>
                     </div>
-                    <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 4 }}>
+                    <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6 }}>
                       Status: <Tag color={request.status?.toLowerCase() === 'approved' ? 'green' : request.status?.toLowerCase() === 'rejected' ? 'red' : 'orange'} style={{ fontSize: 11 }}>
                         {request.status?.toUpperCase()}
                       </Tag>
@@ -763,10 +733,8 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                   </div>
                 </div>
 
-                {/* Step 2: Approved (if approved) */}
                 {request.approved_date && (
                   <div style={{ display: 'flex', position: 'relative', marginBottom: 16 }}>
-                    {/* Timeline Line */}
                     {(request.returns?.length > 0 || request.issues?.length > 0 || request.in_use_qty > 0) && (
                       <div style={{ 
                         position: 'absolute', 
@@ -779,7 +747,6 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                       }} />
                     )}
                     
-                    {/* Icon Circle */}
                     <div style={{ 
                       width: 32, 
                       height: 32, 
@@ -795,14 +762,13 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                       <span style={{ color: 'white', fontSize: 14, fontWeight: 700 }}>2</span>
                     </div>
                     
-                    {/* Content */}
-                    <div style={{ marginLeft: 16, flex: 1, padding: '10px 14px', background: '#f6ffed', borderRadius: 8, borderLeft: '3px solid #52c41a' }}>
+                    <div style={{ marginLeft: 16, flex: 1, padding: '12px 14px', background: '#f6ffed', borderRadius: 10, borderLeft: '4px solid #52c41a', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                           <span style={{ fontWeight: 600, fontSize: 15, color: '#52c41a' }}>Request Approved</span>
                           <span style={{ marginLeft: 12, fontSize: 14, color: '#262626', fontWeight: 500 }}>✓ Approved by Admin</span>
                         </div>
-                        <div style={{ fontSize: 13, color: '#8c8c8c' }}>
+                        <div style={{ fontSize: 12, color: '#8c8c8c', fontWeight: 500 }}>
                           {new Date(request.approved_date).toLocaleString('en-GB', {
                             day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
                           })}
@@ -812,12 +778,9 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                   </div>
                 )}
 
-                {/* Step 3: Return Request Submitted (if any) */}
                 {request.returns?.length > 0 && request.returns.map((ret, idx) => (
                   <React.Fragment key={idx}>
-                    {/* Return Request Submitted */}
                     <div style={{ display: 'flex', position: 'relative', marginBottom: 16 }}>
-                      {/* Timeline Line */}
                       <div style={{ 
                         position: 'absolute', 
                         left: 15, 
@@ -828,7 +791,6 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                         zIndex: 0
                       }} />
                       
-                      {/* Icon Circle */}
                       <div style={{ 
                         width: 32, 
                         height: 32, 
@@ -844,8 +806,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                         <span style={{ color: 'white', fontSize: 12 }}>↩</span>
                       </div>
                       
-                      {/* Content */}
-                      <div style={{ marginLeft: 16, flex: 1, padding: '10px 14px', background: '#e6f7ff', borderRadius: 8, borderLeft: '3px solid #1890ff' }}>
+                      <div style={{ marginLeft: 16, flex: 1, padding: '12px 14px', background: '#e6f7ff', borderRadius: 10, borderLeft: '4px solid #1890ff', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div>
                             <span style={{ fontWeight: 600, fontSize: 15, color: '#1890ff' }}>Return Request Submitted</span>
@@ -853,7 +814,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                               Qty: {ret.qty}
                             </span>
                           </div>
-                          <div style={{ fontSize: 13, color: '#8c8c8c' }}>
+                          <div style={{ fontSize: 12, color: '#8c8c8c', fontWeight: 500 }}>
                             {ret.submitted_date ? new Date(ret.submitted_date).toLocaleString('en-GB', {
                               day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
                             }) : '-'}
@@ -862,9 +823,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                       </div>
                     </div>
 
-                    {/* Return Request Collected/Pending */}
                     <div style={{ display: 'flex', position: 'relative', marginBottom: 16 }}>
-                      {/* Timeline Line - only if there are more items after */}
                       {(idx < request.returns.length - 1 || request.issues?.length > 0 || request.in_use_qty > 0) && (
                         <div style={{ 
                           position: 'absolute', 
@@ -877,7 +836,6 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                         }} />
                       )}
                       
-                      {/* Icon Circle */}
                       <div style={{ 
                         width: 32, 
                         height: 32, 
@@ -897,14 +855,14 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                         </span>
                       </div>
                       
-                      {/* Content */}
                       <div style={{ 
                         marginLeft: 16, 
                         flex: 1, 
-                        padding: '10px 14px', 
+                        padding: '12px 14px', 
                         background: ret.status?.toLowerCase() === 'collected' ? '#f6ffed' : '#fff7e6', 
-                        borderRadius: 8, 
-                        borderLeft: ret.status?.toLowerCase() === 'collected' ? '3px solid #52c41a' : '3px solid #fa8c16' 
+                        borderRadius: 10, 
+                        borderLeft: ret.status?.toLowerCase() === 'collected' ? '4px solid #52c41a' : '4px solid #fa8c16',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.06)' 
                       }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div>
@@ -925,7 +883,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                               {ret.status?.toUpperCase()}
                             </Tag>
                           </div>
-                          <div style={{ fontSize: 13, color: '#8c8c8c' }}>
+                          <div style={{ fontSize: 12, color: '#8c8c8c', fontWeight: 500 }}>
                             {ret.collected_date ? new Date(ret.collected_date).toLocaleString('en-GB', {
                               day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
                             }) : (ret.submitted_date ? new Date(ret.submitted_date).toLocaleString('en-GB', {
@@ -934,7 +892,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                           </div>
                         </div>
                         {ret.status?.toLowerCase() === 'collected' && ret.admin_name && (
-                          <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>
+                          <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6 }}>
                             Collected by: <strong>{ret.admin_name}</strong>
                           </div>
                         )}
@@ -943,10 +901,8 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                   </React.Fragment>
                 ))}
 
-                {/* Step 4: Issues (if any) */}
                 {request.issues?.length > 0 && request.issues.map((issue, idx) => (
                   <div key={idx} style={{ display: 'flex', position: 'relative', marginBottom: 16 }}>
-                    {/* Timeline Line */}
                     {(idx < request.issues.length - 1 || request.in_use_qty > 0) && (
                       <div style={{ 
                         position: 'absolute', 
@@ -959,7 +915,6 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                       }} />
                     )}
                     
-                    {/* Icon Circle */}
                     <div style={{ 
                       width: 32, 
                       height: 32, 
@@ -975,8 +930,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                       <span style={{ color: 'white', fontSize: 14 }}>⚠</span>
                     </div>
                     
-                    {/* Content */}
-                    <div style={{ marginLeft: 16, flex: 1, padding: '10px 14px', background: '#fff1f0', borderRadius: 8, borderLeft: '3px solid #ff4d4f' }}>
+                    <div style={{ marginLeft: 16, flex: 1, padding: '12px 14px', background: '#fff1f0', borderRadius: 10, borderLeft: '4px solid #ff4d4f', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                           <span style={{ fontWeight: 600, fontSize: 15, color: '#ff4d4f' }}>Issue Reported</span>
@@ -984,23 +938,21 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                             Qty: {issue.qty}
                           </span>
                         </div>
-                        <div style={{ fontSize: 13, color: '#8c8c8c' }}>
+                        <div style={{ fontSize: 12, color: '#8c8c8c', fontWeight: 500 }}>
                           {issue.date ? new Date(issue.date).toLocaleString('en-GB', {
                             day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
                           }) : '-'}
                         </div>
                       </div>
-                      <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>
+                      <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6 }}>
                         Approved by: {issue.approved_by}
                       </div>
                     </div>
                   </div>
                 ))}
 
-                {/* Step 5: Current Status - In Use */}
                 {request.in_use_qty > 0 && (
                   <div style={{ display: 'flex', position: 'relative' }}>
-                    {/* Icon Circle */}
                     <div style={{ 
                       width: 32, 
                       height: 32, 
@@ -1017,8 +969,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                       <span style={{ color: 'white', fontSize: 14 }}>●</span>
                     </div>
                     
-                    {/* Content */}
-                    <div style={{ marginLeft: 16, flex: 1, padding: '10px 14px', background: '#fff7e6', borderRadius: 8, borderLeft: '3px solid #fa8c16' }}>
+                    <div style={{ marginLeft: 16, flex: 1, padding: '12px 14px', background: '#fff7e6', borderRadius: 10, borderLeft: '4px solid #fa8c16', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                           <span style={{ fontWeight: 600, fontSize: 15, color: '#fa8c16' }}>Currently In Use</span>
@@ -1026,21 +977,19 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                             Qty: {request.in_use_qty}
                           </span>
                         </div>
-                        <div style={{ fontSize: 12, color: '#fa8c16', fontWeight: 500 }}>
+                        <div style={{ fontSize: 12, color: '#fa8c16', fontWeight: 600 }}>
                           Active
                         </div>
                       </div>
-                      <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 2 }}>
+                      <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 6 }}>
                         Awaiting return
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Rejected Status */}
                 {request.status?.toLowerCase() === 'rejected' && (
                   <div style={{ display: 'flex', position: 'relative' }}>
-                    {/* Icon Circle */}
                     <div style={{ 
                       width: 32, 
                       height: 32, 
@@ -1056,8 +1005,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                       <span style={{ color: 'white', fontSize: 14 }}>✕</span>
                     </div>
                     
-                    {/* Content */}
-                    <div style={{ marginLeft: 16, flex: 1, padding: '10px 14px', background: '#fff1f0', borderRadius: 8, borderLeft: '3px solid #ff4d4f' }}>
+                    <div style={{ marginLeft: 16, flex: 1, padding: '12px 14px', background: '#fff1f0', borderRadius: 10, borderLeft: '4px solid #ff4d4f', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                           <span style={{ fontWeight: 600, fontSize: 14, color: '#ff4d4f' }}>Request Rejected</span>
@@ -1071,36 +1019,31 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                 )}
               </div>
 
-              {/* Summary Bar - Horizontal Layout */}
               <div style={{ 
-                background: '#fffbe6', 
+                background: '#ffffff', 
                 padding: '12px 18px',
-                borderTop: '2px solid #ffe58f',
+                borderTop: '1px solid #f0f0f0',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center'
               }}>
-                <div style={{ display: 'flex', gap: 24 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 13, color: '#8c8c8c', fontWeight: 500 }}>Requested:</span>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: '#1890ff' }}>{request.requested_qty}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 13, color: '#8c8c8c', fontWeight: 500 }}>Returned:</span>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: '#52c41a' }}>{request.total_returned_qty}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 13, color: '#8c8c8c', fontWeight: 500 }}>In Use:</span>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: '#fa8c16' }}>{request.in_use_qty}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 13, color: '#8c8c8c', fontWeight: 500 }}>Issues:</span>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: '#ff4d4f' }}>{request.total_issue_qty}</span>
-                  </div>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <span style={{ background: '#e6f7ff', border: '1px solid #91d5ff', color: '#096dd9', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700 }}>
+                    Requested: {request.requested_qty}
+                  </span>
+                  <span style={{ background: '#f6ffed', border: '1px solid #b7eb8f', color: '#237804', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700 }}>
+                    Returned: {request.total_returned_qty}
+                  </span>
+                  <span style={{ background: '#fff7e6', border: '1px solid #ffd591', color: '#ad4e00', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700 }}>
+                    In Use: {request.in_use_qty}
+                  </span>
+                  <span style={{ background: '#fff1f0', border: '1px solid #ffa39e', color: '#a8071a', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700 }}>
+                    Issues: {request.total_issue_qty}
+                  </span>
                 </div>
-                <div style={{ fontSize: 13, color: '#8c8c8c' }}>
-                  Balance: <strong style={{ color: '#d48806', fontSize: 15 }}>{request.requested_qty - request.total_returned_qty - request.total_issue_qty}</strong>
-                </div>
+                <span style={{ background: '#fffbe6', border: '1px solid #ffe58f', color: '#d48806', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700 }}>
+                  Balance: {Math.max(0, (request.requested_qty || 0) - (request.total_returned_qty || 0) - (request.total_issue_qty || 0))}
+                </span>
               </div>
             </Card>
           </List.Item>

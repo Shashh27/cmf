@@ -356,22 +356,6 @@ const ReturnRequestsTable = () => {
       render: (text) => text || '-',
     },
     {
-      title: 'Created At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 160,
-      className: 'table-header-styled',
-      render: (date) => formatDateTime(date),
-    },
-    {
-      title: 'Updated At',
-      dataIndex: 'updated_at',
-      key: 'updated_at',
-      width: 160,
-      className: 'table-header-styled',
-      render: (date) => formatDateTime(date),
-    },
-    {
       title: 'Action',
       key: 'action',
       width: 180,

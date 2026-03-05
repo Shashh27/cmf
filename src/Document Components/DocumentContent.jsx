@@ -69,6 +69,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       if (selectedNode.type === 'general-folder' || 
           selectedNode.type === 'common-folder' ||
           selectedNode.type === 'common-root' ||
+          selectedNode.type === 'part' ||
           selectedNode.type === 'part-category' || 
           selectedNode.type === 'operation-folder' ||
           selectedNode.type === 'machine-folder' ||
@@ -96,6 +97,8 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       } else if (selectedNode.type === 'common-root') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/all/documents`;
       } else if (selectedNode.type === 'part-category') {
+        url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
+      } else if (selectedNode.type === 'part') {
         url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
       } else if (selectedNode.type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/operation/${selectedNode.operationId}`;

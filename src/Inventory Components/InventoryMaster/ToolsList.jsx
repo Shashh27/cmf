@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Table, Button, Space, message, Input, Select, Card, Row, Col } from 'antd';
-import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined } from '@ant-design/icons';
+import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, BlockOutlined, HistoryOutlined } from '@ant-design/icons';
 import config from '../../Config/config';
 import ToolsHistory from './ToolsHistory';
 
@@ -24,6 +24,8 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   });
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyTool, setHistoryTool] = useState(null);
+  const [hoveredCard, setHoveredCard] = useState(null);
+  const [activeCard, setActiveCard] = useState(null);
 
   // Prevent multiple API calls with a ref
   const isFetchingRef = useRef(false);
@@ -317,19 +319,29 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
           <Card 
             style={{ 
               borderRadius: '12px', 
-              borderBottom: `4px solid ${activeFilter === 'all' ? '#1890ff' : '#f0f0f0'}`,
-              boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
-              transition: 'all 0.3s ease',
+              borderBottom: '4px solid #1890ff',
+              boxShadow: activeCard === 'all'
+                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(24,144,255,0.35)'
+                : hoveredCard === 'all'
+                  ? '0 6px 18px rgba(0,0,0,0.12)'
+                  : '0 2px 10px rgba(0,0,0,0.05)',
+              transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
               cursor: 'pointer',
-              background: activeFilter === 'all' ? '#f0f7ff' : '#fff'
+              transform: hoveredCard === 'all' ? 'translateY(-1px)' : 'none',
+              userSelect: 'none',
+              background: '#f0f7ff'
             }}
             hoverable
             bodyStyle={{ padding: '20px 24px' }}
             onClick={() => handleKpiClick('all')}
+            onMouseEnter={() => setHoveredCard('all')}
+            onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
+            onMouseDown={(e) => { e.preventDefault(); setActiveCard('all'); }}
+            onMouseUp={() => setActiveCard(null)}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '600', marginBottom: '2px' }}>Total Tools</div>
+                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '700', marginBottom: '2px' }}>Total Tools</div>
                 <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '12px' }}>Inventory Items</div>
                 <div style={{ fontSize: '28px', fontWeight: '700', color: '#1890ff' }}>{kpiData.totalTools}</div>
               </div>
@@ -351,19 +363,29 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
           <Card 
             style={{ 
               borderRadius: '12px', 
-              borderBottom: `4px solid ${activeFilter === 'consumables' ? '#52c41a' : '#f0f0f0'}`,
-              boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
-              transition: 'all 0.3s ease',
+              borderBottom: '4px solid #52c41a',
+              boxShadow: activeCard === 'consumables'
+                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(82,196,26,0.35)'
+                : hoveredCard === 'consumables'
+                  ? '0 6px 18px rgba(0,0,0,0.12)'
+                  : '0 2px 10px rgba(0,0,0,0.05)',
+              transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
               cursor: 'pointer',
-              background: activeFilter === 'consumables' ? '#f6ffed' : '#fff'
+              transform: hoveredCard === 'consumables' ? 'translateY(-1px)' : 'none',
+              userSelect: 'none',
+              background: '#f6ffed'
             }}
             hoverable
             bodyStyle={{ padding: '20px 24px' }}
             onClick={() => handleKpiClick('consumables')}
+            onMouseEnter={() => setHoveredCard('consumables')}
+            onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
+            onMouseDown={(e) => { e.preventDefault(); setActiveCard('consumables'); }}
+            onMouseUp={() => setActiveCard(null)}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '600', marginBottom: '2px' }}>Consumables</div>
+                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '700', marginBottom: '2px' }}>Consumables</div>
                 <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '12px' }}>Fast-Moving Items</div>
                 <div style={{ fontSize: '28px', fontWeight: '700', color: '#52c41a' }}>{kpiData.consumables}</div>
               </div>
@@ -385,19 +407,29 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
           <Card 
             style={{ 
               borderRadius: '12px', 
-              borderBottom: `4px solid ${activeFilter === 'non-consumables' ? '#ff4d4f' : '#f0f0f0'}`,
-              boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
-              transition: 'all 0.3s ease',
+              borderBottom: '4px solid #ff4d4f',
+              boxShadow: activeCard === 'non-consumables'
+                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(255,77,79,0.35)'
+                : hoveredCard === 'non-consumables'
+                  ? '0 6px 18px rgba(0,0,0,0.12)'
+                  : '0 2px 10px rgba(0,0,0,0.05)',
+              transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
               cursor: 'pointer',
-              background: activeFilter === 'non-consumables' ? '#fff1f0' : '#fff'
+              transform: hoveredCard === 'non-consumables' ? 'translateY(-1px)' : 'none',
+              userSelect: 'none',
+              background: '#fff1f0'
             }}
             hoverable
             bodyStyle={{ padding: '20px 24px' }}
             onClick={() => handleKpiClick('non-consumables')}
+            onMouseEnter={() => setHoveredCard('non-consumables')}
+            onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
+            onMouseDown={(e) => { e.preventDefault(); setActiveCard('non-consumables'); }}
+            onMouseUp={() => setActiveCard(null)}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '600', marginBottom: '2px' }}>Non-Consumables</div>
+                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '700', marginBottom: '2px' }}>Non-Consumables</div>
                 <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '12px' }}>Fixed Assets</div>
                 <div style={{ fontSize: '28px', fontWeight: '700', color: '#ff4d4f' }}>{kpiData.nonConsumables}</div>
               </div>
@@ -410,7 +442,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
                 justifyContent: 'center', 
                 alignItems: 'center'
               }}>
-                <CloseCircleOutlined style={{ fontSize: '32px', color: '#ff4d4f' }} />
+                <BlockOutlined style={{ fontSize: '32px', color: '#ff4d4f' }} />
               </div>
             </div>
           </Card>

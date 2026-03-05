@@ -3,6 +3,7 @@ import { Tabs } from 'antd';
 import Inventory from './Inventory';
 import ToolRequested from './ToolRequested';
 import ToolReturn from './ToolReturn';
+import ToolIssues from './ToolIssues';
 
 const InventoryData = () => {
   const [activeTab, setActiveTab] = useState('1');
@@ -10,18 +11,23 @@ const InventoryData = () => {
   const items = [
     {
       key: '1',
-      label: 'Inventory Data',
+      label: 'Tool Request',
       children: <Inventory />,
     },
     {
       key: '2',
-      label: 'Tool Requested',
-      children: <ToolRequested onReturnSuccess={() => setActiveTab('3')} />,
+      label: 'Tool Return',
+      children: <ToolRequested onReturnSuccess={() => setActiveTab('3')} onReportIssueSuccess={() => setActiveTab('4')} />,
     },
     {
       key: '3',
-      label: 'Tool Return',
+      label: 'Tool Return Status',
       children: <ToolReturn />,
+    },
+    {
+      key: '4',
+      label: 'Tool Issues',
+      children: <ToolIssues />,
     },
   ];
 

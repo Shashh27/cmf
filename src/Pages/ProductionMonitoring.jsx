@@ -1,14 +1,36 @@
-import React, { useState } from 'react';
-import { Card, Tabs, Typography } from 'antd';
+import React, { useState, useCallback } from 'react';
+import { Card, Tabs, Typography, message } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import PokaYokeChecklists from '../Product Monitoring Components/PokaYokeChecklists';
 import PokaYokeMachineAssignments from '../Product Monitoring Components/PokaYokeMachineAssignments';
 import PokaYokeCompletedLogs from '../Product Monitoring Components/PokaYokeCompletedLogs';
+import config from '../Config/config';
 
 const { Title, Text } = Typography;
 
 const ProductionMonitoring = () => {
   const [activeTab, setActiveTab] = useState('checklists');
+  const [machines, setMachines] = useState([]);
+  const [machinesLoading, setMachinesLoading] = useState(false);
+  const [machinesFetched, setMachinesFetched] = useState(false);
+
+  const fetchMachines = useCallback(async (force = false) => {
+    if ((machinesFetched && !force) || machinesLoading) return;
+
+    setMachinesLoading(true);
+    try {
+      const response = await fetch(`${config.API_BASE_URL}/machines/?skip=0&limit=1000`);
+      if (!response.ok) throw new Error('Failed to fetch machines');
+      const data = await response.json();
+      const machinesList = Array.isArray(data) ? data : (data.items || []);
+      setMachines(machinesList);
+      setMachinesFetched(true);
+    } catch (error) {
+      message.error('Failed to fetch machines: ' + error.message);
+    } finally {
+      setMachinesLoading(false);
+    }
+  }, [machinesFetched, machinesLoading]);
 
   const tabItems = [
     {
@@ -19,12 +41,24 @@ const ProductionMonitoring = () => {
     {
       key: 'machine-assignments',
       label: 'Machine Assignments',
-      children: <PokaYokeMachineAssignments />,
+      children: (
+        <PokaYokeMachineAssignments 
+          machines={machines} 
+          fetchMachines={fetchMachines} 
+          machinesLoading={machinesLoading} 
+        />
+      ),
     },
     {
       key: 'completion-logs',
       label: 'Completion Logs',
-      children: <PokaYokeCompletedLogs />,
+      children: (
+        <PokaYokeCompletedLogs 
+          machines={machines} 
+          fetchMachines={fetchMachines} 
+          machinesLoading={machinesLoading} 
+        />
+      ),
     },
   ];
 
@@ -58,7 +92,7 @@ const ProductionMonitoring = () => {
           onChange={setActiveTab}
           items={tabItems}
           size="large"
-          destroyInactiveTabPane={false}
+          destroyInactiveTabPane={true}
         />
       </div>
     </div>
