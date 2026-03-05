@@ -226,3 +226,6 @@ if __name__ == "__main__":
 
 
 #  uvicorn main:app --reload --host 172.18.7.86 --port 8000
+
+
+# python -m uvicorn main:app --reload --host 172.18.100.76 --port 8000
