@@ -18,6 +18,16 @@ class RawMaterialBase(BaseModel):
     stock_dimensions: Optional[str] = None
     status: Optional[str] = None
 
+    @field_validator('mass', 'density', 'volume', mode='before')
+    @classmethod
+    def round_to_three_decimal_places(cls, v):
+        if v is None:
+            return None
+        try:
+            return round(float(v), 3)
+        except (ValueError, TypeError):
+            return v
+
 
 class RawMaterialCreate(RawMaterialBase):
     pass
@@ -34,9 +44,21 @@ class RawMaterialUpdate(BaseModel):
     stock_dimensions: Optional[str] = None
     status: Optional[str] = None
 
+    @field_validator('mass', 'density', 'volume', mode='before')
+    @classmethod
+    def round_to_three_decimal_places(cls, v):
+        if v is None:
+            return None
+        try:
+            return round(float(v), 3)
+        except (ValueError, TypeError):
+            return v
+
 
 class RawMaterial(RawMaterialBase):
     id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

@@ -213,3 +213,16 @@ if __name__ == "__main__":
         port=8000,
         log_level="info"
     )
+
+
+
+
+
+
+
+
+
+
+
+
+#  uvicorn main:app --reload --host 172.18.7.86 --port 8000

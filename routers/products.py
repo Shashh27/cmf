@@ -1,21 +1,27 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import text
 from typing import List
 
 from DB.database import get_db
 from DB.models.oms import (
-    Product as ProductModel, 
-    Assembly as AssemblyModel, 
+    Product as ProductModel,
+    Assembly as AssemblyModel,
     Part as PartModel,
     Operation as OperationModel,
     Document as DocumentModel,
     ToolWithPart as ToolWithPartModel,
     PartType as PartTypeModel,
     Order as OrderModel,
-    OperationDocument as OperationDocumentModel
+    OperationDocument as OperationDocumentModel,
+    OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
 )
-from DB.models.configuration import WorkCenter as WorkCenterModel
-from DB.models.inventory import RawMaterial as RawMaterialModel
+from DB.models.configuration import (
+    WorkCenter as WorkCenterModel,
+    Machine as MachineModel,
+    PokayokeCompletedLog,
+)
+from DB.models.inventory import RawMaterial as RawMaterialModel, InventoryRequest, InventoryReturnRequest
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.oms import (
     Product, 
@@ -27,6 +33,7 @@ from DB.schemas.oms import (
     Part as PartSchema,
     Operation as OperationSchema
 )
+from DB.minio_client import get_minio_client
 
 router = APIRouter(
     prefix="/products",
@@ -56,16 +63,18 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
         "product_version": db_product.product_version,
         "user_id": db_product.user_id,
         "user_name": user.user_name if user else None,
+        "created_at": db_product.created_at,
+        "updated_at": db_product.updated_at,
     }
 
 
 @router.get("/", response_model=List[Product])
-def get_products(skip: int = 0, limit: int = 100, user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all products with pagination"""
-    query = db.query(ProductModel).options(joinedload(ProductModel.user))
+def get_products(user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all products"""
+    query = db.query(ProductModel).options(joinedload(ProductModel.user)).order_by(ProductModel.id.asc())
     if user_id is not None:
         query = query.filter(ProductModel.user_id == user_id)
-    products = query.offset(skip).limit(limit).all()
+    products = query.all()
     return [
         {
             "id": p.id,
@@ -74,6 +83,8 @@ def get_products(skip: int = 0, limit: int = 100, user_id: int | None = None, db
             "product_version": p.product_version,
             "user_id": p.user_id,
             "user_name": (p.user.user_name if getattr(p, "user", None) else None),
+            "created_at": p.created_at,
+            "updated_at": p.updated_at,
         }
         for p in products
     ]
@@ -100,6 +111,8 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
         "product_version": product.product_version,
         "user_id": product.user_id,
         "user_name": (product.user.user_name if getattr(product, "user", None) else None),
+        "created_at": product.created_at,
+        "updated_at": product.updated_at,
     }
 
 
@@ -127,61 +140,200 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
         "product_version": db_product.product_version,
         "user_id": db_product.user_id,
         "user_name": user.user_name if user else None,
+        "created_at": db_product.created_at,
+        "updated_at": db_product.updated_at,
     }
+
+
+def delete_product_cascade(db: Session, product_id: int) -> None:
+    """
+    Delete a product and all its related data including MinIO files.
+    This includes: documents, operation documents, operations, parts, assemblies, 
+    raw material links, priorities, and inventory records.
+    """
+    db_product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+    if not db_product:
+        return
+
+    minio_client = get_minio_client()
+    
+    # Get all parts for this product
+    parts = db.query(PartModel).filter(PartModel.product_id == product_id).all()
+    part_ids = [p.id for p in parts]
+
+    if part_ids:
+        # Delete pokayoke logs for parts
+        for pid in part_ids:
+            result = db.execute(
+                text(
+                    "SELECT id FROM configuration.pokayoke_completed_logs "
+                    "WHERE part_id = :pid"
+                ),
+                {"pid": pid},
+            )
+            log_ids = [row[0] for row in result]
+            for log_id in log_ids:
+                log_obj = (
+                    db.query(PokayokeCompletedLog)
+                    .filter(PokayokeCompletedLog.id == log_id)
+                    .first()
+                )
+                if log_obj:
+                    db.delete(log_obj)
+
+        db.flush()
+
+        # Get all operations for these parts
+        operations = db.query(OperationModel).filter(
+            OperationModel.part_id.in_(part_ids)
+        ).all()
+        operation_ids = [op.id for op in operations]
+
+        # Delete operation documents and their MinIO files
+        if operation_ids:
+            operation_docs = db.query(OperationDocumentModel).filter(
+                OperationDocumentModel.operation_id.in_(operation_ids)
+            ).all()
+            
+            for op_doc in operation_docs:
+                # Delete from MinIO
+                try:
+                    object_name = op_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
+                    minio_client.delete_file(object_name)
+                except Exception as e:
+                    print(f"Error deleting operation document from MinIO: {e}")
+                
+                # Delete from database
+                db.delete(op_doc)
+            
+            # Flush to ensure operation documents are deleted before operations
+            db.flush()
+        
+        # Delete tools associated with these operations (must be before deleting operations)
+        if operation_ids:
+            db.query(ToolWithPartModel).filter(
+                ToolWithPartModel.operation_id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+
+        # Delete operations
+        if operation_ids:
+            db.query(OperationModel).filter(OperationModel.id.in_(operation_ids)).delete(
+                synchronize_session=False
+            )
+
+        # Delete part documents and their MinIO files
+        part_docs = db.query(DocumentModel).filter(DocumentModel.part_id.in_(part_ids)).all()
+        for part_doc in part_docs:
+            # Delete from MinIO
+            try:
+                object_name = part_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
+                minio_client.delete_file(object_name)
+            except Exception as e:
+                print(f"Error deleting part document from MinIO: {e}")
+            
+            # Delete from database
+            db.delete(part_doc)
+        
+        # Flush to ensure part documents are deleted before parts
+        db.flush()
+
+        # Delete remaining tools with parts (tools not associated with operations)
+        db.query(ToolWithPartModel).filter(ToolWithPartModel.part_id.in_(part_ids)).delete(
+            synchronize_session=False
+        )
+
+        # Delete raw material links
+        db.query(OrderPartsRawMaterialLinkedModel).filter(
+            OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+        
+        # Delete inventory requests related to these parts (before deleting parts)
+        if part_ids:
+            part_inventory_requests = db.query(InventoryRequest).filter(
+                InventoryRequest.part_id.in_(part_ids)
+            ).all()
+            for inv_req in part_inventory_requests:
+                # Delete related return requests first
+                db.query(InventoryReturnRequest).filter(
+                    InventoryReturnRequest.requested_id == inv_req.id
+                ).delete()
+                db.delete(inv_req)
+            db.flush()
+
+        # Delete parts
+        db.query(PartModel).filter(PartModel.id.in_(part_ids)).delete(
+            synchronize_session=False
+        )
+
+    # Delete assemblies recursively
+    def delete_assembly_recursive(assembly_id_to_delete: int) -> None:
+        child_assemblies = (
+            db.query(AssemblyModel)
+            .filter(AssemblyModel.parent_id == assembly_id_to_delete)
+            .all()
+        )
+
+        for child_assembly in child_assemblies:
+            delete_assembly_recursive(child_assembly.id)
+
+        assembly_to_delete = (
+            db.query(AssemblyModel)
+            .filter(AssemblyModel.id == assembly_id_to_delete)
+            .first()
+        )
+        if assembly_to_delete:
+            db.delete(assembly_to_delete)
+
+    root_assemblies = db.query(AssemblyModel).filter(
+        AssemblyModel.product_id == product_id
+    ).all()
+    for assembly in root_assemblies:
+        delete_assembly_recursive(assembly.id)
+
+    # Delete the product itself
+    db.delete(db_product)
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_product(product_id: int, db: Session = Depends(get_db)):
-    """Delete a product and all its assemblies and parts (recursive cascade deletion)"""
+    """
+    Delete a product and all its assemblies and parts (recursive cascade deletion).
+    
+    Cannot delete if product is linked to any orders. Must delete all related orders first.
+    """
     db_product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
     if not db_product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Product with id {product_id} not found"
+            detail=f"Product with id {product_id} not found",
         )
-    
-    # Check if product is used in orders table
+
+    # Check if product is linked to any orders
     related_orders = db.query(OrderModel).filter(OrderModel.product_id == product_id).all()
     if related_orders:
+        order_count = len(related_orders)
         order_numbers = [order.sale_order_number for order in related_orders]
+        
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"This product cannot be deleted because it is linked to existing orders: {', '.join(order_numbers)}. Please remove or update the related orders first."
+            detail=(
+                f"Cannot delete product '{db_product.product_name}' because it is linked to {order_count} order(s): "
+                f"{', '.join(order_numbers)}. "
+                "Please delete the related orders first, then this product can be deleted."
+            ),
         )
 
-    def delete_assembly_recursive(assembly_id_to_delete):
-        """Recursively delete assembly and all its children"""
-        # First, find all child assemblies
-        child_assemblies = db.query(AssemblyModel).filter(AssemblyModel.parent_id == assembly_id_to_delete).all()
-        
-        # Recursively delete all child assemblies
-        for child_assembly in child_assemblies:
-            delete_assembly_recursive(child_assembly.id)
-        
-        # Delete all parts that belong to this assembly
-        parts_under_assembly = db.query(PartModel).filter(PartModel.assembly_id == assembly_id_to_delete).all()
-        for part in parts_under_assembly:
-            db.delete(part)
-        
-        # Delete the assembly itself
-        assembly_to_delete = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id_to_delete).first()
-        if assembly_to_delete:
-            db.delete(assembly_to_delete)
-
-    # First, delete all parts that belong to this product directly
-    parts_direct = db.query(PartModel).filter(PartModel.product_id == product_id).all()
-    for part in parts_direct:
-        db.delete(part)
-    
-    # Then, delete all assemblies that belong to this product (recursively)
-    root_assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).all()
-    for assembly in root_assemblies:
-        delete_assembly_recursive(assembly.id)
-    
-    # Finally, delete the product
-    db.delete(db_product)
-    db.commit()
-    return None
+    # Proceed with cascade deletion
+    try:
+        delete_product_cascade(db, product_id)
+        db.commit()
+        return None
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting product: {str(e)}"
+        )
 
 
 def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchicalData:
@@ -206,10 +358,17 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     # Get all work centers for mapping
     all_work_centers = db.query(WorkCenterModel).all()
     work_center_map = {wc.id: wc.work_center_name for wc in all_work_centers}
-    
+    # Get all machines for mapping
+    all_machines = db.query(MachineModel).all()
+    machine_map = {m.id: m.make for m in all_machines}
+
     # Get all raw materials for mapping
     all_raw_materials = db.query(RawMaterialModel).all()
     raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
+
+    # Get all part types for mapping (avoids N+1 per part in create_part_details)
+    all_part_types = db.query(PartTypeModel).all()
+    part_type_map = {pt.id: pt.type_name for pt in all_part_types}
     
     # Create mappings for easy lookup
     assembly_map = {asm.id: asm for asm in all_assemblies}
@@ -224,8 +383,8 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     tools_by_operation = {}
     
     if part_ids:
-        # Get operations
-        operations = db.query(OperationModel).filter(OperationModel.part_id.in_(part_ids)).all()
+        # Get operations (FIFO by id)
+        operations = db.query(OperationModel).filter(OperationModel.part_id.in_(part_ids)).order_by(OperationModel.id.asc()).all()
         for op in operations:
             if op.part_id not in operations_by_part:
                 operations_by_part[op.part_id] = []
@@ -265,13 +424,17 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
         """Create PartDetails with all related data"""
         part_operations_models = operations_by_part.get(part.id, [])
         
-        # Enrich operations with work_center_name and tools
+        # Enrich operations with work_center_name, machine_name, part_type_name, and tools
         part_operations = []
         for op in part_operations_models:
             op_dict = {
                 "id": op.id,
                 "operation_number": op.operation_number,
                 "operation_name": op.operation_name,
+                "part_type_id": op.part_type_id,
+                "part_type_name": part_type_map.get(op.part_type_id) if op.part_type_id else None,
+                "from_date": op.from_date,
+                "to_date": op.to_date,
                 "setup_time": op.setup_time,
                 "cycle_time": op.cycle_time,
                 "workcenter_id": op.workcenter_id,
@@ -280,15 +443,15 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
                 "work_instructions": op.work_instructions,
                 "notes": op.notes,
                 "work_center_name": work_center_map.get(op.workcenter_id),
+                "machine_name": machine_map.get(op.machine_id),
                 "operation_documents": operation_documents_by_operation.get(op.id, []),
-                "tools": tools_by_operation.get(op.id, [])
+                "tools": tools_by_operation.get(op.id, []),
+                "created_at": op.created_at,
+                "updated_at": op.updated_at,
             }
             part_operations.append(OperationSchema(**op_dict))
         
-        # Get the part type
-        part_type = db.query(PartTypeModel).filter(PartTypeModel.id == part.type_id).first()
-        
-        # Create a new Part model with the type_name included
+        # Create a new Part model with the type_name included (uses pre-fetched map)
         part_dict = {
             'id': part.id,
             'part_name': part.part_name,
@@ -297,8 +460,10 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'raw_material_id': part.raw_material_id,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
-            'type_name': part_type.type_name if part_type else None,
-            'raw_material_name': raw_material_map.get(part.raw_material_id)
+            'type_name': part_type_map.get(part.type_id),
+            'raw_material_name': raw_material_map.get(part.raw_material_id),
+            'created_at': part.created_at,
+            'updated_at': part.updated_at,
         }
         
         part_with_type = PartSchema(**part_dict)

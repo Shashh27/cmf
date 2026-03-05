@@ -8,7 +8,8 @@ from sqlalchemy import (
     TIME,
     Boolean,
     Float,
-    func
+    func,
+    text
 )
 from sqlalchemy.orm import relationship
 from ..database import Base
@@ -26,9 +27,11 @@ class Product(Base):
     product_number = Column(String, unique=True, nullable=False)
     product_version = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    assemblies = relationship("Assembly", back_populates="product")
-    parts = relationship("Part", back_populates="product")
+    assemblies = relationship("Assembly", back_populates="product", cascade="all, delete-orphan")
+    parts = relationship("Part", back_populates="product", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="product")
     user = relationship("AccessUser")
 
@@ -46,11 +49,14 @@ class Assembly(Base):
 
     product_id = Column(Integer, ForeignKey("oms.products.id"))
     parent_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     product = relationship("Product", back_populates="assemblies")
-    parts = relationship("Part", back_populates="assembly")
+    parts = relationship("Part", back_populates="assembly", cascade="all, delete-orphan")
 
     parent = relationship("Assembly", remote_side=[id])
+    children = relationship("Assembly", cascade="all, delete-orphan", overlaps="parent")
 
 
 # =======================
@@ -62,8 +68,11 @@ class PartType(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     type_name = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     parts = relationship("Part", back_populates="type")
+    operations = relationship("Operation", back_populates="part_type")
 
 
 # =======================
@@ -81,16 +90,18 @@ class Part(Base):
     raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"))
     assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
     product_id = Column(Integer, ForeignKey("oms.products.id"))
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     type = relationship("PartType", back_populates="parts")
     raw_material = relationship("RawMaterial")
     assembly = relationship("Assembly", back_populates="parts")
     product = relationship("Product", back_populates="parts")
 
-    operations = relationship("Operation", back_populates="part")
-    documents = relationship("Document", back_populates="part")
-    tools = relationship("ToolWithPart", back_populates="part")
-    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="part")
+    operations = relationship("Operation", back_populates="part", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="part", cascade="all, delete-orphan")
+    tools = relationship("ToolWithPart", back_populates="part", cascade="all, delete-orphan")
+    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="part", cascade="all, delete-orphan")
 
 # =======================
 # Operation
@@ -103,6 +114,10 @@ class Operation(Base):
     operation_number = Column(String, nullable=False)
     operation_name = Column(String, nullable=False)
 
+    part_type_id = Column(Integer, ForeignKey("oms.part_types.id"), nullable=False, server_default=text("1"))
+    from_date = Column(TIMESTAMP(timezone=True), nullable=True)
+    to_date = Column(TIMESTAMP(timezone=True), nullable=True)
+
     setup_time = Column(TIME)
     cycle_time = Column(TIME)
     workcenter_id = Column(Integer)
@@ -112,10 +127,13 @@ class Operation(Base):
 
     work_instructions = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     part = relationship("Part", back_populates="operations")
+    part_type = relationship("PartType", back_populates="operations")
     machine = relationship("DB.models.configuration.Machine")
-    operation_documents = relationship("OperationDocument", back_populates="operation")
+    operation_documents = relationship("OperationDocument", back_populates="operation", cascade="all, delete-orphan")
 
 
 
@@ -135,6 +153,8 @@ class Document(Base):
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"))
     parent_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     part = relationship("Part", back_populates="documents")
     parent = relationship("Document", remote_side=[id])
@@ -151,6 +171,8 @@ class ToolWithPart(Base):
     tool_id = Column(Integer, ForeignKey("inventory.tools_list.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"))
     operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     part = relationship("Part", back_populates="tools")
     tool = relationship("DB.models.inventory.ToolsList")
@@ -166,7 +188,7 @@ class Order(Base):
     __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
-    sale_order_number = Column(String, nullable=False)
+    sale_order_number = Column(String, unique=True, nullable=False)
     project_name = Column(String, nullable=True)
     order_date = Column(TIMESTAMP, nullable=True)
     customer_id = Column(Integer, ForeignKey("configuration.customers.id"), nullable=False)
@@ -175,13 +197,15 @@ class Order(Base):
     quantity = Column(Integer, nullable=False)
     due_date = Column(TIMESTAMP, nullable=False)
     status = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     customer = relationship("Customer", back_populates="orders")
     product = relationship("Product", back_populates="orders")
     user = relationship("AccessUser")
-    order_documents = relationship("OrderDocument", back_populates="order")
-    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order")
-    part_priorities = relationship("OrderPartPriority", back_populates="order")
+    order_documents = relationship("OrderDocument", back_populates="order", cascade="all, delete-orphan")
+    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order", cascade="all, delete-orphan")
+    part_priorities = relationship("OrderPartPriority", back_populates="order", cascade="all, delete-orphan")
 
 # =======================
 # Order Document
@@ -197,6 +221,8 @@ class OrderDocument(Base):
     document_type = Column(String, nullable=False)
     document_version = Column(String, nullable=False)
     parent_id = Column(Integer, ForeignKey("oms.order_documents.id"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     order = relationship("Order", back_populates="order_documents")
     parent = relationship("OrderDocument", remote_side=[id])
@@ -217,6 +243,8 @@ class OperationDocument(Base):
     document_version = Column(String, nullable=False)
     operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
     parent_id = Column(Integer, ForeignKey("oms.operation_documents.id"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     operation = relationship("Operation", back_populates="operation_documents")
@@ -234,7 +262,12 @@ class OrderPartsRawMaterialLinked(Base):
     raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
     order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
-    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    order_quantity = Column(Integer, nullable=True)
+    mass = Column(Float, nullable=True)
+    material_status = Column(String, nullable=True)
+    linkage_group_id = Column(String, nullable=True)  # Segregates demand batches (e.g. 20 kg vs 5 kg)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     raw_material = relationship("RawMaterial")
@@ -254,7 +287,31 @@ class OrderPartPriority(Base):
     product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
     priority = Column(Integer, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     order = relationship("Order", back_populates="part_priorities")
     product = relationship("Product")
+    part = relationship("Part")
+
+
+# =======================
+# Document Extracted Data
+# =======================
+class DocumentExtractedData(Base):
+    __tablename__ = "document_extracted_data"
+    __table_args__ = {'schema': 'oms'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=False)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    note = Column(Text, nullable=True)
+    title = Column(String, nullable=True)
+    stock_size = Column(String, nullable=True)
+    material = Column(String, nullable=True)
+    stocksize_kg = Column(String, nullable=True)
+    net_wt_kg = Column(String, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+    document = relationship("Document")
     part = relationship("Part")

@@ -31,6 +31,8 @@ class RawMaterial(Base):
     quantity = Column(Integer)
     stock_dimensions = Column(String)
     status = Column(String)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 # =======================
