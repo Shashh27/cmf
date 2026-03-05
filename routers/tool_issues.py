@@ -490,6 +490,14 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
         admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+        # Fetch sale_order_number for operator-specific listing
+        sale_order_number = None
+        if issue.request_id:
+            inventory_request = db.query(InventoryRequestModel).filter(InventoryRequestModel.id == issue.request_id).first()
+            if inventory_request and inventory_request.project_id:
+                order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
+                if order:
+                    sale_order_number = order.sale_order_number
         results.append(ToolIssueWithDetailsSchema(
             id=issue.id,
             tool_id=issue.tool_id,
@@ -506,7 +514,8 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
             document_url=issue.document_url,
             tool_name=tool.item_description if tool else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None
+            admin_name=admin.user_name if admin else None,
+            sale_order_number=sale_order_number
         ))
     return results
 

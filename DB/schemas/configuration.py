@@ -1,7 +1,11 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List, Text
+from typing import Optional, List, Text, TYPE_CHECKING
 from datetime import datetime, time
 from typing_extensions import Self
+from .access_control import AccessUserResponse
+
+if TYPE_CHECKING:
+    from .oms import Part as PartSchema, Order as OrderSchema
 
 
 # =======================
@@ -177,12 +181,12 @@ class PokayokeMachineAssignment(PokayokeMachineAssignmentBase):
 
 
 # Create schemas
-class PokayokeChecklistCreate(PokayokeChecklistBase):
-    pass
-
-
 class PokayokeChecklistItemCreate(PokayokeChecklistItemBase):
     pass
+
+
+class PokayokeChecklistCreate(PokayokeChecklistBase):
+    items: List[PokayokeChecklistItemCreate] = []
 
 
 class PokayokeMachineAssignmentCreate(PokayokeMachineAssignmentBase):
@@ -212,6 +216,10 @@ class PokayokeMachineAssignmentUpdate(BaseModel):
 class PokayokeChecklistWithItems(PokayokeChecklist):
     items: List[PokayokeChecklistItem] = []
     machine_assignments: List[PokayokeMachineAssignment] = []
+
+
+class PokayokeMachineAssignmentWithChecklist(PokayokeMachineAssignment):
+    checklist: PokayokeChecklistWithItems
 
 
 # =======================
@@ -254,6 +262,10 @@ class PokayokeItemResponse(PokayokeItemResponseBase):
         from_attributes = True
 
 
+class PokayokeItemResponseWithItem(PokayokeItemResponse):
+    item: PokayokeChecklistItem
+
+
 # Create schemas
 class PokayokeCompletedLogCreate(PokayokeCompletedLogBase):
     pass
@@ -284,4 +296,13 @@ class PokayokeItemResponseUpdate(BaseModel):
 
 # Response with nested data
 class PokayokeCompletedLogWithResponses(PokayokeCompletedLog):
-    item_responses: List[PokayokeItemResponse] = []
+    item_responses: List[PokayokeItemResponseWithItem] = []
+    checklist: Optional[PokayokeChecklist] = None
+    machine: Optional[Machine] = None
+    part: Optional["PartSchema"] = None
+    operator: Optional[AccessUserResponse] = None
+    order: Optional["OrderSchema"] = None
+
+
+from .oms import Part as PartSchema, Order as OrderSchema
+PokayokeCompletedLogWithResponses.model_rebuild()

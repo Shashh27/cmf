@@ -12,6 +12,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from ..database import Base
+from .access_control import AccessUser
+from .oms import Order
 
 
 # =======================
@@ -138,6 +140,8 @@ class PokayokeCompletedLog(Base):
     checklist = relationship("PokayokeChecklist")
     machine = relationship("Machine")
     part = relationship("DB.models.oms.Part")
+    operator = relationship("AccessUser")
+    order = relationship("Order")
     item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
 
 

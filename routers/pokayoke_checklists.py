@@ -30,7 +30,8 @@ from DB.schemas.configuration import (
     PokayokeItemResponseCreate,
     PokayokeItemResponseUpdate,
     PokayokeChecklistWithItems,
-    PokayokeCompletedLogWithResponses
+    PokayokeCompletedLogWithResponses,
+    PokayokeMachineAssignmentWithChecklist
 )
 
 router = APIRouter(
@@ -84,19 +85,31 @@ def validate_expected_value(item_type: str, expected_value: str) -> bool:
 # POKAYOKE CHECKLISTS CRUD
 # =======================
 
-@router.post("/", response_model=PokayokeChecklistSchema, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=PokayokeChecklistWithItems, status_code=status.HTTP_201_CREATED)
 def create_checklist(checklist: PokayokeChecklistCreate, db: Session = Depends(get_db)):
-    """Create a new Pokayoke checklist"""
-    checklist_data = checklist.model_dump()
+    """Create a new Pokayoke checklist with optional items"""
+    checklist_data = checklist.model_dump(exclude={"items"})
     checklist_data["created_at"] = datetime.now(IST).replace(tzinfo=None)
     db_checklist = PokayokeChecklist(**checklist_data)
     db.add(db_checklist)
+    db.flush()  # Get the checklist ID before commit
+    
+    # Create items if provided
+    if checklist.items:
+        for idx, item in enumerate(checklist.items):
+            item_data = item.model_dump()
+            item_data['checklist_id'] = db_checklist.id
+            item_data['sequence_number'] = idx + 1
+            item_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
+            db_item = PokayokeChecklistItem(**item_data)
+            db.add(db_item)
+            
     db.commit()
     db.refresh(db_checklist)
     return db_checklist
 
 
-@router.get("/", response_model=List[PokayokeChecklistSchema])
+@router.get("/", response_model=List[PokayokeChecklistWithItems])
 def get_all_checklists(db: Session = Depends(get_db)):
     """Get all Pokayoke checklists"""
     checklists = db.query(PokayokeChecklist).all()
@@ -371,7 +384,7 @@ def get_machine_assignments(checklist_id: int, db: Session = Depends(get_db)):
     return assignments
 
 
-@router.get("/machines/{machine_id}/assignments", response_model=List[PokayokeMachineAssignmentSchema])
+@router.get("/machines/{machine_id}/assignments", response_model=List[PokayokeMachineAssignmentWithChecklist])
 def get_machine_checklists(machine_id: int, db: Session = Depends(get_db)):
     """Get all Pokayoke checklists assigned to a specific machine"""
     # Verify machine exists
@@ -438,7 +451,7 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
     return db_log
 
 
-@completed_logs_router.get("/", response_model=List[PokayokeCompletedLogSchema])
+@completed_logs_router.get("/", response_model=List[PokayokeCompletedLogWithResponses])
 def get_all_completed_logs(db: Session = Depends(get_db)):
     """Get all Pokayoke completed logs"""
     logs = db.query(PokayokeCompletedLog).all()
@@ -455,27 +468,11 @@ def get_completed_log(log_id: int, db: Session = Depends(get_db)):
             detail=f"Completed log with id {log_id} not found"
         )
     
-    # Get item responses
-    responses = db.query(PokayokeItemResponse).filter(
-        PokayokeItemResponse.completed_log_id == log_id
-    ).all()
-    
-    return PokayokeCompletedLogWithResponses(
-        id=log.id,
-        checklist_id=log.checklist_id,
-        machine_id=log.machine_id,
-        operator_id=log.operator_id,
-        production_order_id=log.production_order_id,
-        part_id=log.part_id,
-        completed_at=log.completed_at,
-        all_items_passed=log.all_items_passed,
-        comments=log.comments,
-        read=log.read,
-        item_responses=responses
-    )
+    # item_responses is already available via relationship in model
+    return log
 
 
-@completed_logs_router.get("/machines/{machine_id}/logs", response_model=List[PokayokeCompletedLogSchema])
+@completed_logs_router.get("/machines/{machine_id}/logs", response_model=List[PokayokeCompletedLogWithResponses])
 def get_machine_completed_logs(machine_id: int, db: Session = Depends(get_db)):
     """Get all completed logs for a specific machine"""
     # Verify machine exists

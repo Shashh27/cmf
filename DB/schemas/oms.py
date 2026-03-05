@@ -1,9 +1,11 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List, Text
+from typing import Optional, List, Text, TYPE_CHECKING
 from datetime import datetime, time
 from typing_extensions import Self
-from .configuration import Customer
 from .inventory import ToolsList
+
+if TYPE_CHECKING:
+    from .configuration import Customer
 
 
 # =======================
@@ -388,7 +390,11 @@ class OrderWithHierarchy(OrderWithCustomerAndProduct):
 
 
 class OrderWithCustomer(Order):
-    customer: Customer
+    customer: "Customer"
+
+
+from .configuration import Customer
+OrderWithCustomer.model_rebuild()
 
 
 
