@@ -39,11 +39,15 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 @router.post("/", response_model=OrderResponse)
 def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     """Create a new order"""
-    # Trim the sale_order_number
-    order.sale_order_number = order.sale_order_number.strip() if order.sale_order_number else order.sale_order_number
+    # Trim and normalize case for the sale_order_number
+    order.sale_order_number = order.sale_order_number.strip().upper() if order.sale_order_number else order.sale_order_number
 
-    # Check if sale_order_number already exists
-    existing_order = db.query(Order).filter(Order.sale_order_number == order.sale_order_number).first()
+    # Case-insensitive check if sale_order_number already exists
+    existing_order = (
+        db.query(Order)
+        .filter(func.lower(Order.sale_order_number) == order.sale_order_number.lower())
+        .first()
+    )
     if existing_order:
         raise HTTPException(
             status_code=400, 
@@ -530,13 +534,17 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    # Trim the sale_order_number if it is being updated
+    # Trim and normalize the sale_order_number if it is being updated
     if order_update.sale_order_number is not None:
-        order_update.sale_order_number = order_update.sale_order_number.strip()
+        order_update.sale_order_number = order_update.sale_order_number.strip().upper()
 
-    # Check if new sale_order_number already exists for a different order
+    # Case-insensitive check if new sale_order_number already exists for a different order
     if order_update.sale_order_number is not None and order_update.sale_order_number != order.sale_order_number:
-        existing_order = db.query(Order).filter(Order.sale_order_number == order_update.sale_order_number).first()
+        existing_order = (
+            db.query(Order)
+            .filter(func.lower(Order.sale_order_number) == order_update.sale_order_number.lower())
+            .first()
+        )
         if existing_order:
             raise HTTPException(
                 status_code=400, 
