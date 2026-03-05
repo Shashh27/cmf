@@ -83,7 +83,7 @@ const KPICards = ({ data }) => {
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               borderRadius: '16px'
             }}
-            bodyStyle={{ padding: '24px', paddingBottom: '20px' }}
+            styles={{ body: { padding: '24px', paddingBottom: '20px' } }}
             onClick={() => setSelectedCard(selectedCard === card.id ? null : card.id)}
           >
             {/* Card Content */}
@@ -113,12 +113,14 @@ const KPICards = ({ data }) => {
               <div className="mb-2">
                 <Statistic
                   value={card.value}
-                  valueStyle={{
-                    color: card.color,
-                    fontSize: '36px',
-                    fontWeight: '700',
-                    lineHeight: 1.2,
-                    fontFamily: 'system-ui, -apple-system, sans-serif'
+                  styles={{
+                    content: {
+                      color: card.color,
+                      fontSize: '36px',
+                      fontWeight: '700',
+                      lineHeight: 1.2,
+                      fontFamily: 'system-ui, -apple-system, sans-serif'
+                    }
                   }}
                 />
               </div>

@@ -58,6 +58,12 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   const [previewModalVisible, setPreviewModalVisible] = useState(false);
   const [previewingDocument, setPreviewingDocument] = useState(null);
 
+  // // Add Document state
+  // const [addModalVisible, setAddModalVisible] = useState(false);
+  // const [addFileList, setAddFileList] = useState([]);
+  // const [addUploading, setAddUploading] = useState(false);
+  // const [addDocType, setAddDocType] = useState('CNC');
+
   // Add Document state
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [addFileList, setAddFileList] = useState([]);

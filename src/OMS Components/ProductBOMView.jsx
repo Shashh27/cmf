@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
-import { Button, Typography, Table, Space, message, Tag, Card, Tooltip, Badge, Modal, Spin } from "antd";
+import { Button, Typography, Table, Space, message, Tag, Card, Tooltip, Badge, Modal, Spin, Select } from "antd";
 import { 
   CaretDownOutlined, 
   CaretRightOutlined, 
@@ -8,6 +8,7 @@ import {
   AppstoreOutlined, 
   BlockOutlined, 
   CodeSandboxOutlined,
+  CodepenOutlined,
   EyeOutlined,
   DownloadOutlined,
   FileTextOutlined,
@@ -126,7 +127,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
         }
     ];
 
-    if (loading) return <div className="p-4 flex justify-center"><Spin size="small" tip="Loading documents..." /></div>;
+    if (loading) return <div className="p-4 flex justify-center"><Spin size="small" /></div>;
     
     if (!docs || docs.length === 0) return (
         <div className="p-6 text-center border border-dashed border-gray-300 rounded-lg bg-gray-50">
@@ -160,15 +161,48 @@ const ProductBOMView = ({ onBackToOrders }) => {
   const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
   const [currentOperation, setCurrentOperation] = useState(null);
   const hasFetchedData = useRef(false);
+  const [selectedDocVersions, setSelectedDocVersions] = useState({}); // { rootId: document } for eBOM version dropdown
+
+  // Group part documents by root (parent_id or id) for eBOM version dropdown
+  const groupedPartDocs = useMemo(() => {
+    const docs = selectedItem?.documents || [];
+    return docs.reduce((acc, doc) => {
+      const rootId = doc.parent_id || doc.id;
+      if (!acc[rootId]) acc[rootId] = [];
+      acc[rootId].push(doc);
+      return acc;
+    }, {});
+  }, [selectedItem?.documents]);
+
+  const latestPartDocs = useMemo(() => {
+    return Object.values(groupedPartDocs).map(group =>
+      [...group].sort((a, b) => parseFloat(b.document_version || '0') - parseFloat(a.document_version || '0'))[0]
+    );
+  }, [groupedPartDocs]);
+
+  useEffect(() => {
+    if (!selectedItem?.documents?.length) return;
+    const updated = { ...selectedDocVersions };
+    let changed = false;
+    latestPartDocs.forEach(doc => {
+      const rootId = doc.parent_id || doc.id;
+      if (!updated[rootId] || !groupedPartDocs[rootId]?.find(d => d.id === updated[rootId].id)) {
+        updated[rootId] = doc;
+        changed = true;
+      }
+    });
+    if (changed) setSelectedDocVersions(updated);
+  }, [latestPartDocs, groupedPartDocs]);
+
+  useEffect(() => {
+    setSelectedDocVersions({});
+  }, [selectedItem?.id]);
 
   useEffect(() => {
     if (hasFetchedData.current || !productId) return;
     hasFetchedData.current = true;
     
-    Promise.all([
-      fetch(`${API_BASE_URL}/products/${productId}`).then(r => r.ok && r.json().then(setProduct)),
-      fetchBOMData()
-    ]).catch(console.error);
+    fetchBOMData().catch(console.error);
   }, [productId]);
 
   const processSubassemblies = (subassemblies) => 
@@ -193,11 +227,15 @@ const ProductBOMView = ({ onBackToOrders }) => {
     }]) || [];
 
   const fetchBOMData = async () => {
+    setLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/products/${productId}/hierarchical`);
       if (!response.ok) return setBomData(null);
       
       const data = await response.json();
+      if (data.product) {
+        setProduct(data.product);
+      }
       const processedAssemblies = data.assemblies?.flatMap(asm => ({
         id: asm.assembly?.id,
         name: asm.assembly?.assembly_name,
@@ -252,23 +290,35 @@ const ProductBOMView = ({ onBackToOrders }) => {
   const toggleExpand = (itemId) => setExpandedItems(prev => ({ ...prev, [itemId]: !prev[itemId] }));
 
   const getTypeIcon = (type) => {
-    const icons = {
-      product: <AppstoreOutlined className="text-purple-600" />,
-      assembly: <BlockOutlined className="text-blue-500" />,
-      part: <CodeSandboxOutlined className="text-green-500" />,
-      make: <CodeSandboxOutlined className="text-green-500" />
-    };
-    return icons[type?.toLowerCase()] || <CodeSandboxOutlined className="text-gray-500" />;
+    const normalized = (type || "").toString().toLowerCase();
+    const inHouseTypes = ["make", "in-house", "in house", "inhouse"];
+    const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
+
+    if (normalized === "product") {
+      return <AppstoreOutlined className="text-purple-600" />;
+    }
+    if (normalized === "assembly") {
+      return <BlockOutlined className="text-blue-500" />;
+    }
+    if (inHouseTypes.includes(normalized)) {
+      return <CodeSandboxOutlined className="text-emerald-600" />;
+    }
+    if (outSourceTypes.includes(normalized)) {
+      return <CodepenOutlined className="text-amber-600" />;
+    }
+    return <CodeSandboxOutlined className="text-gray-500" />;
   };
 
   const getTypeColor = (type) => {
-    const colors = {
-      product: 'purple',
-      assembly: 'blue',
-      part: 'green',
-      make: 'green'
-    };
-    return colors[type?.toLowerCase()] || 'default';
+    const normalized = (type || "").toString().toLowerCase();
+    const inHouseTypes = ["make", "in-house", "in house", "inhouse", "part"];
+    const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
+
+    if (normalized === "product") return 'purple';
+    if (normalized === "assembly") return 'blue';
+    if (inHouseTypes.includes(normalized)) return 'green';
+    if (outSourceTypes.includes(normalized)) return 'orange';
+    return 'default';
   };
 
   const handleDocumentAction = async (url, name, action = 'view') => {
@@ -445,11 +495,16 @@ const ProductBOMView = ({ onBackToOrders }) => {
   };
 
   const OperationsTable = ({ operations, processPlans }) => {
+    const formatDate = (val) => {
+      if (!val) return '—';
+      const d = typeof val === 'string' ? new Date(val) : val;
+      return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+    };
+
     const columns = [
       {
         title: <span className="font-semibold text-gray-700">Op #</span>,
         key: 'operation_number',
-        width: 80,
         render: (_, record, index) => (
           <Tag color="cyan" className="font-mono">
             {String(record.operation_number || index + 1).padStart(2, '0')}
@@ -460,46 +515,68 @@ const ProductBOMView = ({ onBackToOrders }) => {
         title: <span className="font-semibold text-gray-700">Operation Name</span>,
         dataIndex: 'operation_name',
         key: 'operation_name',
-        width: 200,
         render: (name) => (
           <Text className="text-sm font-medium text-gray-800">{name}</Text>
         ),
       },
       {
-        title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Setup Time</span>,
+        title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Setup</span>,
         key: 'setup_time',
-        width: 130,
-        render: (_, record) => {
-          return (
-            <Tag color="orange" icon={<ClockCircleOutlined />}>
-              {record.setup_time || '00:00:00'}
-            </Tag>
-          );
-        },
+        render: (_, record) => (
+          <Tag color="orange" icon={<ClockCircleOutlined />}>
+            {record.setup_time || '00:00:00'}
+          </Tag>
+        ),
       },
       {
-        title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Cycle Time</span>,
+        title: <span className="font-semibold text-gray-700"><ClockCircleOutlined /> Cycle</span>,
         key: 'cycle_time',
-        width: 130,
-        render: (_, record) => {
-          return (
-            <Tag color="green" icon={<ClockCircleOutlined />}>
-              {record.cycle_time || '00:00:00'}
-            </Tag>
-          );
-        },
+        render: (_, record) => (
+          <Tag color="green" icon={<ClockCircleOutlined />}>
+            {record.cycle_time || '00:00:00'}
+          </Tag>
+        ),
       },
       {
         title: <span className="font-semibold text-gray-700"><EnvironmentOutlined /> Workcenter</span>,
         key: 'workcenter',
-        width: 150,
-        render: (_, record) => {
-          return (
-            <Tag color="purple" icon={<EnvironmentOutlined />}>
-              {record.work_center_name || record.workcenter_id || 'N/A'}
-            </Tag>
-          );
-        },
+        render: (_, record) => (
+          <Tag color="purple" icon={<EnvironmentOutlined />}>
+            {record.work_center_name || record.workcenter_id || 'N/A'}
+          </Tag>
+        ),
+      },
+      {
+        title: <span className="font-semibold text-gray-700"><EnvironmentOutlined /> Machine</span>,
+        key: 'machine_name',
+        render: (_, record) => (
+          <Tag color="purple" icon={<EnvironmentOutlined />}>
+            {record.machine_name || record.machine_id || 'N/A'}
+          </Tag>
+        ),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Operation Type</span>,
+        key: 'part_type_name',
+        render: (_, record) => (
+          <Tag color={record.part_type_name?.toLowerCase().includes('out') ? 'orange' : 'blue'}>
+            {record.part_type_name || '—'}
+          </Tag>
+        ),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">From Date</span>,
+        key: 'from_date',
+        render: (_, record) => (
+          <span className="text-sm text-gray-700">{formatDate(record.from_date)}</span>
+        ),
+      },
+      {
+        title: <span className="font-semibold text-gray-700">To Date</span>,
+        key: 'to_date',
+        render: (_, record) => (
+          <span className="text-sm text-gray-700">{formatDate(record.to_date)}</span>
+        ),
       },
     ];
 
@@ -510,7 +587,7 @@ const ProductBOMView = ({ onBackToOrders }) => {
         rowKey="id"
         size="small"
         pagination={false}
-        scroll={{ y: 400 }}
+        scroll={{ x: 'max-content', y: 400 }}
         onRow={(record) => ({
             onClick: () => {
                 setCurrentOperation(record);
@@ -553,17 +630,128 @@ const ProductBOMView = ({ onBackToOrders }) => {
     }
 
     if (bomView === 'ebom') {
+      const docs = selectedItem.documents || [];
       return (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
               <FileTextOutlined className="text-blue-500" />
               Documents
-              <Badge count={selectedItem.documents?.length || 0} style={{ backgroundColor: '#1890ff' }} />
+              <Badge count={latestPartDocs.length} style={{ backgroundColor: '#1890ff' }} />
             </h3>
           </div>
-          {selectedItem.documents?.length > 0 ? (
-            <DocumentTable documents={selectedItem.documents} />
+          {docs.length > 0 ? (
+            <Table
+              dataSource={latestPartDocs}
+              rowKey={(r) => r.parent_id || r.id}
+              size="small"
+              pagination={false}
+              scroll={{ y: 400, x: 600 }}
+              className="modern-table"
+              columns={[
+                {
+                  title: <span className="font-semibold text-gray-700">Document Name</span>,
+                  key: 'document_name',
+                  render: (_, record) => {
+                    const rootId = record.parent_id || record.id;
+                    const currentDoc = selectedDocVersions[rootId] || record;
+                    return (
+                      <Text className="text-sm font-medium text-gray-800">
+                        {currentDoc.document_name || 'Untitled Document'}
+                      </Text>
+                    );
+                  },
+                },
+                {
+                  title: <span className="font-semibold text-gray-700">Type</span>,
+                  key: 'document_type',
+                  width: 120,
+                  render: (_, record) => {
+                    const rootId = record.parent_id || record.id;
+                    const currentDoc = selectedDocVersions[rootId] || record;
+                    return (
+                      <Space>
+                        <FileTextOutlined className="text-blue-500" />
+                        <Tag color="blue" className="text-xs">{currentDoc.document_type || 'Document'}</Tag>
+                      </Space>
+                    );
+                  },
+                },
+                {
+                  title: <span className="font-semibold text-gray-700">Version</span>,
+                  key: 'version',
+                  width: 180,
+                  render: (_, record) => {
+                    const rootId = record.parent_id || record.id;
+                    const group = groupedPartDocs[rootId] || [];
+                    const currentDoc = selectedDocVersions[rootId] || record;
+                    const latestDoc = record;
+                    if (group.length <= 1) {
+                      return <Tag color="green">v{currentDoc.document_version || '1.0'}</Tag>;
+                    }
+                    return (
+                      <Select
+                        size="small"
+                        value={currentDoc.id}
+                        variant="filled"
+                        className="w-full"
+                        onChange={(val) => {
+                          const selected = group.find(d => d.id === val);
+                          setSelectedDocVersions(prev => ({ ...prev, [rootId]: selected }));
+                        }}
+                        style={{ minWidth: 140 }}
+                        options={group
+                          .sort((a, b) => parseFloat(b.document_version || '0') - parseFloat(a.document_version || '0'))
+                          .map(ver => ({
+                            value: ver.id,
+                            label: `v${ver.document_version || '1.0'}`,
+                          }))}
+                        optionRender={(option) => (
+                          <span className="flex items-center gap-2">
+                            <Badge status={option.value === latestDoc.id ? 'success' : 'default'} />
+                            <span className={option.value === currentDoc.id ? 'font-semibold text-blue-600' : ''}>
+                              {option.label}
+                            </span>
+                          </span>
+                        )}
+                      />
+                    );
+                  },
+                },
+                {
+                  title: <span className="font-semibold text-gray-700">Actions</span>,
+                  key: 'actions',
+                  width: 120,
+                  render: (_, record) => {
+                    const rootId = record.parent_id || record.id;
+                    const currentDoc = selectedDocVersions[rootId] || record;
+                    return (
+                      <Space size="small">
+                        <Tooltip title="View Document">
+                          <Button
+                            type="primary"
+                            ghost
+                            size="small"
+                            icon={<EyeOutlined />}
+                            onClick={() => handleDocumentAction(currentDoc.document_url, currentDoc.document_name, 'view')}
+                            className="hover:scale-105 transition-transform"
+                          />
+                        </Tooltip>
+                        <Tooltip title="Download">
+                          <Button
+                            type="default"
+                            size="small"
+                            icon={<DownloadOutlined />}
+                            onClick={() => handleDocumentAction(currentDoc.document_url, currentDoc.document_name, 'download')}
+                            className="hover:scale-105 transition-transform"
+                          />
+                        </Tooltip>
+                      </Space>
+                    );
+                  },
+                },
+              ]}
+            />
           ) : (
             <EmptyState message="No documents available for this part" icon={<FileTextOutlined />} />
           )}
@@ -634,7 +822,7 @@ const ProductBOMView = ({ onBackToOrders }) => {
   }
 
   return (
-    <div style={{ backgroundColor: 'white', padding: 12, borderRadius: 8, border: '1px solid #e8e8e8', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+    <div style={{ backgroundColor: 'white', padding: 'clamp(8px, 2vw, 12px)', borderRadius: 8, border: '1px solid #e8e8e8', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
@@ -647,13 +835,22 @@ const ProductBOMView = ({ onBackToOrders }) => {
         .modern-table .ant-table-tbody > tr > td {
           border-bottom: 1px solid #f0f0f0;
         }
+        @media (max-width: 768px) {
+          .ant-table {
+            font-size: 12px;
+          }
+          .ant-table-thead > tr > th,
+          .ant-table-tbody > tr > td {
+            padding: 8px 4px;
+          }
+        }
       `}</style>
       
       <div>
         {/* Header */}
-        <div className="rounded-xl shadow-lg p-3 mb-4" style={{ backgroundColor: 'white' }}>
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-            <div className="flex items-center gap-2">
+        <div className="rounded-lg lg:rounded-xl shadow-lg p-2 sm:p-3 mb-3 sm:mb-4" style={{ backgroundColor: 'white' }}>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Button 
                 type="default" 
                 size="middle" 
@@ -661,26 +858,27 @@ const ProductBOMView = ({ onBackToOrders }) => {
                 className="shadow-sm hover:shadow-md transition-shadow"
                 icon={<ArrowLeftOutlined />}
               >
-                Back
+                <span className="hidden sm:inline">Back</span>
               </Button>
-              <div>
-                <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <div className="flex-1 sm:flex-initial">
+                <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-800 flex items-center gap-2 m-0">
                   <AppstoreOutlined className="text-blue-600" />
-                  Bill of Materials
+                  <span className="hidden sm:inline">Bill of Materials</span>
+                  <span className="sm:hidden">BOM</span>
                 </h1>
-                <p className="text-sm text-gray-500 mt-1">{product?.product_name || 'Product View'}</p>
+                <p className="text-xs sm:text-sm text-gray-500 mt-1 truncate">{product?.product_name || 'Product View'}</p>
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-600 mr-2">View:</span>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <span className="text-xs sm:text-sm font-medium text-gray-600 mr-2">View:</span>
               {['mbom', 'ebom'].map(view => (
                 <Button 
                   key={view}
                   type={bomView === view ? 'primary' : 'default'}
                   size="middle"
                   onClick={() => setBomView(view)}
-                  className={`font-semibold shadow-sm transition-all ${
+                  className={`font-semibold shadow-sm transition-all flex-1 sm:flex-initial ${
                     bomView === view ? 'shadow-md scale-105' : 'hover:shadow-md'
                   }`}
                 >
@@ -692,18 +890,28 @@ const ProductBOMView = ({ onBackToOrders }) => {
         </div>
 
         {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
           {/* BOM Tree */}
           <div className="lg:col-span-1">
             <Card 
               title={
                 <div className="flex items-center gap-2">
                   <BlockOutlined className="text-blue-600" />
-                  <span className="font-bold text-gray-800">BOM Structure</span>
+                  <span className="font-bold text-gray-800 text-sm sm:text-base">BOM Structure</span>
                 </div>
               }
-              className="shadow-lg rounded-xl overflow-hidden"
-              bodyStyle={{ padding: '12px', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}
+              className="shadow-lg rounded-lg lg:rounded-xl overflow-hidden"
+              styles={{ 
+                body: { 
+                  padding: 'clamp(8px, 2vw, 12px)', 
+                  maxHeight: 'calc(100vh - 240px)', 
+                  overflowY: 'auto' 
+                },
+                header: {
+                  minHeight: 'auto',
+                  padding: 'clamp(8px, 2vw, 16px)'
+                }
+              }}
             >
               {bomData && renderBOMItem(bomData)}
             </Card>
@@ -713,11 +921,11 @@ const ProductBOMView = ({ onBackToOrders }) => {
           <div className="lg:col-span-2">
             <Card
               title={
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 sm:gap-3">
                       {selectedItem && getTypeIcon(selectedItem.type)}
-                      <span className="font-bold text-gray-800 text-lg">
+                      <span className="font-bold text-gray-800 text-sm sm:text-base lg:text-lg truncate">
                         {selectedItem?.name || 'Item Details'}
                       </span>
                       {selectedItem && (
@@ -727,14 +935,25 @@ const ProductBOMView = ({ onBackToOrders }) => {
                       )}
                     </div>
                     {selectedItem?.part_number && (
-                      <Text className="text-xs text-gray-500 ml-8">P/N: {selectedItem.part_number}</Text>
+                      <Text className="text-xs text-gray-500 ml-0 sm:ml-8 block sm:inline">P/N: {selectedItem.part_number}</Text>
                     )}
                   </div>
                 </div>
               }
-              className="shadow-lg rounded-xl overflow-hidden"
-              headStyle={{ background: 'linear-gradient(to right, #f0f5ff, #e6f0ff)', borderBottom: '2px solid #1890ff' }}
-              bodyStyle={{ padding: '20px', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}
+              className="shadow-lg rounded-lg lg:rounded-xl overflow-hidden"
+              styles={{
+                header: {
+                  background: 'linear-gradient(to right, #f0f5ff, #e6f0ff)',
+                  borderBottom: '2px solid #1890ff',
+                  padding: 'clamp(12px, 2vw, 20px)',
+                  minHeight: 'auto'
+                },
+                body: {
+                  padding: 'clamp(12px, 2vw, 20px)',
+                  maxHeight: 'calc(100vh - 240px)',
+                  overflowY: 'auto',
+                },
+              }}
             >
               {renderDetailsPanel()}
             </Card>
@@ -745,20 +964,21 @@ const ProductBOMView = ({ onBackToOrders }) => {
       {/* Document Modal using Ant Design Modal */}
       <Modal
         title={
-          <div className="flex items-center gap-3">
-            <FileTextOutlined className="text-xl text-blue-600" />
-            <span className="font-bold text-gray-800">{documentModal.name || 'Document Viewer'}</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <FileTextOutlined className="text-lg sm:text-xl text-blue-600" />
+            <span className="font-bold text-gray-800 text-sm sm:text-base truncate">{documentModal.name || 'Document Viewer'}</span>
           </div>
         }
         open={documentModal.isOpen}
         onCancel={() => setDocumentModal({ isOpen: false, url: null, name: null })}
-        width="90%"
-        style={{ top: 20 }}
+        width="95%"
+        style={{ top: 20, maxWidth: '1400px' }}
         footer={[
           <Button 
             key="close" 
             size="large"
             onClick={() => setDocumentModal({ isOpen: false, url: null, name: null })}
+            className="w-full sm:w-auto"
           >
             Close
           </Button>,
@@ -768,6 +988,7 @@ const ProductBOMView = ({ onBackToOrders }) => {
             size="large"
             icon={<DownloadOutlined />}
             onClick={() => handleDocumentAction(documentModal.url, documentModal.name, 'download')}
+            className="w-full sm:w-auto"
           >
             Download
           </Button>
@@ -795,34 +1016,35 @@ const ProductBOMView = ({ onBackToOrders }) => {
         title={
             <div className="flex items-center gap-2">
                 <ToolOutlined className="text-blue-500"/> 
-                <span>Operation Details: {currentOperation?.operation_name}</span>
+                <span className="text-sm sm:text-base truncate">Operation Details: {currentOperation?.operation_name}</span>
             </div>
         }
         open={isOperationModalOpen}
         onCancel={() => setIsOperationModalOpen(false)}
-        width={800}
+        width="95%"
+        style={{ maxWidth: 800 }}
         footer={null}
         destroyOnHidden
       >
         {currentOperation && (
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200 space-y-4">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 sm:p-4 rounded-lg border border-blue-200 space-y-3 sm:space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <p className="text-xs font-semibold text-gray-600 mb-1">Work Instructions:</p>
-                    <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap shadow-sm">
+                    <div className="bg-white p-2 sm:p-3 rounded border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto">
                         {currentOperation.work_instructions || 'No instructions available'}
                     </div>
                   </div>
                   <div>
                     <p className="text-xs font-semibold text-gray-600 mb-1">Notes:</p>
-                    <div className="bg-white p-3 rounded border text-sm whitespace-pre-wrap shadow-sm">
+                    <div className="bg-white p-2 sm:p-3 rounded border text-xs sm:text-sm whitespace-pre-wrap shadow-sm max-h-40 overflow-y-auto">
                         {currentOperation.notes || 'None specified'}
                     </div>
                   </div>
                 </div>
 
                 {currentOperation.tools?.length > 0 && (
-                    <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                    <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
                         <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                             <ToolOutlined /> Tools Required:
                         </p>
@@ -832,17 +1054,18 @@ const ProductBOMView = ({ onBackToOrders }) => {
                             pagination={false}
                             size="small"
                             bordered
+                            scroll={{ x: 600 }}
                             columns={[
-                                { title: 'Tool Name', dataIndex: ['tool', 'item_description'], key: 'name', render: (text) => <span className="font-medium">{text}</span> },
-                                { title: 'Code', dataIndex: ['tool', 'identification_code'], key: 'code', render: (text) => <Tag>{text}</Tag> },
-                                { title: 'Make', dataIndex: ['tool', 'make'], key: 'make' },
-                                { title: 'Specification', dataIndex: ['tool', 'range'], key: 'range' },
+                                { title: 'Tool Name', dataIndex: ['tool', 'item_description'], key: 'name', render: (text) => <span className="font-medium text-xs sm:text-sm">{text}</span> },
+                                { title: 'Code', dataIndex: ['tool', 'identification_code'], key: 'code', render: (text) => <Tag className="text-xs">{text}</Tag> },
+                                { title: 'Make', dataIndex: ['tool', 'make'], key: 'make', render: (text) => <span className="text-xs sm:text-sm">{text}</span> },
+                                { title: 'Specification', dataIndex: ['tool', 'range'], key: 'range', render: (text) => <span className="text-xs sm:text-sm">{text}</span> },
                             ]}
                         />
                     </div>
                 )}
 
-                 <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                 <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm">
                     <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                         <FileTextOutlined /> Operation Documents:
                     </p>

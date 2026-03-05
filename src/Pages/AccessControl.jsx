@@ -141,16 +141,23 @@ const AccessControl = () => {
       title: 'Password',
       dataIndex: 'password',
       key: 'password',
-      render: (text, record) => (
-        <Space>
-          <span>{visiblePasswords[record.id] ? (text || 'Not Returned by API') : '••••••••'}</span>
-          <Button 
-            type="text" 
-            icon={visiblePasswords[record.id] ? <EyeInvisibleOutlined /> : <EyeOutlined />} 
-            onClick={() => togglePasswordVisibility(record.id)} 
-          />
-        </Space>
-      ),
+      render: (text, record) => {
+        const password = text || '';
+        const isVisible = visiblePasswords[record.id];
+        const displayText = isVisible
+          ? (password || 'Not Returned by API')
+          : (password ? '•'.repeat(password.length) : 'Not Returned by API');
+        return (
+          <Space>
+            <span>{displayText}</span>
+            <Button 
+              type="text" 
+              icon={isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />} 
+              onClick={() => togglePasswordVisibility(record.id)} 
+            />
+          </Space>
+        );
+      },
     },
     {
       title: 'Actions',

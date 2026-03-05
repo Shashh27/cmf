@@ -44,6 +44,12 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
       calibration_due_date: values.calibration_due_date ? values.calibration_due_date.toISOString() : null,
     };
 
+    if (!machine) {
+      submitData.password = values.password;
+    } else if (values.password) {
+      submitData.password = values.password;
+    }
+
     try {
       const url = machine 
         ? `${API_BASE_URL}/machines/${machine.id}`
@@ -150,6 +156,14 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
             label="Calibration Due Date"
           >
             <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label="Password"
+            rules={[{ required: !machine, message: 'Please enter password' }]}
+          >
+            <Input.Password placeholder="Enter password" />
           </Form.Item>
         </div>
 

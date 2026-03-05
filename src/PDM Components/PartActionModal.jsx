@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { PlusOutlined, DeleteOutlined, UploadOutlined } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
-import { Modal, Form, Input, Select, Button, message, Upload, Card, Badge, TimePicker, Row, Col, } from "antd";
+import { Modal, Form, Input, Select, Button, message, Upload, Card, Badge, TimePicker, Row, Col, DatePicker } from "antd";
+import dayjs from "dayjs";
 
 const { TextArea } = Input;
 
@@ -10,39 +11,70 @@ const PartActionModal = ({
   onCancel, 
   actionType, 
   selectedPart,
-  onActionCreated 
+  onActionCreated,
+  initialOperations = []
 }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [workCenters, setWorkCenters] = useState([]);
   const [allMachines, setAllMachines] = useState([]);
   const [toolsList, setToolsList] = useState([]);
+  const [partTypes, setPartTypes] = useState([]);
+  const [partTypesLoading, setPartTypesLoading] = useState(false);
+  const [workCentersLoading, setWorkCentersLoading] = useState(false);
+  const [machinesLoading, setMachinesLoading] = useState(false);
+  const [toolsLoading, setToolsLoading] = useState(false);
 
-  // Fetch work centers and machines
   useEffect(() => {
-    if (open) {
-      form.resetFields();
-      if (actionType === 'operation') {
-        fetchWorkCenters();
-        fetchMachines();
-        fetchTools();
+    if (!open) return;
+    form.resetFields();
+    if (actionType === "operation") {
+      if (initialOperations && initialOperations.length > 0) {
+        const items = initialOperations.map(op => ({
+          operation_number: op.operation_number,
+          operation_name: op.operation_name,
+          part_type_id: 1,
+          from_date: null,
+          to_date: null,
+          setup_time: op.setup_time ? dayjs(op.setup_time, "HH:mm:ss") : null,
+          cycle_time: op.cycle_time ? dayjs(op.cycle_time, "HH:mm:ss") : null,
+          workcenter_id: op.workcenter_id || null,
+          machine_id: op.machine_id || null,
+          work_instructions: op.work_instructions || "",
+          notes: op.notes || "",
+          documents: [{ document_type: "Balloon", document_version: "1.0" }]
+        }));
+        form.setFieldsValue({ items });
+        return;
       }
     }
-  }, [open, actionType, form]);
+    const defaultType = actionType === "document" ? "2D" : "Balloon";
+    form.setFieldsValue({
+      items: actionType === "operation"
+        ? [{ part_type_id: 1, document_version: "1.0", document_type: defaultType, documents: [{ document_type: "Balloon", document_version: "1.0" }] }]
+        : [{ document_version: "1.0", document_type: defaultType }]
+    });
+  }, [open, actionType, form, initialOperations]);
 
   const fetchMachines = async () => {
+    if (allMachines.length > 0) return;
+    setMachinesLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/machines/?limit=1000`);
+      const response = await fetch(`${API_BASE_URL}/machines/`);
       if (response.ok) {
         const data = await response.json();
         setAllMachines(data);
       }
     } catch (error) {
       console.error("Error fetching machines:", error);
+    } finally {
+      setMachinesLoading(false);
     }
   };
 
   const fetchTools = async () => {
+    if (toolsList.length > 0) return;
+    setToolsLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/tools-list/`);
       if (response.ok) {
@@ -51,10 +83,14 @@ const PartActionModal = ({
       }
     } catch (error) {
       console.error("Error fetching tools:", error);
+    } finally {
+      setToolsLoading(false);
     }
   };
 
   const fetchWorkCenters = async () => {
+    if (workCenters.length > 0) return;
+    setWorkCentersLoading(true);
     try {
       const response = await fetch(`${API_BASE_URL}/workcenters/`);
       if (response.ok) {
@@ -63,6 +99,24 @@ const PartActionModal = ({
       }
     } catch (error) {
       console.error("Error fetching work centers:", error);
+    } finally {
+      setWorkCentersLoading(false);
+    }
+  };
+
+  const fetchPartTypes = async () => {
+    if (partTypes.length > 0) return;
+    setPartTypesLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/part-types/`);
+      if (response.ok) {
+        const data = await response.json();
+        setPartTypes(data);
+      }
+    } catch (error) {
+      console.error("Error fetching part types:", error);
+    } finally {
+      setPartTypesLoading(false);
     }
   };
 
@@ -72,13 +126,42 @@ const PartActionModal = ({
     const items = values.items || [];
     const results = [];
     
+    if (actionType === 'operation') {
+      const missingCustom = items.some(item =>
+        item.documents &&
+        item.documents.some(doc => doc.document_type === 'Other' && !(doc.document_type_other && doc.document_type_other.trim()))
+      );
+      if (missingCustom) {
+        message.error("Please enter custom document type for all 'Other' documents");
+        setLoading(false);
+        return;
+      }
+    } else if (actionType === 'document') {
+      const missingCustom = items.some(item =>
+        item.document_type === 'Other' && !(item.document_type_other && item.document_type_other.trim())
+      );
+      if (missingCustom) {
+        message.error("Please enter custom document type for all 'Other' documents");
+        setLoading(false);
+        return;
+      }
+    }
+    
     // Process items sequentially
     for (const item of items) {
       try {
         if (actionType === 'operation') {
+          const now = dayjs();
           const payload = {
             operation_number: item.operation_number,
             operation_name: item.operation_name,
+            part_type_id: item.part_type_id ?? 1,
+            from_date: item.from_date
+              ? dayjs(item.from_date).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString()
+              : null,
+            to_date: item.to_date
+              ? dayjs(item.to_date).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString()
+              : null,
             setup_time: item.setup_time ? item.setup_time.format('HH:mm:ss') : null,
             cycle_time: item.cycle_time ? item.cycle_time.format('HH:mm:ss') : null,
             workcenter_id: item.workcenter_id ? parseInt(item.workcenter_id) : null,
@@ -117,32 +200,39 @@ const PartActionModal = ({
               }
             }
 
-            // Handle file uploads if any
-            if (item.files && item.files.length > 0) {
-              const formData = new FormData();
-              formData.append('operation_id', newOperation.id);
-              formData.append('document_version', item.document_version || '1.0');
-              formData.append('document_type', item.document_type || 'Balloon');
-              
-              item.files.forEach(fileItem => {
-                if (fileItem.originFileObj) {
-                  formData.append('files', fileItem.originFileObj);
-                }
-              });
+            if (item.documents && item.documents.length > 0) {
+              for (const doc of item.documents) {
+                if (doc.files && doc.files.length > 0) {
+                  const formData = new FormData();
+                  formData.append('operation_id', newOperation.id);
+                  formData.append('document_version', doc.document_version || '1.0');
+                  let docType = doc.document_type || 'Balloon';
+                  if (docType === 'Other' && doc.document_type_other && doc.document_type_other.trim()) {
+                    docType = doc.document_type_other.trim();
+                  }
+                  formData.append('document_type', docType);
 
-              try {
-                const uploadResponse = await fetch(`${API_BASE_URL}/operation-documents/upload/`, {
-                  method: 'POST',
-                  body: formData,
-                });
-                
-                if (!uploadResponse.ok) {
-                  console.error('Failed to upload documents');
-                  message.warning(`Operation created but documents failed to upload for ${item.operation_name}`);
+                  doc.files.forEach(fileItem => {
+                    if (fileItem.originFileObj) {
+                      formData.append('files', fileItem.originFileObj);
+                    }
+                  });
+
+                  try {
+                    const uploadResponse = await fetch(`${API_BASE_URL}/operation-documents/upload/`, {
+                      method: 'POST',
+                      body: formData,
+                    });
+
+                    if (!uploadResponse.ok) {
+                      console.error('Failed to upload documents');
+                      message.warning(`Operation created but documents failed to upload for ${item.operation_name}`);
+                    }
+                  } catch (uploadError) {
+                    console.error('Error uploading documents:', uploadError);
+                    message.warning(`Operation created but documents failed to upload for ${item.operation_name}`);
+                  }
                 }
-              } catch (uploadError) {
-                console.error('Error uploading documents:', uploadError);
-                message.warning(`Operation created but documents failed to upload for ${item.operation_name}`);
               }
             }
           }
@@ -153,7 +243,11 @@ const PartActionModal = ({
           const formDataObj = new FormData();
           formDataObj.append('file', file);
           formDataObj.append('document_name', item.document_name);
-          formDataObj.append('document_type', item.document_type);
+          let docType = item.document_type;
+          if (docType === 'Other' && item.document_type_other && item.document_type_other.trim()) {
+            docType = item.document_type_other.trim();
+          }
+          formDataObj.append('document_type', docType);
           formDataObj.append('document_version', item.document_version || '1.0');
           formDataObj.append('part_id', selectedPart.id.toString());
           if (item.parent_id) {
@@ -201,7 +295,8 @@ const PartActionModal = ({
       open={open}
       onCancel={onCancel}
       footer={null}
-      width={1000}
+      width="95%"
+      style={{ maxWidth: 1000 }}
       destroyOnHidden
       centered
     >
@@ -229,8 +324,7 @@ const PartActionModal = ({
         onFinish={handleFinish}
       >
         <Form.List 
-          name="items" 
-          initialValue={[{ document_version: '1.0', document_type: 'Balloon' }]}
+          name="items"
         >
           {(fields, { add, remove }) => (
             <>
@@ -254,56 +348,122 @@ const PartActionModal = ({
                   >
                     {actionType === 'operation' && (
                       <>
-                        <Row gutter={16}>
-                          <Col span={4}>
-                            <Form.Item
-                              {...restField}
-                              name={[name, 'operation_number']}
-                              label="Op Number"
-                              rules={[{ required: true, message: 'Req' }]}
-                            >
-                              <Input placeholder="OP-001" autoComplete="off" />
-                            </Form.Item>
-                          </Col>
-                          <Col span={8}>
-                            <Form.Item
-                              {...restField}
-                              name={[name, 'operation_name']}
-                              label="Operation Name"
-                              rules={[{ required: true, message: 'Req' }]}
-                            >
-                              <Input placeholder="Cutting" autoComplete="off" />
-                            </Form.Item>
-                          </Col>
-                          <Col span={6}>
-                            <Form.Item
-                              {...restField}
-                              name={[name, 'setup_time']}
-                              label="Setup Time"
-                            >
-                              <TimePicker style={{ width: '100%' }} format="HH:mm:ss" />
-                            </Form.Item>
-                          </Col>
-                          <Col span={6}>
-                            <Form.Item
-                              {...restField}
-                              name={[name, 'cycle_time']}
-                              label="Cycle Time"
-                            >
-                              <TimePicker style={{ width: '100%' }} format="HH:mm:ss" />
-                            </Form.Item>
-                          </Col>
-                        </Row>
+                        <Form.Item noStyle shouldUpdate={(prev, curr) => prev.items?.[index]?.part_type_id !== curr.items?.[index]?.part_type_id}>
+                          {({ getFieldValue }) => {
+                            const isInHouse = getFieldValue(['items', index, 'part_type_id']) === 1 || !getFieldValue(['items', index, 'part_type_id']);
+                            return (
+                              <Row gutter={[12, 12]}>
+                                <Col xs={24} sm={8} md={4} lg={4}>
+                                  <Form.Item
+                                    {...restField}
+                                    name={[name, 'operation_number']}
+                                    label="Op Number"
+                                    rules={[{ required: true, message: 'Req' }]}
+                                  >
+                                    <Input placeholder="OP-001" autoComplete="off" />
+                                  </Form.Item>
+                                </Col>
+                                <Col xs={24} sm={8} md={5} lg={5}>
+                                  <Form.Item
+                                    {...restField}
+                                    name={[name, 'operation_name']}
+                                    label="Operation Name"
+                                    rules={[{ required: true, message: 'Req' }]}
+                                  >
+                                    <Input placeholder="Cutting" autoComplete="off" />
+                                  </Form.Item>
+                                </Col>
+                                <Col xs={24} sm={8} md={4} lg={4}>
+                                  <Form.Item
+                                    {...restField}
+                                    name={[name, 'part_type_id']}
+                                    label="Part Type"
+                                    initialValue={1}
+                                    rules={[{ required: true }]}
+                                  >
+                                    <Select
+                                      placeholder="Type"
+                                      loading={partTypesLoading}
+                                      onOpenChange={(open) => { if (open) fetchPartTypes(); }}
+                                      options={partTypes.map(pt => ({ label: pt.type_name, value: pt.id }))}
+                                    />
+                                  </Form.Item>
+                                </Col>
+                                {isInHouse && (
+                                  <>
+                                    <Col xs={12} sm={12} md={5} lg={5}>
+                                      <Form.Item
+                                        {...restField}
+                                        name={[name, 'setup_time']}
+                                        label="Setup Time"
+                                      >
+                                        <TimePicker style={{ width: '100%' }} format="HH:mm:ss" />
+                                      </Form.Item>
+                                    </Col>
+                                    <Col xs={12} sm={12} md={6} lg={6}>
+                                      <Form.Item
+                                        {...restField}
+                                        name={[name, 'cycle_time']}
+                                        label="Cycle Time"
+                                      >
+                                        <TimePicker style={{ width: '100%' }} format="HH:mm:ss" />
+                                      </Form.Item>
+                                    </Col>
+                                  </>
+                                )}
+                              </Row>
+                            );
+                          }}
+                        </Form.Item>
 
-                        <Row gutter={16}>
-                          <Col span={6}>
+                        <Form.Item noStyle shouldUpdate={(prev, curr) => prev.items?.[index]?.part_type_id !== curr.items?.[index]?.part_type_id}>
+                          {({ getFieldValue }) => {
+                            const isOutSource = getFieldValue(['items', index, 'part_type_id']) === 2;
+                            if (!isOutSource) return null;
+                            return (
+                              <Row gutter={[12, 12]}>
+                                <Col xs={24} sm={12} md={12}>
+                                  <Form.Item
+                                    {...restField}
+                                    name={[name, 'from_date']}
+                                    label="From Date"
+                                    rules={[{ required: true, message: 'Required for Out-Source' }]}
+                                  >
+                                    <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} />
+                                  </Form.Item>
+                                </Col>
+                                <Col xs={24} sm={12} md={12}>
+                                  <Form.Item
+                                    {...restField}
+                                    name={[name, 'to_date']}
+                                    label="To Date"
+                                    rules={[{ required: true, message: 'Required for Out-Source' }]}
+                                  >
+                                    <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} />
+                                  </Form.Item>
+                                </Col>
+                              </Row>
+                            );
+                          }}
+                        </Form.Item>
+
+                        <Form.Item noStyle shouldUpdate={(prev, curr) => prev.items?.[index]?.part_type_id !== curr.items?.[index]?.part_type_id}>
+                          {({ getFieldValue }) => {
+                            const isInHouse = getFieldValue(['items', index, 'part_type_id']) === 1 || !getFieldValue(['items', index, 'part_type_id']);
+                            if (!isInHouse) return null;
+                            return (
+                              <>
+                        <Row gutter={[12, 12]}>
+                          <Col xs={24} sm={12} md={8} lg={6}>
                             <Form.Item
                               {...restField}
                               name={[name, 'workcenter_id']}
                               label="Workcenter"
                             >
-                              <Select 
+                              <Select
                                 placeholder="Select WC"
+                                loading={workCentersLoading}
+                                onOpenChange={(open) => { if (open) fetchWorkCenters(); }}
                                 onChange={() => {
                                   // Clear machine selection when workcenter changes
                                   const currentItems = form.getFieldValue('items');
@@ -321,7 +481,7 @@ const PartActionModal = ({
                               </Select>
                             </Form.Item>
                           </Col>
-                          <Col span={6}>
+                          <Col xs={24} sm={12} md={8} lg={6}>
                             <Form.Item
                               noStyle
                               shouldUpdate={(prevValues, currentValues) => {
@@ -340,9 +500,11 @@ const PartActionModal = ({
                                     name={[name, 'machine_id']}
                                     label="Machine"
                                   >
-                                    <Select 
+                                    <Select
                                       placeholder={workcenterId ? "Select Machine" : "Select WC First"}
                                       disabled={!workcenterId}
+                                      loading={machinesLoading}
+                                      onOpenChange={(open) => { if (open) fetchMachines(); }}
                                     >
                                       {filteredMachines.map(m => (
                                         <Select.Option key={m.id} value={m.id}>
@@ -355,7 +517,7 @@ const PartActionModal = ({
                               }}
                             </Form.Item>
                           </Col>
-                          <Col span={12}>
+                          <Col xs={24} sm={24} md={8} lg={12}>
                             <Form.Item
                               {...restField}
                               name={[name, 'tool_ids']}
@@ -364,6 +526,8 @@ const PartActionModal = ({
                               <Select
                                 mode="multiple"
                                 placeholder="Select Tools"
+                                loading={toolsLoading}
+                                onOpenChange={(open) => { if (open) fetchTools(); }}
                                 optionFilterProp="children"
                                 maxTagCount="responsive"
                                 filterOption={(input, option) =>
@@ -380,8 +544,8 @@ const PartActionModal = ({
                           </Col>
                         </Row>
 
-                        <Row gutter={16}>
-                          <Col span={12}>
+                        <Row gutter={[12, 12]}>
+                          <Col xs={24} sm={12} md={12}>
                             <Form.Item
                               {...restField}
                               name={[name, 'work_instructions']}
@@ -390,7 +554,7 @@ const PartActionModal = ({
                               <TextArea rows={2} placeholder="Enter instructions..." />
                             </Form.Item>
                           </Col>
-                          <Col span={12}>
+                          <Col xs={24} sm={12} md={12}>
                             <Form.Item
                               {...restField}
                               name={[name, 'notes']}
@@ -400,116 +564,247 @@ const PartActionModal = ({
                             </Form.Item>
                           </Col>
                         </Row>
+                              </>
+                            );
+                          }}
+                        </Form.Item>
 
-                        <Row gutter={16}>
-                          <Col span={12}>
-                            <Form.Item
-                              {...restField}
-                              name={[name, 'files']}
-                              label="Operation Documents"
-                              valuePropName="fileList"
-                              getValueFromEvent={normFile}
-                              extra="Upload images or documents"
-                            >
-                              <Upload 
-                                multiple 
-                                beforeUpload={() => false}
-                                listType="text"
-                              >
-                                <Button icon={<UploadOutlined />}>Select Files</Button>
-                              </Upload>
-                            </Form.Item>
-                          </Col>
-                          <Col span={6}>
-                            <Form.Item
-                              {...restField}
-                              name={[name, 'document_type']}
-                              label="Doc Type"
-                            >
-                              <Select placeholder="Select Type">
-                                <Select.Option value="Balloon">Balloon</Select.Option>
-                                <Select.Option value="Image">Image</Select.Option>
-                                <Select.Option value="CNC">CNC</Select.Option>
-                                <Select.Option value="Other">Other</Select.Option>
-                              </Select>
-                            </Form.Item>
-                          </Col>
-                          <Col span={6}>
-                            <Form.Item
-                              {...restField}
-                              name={[name, 'document_version']}
-                              label="Doc Version"
-                            >
-                              <Input placeholder="1.0" disabled />
-                            </Form.Item>
-                          </Col>
-                        </Row>
+                        <Form.List name={[name, 'documents']} initialValue={[{ document_type: 'Balloon', document_version: '1.0' }]}>
+                          {(docFields, { add: addDoc, remove: removeDoc }) => (
+                            <>
+                              <div className="mt-4 border-t pt-4">
+                                <div className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                                  <UploadOutlined className="text-blue-500" />
+                                  Operation Documents
+                                </div>
+                                {docFields.map(({ key: docKey, name: docName, ...docRestField }, docIndex) => (
+                                  <Card 
+                                    key={docKey}
+                                    size="small"
+                                    className="mb-3 bg-gray-50/50 border-gray-200"
+                                    styles={{ body: { padding: '12px' } }}
+                                  >
+                                    <Row gutter={[12, 12]} align="bottom">
+                                      <Col xs={24} sm={10} lg={10}>
+                                        <Form.Item
+                                          {...docRestField}
+                                          name={[docName, 'files']}
+                                          label={<span className="text-xs font-medium text-gray-600">Files</span>}
+                                          valuePropName="fileList"
+                                          getValueFromEvent={normFile}
+                                          className="mb-0"
+                                        >
+                                          <Upload
+                                            multiple
+                                            beforeUpload={() => false}
+                                            className="w-full"
+                                          >
+                                            <Button icon={<UploadOutlined />} size="small" className="w-full text-left flex items-center">Select Files</Button>
+                                          </Upload>
+                                        </Form.Item>
+                                      </Col>
+                                      
+                                      <Col xs={24} sm={10} lg={10}>
+                                        <Form.Item
+                                          noStyle
+                                          shouldUpdate={(prev, current) => {
+                                            const prevType = prev.items?.[index]?.documents?.[docName]?.document_type;
+                                            const currentType = current.items?.[index]?.documents?.[docName]?.document_type;
+                                            return prevType !== currentType;
+                                          }}
+                                        >
+                                          {({ getFieldValue }) => {
+                                            const type = getFieldValue(['items', index, 'documents', docName, 'document_type']);
+                                            return (
+                                              <div className="flex flex-col gap-2">
+                                                <Form.Item
+                                                  {...docRestField}
+                                                  name={[docName, 'document_type']}
+                                                  label={<span className="text-xs font-medium text-gray-600">Doc Type</span>}
+                                                  className="mb-0"
+                                                >
+                                                  <Select placeholder="Select Type" size="small" className="w-full">
+                                                    <Select.Option value="Balloon">Balloon</Select.Option>
+                                                    <Select.Option value="Image">Image</Select.Option>
+                                                    <Select.Option value="CNC">CNC</Select.Option>
+                                                    <Select.Option value="Other">Other</Select.Option>
+                                                  </Select>
+                                                </Form.Item>
+                                                {type === 'Other' && (
+                                                  <Form.Item
+                                                    {...docRestField}
+                                                    name={[docName, 'document_type_other']}
+                                                    className="mb-0"
+                                                    rules={[{ required: true, message: 'Type Required' }]}
+                                                  >
+                                                    <Input placeholder="Custom type..." size="small" autoComplete="off" className="w-full" />
+                                                  </Form.Item>
+                                                )}
+                                              </div>
+                                            );
+                                          }}
+                                        </Form.Item>
+                                      </Col>
+                                      
+                                      <Col xs={18} sm={2} lg={2}>
+                                        <Form.Item
+                                          {...docRestField}
+                                          name={[docName, 'document_version']}
+                                          label={<span className="text-xs font-medium text-gray-600">Ver</span>}
+                                          className="mb-0"
+                                        >
+                                          <Input placeholder="1.0" disabled size="small" className="w-full bg-gray-50 text-center" />
+                                        </Form.Item>
+                                      </Col>
+                                      
+                                      <Col xs={6} sm={2} lg={2} className="flex justify-center">
+                                        {docFields.length > 1 && (
+                                          <Button
+                                            type="text"
+                                            danger
+                                            icon={<DeleteOutlined />}
+                                            onClick={() => removeDoc(docName)}
+                                            className="hover:bg-red-50"
+                                          />
+                                        )}
+                                      </Col>
+                                    </Row>
+                                  </Card>
+                                ))}
+                                <Form.Item>
+                                  <Button 
+                                    type="dashed" 
+                                    onClick={() => addDoc({ document_type: 'Balloon', document_version: '1.0' })} 
+                                    block 
+                                    icon={<PlusOutlined />}
+                                    className="text-blue-500 border-blue-200 hover:border-blue-400"
+                                  >
+                                    Add Document to Operation
+                                  </Button>
+                                </Form.Item>
+                              </div>
+                            </>
+                          )}
+                        </Form.List>
                       </>
                     )}
 
                     {actionType === 'document' && (
-                      <Row gutter={16} align="middle">
-                        <Col span={8}>
-                          <Form.Item
-                            {...restField}
-                            name={[name, 'document_name']}
-                            label="Document Name"
-                            rules={[{ required: true, message: 'Req' }]}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <Input placeholder="Tech Drawing" />
-                          </Form.Item>
-                        </Col>
-                        <Col span={6}>
-                          <Form.Item
-                            {...restField}
-                            name={[name, 'document_type']}
-                            label="Document Type"
-                            rules={[{ required: true, message: 'Req' }]}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <Select placeholder="Select Type">
-                              <Select.Option value="2D">2D</Select.Option>
-                              <Select.Option value="3D">3D</Select.Option>
-                              <Select.Option value="MPP">MPP</Select.Option>
-                              <Select.Option value="Other">Other</Select.Option>
-                            </Select>
-                          </Form.Item>
-                        </Col>
-                        <Col span={4}>
-                          <Form.Item
-                            {...restField}
-                            name={[name, 'document_version']}
-                            label="Version"
-                            rules={[{ required: true, message: 'Req' }]}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <Input placeholder="1.0" disabled />
-                          </Form.Item>
-                        </Col>
-                        <Col span={6}>
-                          <Form.Item
-                            {...restField}
-                            name={[name, 'file']}
-                            label="Upload File"
-                            valuePropName="fileList"
-                            getValueFromEvent={normFile}
-                            rules={[{ required: true, message: 'Req' }]}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <Upload maxCount={1} beforeUpload={() => false}>
-                              <Button icon={<UploadOutlined />}>Select File</Button>
-                            </Upload>
-                          </Form.Item>
-                        </Col>
-                      </Row>
+                      <div>
+                        <Row gutter={[16, 12]} align="bottom">
+                          <Col xs={24} sm={12} lg={6}>
+                            <Form.Item
+                              {...restField}
+                              name={[name, 'file']}
+                              label={<span className="text-xs font-medium text-gray-600">Upload File</span>}
+                              valuePropName="fileList"
+                              getValueFromEvent={normFile}
+                              rules={[{ required: true, message: 'Required' }]}
+                              className="mb-0"
+                            >
+                              <Upload
+                                maxCount={1}
+                                beforeUpload={() => false}
+                                className="w-full"
+                                onChange={({ fileList }) => {
+                                  const fileObj = fileList?.[0]?.originFileObj || fileList?.[0]?.file;
+                                  if (fileObj) {
+                                    const items = form.getFieldValue('items') || [];
+                                    const updated = [...items];
+                                    if (updated[name] && !updated[name].document_name) {
+                                      const baseName = fileObj.name ? fileObj.name.replace(/\.[^/.]+$/, '') : fileObj.name;
+                                      updated[name].document_name = baseName;
+                                      form.setFieldsValue({ items: updated });
+                                    }
+                                  }
+                                }}
+                              >
+                                <Button icon={<UploadOutlined />} className="w-full text-left flex items-center justify-start">
+                                  Select File
+                                </Button>
+                              </Upload>
+                            </Form.Item>
+                          </Col>
+                          
+                          <Col xs={24} sm={12} lg={6}>
+                            <Form.Item
+                              {...restField}
+                              name={[name, 'document_name']}
+                              label={<span className="text-xs font-medium text-gray-600">Document Name</span>}
+                              rules={[{ required: true, message: 'Required' }]}
+                              className="mb-0"
+                            >
+                              <Input placeholder="Tech Drawing" autoComplete="off" className="w-full"/>
+                            </Form.Item>
+                          </Col>
+                          
+                          <Col xs={24} sm={12} lg={6}>
+                            <Form.Item
+                              noStyle
+                              shouldUpdate={(prev, current) => {
+                                const prevType = prev.items?.[name]?.document_type;
+                                const currentType = current.items?.[name]?.document_type;
+                                return prevType !== currentType;
+                              }}
+                            >
+                              {({ getFieldValue }) => {
+                                const type = getFieldValue(['items', name, 'document_type']);
+                                return (
+                                  <div className="flex flex-col gap-2">
+                                    <Form.Item
+                                      {...restField}
+                                      name={[name, 'document_type']}
+                                      label={<span className="text-xs font-medium text-gray-600">Document Type</span>}
+                                      className="mb-0"
+                                      rules={[{ required: true, message: 'Required' }]}
+                                    >
+                                      <Select placeholder="Select Type" className="w-full">
+                                        <Select.Option value="2D">2D</Select.Option>
+                                        <Select.Option value="3D">3D</Select.Option>
+                                        <Select.Option value="Other">Other</Select.Option>
+                                      </Select>
+                                    </Form.Item>
+                                    {type === 'Other' && (
+                                      <Form.Item
+                                        {...restField}
+                                        name={[name, 'document_type_other']}
+                                        className="mb-0"
+                                        rules={[{ required: true, message: 'Type Required' }]}
+                                      >
+                                        <Input placeholder="Custom type..." autoComplete="off" className="w-full" />
+                                      </Form.Item>
+                                    )}
+                                  </div>
+                                );
+                              }}
+                            </Form.Item>
+                          </Col>
+                          
+                          <Col xs={24} sm={12} lg={6}>
+                            <Form.Item
+                              {...restField}
+                              name={[name, 'document_version']}
+                              label={<span className="text-xs font-medium text-gray-600">Version</span>}
+                              rules={[{ required: true, message: 'Required' }]}
+                              className="mb-0"
+                            >
+                              <Input placeholder="1.0" disabled className="w-full bg-gray-50"/>
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                      </div>
                     )}
                   </Card>
                 ))}
               </div>
               
               <Form.Item style={{ marginTop: 16 }}>
-                <Button type="dashed" onClick={() => add({ document_version: '1.0', document_type: 'Balloon' })} block icon={<PlusOutlined />}>
+                <Button
+                  type="dashed"
+                  onClick={() => add({ part_type_id: 1, document_version: '1.0', document_type: actionType === 'document' ? '2D' : 'Balloon' })}
+                  block
+                  icon={<PlusOutlined />}
+                >
                   Add Another {actionType === 'operation' ? 'Operation' : 'Document'}
                 </Button>
               </Form.Item>
@@ -517,11 +812,11 @@ const PartActionModal = ({
           )}
         </Form.List>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <Button onClick={onCancel}>
+        <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+          <Button onClick={onCancel} className="w-full sm:w-auto">
             Cancel
           </Button>
-          <Button type="primary" htmlType="submit" loading={loading} className="no-hover-btn">
+          <Button type="primary" htmlType="submit" loading={loading} className="no-hover-btn w-full sm:w-auto">
             {loading ? 'Creating...' : `Create ${actionType ? actionType.charAt(0).toUpperCase() + actionType.slice(1) + 's' : 'Items'}`}
           </Button>
         </div>

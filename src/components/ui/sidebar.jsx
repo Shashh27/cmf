@@ -1,16 +1,47 @@
-import React from "react";
-import { Layout, Menu } from "antd";
+import React, { useState, useEffect } from "react";
+import { Layout, Menu, Drawer, Button } from "antd";
 import { Link, useLocation } from "react-router-dom";
-import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,SafetyCertificateOutlined,
-  DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined } from "@ant-design/icons";
+import { 
+  AppstoreOutlined, 
+  DeploymentUnitOutlined, 
+  SettingOutlined, 
+  ShoppingCartOutlined,
+  DashboardOutlined,
+  MonitorOutlined,
+  ToolOutlined,
+  SafetyCertificateOutlined,
+  DatabaseOutlined,
+  FileTextOutlined,
+  BellOutlined,
+  LockOutlined,
+  MenuOutlined,
+  CloseOutlined
+} from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 
 const { Sider } = Layout;
 
-const Sidebar = () => {
+const Sidebar = ({ collapsed, onCollapse }) => {
   const location = useLocation();
   const selectedKey = location.pathname;
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   
+  // Detect mobile screen
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) {
+        setMobileDrawerOpen(false);
+      }
+    };
+    
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Get the role prefix from the path
   const getRolePrefix = () => {
     const path = location.pathname;
@@ -36,7 +67,7 @@ const Sidebar = () => {
   const allItems = [
     {
       key: `${prefix}/dashboard`,
-      label: <Link to={`${prefix}/dashboard`}>Dashboard</Link>,
+      label: <Link to={`${prefix}/dashboard`} onClick={() => setMobileDrawerOpen(false)}>Dashboard</Link>,
       icon: <DashboardOutlined />,
     },
     {
@@ -44,14 +75,14 @@ const Sidebar = () => {
       label: 'OMS',
       icon: <ShoppingCartOutlined />,
       children: [
-        { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`}>Orders</Link> },
-        { key: `${prefix}/oms/rawmaterials`, label: <Link to={`${prefix}/oms/rawmaterials`}>Raw Materials</Link> },
-        { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`}>Parts Priority</Link> },
+        { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
+        { key: `${prefix}/oms/rawmaterials`, label: <Link to={`${prefix}/oms/rawmaterials`} onClick={() => setMobileDrawerOpen(false)}>Raw Materials</Link> },
+        { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
       ],
     },
     {
       key: `${prefix}/pdm`,
-      label: <Link to={`${prefix}/pdm`}>PDM</Link>,
+      label: <Link to={`${prefix}/pdm`} onClick={() => setMobileDrawerOpen(false)}>PDM</Link>,
       icon: <DeploymentUnitOutlined />,
     },
     {
@@ -59,14 +90,14 @@ const Sidebar = () => {
       label: 'PPS',
       icon: <AppstoreOutlined />,
       children: [
-        { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`}>Assets Availability</Link> },
-        { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`}>Capacity Planning</Link> },
-        { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`}>Machine Scheduling</Link> },
+        { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link> },
+        { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`} onClick={() => setMobileDrawerOpen(false)}>Capacity Planning</Link> },
+        { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link> },
       ],
     },
     {
       key: `${prefix}/configuration`,
-      label: <Link to={`${prefix}/configuration`}>Configuration</Link>,
+      label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
       icon: <SettingOutlined />,
     },
     {
@@ -83,7 +114,7 @@ const Sidebar = () => {
     },
     {
       key: `${prefix}/quality-management`,
-      label: <Link to={`${prefix}/quality-management`}>Quality Management</Link>,
+      label: <Link to={`${prefix}/quality-management`} onClick={() => setMobileDrawerOpen(false)}>Quality Management</Link>,
       icon: <SafetyCertificateOutlined />,
     },
     {
@@ -91,23 +122,23 @@ const Sidebar = () => {
       label: 'Inventory Management',
       icon: <DatabaseOutlined />,
       children: [
-        { key: `${prefix}/inventory-management/inventory-master`, label: <Link to={`${prefix}/inventory-management/inventory-master`}>Inventory Master</Link> },
-        { key: `${prefix}/inventory-management/overview-data`, label: <Link to={`${prefix}/inventory-management/overview-data`}>Overview Data</Link> },
+        { key: `${prefix}/inventory-management/inventory-master`, label: <Link to={`${prefix}/inventory-management/inventory-master`} onClick={() => setMobileDrawerOpen(false)}>Inventory Master</Link> },
+        { key: `${prefix}/inventory-management/overview-data`, label: <Link to={`${prefix}/inventory-management/overview-data`} onClick={() => setMobileDrawerOpen(false)}>Overview Data</Link> },
       ],
     },
     {
       key: `${prefix}/document-management`,
-      label: <Link to={`${prefix}/document-management`}>Document Management</Link>,
+      label: <Link to={`${prefix}/document-management`} onClick={() => setMobileDrawerOpen(false)}>Document Management</Link>,
       icon: <FileTextOutlined />,
     },
     {
       key: `${prefix}/notification`,
-      label: <Link to={`${prefix}/notification`}>Notification</Link>,
+      label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Notification</Link>,
       icon: <BellOutlined />,
     },
     {
       key: `${prefix}/access_control`,
-      label: <Link to={`${prefix}/access_control`}>Access Control</Link>,
+      label: <Link to={`${prefix}/access_control`} onClick={() => setMobileDrawerOpen(false)}>Access Control</Link>,
       icon: <LockOutlined />,
     },
   ];
@@ -120,22 +151,22 @@ const Sidebar = () => {
     items = [
       {
         key: `${prefix}/dashboard`,
-        label: <Link to={`${prefix}/dashboard`}>Dashboard</Link>,
+        label: <Link to={`${prefix}/dashboard`} onClick={() => setMobileDrawerOpen(false)}>Dashboard</Link>,
         icon: <DashboardOutlined />,
       },
       {
         key: `${prefix}/inspection-results`,
-        label: <Link to={`${prefix}/inspection-results`}>Inspection Results</Link>,
+        label: <Link to={`${prefix}/inspection-results`} onClick={() => setMobileDrawerOpen(false)}>Inspection Results</Link>,
         icon: <SafetyCertificateOutlined />,
       },
       {
         key: `${prefix}/inventory-data`,
-        label: <Link to={`${prefix}/inventory-data`}>Inventory Data</Link>,
+        label: <Link to={`${prefix}/inventory-data`} onClick={() => setMobileDrawerOpen(false)}>Inventory Data</Link>,
         icon: <DatabaseOutlined />,
       },
       {
         key: `${prefix}/documents`,
-        label: <Link to={`${prefix}/documents`}>Documents</Link>,
+        label: <Link to={`${prefix}/documents`} onClick={() => setMobileDrawerOpen(false)}>Documents</Link>,
         icon: <FileTextOutlined />,
       },
     ];
@@ -143,12 +174,12 @@ const Sidebar = () => {
     items = [
       {
         key: `${prefix}/oms/orders`,
-        label: <Link to={`${prefix}/oms/orders`}>Orders</Link>,
+        label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link>,
         icon: <ShoppingCartOutlined />,
       },
       {
         key: `${prefix}/pdm`,
-        label: <Link to={`${prefix}/pdm`}>PDM</Link>,
+        label: <Link to={`${prefix}/pdm`} onClick={() => setMobileDrawerOpen(false)}>PDM</Link>,
         icon: <DeploymentUnitOutlined />,
       },
     ];
@@ -156,9 +187,79 @@ const Sidebar = () => {
     items = [allItems[0]];
   }
 
+  const MenuContent = () => (
+    <>
+      <div className="p-3 sm:p-4 flex justify-center items-center border-b border-gray-100 mb-2">
+        <img src={cmtisLogo} alt="CMTIS Logo" style={{ height: isMobile ? 32 : 40 }} />
+      </div>
+      <Menu
+        mode="inline"
+        defaultSelectedKeys={[selectedKey]}
+        defaultOpenKeys={getOpenKeys()}
+        selectedKeys={[selectedKey]}
+        style={{ borderRight: 0 }}
+        items={items}
+      />
+    </>
+  );
+
+  // Mobile Drawer
+  if (isMobile) {
+    return (
+      <>
+        <Button
+          type="text"
+          icon={<MenuOutlined />}
+          onClick={() => setMobileDrawerOpen(true)}
+          style={{
+            position: 'fixed',
+            top: 16,
+            left: 16,
+            zIndex: 1001,
+            fontSize: 20,
+            width: 40,
+            height: 40,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'white',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            borderRadius: 8
+          }}
+        />
+        <Drawer
+          placement="left"
+          onClose={() => setMobileDrawerOpen(false)}
+          open={mobileDrawerOpen}
+          closable={false}
+          styles={{ 
+            body: { padding: 0 },
+            wrapper: { width: 280 }
+          }}
+          style={{ zIndex: 1000 }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
+            <Button
+              type="text"
+              icon={<CloseOutlined />}
+              onClick={() => setMobileDrawerOpen(false)}
+              size="large"
+            />
+          </div>
+          <MenuContent />
+        </Drawer>
+      </>
+    );
+  }
+
+  // Desktop Sidebar
   return (
     <Sider 
-      width={224} 
+      width={224}
+      collapsedWidth={80}
+      collapsed={collapsed}
+      onCollapse={onCollapse}
+      collapsible
       theme="light" 
       style={{ 
         overflow: 'auto', 
@@ -168,22 +269,14 @@ const Sidebar = () => {
         top: 0, 
         bottom: 0, 
         borderRight: '1px solid #f0f0f0',
-        zIndex: 100
+        zIndex: 100,
+        transition: 'all 0.2s'
       }}
     >
-       <div className="p-4 flex justify-center items-center border-b border-gray-100 mb-2">
-         <img src={cmtisLogo} alt="CMTIS Logo" style={{ height: 40 }} />
-       </div>
-       <Menu
-         mode="inline"
-         defaultSelectedKeys={[selectedKey]}
-         defaultOpenKeys={getOpenKeys()}
-         selectedKeys={[selectedKey]}
-         style={{ borderRight: 0 }}
-         items={items}
-       />
+      <MenuContent />
     </Sider>
   );
 };
 
 export default Sidebar;
+
