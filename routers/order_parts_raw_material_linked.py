@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Dict
 from pydantic import BaseModel
+import uuid
 
 from DB.database import get_db
 from DB.models.oms import OrderPartsRawMaterialLinked, Part, Order
@@ -26,6 +27,7 @@ def _linkage_to_dict(linkage: OrderPartsRawMaterialLinked) -> dict:
         "order_id": linkage.order_id,
         "created_at": linkage.created_at,
         "updated_at": linkage.updated_at,
+        "linkage_group_id": linkage.linkage_group_id,
         "material_name": rm.material_name if rm else None,
         "part_name": pt.part_name if pt else None,
         "part_number": pt.part_number if pt else None,
@@ -58,10 +60,19 @@ class BulkCreateRequest(BaseModel):
     order_id: int
     order_quantities: Optional[Dict[int, int]] = None
     order_masses: Optional[Dict[int, float]] = None
+    linkage_group_id: Optional[str] = None  # If provided, same ID used for all orders in one Submit
 
 
 class BulkStatusUpdateRequest(BaseModel):
     material_status: str
+    # Optional: allow updating batch quantity and mass in the same request
+    order_quantity: Optional[int] = None
+    mass: Optional[float] = None
+
+
+class GroupQuantitiesUpdateRequest(BaseModel):
+    order_quantity: Optional[int] = None
+    mass: Optional[float] = None
 
 
 
@@ -98,19 +109,22 @@ def create_bulk_linkages(request: BulkCreateRequest, db: Session = Depends(get_d
     qty_map = request.order_quantities or {}
     mass_map = request.order_masses or {}
 
-    # Fetch all existing linkages for this order in one query to avoid per-pair lookups
+    linkage_group_id = request.linkage_group_id or uuid.uuid4().hex
+
+    # Only skip if same (order, raw_material, part, batch) already exists - allow same part/order/material in a new batch
     existing_set = {
-        (l.raw_material_id, l.part_id)
+        (l.raw_material_id, l.part_id, (l.linkage_group_id or ""))
         for l in db.query(
             OrderPartsRawMaterialLinked.raw_material_id,
             OrderPartsRawMaterialLinked.part_id,
+            OrderPartsRawMaterialLinked.linkage_group_id,
         ).filter(OrderPartsRawMaterialLinked.order_id == request.order_id).all()
     }
 
     new_linkages = []
     for raw_material_id in request.raw_material_ids:
         for part_id in request.part_ids:
-            if (raw_material_id, part_id) in existing_set:
+            if (raw_material_id, part_id, linkage_group_id) in existing_set:
                 continue
             rm = raw_materials_map[raw_material_id]
             db_linkage = OrderPartsRawMaterialLinked(
@@ -120,6 +134,7 @@ def create_bulk_linkages(request: BulkCreateRequest, db: Session = Depends(get_d
                 order_quantity=qty_map.get(raw_material_id, rm.quantity),
                 mass=mass_map.get(raw_material_id, rm.mass),
                 material_status="purchase request",
+                linkage_group_id=linkage_group_id,
             )
             db.add(db_linkage)
             new_linkages.append(db_linkage)
@@ -138,6 +153,7 @@ def create_bulk_linkages(request: BulkCreateRequest, db: Session = Depends(get_d
             "part_id": lnk.part_id,
             "order_id": lnk.order_id,
             "created_at": lnk.created_at.isoformat() if lnk.created_at else None,
+            "linkage_group_id": lnk.linkage_group_id,
             "material_name": rm.material_name,
             "part_name": pt.part_name,
             "part_number": pt.part_number,
@@ -301,7 +317,7 @@ def update_status_by_order_and_material(order_id: int, raw_material_id: int, pay
     for linkage in linkages:
         linkage.material_status = payload.material_status
 
-    # Use the first linkage's order qty/mass as the group value (not summed per part)
+    # Batch total is stored on each linkage (same for all parts); use first linkage only (do not sum).
     first_link = linkages[0]
     group_order_qty = first_link.order_quantity or 0
     group_order_mass = first_link.mass or 0
@@ -317,3 +333,72 @@ def update_status_by_order_and_material(order_id: int, raw_material_id: int, pay
     db.commit()
 
     return [_linkage_to_dict(l) for l in linkages]
+
+
+@router.put("/status/group/{linkage_group_id}", response_model=List[OrderPartsRawMaterialLinkedWithDetails])
+def update_status_by_group(linkage_group_id: str, payload: BulkStatusUpdateRequest, db: Session = Depends(get_db)):
+    """Update material status for all linkages in a demand batch (group)."""
+    linkages = _load_linkages(
+        db.query(OrderPartsRawMaterialLinked).filter(
+            OrderPartsRawMaterialLinked.linkage_group_id == linkage_group_id,
+        )
+    ).all()
+
+    if not linkages:
+        raise HTTPException(status_code=404, detail="No linkages found for this group")
+
+    new_status = payload.material_status.lower()
+    had_available_before = any((l.material_status or "").lower() == "available" for l in linkages)
+
+    # Update linkage status and, if provided, batch quantities
+    for linkage in linkages:
+        linkage.material_status = payload.material_status
+        if payload.order_quantity is not None:
+            linkage.order_quantity = payload.order_quantity
+        if payload.mass is not None:
+            linkage.mass = payload.mass
+
+    # Batch total is same on every linkage (one Order Kg/Qty per material per submit);
+    # use first per raw_material after applying any new qty/kg.
+    by_raw_material: Dict[int, tuple] = {}
+    for l in linkages:
+        rm_id = l.raw_material_id
+        if rm_id not in by_raw_material:
+            by_raw_material[rm_id] = (l.order_quantity or 0, (l.mass or 0))
+
+    for raw_material_id, (group_qty, group_mass) in by_raw_material.items():
+        raw_material = db.query(RawMaterial).filter(RawMaterial.id == raw_material_id).first()
+        if not raw_material:
+            continue
+        if new_status == "available" and not had_available_before:
+            raw_material.quantity = (raw_material.quantity or 0) + group_qty
+            raw_material.mass = (raw_material.mass or 0) + group_mass
+        elif new_status != "available" and had_available_before:
+            raw_material.quantity = max(0, (raw_material.quantity or 0) - group_qty)
+            raw_material.mass = max(0.0, (raw_material.mass or 0) - group_mass)
+        raw_material.status = "AVAILABLE" if (raw_material.quantity or 0) > 0 else "NOT AVAILABLE"
+
+    db.commit()
+    return [_linkage_to_dict(l) for l in linkages]
+
+
+@router.put("/group/{linkage_group_id}/quantities", response_model=List[OrderPartsRawMaterialLinkedWithDetails])
+def update_group_quantities(linkage_group_id: str, payload: GroupQuantitiesUpdateRequest, db: Session = Depends(get_db)):
+    """Update order_quantity and mass for all linkages in a batch (group). Uses this batch's linkage_group_id only."""
+    linkages = db.query(OrderPartsRawMaterialLinked).filter(
+        OrderPartsRawMaterialLinked.linkage_group_id == linkage_group_id,
+    ).all()
+    if not linkages:
+        raise HTTPException(status_code=404, detail="No linkages found for this group")
+    for l in linkages:
+        if payload.order_quantity is not None:
+            l.order_quantity = payload.order_quantity
+        if payload.mass is not None:
+            l.mass = payload.mass
+    db.commit()
+    refreshed = _load_linkages(
+        db.query(OrderPartsRawMaterialLinked).filter(
+            OrderPartsRawMaterialLinked.linkage_group_id == linkage_group_id,
+        )
+    ).all()
+    return [_linkage_to_dict(l) for l in refreshed]

@@ -507,6 +507,7 @@ class OrderPartsRawMaterialLinkedBase(BaseModel):
     order_quantity: Optional[int] = None
     mass: Optional[float] = None
     material_status: Optional[str] = None
+    linkage_group_id: Optional[str] = None
 
 
 class OrderPartsRawMaterialLinkedCreate(OrderPartsRawMaterialLinkedBase):
@@ -520,6 +521,7 @@ class OrderPartsRawMaterialLinkedUpdate(BaseModel):
     order_quantity: Optional[int] = None
     mass: Optional[float] = None
     material_status: Optional[str] = None
+    linkage_group_id: Optional[str] = None
 
 
 class OrderPartsRawMaterialLinked(OrderPartsRawMaterialLinkedBase):
@@ -540,6 +542,7 @@ class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     material_status: Optional[str] = None
+    linkage_group_id: Optional[str] = None
     updated_at: Optional[datetime] = None
 
     class Config:
@@ -584,6 +587,7 @@ class OrderPartPriority(OrderPartPriorityBase):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
+    product_number: Optional[str] = None
     part_type_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -597,6 +601,7 @@ class OrderWisePriority(BaseModel):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
+    product_number: Optional[str] = None
     min_priority: int
     max_priority: int
     part_count: int

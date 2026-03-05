@@ -188,7 +188,7 @@ class Order(Base):
     __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True)
-    sale_order_number = Column(String, nullable=False)
+    sale_order_number = Column(String, unique=True, nullable=False)
     project_name = Column(String, nullable=True)
     order_date = Column(TIMESTAMP, nullable=True)
     customer_id = Column(Integer, ForeignKey("configuration.customers.id"), nullable=False)
@@ -265,6 +265,7 @@ class OrderPartsRawMaterialLinked(Base):
     order_quantity = Column(Integer, nullable=True)
     mass = Column(Float, nullable=True)
     material_status = Column(String, nullable=True)
+    linkage_group_id = Column(String, nullable=True)  # Segregates demand batches (e.g. 20 kg vs 5 kg)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

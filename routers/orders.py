@@ -39,6 +39,17 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 @router.post("/", response_model=OrderResponse)
 def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     """Create a new order"""
+    # Trim the sale_order_number
+    order.sale_order_number = order.sale_order_number.strip() if order.sale_order_number else order.sale_order_number
+
+    # Check if sale_order_number already exists
+    existing_order = db.query(Order).filter(Order.sale_order_number == order.sale_order_number).first()
+    if existing_order:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Order with Project Number '{order.sale_order_number}' already exists."
+        )
+
     # Check if customer exists
     customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
     if not customer:
@@ -356,6 +367,7 @@ def get_all_part_priorities(db: Session = Depends(get_db)):
             "sale_order_number": p.order.sale_order_number if p.order else None,
             "project_name": p.order.project_name if p.order else None,
             "product_name": p.product.product_name if p.product else None,
+            "product_number": p.product.product_number if p.product else None,
             "part_type_name": p.part.type.type_name if p.part and p.part.type else None,
             "created_at": p.created_at,
             "updated_at": p.updated_at,
@@ -450,6 +462,7 @@ def get_order_wise_priorities(db: Session = Depends(get_db)):
             Order.sale_order_number,
             Order.project_name,
             Product.product_name,
+            Product.product_number,
             groups_subquery.c.min_priority,
             groups_subquery.c.max_priority,
             groups_subquery.c.part_count,
@@ -468,6 +481,7 @@ def get_order_wise_priorities(db: Session = Depends(get_db)):
                 "sale_order_number": row.sale_order_number,
                 "project_name": row.project_name,
                 "product_name": row.product_name,
+                "product_number": row.product_number,
                 "min_priority": row.min_priority,
                 "max_priority": row.max_priority,
                 "part_count": row.part_count,
@@ -515,6 +529,20 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Trim the sale_order_number if it is being updated
+    if order_update.sale_order_number is not None:
+        order_update.sale_order_number = order_update.sale_order_number.strip()
+
+    # Check if new sale_order_number already exists for a different order
+    if order_update.sale_order_number is not None and order_update.sale_order_number != order.sale_order_number:
+        existing_order = db.query(Order).filter(Order.sale_order_number == order_update.sale_order_number).first()
+        if existing_order:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Order with Project Number '{order_update.sale_order_number}' already exists."
+            )
+
     if order_update.customer_id is not None:
         customer = db.query(Customer).filter(Customer.id == order_update.customer_id).first()
         if not customer:
