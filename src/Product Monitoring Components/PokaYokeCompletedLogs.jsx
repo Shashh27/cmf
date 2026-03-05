@@ -10,13 +10,8 @@ import {
   Modal,
   message,
 } from 'antd';
-import {
-  ReloadOutlined,
-  FileTextOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-} from '@ant-design/icons';
-import config from '../Config/config';
+import { ReloadOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, } from '@ant-design/icons';
+import { API_BASE_URL } from '../Config/auth.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -44,10 +39,10 @@ const PokaYokeCompletedLogs = () => {
   const fetchMetaData = async () => {
     try {
       const [machinesRes, checklistsRes, ordersRes, operatorsRes] = await Promise.all([
-        fetch(`${config.API_BASE_URL}/machines`),
-        fetch(`${config.API_BASE_URL}/pokayoke-checklists`),
-        fetch(`${config.API_BASE_URL}/orders`),
-        fetch(`${config.API_BASE_URL}/access-users?skip=0&limit=1000`),
+        fetch(`${API_BASE_URL}/machines`),
+        fetch(`${API_BASE_URL}/pokayoke-checklists`),
+        fetch(`${API_BASE_URL}/orders`),
+        fetch(`${API_BASE_URL}/access-users?skip=0&limit=1000`),
       ]);
 
       if (!machinesRes.ok) throw new Error('Failed to fetch machines');
@@ -73,8 +68,8 @@ const PokaYokeCompletedLogs = () => {
     try {
       setLoading(true);
       const url = machineId
-        ? `${config.API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`
-        : `${config.API_BASE_URL}/pokayoke-completed-logs`;
+        ? `${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`
+        : `${API_BASE_URL}/pokayoke-completed-logs`;
 
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch completion logs');
@@ -165,8 +160,8 @@ const PokaYokeCompletedLogs = () => {
 
     try {
       const [logRes, checklistRes] = await Promise.all([
-        fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/${log.id}`),
-        fetch(`${config.API_BASE_URL}/pokayoke-checklists/${log.checklist_id}`),
+        fetch(`${API_BASE_URL}/pokayoke-completed-logs/${log.id}`),
+        fetch(`${API_BASE_URL}/pokayoke-checklists/${log.checklist_id}`),
       ]);
 
       if (!logRes.ok) throw new Error('Failed to fetch log details');

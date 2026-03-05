@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Card,Row,Col,Typography,Button,Tag,Space,DatePicker,Select,Input,Tabs } from 'antd';
-import { ToolOutlined,DashboardOutlined,ClockCircleOutlined,ProfileOutlined,SettingOutlined,FileTextOutlined,DownloadOutlined } from '@ant-design/icons';
+import { ToolOutlined,DashboardOutlined,ClockCircleOutlined,ProfileOutlined,SettingOutlined,FileTextOutlined,DownloadOutlined,WarningOutlined } from '@ant-design/icons';
 import machineImg from '../assets/machine.png';
 import PokaYokeChecklist from './PokaYokeChecklist';
+import ReportIssue from './ReportIssue';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -16,6 +17,7 @@ const Dashboard = () => {
   const [docFilter, setDocFilter] = useState('All Documents');
   const [showChecklist, setShowChecklist] = useState(false);
   const [machineId, setMachineId] = useState(null);
+  const [showReportIssue, setShowReportIssue] = useState(false);
 
   useEffect(() => {
     try {
@@ -147,7 +149,17 @@ const Dashboard = () => {
                 </Space>
                 <Space>
                   <span style={{ width: 8, height: 8, borderRadius: 9999, background: '#ff4d4f', display: 'inline-block' }} />
-                  <Button type="link" danger>Report Issue</Button>
+                  <Button
+                    type="link"
+                    danger
+                    className="report-issue-link"
+                    onClick={() => setShowReportIssue(true)}
+                  >
+                    <span className="report-issue-icon">
+                      <WarningOutlined />
+                    </span>
+                    Report Issue
+                  </Button>
                 </Space>
               </div>
             }
@@ -494,8 +506,8 @@ const Dashboard = () => {
               block
               style={{
                 borderRadius: 9999,
-                background: '#22c55e',
-                borderColor: '#22c55e',
+                background: '#1677FF',
+                borderColor: '#1677FF',
               }}
               onClick={() => setShowChecklist(true)}
             >
@@ -526,6 +538,11 @@ const Dashboard = () => {
       <PokaYokeChecklist
         open={showChecklist}
         onClose={() => setShowChecklist(false)}
+        machineId={machineId}
+      />
+      <ReportIssue
+        open={showReportIssue}
+        onClose={() => setShowReportIssue(false)}
         machineId={machineId}
       />
     </div>

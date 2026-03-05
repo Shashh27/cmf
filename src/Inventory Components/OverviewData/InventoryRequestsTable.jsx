@@ -1,17 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState(null);
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [loading] = useState(false);
+ 
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
   });
+
+  const getCurrentAdminId = () => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        if (user && user.id != null) return parseInt(user.id);
+      }
+    } catch {
+      void 0;
+    }
+    return 0;
+  };
+  const getCurrentAdminName = () => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        return user?.username || user?.name || user?.email || 'admin';
+      }
+    } catch {
+      void 0;
+    }
+    return 'admin';
+  };
 
   useEffect(() => {
     fetchInventoryRequests();
@@ -19,7 +43,7 @@ const InventoryRequestsTable = () => {
 
   const fetchInventoryRequests = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/inventory-requests/`);
+      const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -39,7 +63,8 @@ const InventoryRequestsTable = () => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=6&status=approved`, {
+          const adminId = getCurrentAdminId();
+          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=approved`, {
             method: 'PUT'
           });
           
@@ -50,9 +75,14 @@ const InventoryRequestsTable = () => {
           
           message.success('Inventory request approved successfully');
           
-          // Update only the specific row instead of refetching all data
+          let result = {};
+          try {
+            result = await response.json();
+          } catch {
+            result = {};
+          }
           setRequests(prev => prev.map(req => 
-            req.id === record.id ? { ...req, status: 'approved' } : req
+            req.id === record.id ? { ...req, status: 'approved', admin_name: result.admin_name || getCurrentAdminName() } : req
           ));
         } catch (error) {
           console.error('Failed to approve request:', error);
@@ -71,7 +101,8 @@ const InventoryRequestsTable = () => {
       okType: 'danger',
       onOk: async () => {
         try {
-          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=6&status=rejected`, {
+          const adminId = getCurrentAdminId();
+          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=rejected`, {
             method: 'PUT'
           });
           
@@ -82,9 +113,14 @@ const InventoryRequestsTable = () => {
           
           message.success('Inventory request rejected successfully');
           
-          // Update only the specific row instead of refetching all data
+          let result = {};
+          try {
+            result = await response.json();
+          } catch {
+            result = {};
+          }
           setRequests(prev => prev.map(req => 
-            req.id === record.id ? { ...req, status: 'rejected' } : req
+            req.id === record.id ? { ...req, status: 'rejected', admin_name: result.admin_name || getCurrentAdminName() } : req
           ));
         } catch (error) {
           console.error('Failed to reject request:', error);
@@ -92,11 +128,6 @@ const InventoryRequestsTable = () => {
         }
       }
     });
-  };
-
-  const handleViewDetails = (record) => {
-    setSelectedRequest(record);
-    setDetailModalVisible(true);
   };
 
   const getStatusColor = (status) => {
@@ -110,16 +141,6 @@ const InventoryRequestsTable = () => {
       default:
         return 'default';
     }
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    // Format: DD/MM/YYYY
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
   };
 
   const formatDateTime = (dateString) => {
@@ -290,37 +311,6 @@ const InventoryRequestsTable = () => {
         size="small"
         scroll={{ x: 1200 }}
       />
-
-      <Modal
-        title="Inventory Request Details"
-        open={detailModalVisible}
-        onCancel={() => setDetailModalVisible(false)}
-        footer={[
-          <Button key="close" onClick={() => setDetailModalVisible(false)}>
-            Close
-          </Button>
-        ]}
-        width={800}
-      >
-        {selectedRequest && (
-          <div>
-            <p><strong>Tool Name:</strong> {selectedRequest.tool_name || '-'}</p>
-            <p><strong>Project Number:</strong> {selectedRequest.project_name || '-'}</p>
-            <p><strong>Part Name:</strong> {selectedRequest.part_name || '-'}</p>
-            <p><strong>Quantity:</strong> {selectedRequest.quantity}</p>
-            <p><strong>Purpose of Use:</strong> {selectedRequest.purpose_of_use || '-'}</p>
-            <p><strong>Status:</strong> 
-              <Tag color={getStatusColor(selectedRequest.status)} style={{ marginLeft: 8 }}>
-                {selectedRequest.status?.toUpperCase() || '-'}
-              </Tag>
-            </p>
-            <p><strong>Requested By:</strong> {selectedRequest.operator_name || '-'}</p>
-            <p><strong>Approved By:</strong> {selectedRequest.admin_name || '-'}</p>
-            <p><strong>Created At:</strong> {formatDateTime(selectedRequest.created_at)}</p>
-            <p><strong>Updated At:</strong> {formatDateTime(selectedRequest.updated_at)}</p>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };

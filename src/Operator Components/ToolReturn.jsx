@@ -131,6 +131,14 @@ const ToolReturn = () => {
       }
     },
     {
+      title: 'Collected By',
+      dataIndex: 'collected_by',
+      key: 'collected_by',
+      width: 150,
+      ellipsis: true,
+      render: (text, record) => text || record.admin_name || record.supervisor_name || '-',
+    },
+    {
       title: 'Details',
       key: 'details',
       width: 200,

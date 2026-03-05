@@ -44,7 +44,6 @@ const ToolRequested = ({ onReturnSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [returnLoading, setReturnLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
-  const [toolsById, setToolsById] = useState({});
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -59,7 +58,6 @@ const ToolRequested = ({ onReturnSuccess }) => {
   useEffect(() => {
     fetchRequests();
     fetchReturnRequests();
-    fetchToolsList();
   }, []);
 
   const getCurrentOperatorId = () => {
@@ -69,18 +67,11 @@ const ToolRequested = ({ onReturnSuccess }) => {
         const user = JSON.parse(storedUser);
         if (user && user.id != null) return parseInt(user.id);
       }
-    } catch (e) {
-      
+    } catch {
+      void 0;
     }
     const fallback = localStorage.getItem('operator_id');
     return fallback ? parseInt(fallback) : null;
-  };
-
-  const isConsumableType = (item) => {
-    const v = (item?.tool_type ?? item?.type ?? '').toString().trim().toLowerCase();
-    if (!v) return false;
-    if (v.includes('non')) return false;
-    return v.includes('consum');
   };
 
   const handleTableChange = (newPagination) => {
@@ -104,18 +95,11 @@ const ToolRequested = ({ onReturnSuccess }) => {
     return rr.status === 'collected' ? sum + (rr.returned_qty || 0) : sum;
   }, 0);
   const totalToBeReturned = requests.reduce((sum, r) => {
-    const isConsum = isConsumableType(r);
-    if (r.status === 'approved' && !isConsum) {
+    if (r.status === 'approved') {
       const pendingQty = pendingByReq[r.id] || 0;
       const collectedQty = collectedByReq[r.id] || 0;
       const remainingWithOperator = (r.quantity || 0) - collectedQty - pendingQty;
       return sum + (remainingWithOperator > 0 ? remainingWithOperator : 0);
-    }
-    return sum;
-  }, 0);
-  const totalPending = requests.reduce((sum, r) => {
-    if (r.status === 'pending') {
-      return sum + (r.quantity || 0);
     }
     return sum;
   }, 0);
@@ -141,10 +125,7 @@ const ToolRequested = ({ onReturnSuccess }) => {
               return oid == null ? true : parseInt(oid) === currentOpId;
             })
           : sortedData;
-        setRequests(filteredSorted.map(r => ({
-          ...r,
-          tool_type: r.tool_type || toolsById[r.tool_id] || r.tool_type
-        })));
+        setRequests(filteredSorted);
       }
     } catch (error) {
       console.error('Failed to fetch requests:', error);
@@ -153,22 +134,6 @@ const ToolRequested = ({ onReturnSuccess }) => {
     }
   };
 
-  const fetchToolsList = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/tools-list/`);
-      if (res.ok) {
-        const tools = await res.json();
-        const map = {};
-        (Array.isArray(tools) ? tools : []).forEach(t => {
-          if (t && t.id != null) map[t.id] = t.type || '';
-        });
-        setToolsById(map);
-        setRequests(prev => prev.map(r => ({ ...r, tool_type: r.tool_type || map[r.tool_id] })));
-      }
-    } catch (e) {
-      console.error('Failed to fetch tools list', e);
-    }
-  };
   const fetchReturnRequests = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
@@ -295,6 +260,7 @@ const ToolRequested = ({ onReturnSuccess }) => {
       key: 'tool_name',
       width: 150,
       ellipsis: true,
+      fixed: 'left',
       filteredValue: [searchText],
       onFilter: (value, record) => {
         return (
@@ -305,10 +271,22 @@ const ToolRequested = ({ onReturnSuccess }) => {
       },
     },
     {
-      title: 'Quantity',
+      title: 'Total Quantity',
       dataIndex: 'quantity',
       key: 'quantity',
       width: 100,
+    },
+    {
+      title: 'Remaining Quantity',
+      key: 'remaining_quantity',
+      width: 140,
+      render: (_, record) => {
+        const totalReturnedAnyStatus = returnRequests
+          .filter(rr => rr.requested_id === record.id)
+          .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
+        const remaining = (record.quantity || 0) - totalReturnedAnyStatus;
+        return remaining > 0 ? remaining : 0;
+      },
     },
     {
       title: 'Project',
@@ -358,7 +336,6 @@ const ToolRequested = ({ onReturnSuccess }) => {
       width: 120,
       fixed: 'right',
       render: (_, record) => {
-        const isConsumable = isConsumableType(record);
         const totalReturnedAnyStatus = returnRequests
           .filter(rr => rr.requested_id === record.id)
           .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
@@ -369,11 +346,11 @@ const ToolRequested = ({ onReturnSuccess }) => {
         <Button 
           type="primary" 
           size="small"
-          disabled={record.status !== 'approved' || isExhausted || isConsumable}
+          disabled={record.status !== 'approved' || isExhausted}
           onClick={() => handleReturnTool(record)}
           loading={returnLoading}
         >
-          {isConsumable ? 'Consumable' : (isExhausted ? 'Returned' : 'Return Tool')}
+          {isExhausted ? 'Returned' : 'Return Tool'}
         </Button>
       )},
     },
@@ -395,9 +372,9 @@ const ToolRequested = ({ onReturnSuccess }) => {
         </Col>
         <Col xs={24} sm={12} md={6}>
           <KpiCard
-            title="Total Tool Returned"
+            title="Total Tool Collected"
             count={totalReturned}
-            label="Returned"
+            label="Collected"
             icon={<CheckCircleOutlined style={{ fontSize: '20px', color: '#52C41A' }} />}
             color="#237804"
             bgColor="#F6FFED"

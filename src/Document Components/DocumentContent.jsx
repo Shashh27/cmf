@@ -12,7 +12,7 @@ import {
   CloudUploadOutlined,
   HistoryOutlined
 } from '@ant-design/icons';
-import config from '../Config/config';
+import { API_BASE_URL } from '../Config/auth.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -67,13 +67,13 @@ const DocumentContent = ({ selectedNode }) => {
     try {
       let url = '';
       if (selectedNode.type === 'general-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${selectedNode.folderId}/documents`;
+        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${selectedNode.folderId}/documents`;
       } else if (selectedNode.type === 'part-category') {
-        url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
+        url = `${API_BASE_URL}/documents/part/${selectedNode.partId}`;
       } else if (selectedNode.type === 'operation-folder') {
-        url = `${config.API_BASE_URL}/operation-documents/operation/${selectedNode.operationId}`;
+        url = `${API_BASE_URL}/operation-documents/operation/${selectedNode.operationId}`;
       } else if (selectedNode.type === 'folder' && selectedNode.category === 'Reports') {
-        url = `${config.API_BASE_URL}/order-documents/order/${selectedNode.orderId}`;
+        url = `${API_BASE_URL}/order-documents/order/${selectedNode.orderId}`;
       }
 
       if (!url) {
@@ -377,16 +377,16 @@ const DocumentContent = ({ selectedNode }) => {
       let body = {};
 
       if (editingDocument.doc_source_type === 'general-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${editingDocument.id}`;
+        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${editingDocument.id}`;
         body = { file_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'part-category') {
-        url = `${config.API_BASE_URL}/documents/${editingDocument.id}`;
+        url = `${API_BASE_URL}/documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'operation-folder') {
-        url = `${config.API_BASE_URL}/operation-documents/${editingDocument.id}`;
+        url = `${API_BASE_URL}/operation-documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'folder') {
-        url = `${config.API_BASE_URL}/order-documents/${editingDocument.id}`;
+        url = `${API_BASE_URL}/order-documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       }
 
@@ -417,13 +417,13 @@ const DocumentContent = ({ selectedNode }) => {
   const handleDownloadDocument = (document) => {
     let downloadUrl = '';
     if (document.doc_source_type === 'general-folder') {
-      downloadUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${document.id}/download`;
+      downloadUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${document.id}/download`;
     } else if (document.doc_source_type === 'part-category') {
-      downloadUrl = `${config.API_BASE_URL}/documents/${document.id}/download`;
+      downloadUrl = `${API_BASE_URL}/documents/${document.id}/download`;
     } else if (document.doc_source_type === 'operation-folder') {
-      downloadUrl = `${config.API_BASE_URL}/operation-documents/${document.id}/download`;
+      downloadUrl = `${API_BASE_URL}/operation-documents/${document.id}/download`;
     } else if (document.doc_source_type === 'folder') {
-      downloadUrl = `${config.API_BASE_URL}/order-documents/download/${document.id}`;
+      downloadUrl = `${API_BASE_URL}/order-documents/download/${document.id}`;
     }
 
     if (downloadUrl) {
@@ -482,20 +482,20 @@ const DocumentContent = ({ selectedNode }) => {
       let url = '';
       
       if (uploadingDocument.doc_source_type === 'general-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
+        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
         formData.append('folder_id', uploadingDocument.general_folder_id.toString());
         // Use the actual uploaded file name instead of parent document name
         formData.append('file_name', file.name);
         formData.append('parent_id', uploadingDocument.id.toString());
       } else if (uploadingDocument.doc_source_type === 'part-category') {
-        url = `${config.API_BASE_URL}/documents/`;
+        url = `${API_BASE_URL}/documents/`;
         formData.append('document_name', file.name); // Use the name of the new file
         formData.append('document_type', uploadingDocument.document_type);
         formData.append('document_version', nextVersion);
         formData.append('part_id', selectedNode.partId);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
       } else if (uploadingDocument.doc_source_type === 'operation-folder') {
-        url = `${config.API_BASE_URL}/operation-documents/upload/`;
+        url = `${API_BASE_URL}/operation-documents/upload/`;
         formData.append('operation_id', selectedNode.operationId);
         formData.append('document_type', uploadingDocument.document_type || 'CNC');
         formData.append('document_version', nextVersion);
@@ -504,7 +504,7 @@ const DocumentContent = ({ selectedNode }) => {
         formData.delete('file');
         formData.append('files', file, file.name);
       } else if (uploadingDocument.doc_source_type === 'folder' && selectedNode.category === 'Reports') {
-        url = `${config.API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
+        url = `${API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
         formData.append('document_type', uploadingDocument.document_type || 'Other');
         formData.append('document_version', nextVersion);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
@@ -562,11 +562,11 @@ const DocumentContent = ({ selectedNode }) => {
       let url = '';
       
       if (selectedNode.type === 'general-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
+        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('file_name', file.name);
       } else if (selectedNode.type === 'part-category') {
-        url = `${config.API_BASE_URL}/documents/`;
+        url = `${API_BASE_URL}/documents/`;
         formData.append('document_name', file.name);
         formData.append('document_type', selectedNode.category === 'MPP' ? 'mpp' : 
                         selectedNode.category === 'ENGINEERING_DRAWING' ? '2d' : 
@@ -575,14 +575,14 @@ const DocumentContent = ({ selectedNode }) => {
         formData.append('document_version', '1.0');
         formData.append('part_id', selectedNode.partId);
       } else if (selectedNode.type === 'operation-folder') {
-        url = `${config.API_BASE_URL}/operation-documents/upload/`;
+        url = `${API_BASE_URL}/operation-documents/upload/`;
         formData.append('operation_id', selectedNode.operationId);
         formData.append('document_type', addDocType);
         formData.append('document_version', '1.0');
         formData.delete('file');
         formData.append('files', file, file.name);
       } else if (selectedNode.type === 'folder' && selectedNode.category === 'Reports') {
-        url = `${config.API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
+        url = `${API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
         formData.append('document_type', 'Report');
         formData.append('document_version', '1.0');
       }
@@ -619,13 +619,13 @@ const DocumentContent = ({ selectedNode }) => {
         try {
           let url = '';
           if (document.doc_source_type === 'general-folder') {
-            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${document.id}`;
+            url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'part-category') {
-            url = `${config.API_BASE_URL}/documents/${document.id}`;
+            url = `${API_BASE_URL}/documents/${document.id}`;
           } else if (document.doc_source_type === 'operation-folder') {
-            url = `${config.API_BASE_URL}/operation-documents/${document.id}`;
+            url = `${API_BASE_URL}/operation-documents/${document.id}`;
           } else if (document.doc_source_type === 'folder') {
-            url = `${config.API_BASE_URL}/order-documents/${document.id}`;
+            url = `${API_BASE_URL}/order-documents/${document.id}`;
           }
 
           const response = await fetch(url, {

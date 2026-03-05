@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Input, Select, Card, Row, Col, Statistic } from 'antd';
 import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, CloseCircleOutlined, MonitorOutlined } from '@ant-design/icons';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const { Option } = Select;
 const { Search } = Input;
@@ -46,7 +46,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
 
   const fetchTools = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/tools-list/`);
+      const response = await fetch(`${API_BASE_URL}/tools-list/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

@@ -1,39 +1,50 @@
-import React, { useState } from 'react';
-import { Card, Tabs, Typography } from 'antd';
+import React from 'react';
+import { Card, Typography } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
-import PokaYokeChecklists from '../Product Monitoring Components/PokaYokeChecklists';
-import PokaYokeMachineAssignments from '../Product Monitoring Components/PokaYokeMachineAssignments';
-import PokaYokeCompletedLogs from '../Product Monitoring Components/PokaYokeCompletedLogs';
+import { useLocation } from 'react-router-dom';
+import PokaYoke from '../Product Monitoring Components/PokaYoke';
+import Maintenance from '../Product Monitoring Components/Maintenance';
+import LiveMonitoring from '../Product Monitoring Components/LiveMonitoring';
+import PlannedVsActual from '../Product Monitoring Components/PlannedVsActual';
+import OrderTracking from '../Product Monitoring Components/OrderTracking';
 
 const { Title } = Typography;
 
 const ProductionMonitoring = () => {
-  const [activeTab, setActiveTab] = useState('checklists');
+  const location = useLocation();
+  const path = location.pathname;
 
-  const tabItems = [
-    {
-      key: 'checklists',
-      label: 'Checklists',
-      children: <PokaYokeChecklists />,
-    },
-    {
-      key: 'machine-assignments',
-      label: 'Machine Assignments',
-      children: <PokaYokeMachineAssignments />,
-    },
-    {
-      key: 'completion-logs',
-      label: 'Completion Logs',
-      children: <PokaYokeCompletedLogs />,
-    },
-  ];
+  const renderContent = () => {
+    if (path.includes('/product-monitoring/maintenance')) {
+      return <Maintenance />;
+    }
+    if (path.includes('/product-monitoring/live-monitoring')) {
+      return <LiveMonitoring />;
+    }
+    if (path.includes('/product-monitoring/planned-vs-actual')) {
+      return <PlannedVsActual />;
+    }
+    if (path.includes('/product-monitoring/order-tracking')) {
+      return <OrderTracking />;
+    }
+    return <PokaYoke />;
+  };
+
+  const titleText = (() => {
+    if (path.includes('/product-monitoring/maintenance')) return 'Maintenance';
+    if (path.includes('/product-monitoring/live-monitoring')) return 'Live Monitoring';
+    if (path.includes('/product-monitoring/planned-vs-actual')) return 'Planned vs Actual';
+    if (path.includes('/product-monitoring/order-tracking')) return 'Order Tracking';
+    return 'PokaYoke Checklist System';
+  })();
+  const showPokaYokeIcon = path.includes('/product-monitoring/pokayoke-checklists');
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
       <div style={{ marginBottom: '24px' }}>
         <Title level={2} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <SafetyCertificateOutlined style={{ color: '#1890ff' }} />
-          PokaYoke Checklist System
+          {showPokaYokeIcon && <SafetyCertificateOutlined style={{ color: '#1890ff' }} />}
+          {titleText}
         </Title>
       </div>
       
@@ -44,13 +55,7 @@ const ProductionMonitoring = () => {
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
         }}
       >
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={tabItems}
-          size="large"
-          style={{ marginBottom: 0 }}
-        />
+        {renderContent()}
       </Card>
     </div>
   );

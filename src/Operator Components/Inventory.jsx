@@ -134,8 +134,7 @@ const Inventory = () => {
         project_id: values.project_id, // Sending Order ID as requested
         part_id: values.part_id,
         quantity: values.quantity,
-        purpose_of_use: values.purpose_of_use || "",
-        created_at: new Date().toISOString()
+        purpose_of_use: values.purpose_of_use || ""
       };
 
       const response = await fetch(`${API_BASE_URL}/inventory-requests/`, {
@@ -228,10 +227,13 @@ const Inventory = () => {
         tool.type?.toLowerCase().includes(searchText.toLowerCase())
       );
     }
-    
-    setFilteredData(filtered);
-    // Reset to first page when filtering
-    setPagination(prev => ({ ...prev, current: 1 }));
+    // Ensure stable ordering by ID ascending so rows keep their position
+    const sorted = [...filtered].sort((a, b) => {
+      const aid = Number(a?.id ?? 0);
+      const bid = Number(b?.id ?? 0);
+      return aid - bid;
+    });
+    setFilteredData(sorted);
   };
 
   const handleKpiClick = (filterType) => {
@@ -263,6 +265,7 @@ const Inventory = () => {
       key: 'item_description',
       width: 140,
       ellipsis: true,
+      fixed: 'left',
     },
     {
       title: 'Range',

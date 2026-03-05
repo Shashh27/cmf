@@ -1,17 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const ReturnRequestsTable = () => {
   const [returnRequests, setReturnRequests] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState(null);
-  const [detailModalVisible, setDetailModalVisible] = useState(false);
+  const [loading] = useState(false);
+ 
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
   });
+
+  const getCurrentAdminId = () => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        if (user && user.id != null) return parseInt(user.id);
+      }
+    } catch {
+      void 0;
+    }
+    return 0;
+  };
   
   useEffect(() => {
     fetchReturnRequests();
@@ -19,7 +31,7 @@ const ReturnRequestsTable = () => {
 
   const fetchReturnRequests = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/`);
+      const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -51,10 +63,11 @@ const ReturnRequestsTable = () => {
         console.log('Record ID:', record.id);
         console.log('Record Tool Name:', record.inventory_request_details?.tool_name);
         console.log('Current Status:', record.status);
-        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=6&status=pending&table_id=${record.id}`);
+        const adminId = getCurrentAdminId();
+        console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=6&status=pending&table_id=${record.id}`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -101,10 +114,11 @@ const ReturnRequestsTable = () => {
         console.log('Record ID:', record.id);
         console.log('Record Tool Name:', record.inventory_request_details?.tool_name);
         console.log('Current Status:', record.status);
-        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=6&status=collected&table_id=${record.id}`);
+        const adminId = getCurrentAdminId();
+        console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=6&status=collected&table_id=${record.id}`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -139,31 +153,7 @@ const ReturnRequestsTable = () => {
     });
   };
 
-  const handleDelete = async (record) => {
-    try {
-      const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}`, {
-        method: 'DELETE'
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to delete return request');
-      }
-      
-      message.success('Return request deleted successfully');
-      
-      // Remove the deleted row from state instead of refetching
-      setReturnRequests(prev => prev.filter(req => req.id !== record.id));
-    } catch (error) {
-      console.error('Failed to delete return request:', error);
-      message.error('Failed to delete return request: ' + error.message);
-    }
-  };
-
-  const handleViewDetails = (record) => {
-    setSelectedRequest(record);
-    setDetailModalVisible(true);
-  };
+ 
 
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
@@ -176,15 +166,7 @@ const ReturnRequestsTable = () => {
     }
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    // Format: DD/MM/YYYY
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
-  };
+ 
 
   const formatDateTime = (dateString) => {
     if (!dateString) return '-';
@@ -373,45 +355,6 @@ const ReturnRequestsTable = () => {
         size="small"
         scroll={{ x: 1000 }}
       />
-
-      <Modal
-        title="Return Request Details"
-        open={detailModalVisible}
-        onCancel={() => setDetailModalVisible(false)}
-        footer={[
-          <Button key="close" onClick={() => setDetailModalVisible(false)}>
-            Close
-          </Button>
-        ]}
-        width={800}
-      >
-        {selectedRequest && (
-          <div>
-            <p><strong>Total Requested Quantity:</strong> {selectedRequest.total_requested_qty}</p>
-            <p><strong>Returned Quantity:</strong> {selectedRequest.returned_qty}</p>
-            <p><strong>Status:</strong> 
-              <Tag color={getStatusColor(selectedRequest.status)} style={{ marginLeft: 8 }}>
-                {selectedRequest.status?.toUpperCase() || '-'}
-              </Tag>
-            </p>
-            <p><strong>Remarks:</strong> {selectedRequest.remarks || '-'}</p>
-            <p><strong>Returned By:</strong> {selectedRequest.operator_name || '-'}</p>
-            <p><strong>Collected By:</strong> {selectedRequest.admin_name || '-'}</p>
-            <p><strong>Created At:</strong> {formatDateTime(selectedRequest.created_at)}</p>
-            <p><strong>Updated At:</strong> {formatDateTime(selectedRequest.updated_at)}</p>
-            
-            {selectedRequest.inventory_request_details && (
-              <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 4 }}>
-                <h4>Original Inventory Request Details:</h4>
-                <p><strong>Tool:</strong> {selectedRequest.inventory_request_details.tool_name || '-'}</p>
-                <p><strong>Project Number:</strong> {selectedRequest.inventory_request_details.project_name || '-'}</p>
-                <p><strong>Part Name:</strong> {selectedRequest.inventory_request_details.part_name || '-'}</p>
-                <p><strong>Purpose of Use:</strong> {selectedRequest.inventory_request_details.purpose_of_use || '-'}</p>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };

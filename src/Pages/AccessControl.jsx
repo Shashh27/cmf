@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Input, Typography, Tag, message, Space, Modal } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, EyeInvisibleOutlined, LockOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
+import LockAnimation from '../assets/Unlocking.json';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
-import config from '../Config/config';
+import { API_BASE_URL } from '../Config/auth.js';
 import UserModal from '../Access Control Components/UserModal';
 
 dayjs.extend(utc);
@@ -18,12 +19,39 @@ const AccessControl = () => {
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const [editingUser, setEditingUser] = useState(null);
   const [users, setUsers] = useState([]);
+  const lockRef = React.useRef(null);
+
+  useEffect(() => {
+    const ensureLottie = () =>
+      new Promise((resolve) => {
+        if (window.lottie) return resolve();
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.12.2/lottie.min.js';
+        script.async = true;
+        script.onload = () => resolve();
+        document.head.appendChild(script);
+      });
+    ensureLottie().then(() => {
+      try {
+        if (lockRef.current && window.lottie) {
+          window.lottie.loadAnimation({
+            container: lockRef.current,
+            renderer: 'svg',
+            loop: true,
+            autoplay: true,
+            animationData: LockAnimation,
+          });
+        }
+      } catch {}
+    });
+  }, []);
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/access-users/`);
+      const response = await fetch(`${API_BASE_URL}/access-users/`);
       if (response.ok) {
-        const data = await response.json();
+        let data = await response.json();
+        data = Array.isArray(data) ? data.slice().sort((a, b) => (a.id || 0) - (b.id || 0)) : [];
         const mappedUsers = data.map((user, index) => ({
           ...user,
           slno: index + 1,
@@ -57,7 +85,7 @@ const AccessControl = () => {
       title: 'Are you sure you want to delete this user?',
       onOk: async () => {
         try {
-          const response = await fetch(`${config.API_BASE_URL}/access-users/${id}/`, {
+          const response = await fetch(`${API_BASE_URL}/access-users/${id}/`, {
             method: 'DELETE',
           });
           if (response.ok) {
@@ -129,13 +157,13 @@ const AccessControl = () => {
       title: 'Created At',
       dataIndex: 'createdAt',
       key: 'createdAt',
-      render: (text) => text ? dayjs.utc(text).tz('Asia/Kolkata').format('DD/MM/YYYY HH:mm') : '-',
+      render: (text) => text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '-',
     },
     {
       title: 'Updated At',
       dataIndex: 'updatedAt',
       key: 'updatedAt',
-      render: (text) => text ? dayjs.utc(text).tz('Asia/Kolkata').format('DD/MM/YYYY HH:mm') : '-',
+      render: (text) => text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '-',
     },
     {
       title: 'Password',
@@ -189,10 +217,12 @@ const AccessControl = () => {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex items-center justify-between">
           <div>
-            <Title level={2} style={{ margin: 0, fontSize: '24px' }} className="flex items-center gap-3 text-gray-800">
-              <LockOutlined className="text-blue-600" />
-              Access Control Management
-            </Title>
+            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              <div ref={lockRef} style={{ width:36, height:36 }} />
+              <Title level={2} style={{ margin: 0, fontSize: '24px' }} className="text-gray-800">
+                Access Control Management
+              </Title>
+            </div>
             <Typography.Text className="text-gray-500 mt-1 block">
               Manage users, roles, and access permissions
             </Typography.Text>

@@ -10,17 +10,17 @@ const InventoryData = () => {
   const items = [
     {
       key: '1',
-      label: 'Inventory Data',
+      label: 'Tool Request',
       children: <Inventory />,
     },
     {
       key: '2',
-      label: 'Tool Requested',
+      label: 'Tool Return',
       children: <ToolRequested onReturnSuccess={() => setActiveTab('3')} />,
     },
     {
       key: '3',
-      label: 'Tool Return',
+      label: 'Tool Return Status',
       children: <ToolReturn />,
     },
   ];

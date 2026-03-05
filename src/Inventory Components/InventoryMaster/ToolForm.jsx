@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Form, Input, InputNumber, Button, Modal, message, Row, Col, Select } from 'antd';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -26,7 +26,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
       
       if (editingTool) {
         // Update existing tool
-        const response = await fetch(`${config.API_BASE_URL}/tools-list/${editingTool.id}`, {
+        const response = await fetch(`${API_BASE_URL}/tools-list/${editingTool.id}`, {
           method: 'PUT',
           headers: { 
             'Content-Type': 'application/json',
@@ -42,7 +42,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
         message.success('Tool updated successfully');
       } else {
         // Create new tool
-        const response = await fetch(`${config.API_BASE_URL}/tools-list/`, {
+        const response = await fetch(`${API_BASE_URL}/tools-list/`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',

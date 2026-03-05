@@ -1,29 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Table, 
-  Button, 
-  Modal, 
-  Form, 
-  Select, 
-  message, 
-  Space, 
-  Popconfirm,
-  Tag,
-  Card,
-  Typography,
-  Input,
-  Divider
-} from 'antd';
-import { 
-  PlusOutlined, 
-  DeleteOutlined,
-  SettingOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  ReloadOutlined,
-  LinkOutlined
-} from '@ant-design/icons';
-import config from '../Config/config';
+import { Table, Button, Modal, Form, Select, message, Space, Popconfirm,Tag,Card,Typography,Input,Divider } from 'antd';
+import { PlusOutlined, DeleteOutlined,SettingOutlined,CheckCircleOutlined,ClockCircleOutlined,ReloadOutlined,LinkOutlined } from '@ant-design/icons';
+import { API_BASE_URL } from '../Config/auth.js';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -50,7 +28,7 @@ const PokaYokeMachineAssignments = () => {
 
   const fetchMachines = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/machines/?skip=0&limit=100`);
+      const response = await fetch(`${API_BASE_URL}/machines/?skip=0&limit=100`);
       if (!response.ok) throw new Error('Failed to fetch machines');
       const data = await response.json();
       setMachines(data);
@@ -61,7 +39,7 @@ const PokaYokeMachineAssignments = () => {
 
   const fetchChecklists = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/`);
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/`);
       if (!response.ok) throw new Error('Failed to fetch checklists');
       const data = await response.json();
       setChecklists(data);
@@ -73,7 +51,7 @@ const PokaYokeMachineAssignments = () => {
   const fetchMachineAssignments = async (machineId) => {
     setLoading(true);
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`);
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`);
       if (!response.ok) throw new Error('Failed to fetch assignments');
       const data = await response.json();
       
@@ -81,10 +59,10 @@ const PokaYokeMachineAssignments = () => {
       const assignmentsWithDetails = await Promise.all(
         data.map(async (assignment) => {
           try {
-            const checklistResponse = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}`);
+            const checklistResponse = await fetch(`${API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}`);
             if (checklistResponse.ok) {
               const checklist = await checklistResponse.json();
-              const itemsResponse = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}/items`);
+              const itemsResponse = await fetch(`${API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}/items`);
               const items = itemsResponse.ok ? await itemsResponse.json() : [];
               return { 
                 ...assignment, 
@@ -111,7 +89,7 @@ const PokaYokeMachineAssignments = () => {
     if (!selectedMachine) return;
     
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${values.checklist_id}/assignments`, {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${values.checklist_id}/assignments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -135,7 +113,7 @@ const PokaYokeMachineAssignments = () => {
 
   const handleDeleteAssignment = async (id) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/assignments/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/assignments/${id}`, {
         method: 'DELETE',
       });
 

@@ -1,22 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Table, 
-  Card, 
-  Space, 
-  Tag, 
-  Typography, 
-  Alert,
-  Spin,
-  Empty,
-  Input,
-  Button
-} from 'antd';
-import { 
-  HistoryOutlined, 
-  TableOutlined,
-  SearchOutlined
-} from '@ant-design/icons';
-import config from '../../Config/config';
+import { Table, Card, Space, Tag, Typography, Alert,Spin,Empty,Input,Button } from 'antd';
+import { HistoryOutlined, TableOutlined,SearchOutlined } from '@ant-design/icons';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const { Title, Text } = Typography;
 
@@ -37,7 +22,7 @@ const TransactionHistory = () => {
   const fetchAllTransactions = async () => {
     try {
       console.log('Fetching all transactions...');
-      const response = await fetch(`${config.API_BASE_URL}/transaction-history/all`);
+      const response = await fetch(`${API_BASE_URL}/transaction-history/all`);
       console.log('Response status:', response.status);
       
       if (!response.ok) {

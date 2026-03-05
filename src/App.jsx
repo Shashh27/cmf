@@ -10,13 +10,7 @@ import Configuration from "./Pages/Configuration";
 import Dashboard from "./Pages/Dashboard";
 import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
 import OperatorDashboard from "./Pages/OperatorDashboard";
-import AssetsAvailability from "./PPS Components/AssetsAvailability";
-import CapacityPlanning from "./PPS Components/CapacityPlanning";
-import MachineScheduling from "./PPS Components/MachineScheduling";
-import LiveMonitoring from "./Product Monitoring Components/LiveMonitoring";
-import PlannedVsActual from "./Product Monitoring Components/PlannedVsActual";
-import OrderTracking from "./Product Monitoring Components/OrderTracking";
-import Maintenance from "./Product Monitoring Components/Maintenance";
+import PPS from "./Pages/PPS";
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
 import QualityManagement from "./Quality Management Components/QualityManagement";
 import InventoryMaster from "./Pages/Inventory";
@@ -48,17 +42,18 @@ function App() {
           <Route path="/admin/pdm" element={<PDM />} />
 
           <Route path="/admin/pps" element={<Navigate to="/admin/pps/assets-availability" replace />} />
-          <Route path="/admin/pps/assets-availability" element={<AssetsAvailability />} />
-          <Route path="/admin/pps/capacity-planning" element={<CapacityPlanning />} />
-          <Route path="/admin/pps/machine-scheduling" element={<MachineScheduling />} />
+          <Route path="/admin/pps/assets-availability" element={<PPS />} />
+          <Route path="/admin/pps/capacity-planning" element={<PPS />} />
+          <Route path="/admin/pps/machine-scheduling" element={<PPS />} />
+          <Route path="/admin/pps/process-planning" element={<PPS />} />
 
           <Route path="/admin/configuration" element={<Configuration />} />
 
           <Route path="/admin/product-monitoring" element={<Navigate to="/admin/product-monitoring/live-monitoring" replace />} />
-          <Route path="/admin/product-monitoring/live-monitoring" element={<LiveMonitoring />} />
-          <Route path="/admin/product-monitoring/planned-vs-actual" element={<PlannedVsActual />} />
-          <Route path="/admin/product-monitoring/order-tracking" element={<OrderTracking />} />
-          <Route path="/admin/product-monitoring/maintenance" element={<Maintenance />} />
+          <Route path="/admin/product-monitoring/live-monitoring" element={<ProductionMonitoring />} />
+          <Route path="/admin/product-monitoring/planned-vs-actual" element={<ProductionMonitoring />} />
+          <Route path="/admin/product-monitoring/order-tracking" element={<ProductionMonitoring />} />
+          <Route path="/admin/product-monitoring/maintenance" element={<ProductionMonitoring />} />
           <Route path="/admin/product-monitoring/pokayoke-checklists" element={<ProductionMonitoring />} />
 
           <Route path="/admin/quality-management" element={<QualityManagement />} />

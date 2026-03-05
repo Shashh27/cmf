@@ -12,7 +12,7 @@ import {
   DeleteOutlined,    // Icon for delete
   UploadOutlined     // Icon for upload
 } from '@ant-design/icons';
-import config from '../Config/config';
+import { API_BASE_URL } from '../Config/auth.js';
 
 const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   const [loading, setLoading] = useState(false);
@@ -55,7 +55,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
   const fetchOrders = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${config.API_BASE_URL}/orders/`);
+      const response = await fetch(`${API_BASE_URL}/orders/`);
       if (!response.ok) {
         throw new Error('Failed to fetch orders');
       }
@@ -71,7 +71,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
 
   const fetchPartsList = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/parts/`);
+      const response = await fetch(`${API_BASE_URL}/parts/`);
       if (!response.ok) {
         throw new Error('Failed to fetch parts');
       }
@@ -84,7 +84,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
 
   const fetchGeneralFolders = async () => {
     try {
-      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/tree`);
+      const response = await fetch(`http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/tree`);
       if (!response.ok) {
         throw new Error('Failed to fetch general folders');
       }
@@ -349,7 +349,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     }
 
     try {
-      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders`, {
+      const response = await fetch(`http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -389,7 +389,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
     if (!folderToDelete) return;
 
     try {
-      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${folderToDelete.id}`, {
+      const response = await fetch(`http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${folderToDelete.id}`, {
         method: 'DELETE'
       });
 
@@ -447,7 +447,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
       setLoading(true);
       console.log('Uploading file:', file.name, 'to folder:', uploadFolderId);
       
-      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`, {
+      const response = await fetch(`http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`, {
         method: 'POST',
         body: formData,
         // Don't set Content-Type header, let browser set it with boundary
@@ -497,7 +497,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
 
   const fetchOrderHierarchy = async (orderId) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/orders/${orderId}/hierarchical`);
+      const response = await fetch(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
       if (!response.ok) {
         throw new Error('Failed to fetch order hierarchy');
       }
@@ -511,7 +511,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false }, ref) => {
 
   const fetchOperationsByPart = async (partId) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/operations/part/${partId}`);
+      const response = await fetch(`${API_BASE_URL}/operations/part/${partId}`);
       
       if (!response.ok) {
         throw new Error(`Failed to fetch operations: ${response.status} ${response.statusText}`);
