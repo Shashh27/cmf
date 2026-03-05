@@ -1,45 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, message, Tag, Modal, Popconfirm } from 'antd';
+import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Input, Select, Row, Col } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../Config/auth.js';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
-  const [loading] = useState(false);
- 
+  const [filteredRequests, setFilteredRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
   });
-
-  const getCurrentAdminId = () => {
-    try {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        const user = JSON.parse(storedUser);
-        if (user && user.id != null) return parseInt(user.id);
-      }
-    } catch {
-      void 0;
-    }
-    return 0;
-  };
-  const getCurrentAdminName = () => {
-    try {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        const user = JSON.parse(storedUser);
-        return user?.username || user?.name || user?.email || 'admin';
-      }
-    } catch {
-      void 0;
-    }
-    return 'admin';
-  };
+  const [dateRange, setDateRange] = useState([null, null]);
+  const [typeFilter, setTypeFilter] = useState('all'); // all | pending | approved | rejected
+  const [searchText, setSearchText] = useState('');
+  const { RangePicker } = DatePicker;
 
   useEffect(() => {
     fetchInventoryRequests();
   }, []);
+
+  useEffect(() => {
+    applyFilters();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requests, dateRange, typeFilter, searchText]);
+
+  const getCurrentAdminInfo = () => {
+    try {
+      const stored = localStorage.getItem('user');
+      if (!stored) return { id: null, name: null };
+      const u = JSON.parse(stored);
+      const id = u?.id != null ? parseInt(u.id) : null;
+      const name = u?.user_name || u?.username || null;
+      return { id, name };
+    } catch (e) {
+      console.error('Failed to parse user from localStorage', e);
+      return { id: null, name: null };
+    }
+  };
 
   const fetchInventoryRequests = async () => {
     try {
@@ -48,7 +48,7 @@ const InventoryRequestsTable = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
-      setRequests(data);
+      setRequests(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Failed to fetch inventory requests:', error);
       message.error('Failed to fetch inventory requests: ' + error.message);
@@ -63,8 +63,13 @@ const InventoryRequestsTable = () => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          const adminId = getCurrentAdminId();
-          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=approved`, {
+          const { id: adminId, name: adminName } = getCurrentAdminInfo();
+          if (!adminId) {
+            message.error('Unable to determine current user. Please log in again.');
+            return;
+          }
+
+          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=approved`, {
             method: 'PUT'
           });
           
@@ -82,7 +87,13 @@ const InventoryRequestsTable = () => {
             result = {};
           }
           setRequests(prev => prev.map(req => 
-            req.id === record.id ? { ...req, status: 'approved', admin_name: result.admin_name || getCurrentAdminName() } : req
+            req.id === record.id 
+              ? { 
+                  ...req, 
+                  status: 'approved',
+                  admin_name: adminName || req.admin_name 
+                } 
+              : req
           ));
         } catch (error) {
           console.error('Failed to approve request:', error);
@@ -101,8 +112,13 @@ const InventoryRequestsTable = () => {
       okType: 'danger',
       onOk: async () => {
         try {
-          const adminId = getCurrentAdminId();
-          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=rejected`, {
+          const { id: adminId, name: adminName } = getCurrentAdminInfo();
+          if (!adminId) {
+            message.error('Unable to determine current user. Please log in again.');
+            return;
+          }
+
+          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=rejected`, {
             method: 'PUT'
           });
           
@@ -120,7 +136,13 @@ const InventoryRequestsTable = () => {
             result = {};
           }
           setRequests(prev => prev.map(req => 
-            req.id === record.id ? { ...req, status: 'rejected', admin_name: result.admin_name || getCurrentAdminName() } : req
+            req.id === record.id 
+              ? { 
+                  ...req, 
+                  status: 'rejected',
+                  admin_name: adminName || req.admin_name 
+                } 
+              : req
           ));
         } catch (error) {
           console.error('Failed to reject request:', error);
@@ -153,6 +175,45 @@ const InventoryRequestsTable = () => {
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     return `${day}/${month}/${year} ${hours}:${minutes}`;
+  };
+
+  const applyFilters = () => {
+    let data = Array.isArray(requests) ? [...requests] : [];
+    // Type/status filter
+    if (typeFilter !== 'all') {
+      data = data.filter(r => (r.status || '').toLowerCase() === typeFilter);
+    }
+    // Date range filter on created_at
+    const [start, end] = dateRange || [];
+    if (start && end) {
+      const startDate = start.startOf('day').toDate();
+      const endDate = end.endOf('day').toDate();
+      data = data.filter(r => {
+        if (!r.created_at) return false;
+        const created = new Date(r.created_at);
+        return created >= startDate && created <= endDate;
+      });
+    }
+    // Text search on project number (project_name) or tool name
+    if (searchText) {
+      const s = searchText.toLowerCase();
+      data = data.filter(r =>
+        (r.project_name || '').toLowerCase().includes(s) ||
+        (r.tool_name || '').toLowerCase().includes(s)
+      );
+    }
+    setFilteredRequests(data);
+    setPagination(prev => ({ ...prev, current: 1 }));
+  };
+
+  const handleRefresh = () => {
+    fetchInventoryRequests();
+  };
+
+  const handleClear = () => {
+    setDateRange([null, null]);
+    setTypeFilter('all');
+    setSearchText('');
   };
 
   const columns = [
@@ -237,22 +298,6 @@ const InventoryRequestsTable = () => {
       render: (text) => text || '-',
     },
     {
-      title: 'Created At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 160,
-      className: 'table-header-styled',
-      render: (date) => formatDateTime(date),
-    },
-    {
-      title: 'Updated At',
-      dataIndex: 'updated_at',
-      key: 'updated_at',
-      width: 160,
-      className: 'table-header-styled',
-      render: (date) => formatDateTime(date),
-    },
-    {
       title: 'Action',
       key: 'action',
       width: 180,
@@ -265,6 +310,8 @@ const InventoryRequestsTable = () => {
             type="primary"
             size="small"
             onClick={() => handleApprove(record)}
+            disabled={record.status !== 'pending'}
+            title={record.status !== 'pending' ? `Cannot approve: request is ${record.status}` : 'Approve this request'}
           >
             Approve
           </Button>
@@ -272,6 +319,8 @@ const InventoryRequestsTable = () => {
             danger
             size="small"
             onClick={() => handleReject(record)}
+            disabled={record.status !== 'pending'}
+            title={record.status !== 'pending' ? `Cannot reject: request is ${record.status}` : 'Reject this request'}
           >
             Reject
           </Button>
@@ -282,9 +331,60 @@ const InventoryRequestsTable = () => {
 
   return (
     <div>
+      <div style={{ marginBottom: 12 }}>
+        <Row gutter={[12, 12]} align="middle">
+          <Col xs={24} sm={12} md={10} lg={8} xl={6}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Date Range</span>
+              <RangePicker
+                style={{ width: '100%' }}
+                value={dateRange}
+                onChange={(vals) => setDateRange(vals)}
+                allowClear
+              />
+            </div>
+          </Col>
+          <Col xs={24} sm={12} md={6} lg={6} xl={4}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Type</span>
+              <Select
+                value={typeFilter}
+                onChange={setTypeFilter}
+                style={{ width: '100%' }}
+                options={[
+                  { value: 'all', label: 'All Types' },
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'approved', label: 'Approved' },
+                  { value: 'rejected', label: 'Rejected' },
+                ]}
+              />
+            </div>
+          </Col>
+          <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Search</span>
+              <Input.Search
+                placeholder="Search by project number or tool name"
+                allowClear
+                onSearch={(v) => setSearchText(v || '')}
+                onChange={(e) => setSearchText(e.target.value)}
+              />
+            </div>
+          </Col>
+          <Col xs="auto">
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>&nbsp;</span>
+              <Space>
+                <Button onClick={handleRefresh}>Refresh</Button>
+                <Button onClick={handleClear}>Clear</Button>
+              </Space>
+            </div>
+          </Col>
+        </Row>
+      </div>
       <Table
         columns={columns}
-        dataSource={requests}
+        dataSource={filteredRequests}
         rowKey="id"
         loading={loading}
         className="modern-table"
@@ -309,6 +409,20 @@ const InventoryRequestsTable = () => {
           },
         }}
         size="small"
+        components={{
+          header: {
+            cell: (props) => (
+              <th
+                {...props}
+                style={{
+                  ...(props.style || {}),
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                }}
+              />
+            ),
+          },
+        }}
         scroll={{ x: 1200 }}
       />
     </div>

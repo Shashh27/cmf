@@ -24,6 +24,15 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
       const values = await form.validateFields();
       setLoading(true);
       
+      // When creating a new tool, set total_quantity = quantity
+      // When editing, if total_quantity is not provided, keep it as is
+      const submissionData = {
+        ...values,
+        total_quantity: editingTool ? 
+          (values.total_quantity !== undefined ? values.total_quantity : editingTool.total_quantity) : 
+          values.quantity
+      };
+      
       if (editingTool) {
         // Update existing tool
         const response = await fetch(`${API_BASE_URL}/tools-list/${editingTool.id}`, {
@@ -31,7 +40,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
           headers: { 
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(values)
+          body: JSON.stringify(submissionData)
         });
         
         if (!response.ok) {
@@ -47,7 +56,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
           headers: { 
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(values)
+          body: JSON.stringify(submissionData)
         });
         
         if (!response.ok) {
@@ -133,20 +142,33 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
         </Row>
 
         <Row gutter={16}>
-          <Col span={8}>
+          <Col span={6}>
             <Form.Item
               name="quantity"
-              label="Quantity"
+              label="Available Qty"
               rules={[{ type: 'number', min: 0, message: 'Quantity must be a positive number' }]}
             >
               <InputNumber
-                placeholder="Enter quantity"
+                placeholder="Enter available quantity"
                 style={{ width: '100%' }}
                 min={0}
               />
             </Form.Item>
           </Col>
-          <Col span={8}>
+          <Col span={6}>
+            <Form.Item
+              name="total_quantity"
+              label="Total Qty"
+              rules={[{ type: 'number', min: 0, message: 'Total quantity must be a positive number' }]}
+            >
+              <InputNumber
+                placeholder="Enter total quantity"
+                style={{ width: '100%' }}
+                min={0}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
             <Form.Item
               name="amount"
               label="Amount ($)"
@@ -160,7 +182,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
               />
             </Form.Item>
           </Col>
-          <Col span={8}>
+          <Col span={6}>
             <Form.Item
               name="type"
               label="Type"

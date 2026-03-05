@@ -8,7 +8,7 @@ import LiveMonitoring from '../Product Monitoring Components/LiveMonitoring';
 import PlannedVsActual from '../Product Monitoring Components/PlannedVsActual';
 import OrderTracking from '../Product Monitoring Components/OrderTracking';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 const ProductionMonitoring = () => {
   const location = useLocation();
@@ -49,7 +49,7 @@ const ProductionMonitoring = () => {
       </div>
       
       <Card 
-        bordered={false}
+        bordered={false} 
         style={{ 
           borderRadius: '8px',
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'

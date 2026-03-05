@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Tag, message, notification, Modal, Input, InputNumber, Form, Card, Row, Col } from 'antd';
+import { Table, Button, Tag, message, notification, Modal, Input, InputNumber, Form, Card, Row, Col, Select } from 'antd';
 import { API_BASE_URL } from '../Config/auth';
 import { SearchOutlined, ToolOutlined, CheckCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
 
@@ -38,7 +38,7 @@ const KpiCard = ({ title, count, label, icon, color, bgColor }) => {
   );
 };
 
-const ToolRequested = ({ onReturnSuccess }) => {
+const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   const [requests, setRequests] = useState([]);
   const [returnRequests, setReturnRequests] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -54,10 +54,35 @@ const ToolRequested = ({ onReturnSuccess }) => {
   const [currentRecord, setCurrentRecord] = useState(null);
   const [returnQuantity, setReturnQuantity] = useState(1);
   const [remarks, setRemarks] = useState('');
+  // Quantity exceeded popup (return qty > remaining)
+  const [showQuantityExceededModal, setShowQuantityExceededModal] = useState(false);
+  const [quantityExceededRemaining, setQuantityExceededRemaining] = useState(0);
+  // Issue modal state
+  const [isIssueModalVisible, setIsIssueModalVisible] = useState(false);
+  const [issueQty, setIssueQty] = useState(1);
+  const [issueCategory, setIssueCategory] = useState(undefined);
+  const [issueDescription, setIssueDescription] = useState('');
+  const [issueFile, setIssueFile] = useState(null);
+  const [issueCustomCategory, setIssueCustomCategory] = useState('');
+  const [issuesByReq, setIssuesByReq] = useState({});
+  // Issue quantity exceeded popup (issue qty > remaining)
+  const [showIssueQuantityExceededModal, setShowIssueQuantityExceededModal] = useState(false);
+  const [issueQuantityExceededRemaining, setIssueQuantityExceededRemaining] = useState(0);
+
+  const computeRemaining = (req) => {
+    if (!req) return 0;
+    const returned = returnRequests
+      .filter(rr => rr.requested_id === req.id)
+      .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
+    const issues = issuesByReq[req.id] || 0;
+    return Math.max(0, (req.quantity || 0) - returned - issues);
+  };
 
   useEffect(() => {
     fetchRequests();
     fetchReturnRequests();
+    fetchToolsList();
+    fetchToolIssues();
   }, []);
 
   const getCurrentOperatorId = () => {
@@ -95,11 +120,10 @@ const ToolRequested = ({ onReturnSuccess }) => {
     return rr.status === 'collected' ? sum + (rr.returned_qty || 0) : sum;
   }, 0);
   const totalToBeReturned = requests.reduce((sum, r) => {
-    if (r.status === 'approved') {
-      const pendingQty = pendingByReq[r.id] || 0;
-      const collectedQty = collectedByReq[r.id] || 0;
-      const remainingWithOperator = (r.quantity || 0) - collectedQty - pendingQty;
-      return sum + (remainingWithOperator > 0 ? remainingWithOperator : 0);
+    const isConsum = isConsumableType(r);
+    if (r.status === 'approved' && !isConsum) {
+      const remaining = computeRemaining(r);
+      return sum + (remaining > 0 ? remaining : 0);
     }
     return sum;
   }, 0);
@@ -155,12 +179,45 @@ const ToolRequested = ({ onReturnSuccess }) => {
       console.error('Failed to fetch return requests:', error);
     }
   };
+  const fetchToolIssues = async () => {
+    try {
+      // scope to current operator if available
+      let operator_id = null;
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          operator_id = user.id;
+        } catch {}
+      }
+      if (!operator_id) {
+        operator_id = localStorage.getItem('operator_id');
+      }
+      let url = `${API_BASE_URL}/tool-issues/`;
+      if (operator_id) url = `${API_BASE_URL}/tool-issues/by-operator/${operator_id}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const arr = await res.json();
+        const map = {};
+        (Array.isArray(arr) ? arr : []).forEach(i => {
+          const reqId = i.request_id;
+          const st = (i.status || '').toLowerCase();
+          if (reqId != null && (st === 'pending' || st === 'approved')) {
+            map[reqId] = (map[reqId] || 0) + (i.tool_issue_qty || 0);
+          }
+        });
+        setIssuesByReq(map);
+      }
+    } catch (e) {
+      // silent fail
+    }
+  };
 
   const handleReturnTool = (record) => {
-    const totalReturnedAnyStatus = returnRequests
-      .filter(rr => rr.requested_id === record.id)
-      .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
-    const remaining = (record.quantity || 0) - totalReturnedAnyStatus;
+    // ensure latest outstanding before opening
+    fetchToolIssues();
+    fetchReturnRequests();
+    const remaining = computeRemaining(record);
     if (remaining <= 0) {
       message.warning('No items remaining to return');
       return;
@@ -174,13 +231,15 @@ const ToolRequested = ({ onReturnSuccess }) => {
   const handleReturnSubmit = async () => {
     if (!currentRecord) return;
 
-    // Client-side validation for quantity
-    const totalReturnedAnyStatus = returnRequests
-      .filter(rr => rr.requested_id === currentRecord.id)
-      .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
-    const remaining = (currentRecord.quantity || 0) - totalReturnedAnyStatus;
+    // Recompute remaining at submit time (in case of stale data)
+    const remaining = computeRemaining(currentRecord);
+    if (returnQuantity < 1) {
+      message.error('Return quantity must be at least 1');
+      return;
+    }
     if (returnQuantity > remaining) {
-      message.error(`Cannot return more than remaining quantity (${remaining})`);
+      setQuantityExceededRemaining(remaining);
+      setShowQuantityExceededModal(true);
       return;
     }
     
@@ -253,6 +312,90 @@ const ToolRequested = ({ onReturnSuccess }) => {
     }
   };
 
+  const openIssueModal = (record) => {
+    // Compute outstanding before opening
+    fetchToolIssues();
+    fetchReturnRequests();
+    const outstanding = computeRemaining(record);
+    if (outstanding <= 0) {
+      message.warning('No items remaining to report as issue');
+      return;
+    }
+    setCurrentRecord(record);
+    setIssueQty(Math.min(1, outstanding) || 1);
+    setIssueCategory(undefined);
+    setIssueDescription('');
+    setIssueFile(null);
+    setIsIssueModalVisible(true);
+  };
+
+  const handleIssueSubmit = async () => {
+    if (!currentRecord) return;
+    // client-side validation for max within outstanding
+    const outstanding = computeRemaining(currentRecord);
+    if (issueQty <= 0) {
+      message.error('Issue quantity must be at least 1');
+      return;
+    }
+    if (issueQty > outstanding) {
+      setIssueQuantityExceededRemaining(outstanding);
+      setShowIssueQuantityExceededModal(true);
+      return;
+    }
+    try {
+      // operator id
+      let operator_id = null;
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          operator_id = user.id;
+        } catch {}
+      }
+      if (!operator_id) {
+        operator_id = localStorage.getItem('operator_id');
+      }
+      if (!operator_id) {
+        throw new Error('Operator ID not found. Please log in again.');
+      }
+      const formData = new FormData();
+      formData.append('tool_id', String(currentRecord.tool_id));
+      formData.append('request_id', String(currentRecord.id));
+      formData.append('tool_issue_qty', String(issueQty));
+      formData.append('operator_id', String(operator_id));
+      let categoryToSend = issueCategory;
+      if (issueCategory === 'other') {
+        categoryToSend = issueCustomCategory && issueCustomCategory.trim() ? issueCustomCategory.trim() : 'other';
+      }
+      if (categoryToSend) formData.append('issue_category', categoryToSend);
+      if (issueDescription) formData.append('description', issueDescription);
+      if (issueFile) formData.append('document', issueFile);
+      
+      const resp = await fetch(`${API_BASE_URL}/tool-issues/`, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'accept': 'application/json'
+        }
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+      message.success('Issue reported successfully');
+      setIsIssueModalVisible(false);
+      fetchToolIssues();
+      if (typeof onReportIssueSuccess === 'function') {
+        onReportIssueSuccess();
+      }
+    } catch (e) {
+      notification.error({
+        message: 'Report Issue Failed',
+        description: e.message || 'Could not submit the issue'
+      });
+    }
+  };
+
   const columns = [
     {
       title: 'Tool Name',
@@ -277,16 +420,14 @@ const ToolRequested = ({ onReturnSuccess }) => {
       width: 100,
     },
     {
-      title: 'Remaining Quantity',
-      key: 'remaining_quantity',
-      width: 140,
+      title: 'Remaining Qty',
+      key: 'remaining_qty',
+      width: 130,
+      align: 'center',
       render: (_, record) => {
-        const totalReturnedAnyStatus = returnRequests
-          .filter(rr => rr.requested_id === record.id)
-          .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
-        const remaining = (record.quantity || 0) - totalReturnedAnyStatus;
+        const remaining = computeRemaining(record);
         return remaining > 0 ? remaining : 0;
-      },
+      }
     },
     {
       title: 'Project',
@@ -336,22 +477,29 @@ const ToolRequested = ({ onReturnSuccess }) => {
       width: 120,
       fixed: 'right',
       render: (_, record) => {
-        const totalReturnedAnyStatus = returnRequests
-          .filter(rr => rr.requested_id === record.id)
-          .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
-        const remaining = (record.quantity || 0) - totalReturnedAnyStatus;
+        const remaining = computeRemaining(record);
         const isExhausted = remaining <= 0;
         
         return (
-        <Button 
-          type="primary" 
-          size="small"
-          disabled={record.status !== 'approved' || isExhausted}
-          onClick={() => handleReturnTool(record)}
-          loading={returnLoading}
-        >
-          {isExhausted ? 'Returned' : 'Return Tool'}
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button 
+            type="primary" 
+            size="small"
+            disabled={record.status !== 'approved' || isExhausted}
+            onClick={() => handleReturnTool(record)}
+            loading={returnLoading}
+          >
+            {isExhausted ? 'Returned' : 'Return Tool'}
+          </Button>
+          <Button
+            danger
+            size="small"
+            disabled={record.status !== 'approved' || isExhausted}
+            onClick={() => openIssueModal(record)}
+          >
+            Report Issue
+          </Button>
+        </div>
       )},
     },
   ];
@@ -444,12 +592,20 @@ const ToolRequested = ({ onReturnSuccess }) => {
           </Form.Item>
           <Form.Item label="Return Quantity">
             <InputNumber 
-              min={1} 
-              // Removed max to allow validation on submit
-              value={returnQuantity} 
-              onChange={setReturnQuantity} 
+              min={1}
+              value={returnQuantity}
+              onChange={(val) => {
+                if (!currentRecord) return;
+                if (typeof val === 'number') {
+                  if (val < 1) setReturnQuantity(1);
+                  else setReturnQuantity(val);
+                }
+              }}
               style={{ width: '100%' }}
             />
+            <div style={{ marginTop: 6, fontSize: 12, color: '#8c8c8c' }}>
+              Remaining quantity: {currentRecord ? computeRemaining(currentRecord) : 0}. You cannot return more than this.
+            </div>
           </Form.Item>
           <Form.Item label="Remarks">
             <Input.TextArea 
@@ -460,6 +616,100 @@ const ToolRequested = ({ onReturnSuccess }) => {
             />
           </Form.Item>
         </Form>
+      </Modal>
+      <Modal
+        title="Invalid Quantity"
+        open={showQuantityExceededModal}
+        onCancel={() => setShowQuantityExceededModal(false)}
+        footer={[
+          <Button key="ok" type="primary" onClick={() => setShowQuantityExceededModal(false)}>
+            OK
+          </Button>,
+        ]}
+        closable
+      >
+        <p style={{ margin: 0 }}>
+          Return quantity is more than the remaining quantity. Remaining quantity is <strong>{quantityExceededRemaining}</strong>. 
+        </p>
+      </Modal>
+      <Modal
+        title="Report Issue"
+        open={isIssueModalVisible}
+        onOk={handleIssueSubmit}
+        onCancel={() => setIsIssueModalVisible(false)}
+        maskClosable={false}
+      >
+        <Form layout="vertical">
+          <Form.Item label="Tool Name">
+            <Input value={currentRecord?.tool_name} disabled />
+          </Form.Item>
+          <Form.Item label="Issue Quantity">
+            <InputNumber 
+              min={1}
+              value={issueQty} 
+              onChange={(val) => {
+                if (typeof val === 'number') {
+                  if (val < 1) setIssueQty(1);
+                  else setIssueQty(val);
+                }
+              }}
+              style={{ width: '100%' }}
+            />
+            <div style={{ marginTop: 6, fontSize: 12, color: '#8c8c8c' }}>
+              Remaining quantity: {currentRecord ? computeRemaining(currentRecord) : 0}. You cannot report more than this.
+            </div>
+          </Form.Item>
+          <Form.Item label="Issue Category">
+            <Select
+              placeholder="Select issue category"
+              value={issueCategory}
+              onChange={setIssueCategory}
+              allowClear
+              options={[
+                { value: 'wear and tear', label: 'Wear and Tear' },
+                { value: 'calibration drift', label: 'Calibration Drift' },
+                { value: 'other', label: 'Other' },
+              ]}
+            />
+          </Form.Item>
+          {issueCategory === 'other' && (
+            <Form.Item label="Custom Category">
+              <Input
+                value={issueCustomCategory}
+                onChange={(e) => setIssueCustomCategory(e.target.value)}
+                placeholder="Type category"
+              />
+            </Form.Item>
+          )}
+          <Form.Item label="Description">
+            <Input.TextArea
+              rows={4}
+              value={issueDescription}
+              onChange={(e) => setIssueDescription(e.target.value)}
+            />
+          </Form.Item>
+          <Form.Item label="Attach Document (optional)">
+            <input
+              type="file"
+              onChange={(e) => setIssueFile(e.target.files?.[0] || null)}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title="Invalid Quantity"
+        open={showIssueQuantityExceededModal}
+        onCancel={() => setShowIssueQuantityExceededModal(false)}
+        footer={[
+          <Button key="ok" type="primary" onClick={() => setShowIssueQuantityExceededModal(false)}>
+            OK
+          </Button>,
+        ]}
+        closable
+      >
+        <p style={{ margin: 0 }}>
+          Issue quantity is more than the remaining quantity. Remaining quantity is <strong>{issueQuantityExceededRemaining}</strong>. 
+        </p>
       </Modal>
     </div>
     </div>

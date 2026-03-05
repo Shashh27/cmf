@@ -1,7 +1,7 @@
 import React from 'react';
 import { Tabs, Card, Typography } from 'antd';
 import { HistoryOutlined } from '@ant-design/icons';
-import { InventoryRequestsTable, ReturnRequestsTable, InventoryAnalytics, TransactionHistory } from '../Inventory Components/OverviewData';
+import { InventoryRequestsTable, ReturnRequestsTable, InventoryAnalytics, TransactionHistory, ToolsIssues } from '../Inventory Components/OverviewData';
 
 const { TabPane } = Tabs;
 const { Title, Text } = Typography;
@@ -26,7 +26,7 @@ const OverviewData = () => {
               Inventory Overview
             </Title>
             <Text type="secondary" style={{ fontSize: '14px', marginTop: '2px', display: 'block' }}>
-              Track and analyze all inventory requests, returns, and transaction history
+              Track requests, returns, issues and transaction history
             </Text>
           </div>
         </div>
@@ -39,6 +39,9 @@ const OverviewData = () => {
           </TabPane>
           <TabPane tab="Return Requests" key="return-requests">
             <ReturnRequestsTable />
+          </TabPane>
+          <TabPane tab="Tools Issues" key="tools-issues">
+            <ToolsIssues />
           </TabPane>
           <TabPane tab="Inventory Analytics" key="analytics">
             <InventoryAnalytics />

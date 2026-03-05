@@ -1,75 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Table,
-  Select,
-  Typography,
-  Card,
-  Button,
-  Space,
-  Tag,
-  Modal,
-  message,
-} from 'antd';
-import { ReloadOutlined, FileTextOutlined, CheckCircleOutlined, CloseCircleOutlined, } from '@ant-design/icons';
-import { API_BASE_URL } from '../Config/auth.js';
+import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,} from 'antd';
+import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,} from '@ant-design/icons';
+import config from '../Config/config';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-const PokaYokeCompletedLogs = () => {
+const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }) => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [machines, setMachines] = useState([]);
-  const [checklists, setChecklists] = useState([]);
-  const [orders, setOrders] = useState([]);
-  const [operators, setOperators] = useState([]);
   const [selectedMachine, setSelectedMachine] = useState(null);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
 
   const [detailModalVisible, setDetailModalVisible] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [selectedLog, setSelectedLog] = useState(null);
   const [selectedLogDetails, setSelectedLogDetails] = useState(null);
-  const [checklistItemsMap, setChecklistItemsMap] = useState({});
 
   useEffect(() => {
-    fetchMetaData();
     fetchLogs();
   }, []);
-
-  const fetchMetaData = async () => {
-    try {
-      const [machinesRes, checklistsRes, ordersRes, operatorsRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/machines`),
-        fetch(`${API_BASE_URL}/pokayoke-checklists`),
-        fetch(`${API_BASE_URL}/orders`),
-        fetch(`${API_BASE_URL}/access-users?skip=0&limit=1000`),
-      ]);
-
-      if (!machinesRes.ok) throw new Error('Failed to fetch machines');
-      if (!checklistsRes.ok) throw new Error('Failed to fetch checklists');
-      if (!ordersRes.ok) throw new Error('Failed to fetch orders');
-      if (!operatorsRes.ok) throw new Error('Failed to fetch operators');
-
-      const machinesData = await machinesRes.json();
-      const checklistsData = await checklistsRes.json();
-      const ordersData = await ordersRes.json();
-      const operatorsData = await operatorsRes.json();
-
-      setMachines(machinesData || []);
-      setChecklists(checklistsData || []);
-      setOrders(ordersData || []);
-      setOperators(operatorsData || []);
-    } catch (error) {
-      message.error(error.message || 'Failed to load reference data');
-    }
-  };
 
   const fetchLogs = async (machineId = null) => {
     try {
       setLoading(true);
       const url = machineId
-        ? `${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`
-        : `${API_BASE_URL}/pokayoke-completed-logs`;
+        ? `${config.API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`
+        : `${config.API_BASE_URL}/pokayoke-completed-logs/`;
 
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch completion logs');
@@ -112,11 +68,6 @@ const PokaYokeCompletedLogs = () => {
     return `${day}/${month}/${year}, ${hoursStr}:${minutes}:${seconds} ${ampm}`;
   };
 
-  const getChecklistName = (id) => {
-    const checklist = checklists.find((c) => c.id === id);
-    return checklist ? checklist.name : '-';
-  };
-
   const getMachineLabel = (id) => {
     const machine = machines.find((m) => m.id === id);
     if (!machine) return '-';
@@ -124,16 +75,6 @@ const PokaYokeCompletedLogs = () => {
       return `${machine.make} ${machine.model}`;
     }
     return machine.make || `Machine ${machine.id}`;
-  };
-
-  const getOperatorName = (id) => {
-    const operator = operators.find((o) => o.id === id);
-    return operator ? operator.user_name : '-';
-  };
-
-  const getOrderNumber = (id) => {
-    const order = orders.find((o) => o.id === id);
-    return order ? order.sale_order_number : '-';
   };
 
   const getStatusTag = (allItemsPassed) => {
@@ -151,44 +92,14 @@ const PokaYokeCompletedLogs = () => {
     );
   };
 
-  const handleViewDetails = async (log) => {
+  const handleViewDetails = (log) => {
     setSelectedLog(log);
     setDetailModalVisible(true);
-    setDetailLoading(true);
-    setSelectedLogDetails(null);
-    setChecklistItemsMap({});
-
-    try {
-      const [logRes, checklistRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/pokayoke-completed-logs/${log.id}`),
-        fetch(`${API_BASE_URL}/pokayoke-checklists/${log.checklist_id}`),
-      ]);
-
-      if (!logRes.ok) throw new Error('Failed to fetch log details');
-      if (!checklistRes.ok) throw new Error('Failed to fetch checklist details');
-
-      const logData = await logRes.json();
-      const checklistData = await checklistRes.json();
-
-      setSelectedLogDetails(logData);
-
-      if (checklistData && Array.isArray(checklistData.items)) {
-        const map = {};
-        checklistData.items.forEach((item) => {
-          map[item.id] = item;
-        });
-        setChecklistItemsMap(map);
-      }
-    } catch (error) {
-      message.error(error.message || 'Failed to load log details');
-    } finally {
-      setDetailLoading(false);
-    }
+    setSelectedLogDetails(log);
   };
 
-  const getItemText = (itemId) => {
-    const item = checklistItemsMap[itemId];
-    return item ? item.item_text : '-';
+  const getItemText = (response) => {
+    return response.item?.item_text || '-';
   };
 
   const getResponseStatusTag = (isConfirming) => {
@@ -217,39 +128,39 @@ const PokaYokeCompletedLogs = () => {
     },
     {
       title: 'Checklist',
-      dataIndex: 'checklist_id',
+      dataIndex: 'checklist',
       key: 'checklist',
       width: 200,
       className: 'table-header-styled',
-      render: (id) => <Text strong>{getChecklistName(id)}</Text>,
+      render: (checklist) => <Text strong>{checklist?.name || '-'}</Text>,
     },
     {
       title: 'Machine',
-      dataIndex: 'machine_id',
+      dataIndex: 'machine',
       key: 'machine',
       width: 260,
       className: 'table-header-styled',
-      render: (id) => (
+      render: (machine) => (
         <div style={{ whiteSpace: 'normal' }}>
-          <Text>{getMachineLabel(id)}</Text>
+          <Text>{machine ? `${machine.make} ${machine.model || ''}` : '-'}</Text>
         </div>
       ),
     },
     {
       title: 'Operator',
-      dataIndex: 'operator_id',
+      dataIndex: 'operator',
       key: 'operator',
       width: 160,
       className: 'table-header-styled',
-      render: (id) => getOperatorName(id),
+      render: (operator) => operator?.user_name || '-',
     },
     {
       title: 'Production Order',
-      dataIndex: 'production_order_id',
+      dataIndex: 'order',
       key: 'production_order',
       width: 160,
       className: 'table-header-styled',
-      render: (id) => getOrderNumber(id),
+      render: (order) => order?.sale_order_number || '-',
     },
     {
       title: 'Completed At',
@@ -289,11 +200,10 @@ const PokaYokeCompletedLogs = () => {
   const responseColumns = [
     {
       title: 'Checklist Item',
-      dataIndex: 'item_id',
       key: 'item_id',
       width: 250,
       className: 'table-header-styled',
-      render: (id) => getItemText(id),
+      render: (_, record) => getItemText(record),
     },
     {
       title: 'Response',
@@ -343,7 +253,9 @@ const PokaYokeCompletedLogs = () => {
 
       <Card
         style={{
-          borderRadius: '8px',
+          borderRadius: '12px',
+          border: '1px solid #f0f0f0',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
           marginBottom: '16px',
         }}
         bodyStyle={{ padding: '16px 20px' }}
@@ -363,6 +275,8 @@ const PokaYokeCompletedLogs = () => {
             <Select
               allowClear
               placeholder="Select Machine"
+              loading={machinesLoading}
+              onFocus={() => fetchMachines()}
               style={{ width: '100%' }}
               value={selectedMachine}
               onChange={handleMachineChange}
@@ -394,12 +308,21 @@ const PokaYokeCompletedLogs = () => {
         size="small"
         scroll={{ x: 1100 }}
         pagination={{
-          pageSize: 10,
+          current: pagination.current,
+          pageSize: pagination.pageSize,
           showSizeChanger: true,
           showQuickJumper: true,
           showTotal: (total, range) =>
             `${range[0]}-${range[1]} of ${total} items`,
           pageSizeOptions: ['10', '20', '50', '100'],
+          onChange: (page, pageSize) => {
+            setPagination({ current: page, pageSize: pageSize });
+            console.log('Page changed to:', page, 'Page size:', pageSize);
+          },
+          onShowSizeChange: (current, size) => {
+            setPagination({ current: 1, pageSize: size });
+            console.log('Page size changed to:', size);
+          },
         }}
         style={{
           background: '#fff',
@@ -450,12 +373,9 @@ const PokaYokeCompletedLogs = () => {
         }
         width={900}
       >
-        {detailLoading ? (
-          <div style={{ textAlign: 'center', padding: '40px' }}>Loading...</div>
-        ) : (
-          selectedLogDetails && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <Card
+        {selectedLogDetails && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Card
                 bordered={false}
                 style={{ background: '#fafafa', borderRadius: 8 }}
               >
@@ -470,31 +390,37 @@ const PokaYokeCompletedLogs = () => {
                   <div>
                     <Text type="secondary">Checklist</Text>
                     <div style={{ fontWeight: 500 }}>
-                      {getChecklistName(selectedLogDetails.checklist_id)}
+                      {selectedLogDetails.checklist?.name || '-'}
                     </div>
                   </div>
                   <div>
                     <Text type="secondary">Machine</Text>
                     <div style={{ fontWeight: 500 }}>
-                      {getMachineLabel(selectedLogDetails.machine_id)}
+                      {selectedLogDetails.machine ? `${selectedLogDetails.machine.make} ${selectedLogDetails.machine.model || ''}` : '-'}
                     </div>
                   </div>
                   <div>
                     <Text type="secondary">Operator</Text>
                     <div style={{ fontWeight: 500 }}>
-                      {getOperatorName(selectedLogDetails.operator_id)}
+                      {selectedLogDetails.operator?.user_name || '-'}
                     </div>
                   </div>
                   <div>
                     <Text type="secondary">Production Order</Text>
                     <div style={{ fontWeight: 500 }}>
-                      {getOrderNumber(selectedLogDetails.production_order_id)}
+                      {selectedLogDetails.order?.sale_order_number || '-'}
                     </div>
                   </div>
                   <div>
                     <Text type="secondary">Completed At</Text>
                     <div style={{ fontWeight: 500 }}>
                       {formatDateTime(selectedLogDetails.completed_at)}
+                    </div>
+                  </div>
+                  <div>
+                    <Text type="secondary">Part</Text>
+                    <div style={{ fontWeight: 500 }}>
+                      {selectedLogDetails.part?.part_name || '-'}
                     </div>
                   </div>
                 </div>
@@ -540,8 +466,7 @@ const PokaYokeCompletedLogs = () => {
                 />
               </div>
             </div>
-          )
-        )}
+          )}
       </Modal>
     </div>
   );

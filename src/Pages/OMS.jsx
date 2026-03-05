@@ -1,12 +1,19 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty } from "antd";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
 import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
-  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined } from "@ant-design/icons";
+  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import ProductBOMView from "../OMS Components/ProductBOMView";
+import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
+import dayjs from "dayjs";
+import isBetween from "dayjs/plugin/isBetween";
+
+dayjs.extend(isBetween);
+
+const { RangePicker } = DatePicker;
 
 const OMS = () => {
   const navigate = useNavigate();
@@ -21,6 +28,8 @@ const OMS = () => {
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [searchText, setSearchText] = useState("");
+  const [dateRange, setDateRange] = useState(null);
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
@@ -34,17 +43,13 @@ const OMS = () => {
   const prefix = getRolePrefix();
 
   useEffect(() => {
-    if (hasFetchedData.current) return;
+    if (hasFetchedData.current || productId) return;
     
     const fetchData = async () => {
       hasFetchedData.current = true;
       setLoading(true);
       try {
-        await Promise.all([
-          fetchOrders(),
-          fetchCustomers(), 
-          fetchProducts()
-        ]);
+        await fetchOrders();
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -53,7 +58,7 @@ const OMS = () => {
     };
 
     fetchData();
-  }, []);
+  }, [productId]);
 
   const fetchCustomers = async () => {
     try {
@@ -93,57 +98,48 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      let url = `${API_BASE_URL}/orders/?skip=0&limit=1000`;
+      let url = `${API_BASE_URL}/orders/`;
       if (prefix === '/project_coordinator') {
         try {
           const stored = localStorage.getItem('user');
           const u = stored ? JSON.parse(stored) : null;
           if (u?.id) {
-            url = `${API_BASE_URL}/orders/?user_id=${u.id}&skip=0&limit=1000`;
+            url = `${API_BASE_URL}/orders/?user_id=${u.id}`;
           }
         } catch (e) {
           console.error('Failed to parse user from localStorage', e);
         }
       }
-      let data = [];
-      let ok = false;
-      try {
-        const response = await fetch(url);
-        ok = response.ok;
-        if (ok) {
-          data = await response.json();
-        }
-      } catch (_) {}
-      if ((!ok || !Array.isArray(data) || data.length === 0) && prefix === '/admin') {
-        const alt = await fetch(`${API_BASE_URL}/orders/with-customers?skip=0&limit=1000`);
-        if (alt.ok) {
-          const altData = await alt.json();
-          setOrders(Array.isArray(altData) ? altData : []);
-          return;
-        }
+      const response = await fetch(url);
+      if (response.ok) {
+        const data = await response.json();
+        setOrders(Array.isArray(data) ? data : []);
+      } else {
+        setOrders([]);
       }
-      setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error fetching orders:", error);
       setOrders([]);
     }
   };
 
-  const getCustomerName = (customerId) => {
+  const getCustomerName = (customerId, record) => {
     const customer = customers.find((c) => c.id === customerId);
-    return customer?.company_name ?? customerId;
+    if (customer) return customer.company_name;
+    return record?.customer_name ?? customerId;
   };
 
-  const getProductName = (productId) => {
+  const getProductName = (productId, record) => {
     const product = products.find((p) => p.id === productId);
-    return (product?.product_name || product?.product_number) ?? productId;
+    if (product) return (product.product_name || product.product_number);
+    return record?.product_name ?? productId;
   };
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
-    const date = new Date(dateStr);
-    return date.toLocaleDateString();
+    return dayjs(dateStr).format("DD/MM/YYYY");
   };
+
 
   const getStatusBadge = (status) => {
     const statusConfig = {
@@ -187,8 +183,13 @@ const OMS = () => {
         try {
           const response = await fetch(`${API_BASE_URL}/orders/${order.id}`, { method: "DELETE" });
           if (response.ok) {
+            const result = await response.json();
             fetchOrders();
-            messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
+            if (result.product_also_deleted) {
+              messageApi.success(`Order "${order.sale_order_number}" and its associated product deleted successfully!`);
+            } else {
+              messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
+            }
           } else {
             const data = await response.json();
             messageApi.error(data.detail || "Failed to delete order");
@@ -216,6 +217,87 @@ const OMS = () => {
     navigate(`${prefix}/oms`);
   };
 
+  const handleSearch = (value) => {
+    setSearchText(value);
+  };
+
+  const handleDateRangeChange = (dates) => {
+    setDateRange(dates);
+  };
+
+  const filteredOrders = orders.filter((order, index) => {
+    // 1. Date Range Filter
+    if (dateRange && dateRange[0] && dateRange[1]) {
+      const start = dateRange[0].startOf('day');
+      const end = dateRange[1].endOf('day');
+      const orderDate = order.order_date ? dayjs(order.order_date) : null;
+      const dueDate = order.due_date ? dayjs(order.due_date) : null;
+
+      // Strict containment: If a date exists, it MUST be within the [start, end] range.
+      // If it's "beyond" (before start or after end), hide the row.
+      if (orderDate && (orderDate.isBefore(start) || orderDate.isAfter(end))) return false;
+      if (dueDate && (dueDate.isBefore(start) || dueDate.isAfter(end))) return false;
+      
+      // If no date exists at all, hide it when filtering
+      if (!orderDate && !dueDate) return false;
+    }
+
+    // 2. Global Search Filter (Table Headers)
+    if (!searchText) return true;
+    
+    const searchLower = searchText.toLowerCase();
+    
+    // SL NO (index + 1)
+    const slNo = String(index + 1);
+    
+    // Project Number
+    const saleOrderNumber = String(order.sale_order_number || "").toLowerCase();
+    
+    // Project Name
+    const projectName = String(order.project_name || "").toLowerCase();
+    
+    // Customer
+    const customerName = String(getCustomerName(order.customer_id, order) || "").toLowerCase();
+    
+    // Product
+    const productName = String(getProductName(order.product_id, order) || "").toLowerCase();
+    
+    // Qty
+    const quantity = String(order.quantity || "");
+    
+    // Dates (formatted)
+    const formattedOrderDate = formatDate(order.order_date).toLowerCase();
+    const formattedDueDate = formatDate(order.due_date).toLowerCase();
+    
+    // Status
+    const status = String(order.status || "").toLowerCase();
+    
+    // Project Coordinator
+    const userName = String(order.user_name || order.user_id || "").toLowerCase();
+    
+    return (
+      slNo.includes(searchLower) ||
+      projectName.includes(searchLower) ||
+      saleOrderNumber.includes(searchLower) ||
+      customerName.includes(searchLower) ||
+      productName.includes(searchLower) ||
+      quantity.includes(searchLower) ||
+      formattedOrderDate.includes(searchLower) ||
+      formattedDueDate.includes(searchLower) ||
+      status.includes(searchLower) ||
+      userName.includes(searchLower)
+    );
+  });
+
+  if (productId) {
+    return (
+      <ProductBOMView 
+        productId={productId}
+        onBackToOrders={handleBackToOrders}
+      />
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -224,15 +306,6 @@ const OMS = () => {
             <p className="mt-4 text-gray-500 font-medium">Loading orders...</p>
         </div>
       </div>
-    );
-  }
-
-  if (productId) {
-    return (
-      <ProductBOMView 
-        productId={productId}
-        onBackToOrders={handleBackToOrders}
-      />
     );
   }
 
@@ -260,10 +333,10 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Customer</span>,
       dataIndex: "customer_id",
       key: "customer_id",
-      render: (customerId) => (
+      render: (customerId, record) => (
         <Space>
             <UserOutlined className="text-gray-400" />
-            <span className="text-gray-700">{getCustomerName(customerId)}</span>
+            <span className="text-gray-700">{getCustomerName(customerId, record)}</span>
         </Space>
       ),
     },
@@ -271,7 +344,7 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Product</span>,
       dataIndex: "product_id",
       key: "product_id",
-      render: (productId) => (
+      render: (productId, record) => (
         <Button 
           type="link" 
           onClick={() => handleViewBOM(productId)}
@@ -279,7 +352,7 @@ const OMS = () => {
           icon={<AppstoreOutlined />}
           className="flex items-center gap-1"
         >
-          {getProductName(productId)}
+          {getProductName(productId, record)}
         </Button>
       ),
     },
@@ -376,8 +449,14 @@ const OMS = () => {
   const scheduledCount = orders.filter(o => o.status === 'Ongoing').length;
   const completedCount = orders.filter(o => o.status === 'Completed').length;
 
+  const ordersForPdf = orders.map(order => ({
+    ...order,
+    customer_name: getCustomerName(order.customer_id, order),
+    product_name: getProductName(order.product_id, order),
+  }));
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-2 sm:p-4 lg:p-6">
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
@@ -401,83 +480,132 @@ const OMS = () => {
           border: none !important;
           box-shadow: none !important;
         }
+        .ant-input-search:hover .ant-input {
+          border-color: #4096ff !important;
+        }
+        .ant-input-search:hover .ant-input-group-addon {
+          background-color: #4096ff !important;
+          border-color: #4096ff !important;
+        }
+        .ant-input-search:hover .ant-input-group-addon .anticon {
+          color: white !important;
+        }
+        @media (max-width: 768px) {
+          .ant-table {
+            font-size: 12px;
+          }
+          .ant-table-thead > tr > th {
+            padding: 8px 4px;
+          }
+          .ant-table-tbody > tr > td {
+            padding: 8px 4px;
+          }
+        }
       `}</style>
 
       {contextHolder}
 
       {/* KPI Cards - only for Project Coordinator */}
       {prefix === '/project_coordinator' && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="rounded-xl p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-4 lg:mb-6">
+          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm text-gray-600">Total Orders</div>
-                <div className="text-2xl font-bold text-blue-700">{totalOrders}</div>
+                <div className="text-xs sm:text-sm text-gray-600">Total Orders</div>
+                <div className="text-xl sm:text-2xl font-bold text-blue-700">{totalOrders}</div>
               </div>
-              <ShoppingOutlined className="text-blue-600 text-2xl" />
+              <ShoppingOutlined className="text-blue-600 text-xl sm:text-2xl" />
             </div>
           </div>
-          <div className="rounded-xl p-4 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm">
+          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm text-gray-600">Pending</div>
-                <div className="text-2xl font-bold text-orange-600">{inProgressCount}</div>
+                <div className="text-xs sm:text-sm text-gray-600">Pending</div>
+                <div className="text-xl sm:text-2xl font-bold text-orange-600">{inProgressCount}</div>
               </div>
-              <AppstoreOutlined className="text-orange-500 text-2xl" />
+              <AppstoreOutlined className="text-orange-500 text-xl sm:text-2xl" />
             </div>
           </div>
-          <div className="rounded-xl p-4 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm">
+          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm text-gray-600">Scheduled</div>
-                <div className="text-2xl font-bold text-purple-600">{scheduledCount}</div>
+                <div className="text-xs sm:text-sm text-gray-600">Scheduled</div>
+                <div className="text-xl sm:text-2xl font-bold text-purple-600">{scheduledCount}</div>
               </div>
-              <ClockCircleOutlined className="text-purple-500 text-2xl" />
+              <ClockCircleOutlined className="text-purple-500 text-xl sm:text-2xl" />
             </div>
           </div>
-          <div className="rounded-xl p-4 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm">
+          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm text-gray-600">Completed</div>
-                <div className="text-2xl font-bold text-green-600">{completedCount}</div>
+                <div className="text-xs sm:text-sm text-gray-600">Completed</div>
+                <div className="text-xl sm:text-2xl font-bold text-green-600">{completedCount}</div>
               </div>
-              <CheckCircleOutlined className="text-green-500 text-2xl" />
+              <CheckCircleOutlined className="text-green-500 text-xl sm:text-2xl" />
             </div>
           </div>
         </div>
       )}
 
       {/* Header */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
-        <div className="flex items-center justify-between">
-            <div>
-                <Typography.Title level={2} style={{ margin: 0, fontSize: '24px' }} className="flex items-center gap-3 text-gray-800">
+      <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4">
+            <div className="w-full lg:w-auto">
+                <Typography.Title 
+                  level={2} 
+                  style={{ margin: 0, fontSize: 'clamp(18px, 4vw, 24px)' }} 
+                  className="flex items-center gap-2 sm:gap-3 text-gray-800"
+                >
                     <ShoppingOutlined className="text-blue-600" />
-                    Order Management
+                    <span className="hidden sm:inline">Order Management</span>
+                    <span className="sm:hidden">Orders</span>
                 </Typography.Title>
-                <Typography.Text className="text-gray-500 mt-1 block">
+                <Typography.Text className="text-gray-500 mt-1 block text-xs sm:text-sm">
                     Manage sales orders, track status, and handle documents
                 </Typography.Text>
             </div>
-            <Button 
-                type="primary" 
-                icon={<PlusOutlined />}
-                onClick={handleCreateOrder}
-                size="large"
-                style={{ backgroundColor: '#2563eb' }}
-                className="border-none shadow-md no-hover-btn"
-            >
-                New Order
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+              <RangePicker
+                onChange={handleDateRangeChange}
+                className="w-full sm:w-64"
+                format="DD/MM/YYYY"
+                placeholder={["Start Date", "End Date"]}
+              />
+              <Input.Search
+                placeholder="Search by any field..."
+                allowClear
+                onSearch={handleSearch}
+                onChange={(e) => handleSearch(e.target.value)}
+                className="w-full sm:w-64 lg:w-80"
+                size="middle"
+              />
+              <div className="flex gap-2">
+                <OMSOrdersPdfDownload
+                  orders={ordersForPdf}
+                  formatDate={formatDate}
+                />
+                <Button 
+                    type="primary" 
+                    icon={<PlusOutlined />}
+                    onClick={handleCreateOrder}
+                    size="middle"
+                    style={{ backgroundColor: '#2563eb' }}
+                    className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
+                >
+                    <span className="hidden sm:inline">New Order</span>
+                    <span className="sm:hidden">New</span>
+                </Button>
+              </div>
+            </div>
         </div>
       </div>
       <Card 
-        className="shadow-sm rounded-xl border border-gray-100" 
+        className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" 
         styles={{ body: { padding: 0 } }}
       >
         <Table
             columns={columns}
-            dataSource={orders}
+            dataSource={filteredOrders}
             rowKey="id"
             pagination={{
                 current: ordersPagination.current,
@@ -486,7 +614,8 @@ const OMS = () => {
                 showQuickJumper: true,
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
                 pageSizeOptions: ['10', '20', '50', '100'],
-                position: ['bottomCenter'],
+                placement: 'bottom',
+                responsive: true,
             }}
             onChange={(paginationConfig) => {
                 setOrdersPagination({
@@ -497,8 +626,8 @@ const OMS = () => {
             size="small"
             bordered
             className="modern-table"
-            locale={{ emptyText: <Empty description="No orders found" /> }}
-            scroll={{ x: 'max-content' }}
+            locale={{ emptyText: <Empty description={searchText ? "No orders found matching your search" : "No orders found"} /> }}
+            scroll={{ x: 1200 }}
         />
       </Card>
 
@@ -511,6 +640,8 @@ const OMS = () => {
         editingOrder={editingOrder}
         customers={customers}
         products={products}
+        fetchCustomers={fetchCustomers}
+        fetchProducts={fetchProducts}
       />
       
       <DocumentModal

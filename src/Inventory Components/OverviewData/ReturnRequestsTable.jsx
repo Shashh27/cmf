@@ -1,33 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Space, message, Tag, Modal, Popconfirm } from 'antd';
+import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Input, Select, Row, Col } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../Config/auth.js';
 
 const ReturnRequestsTable = () => {
   const [returnRequests, setReturnRequests] = useState([]);
-  const [loading] = useState(false);
- 
+  const [filteredReturnRequests, setFilteredReturnRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
   });
-
-  const getCurrentAdminId = () => {
-    try {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        const user = JSON.parse(storedUser);
-        if (user && user.id != null) return parseInt(user.id);
-      }
-    } catch {
-      void 0;
-    }
-    return 0;
-  };
+  const [dateRange, setDateRange] = useState([null, null]);
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [searchText, setSearchText] = useState('');
+  const { RangePicker } = DatePicker;
   
   useEffect(() => {
     fetchReturnRequests();
   }, []);
+
+  useEffect(() => {
+    applyFilters();
+  }, [returnRequests, dateRange, typeFilter, searchText]);
+
+  const getCurrentAdminInfo = () => {
+    try {
+      const stored = localStorage.getItem('user');
+      if (!stored) return { id: null, name: null };
+      const u = JSON.parse(stored);
+      const id = u?.id != null ? parseInt(u.id) : null;
+      const name = u?.user_name || u?.username || null;
+      return { id, name };
+    } catch (e) {
+      console.error('Failed to parse user from localStorage', e);
+      return { id: null, name: null };
+    }
+  };
 
   const fetchReturnRequests = async () => {
     try {
@@ -44,7 +55,7 @@ const ReturnRequestsTable = () => {
       });
       console.log('===============================');
       
-      setReturnRequests(data);
+      setReturnRequests(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Failed to fetch return requests:', error);
       message.error('Failed to fetch return requests: ' + error.message);
@@ -63,11 +74,15 @@ const ReturnRequestsTable = () => {
         console.log('Record ID:', record.id);
         console.log('Record Tool Name:', record.inventory_request_details?.tool_name);
         console.log('Current Status:', record.status);
-        const adminId = getCurrentAdminId();
-        console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`);
+        const { id: adminId } = getCurrentAdminInfo();
+        if (!adminId) {
+          message.error('Unable to determine current user. Please log in again.');
+          return;
+        }
+        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`, {
+          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -114,11 +129,15 @@ const ReturnRequestsTable = () => {
         console.log('Record ID:', record.id);
         console.log('Record Tool Name:', record.inventory_request_details?.tool_name);
         console.log('Current Status:', record.status);
-        const adminId = getCurrentAdminId();
-        console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`);
+        const { id: adminId, name: adminName } = getCurrentAdminInfo();
+        if (!adminId) {
+          message.error('Unable to determine current user. Please log in again.');
+          return;
+        }
+        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`, {
+          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -137,14 +156,14 @@ const ReturnRequestsTable = () => {
                 ? { 
                     ...req, 
                     status: 'collected', 
-                    admin_name: result.admin_name,
+                    admin_name: adminName || result.admin_name,
                     updated_at: new Date().toISOString()
                   }
                 : req
             )
           );
           
-          message.success(`Return request marked as collected by ${result.admin_name || 'admin'}`);
+          message.success(`Return request marked as collected by ${adminName || result.admin_name || 'admin'}`);
         } catch (error) {
           console.error('Failed to update status to collected:', error);
           message.error('Failed to update status to collected: ' + error.message);
@@ -178,6 +197,42 @@ const ReturnRequestsTable = () => {
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     return `${day}/${month}/${year} ${hours}:${minutes}`;
+  };
+
+  const applyFilters = () => {
+    let data = Array.isArray(returnRequests) ? [...returnRequests] : [];
+    if (typeFilter !== 'all') {
+      data = data.filter(r => (r.status || '').toLowerCase() === typeFilter);
+    }
+    const [start, end] = dateRange || [];
+    if (start && end) {
+      const s = start.startOf('day').toDate();
+      const e = end.endOf('day').toDate();
+      data = data.filter(r => {
+        if (!r.created_at) return false;
+        const c = new Date(r.created_at);
+        return c >= s && c <= e;
+      });
+    }
+    if (searchText) {
+      const s = searchText.toLowerCase();
+      data = data.filter(r => 
+        (r.inventory_request_details?.project_name || '').toLowerCase().includes(s) ||
+        (r.inventory_request_details?.tool_name || '').toLowerCase().includes(s)
+      );
+    }
+    setFilteredReturnRequests(data);
+    setPagination(prev => ({ ...prev, current: 1 }));
+  };
+
+  const handleRefresh = () => {
+    fetchReturnRequests();
+  };
+
+  const handleClear = () => {
+    setDateRange([null, null]);
+    setTypeFilter('all');
+    setSearchText('');
   };
 
   const columns = [
@@ -222,7 +277,7 @@ const ReturnRequestsTable = () => {
       title: 'Requested Qty',
       dataIndex: 'total_requested_qty',
       key: 'total_requested_qty',
-      width: 120,
+      width: 160,
       align: 'center',
       className: 'table-header-styled',
     },
@@ -230,7 +285,7 @@ const ReturnRequestsTable = () => {
       title: 'Returned Qty',
       dataIndex: 'returned_qty',
       key: 'returned_qty',
-      width: 110,
+      width: 160,
       align: 'center',
       className: 'table-header-styled',
     },
@@ -238,7 +293,7 @@ const ReturnRequestsTable = () => {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 120,
+      width: 160,
       align: 'center',
       className: 'table-header-styled',
       filters: [
@@ -269,22 +324,6 @@ const ReturnRequestsTable = () => {
       render: (text) => text || '-',
     },
     {
-      title: 'Created At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 160,
-      className: 'table-header-styled',
-      render: (date) => formatDateTime(date),
-    },
-    {
-      title: 'Updated At',
-      dataIndex: 'updated_at',
-      key: 'updated_at',
-      width: 160,
-      className: 'table-header-styled',
-      render: (date) => formatDateTime(date),
-    },
-    {
       title: 'Action',
       key: 'action',
       width: 180,
@@ -306,7 +345,8 @@ const ReturnRequestsTable = () => {
               type="default"
               size="small"
               onClick={() => handlePending(record)}
-              disabled={record.status === 'pending'}
+              disabled={true} // Always disabled - pending is the initial state only
+              title="Status can only change from pending to collected (one-way)"
             >
               Pending
             </Button>
@@ -314,7 +354,8 @@ const ReturnRequestsTable = () => {
               type="primary"
               size="small"
               onClick={() => handleCollected(record)}
-              disabled={record.status === 'collected'}
+              disabled={record.status !== 'pending'}
+              title={record.status !== 'pending' ? `Cannot mark as collected: request is ${record.status}` : 'Mark this return as collected'}
             >
               Collected
             </Button>
@@ -326,12 +367,63 @@ const ReturnRequestsTable = () => {
 
   return (
     <div>
+      <div style={{ marginBottom: 12 }}>
+        <Row gutter={[12, 12]} align="middle">
+          <Col xs={24} sm={12} md={10} lg={8} xl={6}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Date Range</span>
+              <RangePicker
+                style={{ width: '100%' }}
+                value={dateRange}
+                onChange={(vals) => setDateRange(vals)}
+                allowClear
+              />
+            </div>
+          </Col>
+          <Col xs={24} sm={12} md={6} lg={6} xl={4}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Type</span>
+              <Select
+                value={typeFilter}
+                onChange={setTypeFilter}
+                style={{ width: '100%' }}
+                options={[
+                  { value: 'all', label: 'All Types' },
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'collected', label: 'Collected' },
+                ]}
+              />
+            </div>
+          </Col>
+          <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Search</span>
+              <Input.Search
+                placeholder="Search by project number or tool name"
+                allowClear
+                onSearch={(v) => setSearchText(v || '')}
+                onChange={(e) => setSearchText(e.target.value)}
+              />
+            </div>
+          </Col>
+          <Col xs="auto">
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>&nbsp;</span>
+              <Space>
+                <Button onClick={handleRefresh}>Refresh</Button>
+                <Button onClick={handleClear}>Clear</Button>
+              </Space>
+            </div>
+          </Col>
+        </Row>
+      </div>
       <Table
+        className="inventory-return-table modern-table"
         columns={columns}
-        dataSource={returnRequests}
+        dataSource={filteredReturnRequests}
         rowKey="id"
         loading={loading}
-        className="modern-table"
+      
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,
@@ -350,6 +442,20 @@ const ReturnRequestsTable = () => {
               current: 1,
               pageSize: size,
             });
+          },
+        }}
+        components={{
+          header: {
+            cell: (props) => (
+              <th
+                {...props}
+                style={{
+                  ...(props.style || {}),
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                }}
+              />
+            ),
           },
         }}
         size="small"

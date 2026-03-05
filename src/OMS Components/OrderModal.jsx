@@ -1,16 +1,127 @@
 import React, { useState, useEffect } from "react";
 import { API_BASE_URL } from "../Config/auth";
-import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse } from "antd";
+import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber } from "antd";
 import { FileTextOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
 import { message } from "antd";
+import dayjs from "dayjs";
 
 const { Title } = Typography;
 const { Option } = Select;
 
-const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, products }) => {
+const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, products, fetchCustomers, fetchProducts }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
+  const [decimalWarnings, setDecimalWarnings] = useState({});
+
+  const limitDecimals = (value, fieldName, precision = 3) => {
+    if (value === null || value === undefined || value === '') return value;
+    // Remove any character that is not a digit or a decimal point
+    const cleaned = String(value).replace(/[^0-9.]/g, '');
+    let str = cleaned;
+    
+    // For whole numbers (precision = 0), remove any decimal point
+    if (precision === 0) {
+      str = str.replace(/\./g, '');
+      // Enforce max 5 digits for quantity-like fields
+      if (str.length > 5) {
+        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
+        return str.slice(0, 5);
+      }
+      return str;
+    }
+
+    if (str.includes('.')) {
+      const [int, dec] = str.split('.');
+      if (dec.length > precision) {
+        showDecimalWarning(fieldName, precision);
+        return `${int}.${dec.slice(0, precision)}`;
+      }
+      return str;
+    }
+    return str;
+  };
+
+  const showDecimalWarning = (fieldName, precision, customMsg) => {
+    if (!fieldName) return;
+    const msg = customMsg ?? (precision === 0 ? "Only whole numbers allowed" : `Max ${precision} decimal places allowed`);
+    setDecimalWarnings(prev => ({ ...prev, [fieldName]: msg }));
+    // Auto-clear warning after 3 seconds
+    setTimeout(() => {
+      setDecimalWarnings(prev => ({ ...prev, [fieldName]: null }));
+    }, 3000);
+  };
+
+  const blockExtraDecimals = (e, fieldName, precision = 3) => {
+    const { value } = e.target;
+    
+    // 1. Strictly block negative sign and common symbols/letters
+    const forbiddenKeys = ['-', '+', 'e', 'E', '@', '#', '$', '%', '&', '*', '(', ')', '_', '=', '<', '>', '/', '?', ';', ':', '"', "'", '[', ']', '{', '}', '|', '\\', '`', '~'];
+    if (forbiddenKeys.includes(e.key)) {
+      e.preventDefault();
+      return;
+    }
+
+    // 2. Block decimal point if precision is 0 (whole numbers only)
+    if (precision === 0 && e.key === '.') {
+      showDecimalWarning(fieldName, 0);
+      e.preventDefault();
+      return;
+    }
+
+    // 3. If precision is 0, enforce max 5 digits in real-time
+    if (precision === 0 && /[0-9]/.test(e.key)) {
+      const digitsOnly = String(value).replace(/\D/g, '');
+      const hasSelection = e.target.selectionStart !== e.target.selectionEnd;
+      if (digitsOnly.length >= 5 && !hasSelection) {
+        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Allow navigation, delete, backspace, etc.
+    const allowedKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Control', '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+    
+    // If it's not an allowed key and not a combo (Ctrl+C, etc.), block it
+    if (!allowedKeys.includes(e.key) && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      return;
+    }
+
+    if (e.key === '.' && value.includes('.')) {
+      e.preventDefault(); // Block multiple dots
+      return;
+    }
+
+    if (value.includes('.')) {
+      const parts = value.split('.');
+      const selectionStart = e.target.selectionStart;
+      const dotIndex = value.indexOf('.');
+      
+      // If typing after the dot and already at precision limit
+      if (selectionStart > dotIndex && parts[1].length >= precision) {
+        // Check if there is a text selection that would be replaced
+        if (e.target.selectionStart === e.target.selectionEnd) {
+          showDecimalWarning(fieldName, precision);
+          e.preventDefault();
+        }
+      }
+    }
+  };
+
+  // Fetch data on demand
+  const handleCustomerDropdown = (open) => {
+    if (open && customers.length === 0) {
+      fetchCustomers?.();
+    }
+  };
+
+  const handleProductDropdown = (open) => {
+    if (open && products.length === 0) {
+      fetchProducts?.();
+    }
+  };
 
 
   useEffect(() => {
@@ -21,8 +132,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           customer_id: editingOrder.customer_id?.toString() ?? "",
           product_id: editingOrder.product_id?.toString() ?? "",
           quantity: editingOrder.quantity?.toString() ?? "",
-          due_date: editingOrder.due_date ? editingOrder.due_date.split("T")[0] : "",
-          order_date: editingOrder.order_date ? editingOrder.order_date.split("T")[0] : "",
+          due_date: editingOrder.due_date ? dayjs(editingOrder.due_date) : null,
+          order_date: editingOrder.order_date ? dayjs(editingOrder.order_date) : null,
           user_id: editingOrder.user_id?.toString() ?? "",
         });
       } else {
@@ -61,6 +172,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       
       const payload = {
         ...values,
+        sale_order_number: values.sale_order_number?.trim(),
         quantity: parseInt(values.quantity),
         customer_id: parseInt(values.customer_id),
         product_id: parseInt(values.product_id),
@@ -69,7 +181,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
       if (values.due_date) {
         try {
-          payload.due_date = new Date(values.due_date).toISOString();
+          payload.due_date = dayjs(values.due_date).toISOString();
         } catch {
           delete payload.due_date;
         }
@@ -79,12 +191,21 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
       if (values.order_date) {
         try {
-          payload.order_date = new Date(values.order_date).toISOString();
+          payload.order_date = dayjs(values.order_date).toISOString();
         } catch {
           delete payload.order_date;
         }
       } else {
         delete payload.order_date;
+      }
+
+      if (!editingOrder && documents.some(doc =>
+        doc.document_type === "Other" &&
+        !(doc.document_type_other && doc.document_type_other.trim())
+      )) {
+        message.error("Please enter document type name for all 'Other' order documents");
+        setLoading(false);
+        return;
       }
 
       const response = await fetch(url, {
@@ -106,7 +227,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         onOrderCreated(result);
         handleClose();
       } else {
-        message.error("Failed to save order");
+        const errorData = await response.json();
+        message.error(errorData.detail || "Failed to save order");
       }
     } catch (error) {
       console.error("Error saving order:", error);
@@ -123,7 +245,16 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   };
 
   const handleDocumentAdd = () => {
-    setDocuments([...documents, { file: null, document_name: "", document_type: "", document_version: "1.0" }]);
+    setDocuments([
+      ...documents,
+      {
+        file: null,
+        document_name: "",
+        document_type: "Other",
+        document_type_other: "",
+        document_version: "1.0",
+      },
+    ]);
   };
 
   const handleDocumentRemove = (index) => {
@@ -143,7 +274,11 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         const uploadFormData = new FormData();
         uploadFormData.append("file", doc.file);
         uploadFormData.append("document_name", doc.document_name || doc.file?.name || "Document");
-        uploadFormData.append("document_type", doc.document_type || "Document");
+        let docType = doc.document_type || "Document";
+        if (docType === "Other" && doc.document_type_other && doc.document_type_other.trim()) {
+          docType = doc.document_type_other.trim();
+        }
+        uploadFormData.append("document_type", docType);
         uploadFormData.append("document_version", "1.0"); // Hardcoded to 1.0 for new order creation
 
         try {
@@ -163,14 +298,15 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       open={isOpen}
       onCancel={handleClose}
       footer={null}
-      width={1100}
+      width="95%"
+      style={{ maxWidth: 1100 }}
       centered
       maskClosable={false}
       keyboard={false}
       title={
         <div className="flex items-center gap-2">
           <FileTextOutlined className="text-blue-500" />
-          <span className="font-bold text-gray-800">
+          <span className="font-bold text-gray-800 text-sm sm:text-base">
             {editingOrder ? "Edit Order" : "Create New Order"}
           </span>
         </div>
@@ -178,6 +314,14 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
     >
       <style>{`
         .hide-optional .ant-form-item-optional { display: none !important; }
+        @media (max-width: 768px) {
+          .ant-modal-body {
+            padding: 12px;
+          }
+          .ant-form-item {
+            margin-bottom: 12px;
+          }
+        }
       `}</style>
       <Form
         form={form}
@@ -185,9 +329,19 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         onFinish={handleSubmit}
         className="mt-2"
         requiredMark="optional"
+        initialValues={{
+          sale_order_number: "",
+          project_name: "",
+          customer_id: "",
+          product_id: "",
+          quantity: "",
+          status: "Pending",
+          user_name_display: "",
+          user_id: "",
+        }}
       >
-        <Row gutter={24}>
-          <Col span={6}>
+        <Row gutter={[12, 0]}>
+          <Col xs={24} sm={12} md={6}>
             <Form.Item
               name="user_name_display"
               label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">User</span>}
@@ -200,9 +354,9 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             <input type="hidden" />
           </Form.Item>
         </Row>
-        <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6 shadow-sm">
-          <Row gutter={24}>
-            <Col span={6}>
+        <div className="bg-gray-50 p-3 sm:p-4 rounded-lg lg:rounded-xl border border-gray-200 mb-4 sm:mb-6 shadow-sm">
+          <Row gutter={[12, 0]}>
+            <Col xs={24} sm={12} md={6}>
               <Form.Item
                 name="sale_order_number"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Project Number</span>}
@@ -212,7 +366,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 <Input placeholder="Enter #" className="rounded-md border-gray-300 h-10" autoComplete="off" />
               </Form.Item>
             </Col>
-            <Col span={9}>
+            <Col xs={24} sm={12} md={9}>
               <Form.Item
                 name="project_name"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Project Name</span>}
@@ -221,71 +375,108 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 <Input placeholder="Enter project name" className="rounded-md border-gray-300 h-10" autoComplete="off" />
               </Form.Item>
             </Col>
-            <Col span={9}>
+            <Col xs={24} sm={24} md={9}>
               <Form.Item
                 name="customer_id"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Customer</span>}
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-4"
               >
-                <Select placeholder="Select customer" className="h-10 custom-select-v2">
+                <Select 
+                  placeholder="Select customer" 
+                  className="h-10 custom-select-v2"
+                  onOpenChange={handleCustomerDropdown}
+                >
                   {customers.map((customer) => (
                     <Option key={customer.id} value={customer.id.toString()}>
                       {customer.company_name}
                     </Option>
                   ))}
+                  {editingOrder && customers.length === 0 && (
+                    <Option key={editingOrder.customer_id} value={editingOrder.customer_id?.toString()}>
+                      {editingOrder.customer_name || `Customer ${editingOrder.customer_id}`}
+                    </Option>
+                  )}
                 </Select>
               </Form.Item>
             </Col>
           </Row>
 
-          <Row gutter={24}>
-            <Col span={6}>
+          <Row gutter={[12, 0]}>
+            <Col xs={24} sm={12} md={6}>
               <Form.Item
                 name="product_id"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Product</span>}
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-0"
               >
-                <Select placeholder="Select product" className="h-10">
+                <Select 
+                  placeholder="Select product" 
+                  className="h-10"
+                  onOpenChange={handleProductDropdown}
+                >
                   {products.map((product) => (
                     <Option key={product.id} value={product.id.toString()}>
                       {product.product_name || product.product_number || `Product ${product.id}`}
                     </Option>
                   ))}
+                  {editingOrder && products.length === 0 && (
+                    <Option key={editingOrder.product_id} value={editingOrder.product_id?.toString()}>
+                      {editingOrder.product_name || `Product ${editingOrder.product_id}`}
+                    </Option>
+                  )}
                 </Select>
               </Form.Item>
             </Col>
-            <Col span={4}>
+            <Col xs={12} sm={6} md={4}>
               <Form.Item
                 name="quantity"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Quantity</span>}
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-0"
+                validateStatus={decimalWarnings['quantity'] ? 'warning' : ''}
+                help={decimalWarnings['quantity']}
               >
-                <Input type="number" placeholder="Qty" className="h-10 rounded-md border-gray-300" />
+                <InputNumber 
+                  placeholder="Qty" 
+                  className="h-10 rounded-md border-gray-300 w-full" 
+                  min={1} 
+                  max={99999}
+                  precision={0}
+                  stringMode
+                  parser={(val) => limitDecimals(val, 'quantity', 0)}
+                  onKeyDown={(e) => blockExtraDecimals(e, 'quantity', 0)}
+                />
               </Form.Item>
             </Col>
-            <Col span={5}>
+            <Col xs={12} sm={9} md={5}>
               <Form.Item
                 name="order_date"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Order Date</span>}
                 className="mb-0"
               >
-                <Input type="date" className="h-10 rounded-md border-gray-300" />
+                <DatePicker 
+                  className="h-10 rounded-md border-gray-300 w-full" 
+                  format="DD-MM-YYYY"
+                  placeholder="DD-MM-YYYY"
+                />
               </Form.Item>
             </Col>
-            <Col span={5}>
+            <Col xs={12} sm={9} md={5}>
               <Form.Item
                 name="due_date"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Due Date</span>}
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-0"
               >
-                <Input type="date" className="h-10 rounded-md border-gray-300" />
+                <DatePicker 
+                  className="h-10 rounded-md border-gray-300 w-full" 
+                  format="DD-MM-YYYY"
+                  placeholder="DD-MM-YYYY"
+                />
               </Form.Item>
             </Col>
-            <Col span={4}>
+            <Col xs={12} sm={6} md={4}>
               <Form.Item
                 name="status"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Status</span>}
@@ -303,9 +494,9 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         
         {/* Document Upload Section - Only for new orders */}
         {!editingOrder && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-4 px-1">
-              <h4 className="text-base font-bold text-gray-800 flex items-center gap-2 m-0">
+          <div className="mt-4 sm:mt-6">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4 px-1 gap-2">
+              <h4 className="text-sm sm:text-base font-bold text-gray-800 flex items-center gap-2 m-0">
                 <FileTextOutlined className="text-blue-500" />
                 Order Documents (Optional)
               </h4>
@@ -313,40 +504,41 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 type="dashed"
                 icon={<UploadOutlined />}
                 onClick={handleDocumentAdd}
-                className="flex items-center gap-1"
+                className="flex items-center gap-1 w-full sm:w-auto"
+                size="middle"
               >
                 Add Document
               </Button>
             </div>
 
             {documents.length === 0 ? (
-              <div className="text-center py-8 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50">
-                <UploadOutlined className="text-3xl text-gray-300 mb-2" />
-                <p className="text-gray-500 m-0">No documents added yet</p>
+              <div className="text-center py-6 sm:py-8 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50">
+                <UploadOutlined className="text-2xl sm:text-3xl text-gray-300 mb-2" />
+                <p className="text-gray-500 m-0 text-sm">No documents added yet</p>
               </div>
             ) : (
-              <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
-                <table className="w-full text-left border-collapse">
+              <div className="border border-gray-200 rounded-lg overflow-x-auto bg-white">
+                <table className="w-full text-left border-collapse min-w-[600px]">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[5%] text-center">#</th>
-                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[30%]">File Selection</th>
-                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[30%]">Document Name</th>
-                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[20%]">Document Type</th>
-                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[10%] text-center">Ver</th>
-                      <th className="px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[5%] text-center">Del</th>
+                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[5%] text-center">#</th>
+                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[25%]">File Selection</th>
+                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[25%]">Document Name</th>
+                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[30%]">Document Type</th>
+                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[10%] text-center">Ver</th>
+                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[5%] text-center">Del</th>
                     </tr>
                   </thead>
                   <tbody>
                     {documents.map((doc, index) => (
                       <tr key={index} className="border-b border-gray-100 last:border-0 hover:bg-blue-50/20 transition-all align-middle">
-                        <td className="px-4 py-6 text-center align-middle">
+                        <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">
                           <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md border border-blue-100">
                             {index + 1}
                           </span>
                         </td>
-                        <td className="px-4 py-6 align-middle">
-                          <div className="relative h-10"> {/* Fixed height matching other inputs */}
+                        <td className="px-2 sm:px-4 py-4 sm:py-6 align-middle">
+                          <div className="relative h-10">
                             <input
                               type="file"
                               id={`file-upload-${index}`}
@@ -362,7 +554,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                             <Button
                               icon={<UploadOutlined />}
                               onClick={() => document.getElementById(`file-upload-${index}`).click()}
-                              className={`h-10 rounded-md border-dashed flex items-center justify-center transition-all ${
+                              className={`h-10 rounded-md border-dashed flex items-center justify-center transition-all text-xs sm:text-sm ${
                                 doc.file 
                                   ? "bg-blue-50 border-blue-400 text-blue-600 font-bold" 
                                   : "bg-gray-50 border-gray-300 text-gray-500 hover:border-blue-500 hover:text-blue-500"
@@ -378,38 +570,53 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-6 align-middle">
+                        <td className="px-2 sm:px-4 py-4 sm:py-6 align-middle">
                           <Input
                             value={doc.document_name}
                             onChange={(e) => handleDocumentChange(index, 'document_name', e.target.value)}
                             placeholder="Enter document name"
-                            className={`text-sm h-10 rounded-md border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all placeholder:text-gray-400 ${doc.document_name ? 'bg-blue-50/10 border-blue-200 font-medium text-blue-700' : ''}`}
+                            className={`text-xs sm:text-sm h-10 rounded-md border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-100 transition-all placeholder:text-gray-400 ${doc.document_name ? 'bg-blue-50/10 border-blue-200 font-medium text-blue-700' : ''}`}
                           />
                         </td>
-                        <td className="px-4 py-6 align-middle">
-                          <Select
-                            value={doc.document_type}
-                            onChange={(value) => handleDocumentChange(index, 'document_type', value)}
-                            placeholder="Select Type"
-                            className="text-sm w-full h-10 custom-select-v2"
-                            size="middle"
-                          >
-                            <Option value="Other">Other</Option>
-                      
-                          </Select>
+                        <td className="px-2 sm:px-4 py-4 sm:py-6 align-middle">
+                          <div className="flex flex-col sm:flex-row gap-2 w-full">
+                            <div className="w-full sm:w-[35%]">
+                              <Select
+                                value={doc.document_type}
+                                onChange={(value) => handleDocumentChange(index, 'document_type', value)}
+                                placeholder="Select Type"
+                                className="text-xs sm:text-sm h-10 custom-select-v2 w-full"
+                                size="middle"
+                              >
+                                <Option value="Other">Other</Option>
+                              </Select>
+                            </div>
+                            {doc.document_type === "Other" && (
+                              <div className="flex-1">
+                                <Input
+                                  value={doc.document_type_other}
+                                  onChange={(e) =>
+                                    handleDocumentChange(index, "document_type_other", e.target.value)
+                                  }
+                                  placeholder="Enter document type name"
+                                  className="text-xs sm:text-sm h-10 rounded-md border-gray-300 w-full"
+                                />
+                              </div>
+                            )}
+                          </div>
                         </td>
-                        <td className="px-4 py-6 text-center align-middle">
-                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-3 py-1.5 rounded-md border border-gray-200">
+                        <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">
+                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 sm:px-3 py-1.5 rounded-md border border-gray-200">
                             1.0
                           </span>
                         </td>
-                        <td className="px-4 py-6 text-center align-middle">
+                        <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">
                           <Button
                             type="text"
                             danger
-                            icon={<CloseOutlined className="text-lg" />}
+                            icon={<CloseOutlined className="text-base sm:text-lg" />}
                             onClick={() => handleDocumentRemove(index)}
-                            className="hover:bg-red-50 rounded-full w-10 h-10 flex items-center justify-center transition-all hover:scale-110"
+                            className="hover:bg-red-50 rounded-full w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center transition-all hover:scale-110"
                           />
                         </td>
                       </tr>
@@ -421,8 +628,12 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           </div>
         )}
         
-        <div className="flex justify-end gap-3 mt-8 pt-4 border-t border-gray-100">
-          <Button onClick={handleClose} size="large" className="rounded-md px-8">
+        <div className="flex flex-col sm:flex-row justify-end gap-3 mt-6 sm:mt-8 pt-4 border-t border-gray-100">
+          <Button 
+            onClick={handleClose} 
+            size="large" 
+            className="rounded-md px-8 w-full sm:w-auto"
+          >
             Cancel
           </Button>
           <Button 
@@ -430,7 +641,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             htmlType="submit" 
             loading={loading} 
             size="large"
-            className="no-hover-btn rounded-md px-10 font-semibold"
+            className="no-hover-btn rounded-md px-10 font-semibold w-full sm:w-auto"
           >
             {editingOrder ? "Update Order" : "Create Order"}
           </Button>

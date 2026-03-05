@@ -38,6 +38,12 @@ const Navbar = () => {
     const path = location.pathname;
     if (path.includes('/dashboard')) return 'Dashboard';
     if (path.includes('/oms/orders')) return 'Orders';
+    if (path.includes('/oms/parts-priority')) {
+      const params = new URLSearchParams(location.search);
+      const tab = params.get('tab');
+      if (tab === 'order-wise') return 'Order Wise Priority';
+      return 'Parts Priority';
+    }
     if (path.includes('/oms/rawmaterials')) return 'Raw Materials';
     if (path.includes('/pdm')) return 'Product Data Management';
     if (path.includes('/pps')) return 'Production Planning System';
@@ -62,13 +68,13 @@ const Navbar = () => {
   const userMenu = (
     <div style={{ minWidth: '120px' }}>
       <div style={{ padding: '4px 0 8px 0', borderBottom: '1px solid #f0f0f0', marginBottom: '8px' }}>
-        <Text type="secondary">Role: {roleInfo.role}</Text>
+        <Text type="secondary" style={{ fontSize: 'clamp(11px, 2vw, 12px)' }}>Role: {roleInfo.role}</Text>
       </div>
       <Button 
         type="text" 
         icon={<LogoutOutlined />} 
         onClick={handleLogout}
-        style={{ width: '100%', textAlign: 'left', padding: '4px 0' }}
+        style={{ width: '100%', textAlign: 'left', padding: '4px 0', fontSize: 'clamp(12px, 2.5vw, 14px)' }}
       >
         Logout
       </Button>
@@ -76,29 +82,80 @@ const Navbar = () => {
   );
 
   return (
-    <Header style={{ 
-      position: 'fixed', 
-      top: 0, 
-      zIndex: 1000, 
-      width: 'calc(100% - 224px)', 
-      background: '#fff', 
-      padding: '0 24px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      borderBottom: '1px solid #f0f0f0',
-      left: 224
-    }}>
-      <Title level={4} style={{ margin: 0 }}>{getTitle()}</Title>
+    <Header 
+      style={{ 
+        position: 'fixed', 
+        top: 0, 
+        zIndex: 1000, 
+        width: '100%', 
+        background: '#fff', 
+        padding: '0 clamp(12px, 3vw, 24px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderBottom: '1px solid #f0f0f0',
+        left: 0
+      }}
+      className="responsive-navbar"
+    >
+      <style>{`
+        @media (min-width: 768px) {
+          .responsive-navbar {
+            width: calc(100% - 224px) !important;
+            left: 224px !important;
+          }
+        }
+        @media (max-width: 768px) {
+          .responsive-navbar {
+            padding-left: 64px !important;
+          }
+        }
+      `}</style>
+      <Title 
+        level={4} 
+        style={{ 
+          margin: 0, 
+          fontSize: 'clamp(14px, 3.5vw, 18px)',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: 'calc(100vw - 200px)'
+        }}
+      >
+        {getTitle()}
+      </Title>
       
-      <Space size="large">
+      <Space size={screens.xs ? "small" : "large"}>
         <Badge dot>
-          <Button type="text" icon={<BellOutlined style={{ fontSize: 20 }} />} />
+          <Button 
+            type="text" 
+            icon={<BellOutlined style={{ fontSize: screens.xs ? 18 : 20 }} />} 
+          />
         </Badge>
         <Popover content={userMenu} trigger="click" placement="bottomRight">
-          <Space style={{ cursor: 'pointer' }}>
-            <Avatar style={{ backgroundColor: '#1890ff' }}>{roleInfo.avatar}</Avatar>
-            {!screens.xs && <Text strong style={{ whiteSpace: 'nowrap' }}>{roleInfo.name}</Text>}
+          <Space style={{ cursor: 'pointer' }} size="small">
+            <Avatar 
+              style={{ 
+                backgroundColor: '#1890ff',
+                width: screens.xs ? 32 : 40,
+                height: screens.xs ? 32 : 40,
+                lineHeight: screens.xs ? '32px' : '40px',
+                fontSize: screens.xs ? '14px' : '18px'
+              }}
+            >
+              {roleInfo.avatar}
+            </Avatar>
+            {!screens.xs && (
+              <Text 
+                strong 
+                style={{ 
+                  whiteSpace: 'nowrap',
+                  fontSize: 'clamp(12px, 2.5vw, 14px)'
+                }}
+              >
+                {roleInfo.name}
+              </Text>
+            )}
           </Space>
         </Popover>
       </Space>

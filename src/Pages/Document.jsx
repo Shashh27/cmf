@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Layout, Typography, Button, Card } from 'antd';
-import { PlusOutlined, FileTextOutlined } from '@ant-design/icons';
+import { PlusOutlined } from '@ant-design/icons';
+import Lottie from 'lottie-react';
+import documentIcon from '../assets/DocumentIcon.json';
 import DocumentTree from '../Document Components/DocumentTree';
 import DocumentContent from '../Document Components/DocumentContent';
 
@@ -9,6 +11,7 @@ const { Title, Text } = Typography;
 
 const Document = () => {
   const [selectedNode, setSelectedNode] = useState(null);
+    const [documentsRefreshKey, setDocumentsRefreshKey] = useState(0);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const documentTreeRef = useRef(null);
 
@@ -23,6 +26,14 @@ const Document = () => {
 
   const handleNodeSelect = (nodeData) => {
     setSelectedNode(nodeData);
+  };
+
+  // Callback to refresh the document tree when documents change
+  const handleDocumentsChange = () => {
+    if (documentTreeRef.current && typeof documentTreeRef.current.refreshTree === 'function') {
+      documentTreeRef.current.refreshTree();
+    }
+    setDocumentsRefreshKey(prev => prev + 1);
   };
 
   return (
@@ -40,8 +51,15 @@ const Document = () => {
           }}
           bodyStyle={{ padding: '16px 24px' }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <FileTextOutlined style={{ fontSize: '28px', color: '#1890ff' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <div style={{ width: 64, height: 64 }}>
+              <Lottie
+                animationData={documentIcon}
+                loop
+                autoplay
+                style={{ width: '100%', height: '100%' }}
+              />
+            </div>
             <div>
               <Title level={3} style={{ margin: 0, fontSize: '22px', fontWeight: 600, color: '#1a1a1a' }}>
                 Document Management
@@ -65,12 +83,12 @@ const Document = () => {
         {/* Left Panel - Document Tree */}
         <div 
           style={{ 
-            width: isMobile ? '100%' : '350px',
-            minWidth: isMobile ? 'unset' : '280px',
-            maxWidth: isMobile ? '100%' : '400px',
+            flex: isMobile ? '0 0 100%' : '0 0 32%',
+            minWidth: isMobile ? 'unset' : 280,
+            maxWidth: isMobile ? '100%' : 480,
             height: isMobile ? 'calc(100vh - 200px)' : '100%', 
             background: '#fff', 
-            overflow: 'visible', // Allow content to flow and scroll
+            overflow: 'visible',
             borderRadius: '12px',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
             flexShrink: 0,
@@ -113,7 +131,8 @@ const Document = () => {
             <DocumentTree 
               ref={documentTreeRef}
               onNodeSelect={handleNodeSelect} 
-              isMobile={isMobile} 
+              isMobile={isMobile}
+              onDocumentsChange={handleDocumentsChange}
             />
           </div>
         </div>
@@ -127,7 +146,12 @@ const Document = () => {
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
           minWidth: 0
         }}>
-          <DocumentContent selectedNode={selectedNode} />
+          <DocumentContent 
+            selectedNode={selectedNode} 
+            onDocumentsChange={handleDocumentsChange}
+            documentTreeRef={documentTreeRef}
+            documentsRefreshKey={documentsRefreshKey}
+          />
         </div>
       </div>
     </div>

@@ -16,6 +16,7 @@ const PokaYokeChecklists = () => {
   const [initialItems, setInitialItems] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingChecklist, setEditingChecklist] = useState(null);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [form] = Form.useForm();
   const [itemForm] = Form.useForm();
   const [editForm] = Form.useForm();
@@ -31,21 +32,11 @@ const PokaYokeChecklists = () => {
       if (!response.ok) throw new Error('Failed to fetch checklists');
       const data = await response.json();
       
-      // Fetch items count for each checklist
-      const checklistsWithCounts = await Promise.all(
-        data.map(async (checklist) => {
-          try {
-            const itemsResponse = await fetch(`${API_BASE_URL}/pokayoke-checklists/${checklist.id}/items`);
-            if (itemsResponse.ok) {
-              const items = await itemsResponse.json();
-              return { ...checklist, itemsCount: items.length };
-            }
-            return { ...checklist, itemsCount: 0 };
-          } catch (error) {
-            return { ...checklist, itemsCount: 0 };
-          }
-        })
-      );
+      // Data now includes nested items info
+      const checklistsWithCounts = data.map((checklist) => ({
+        ...checklist,
+        itemsCount: checklist.items?.length || 0
+      }));
       
       setChecklists(checklistsWithCounts);
     } catch (error) {
@@ -57,51 +48,28 @@ const PokaYokeChecklists = () => {
 
   const handleCreateChecklist = async (values) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/`, {
+      const itemsToCreate = initialItems
+        .filter((item) => item.item_text && item.item_type && item.expected_value)
+        .map((item) => ({
+          item_text: item.item_text,
+          item_type: item.item_type,
+          expected_value: item.expected_value,
+          is_required: !!item.is_required,
+        }));
+
+      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           name: values.name,
-          description: values.description
+          description: values.description,
+          items: itemsToCreate
         }),
       });
 
       if (!response.ok) throw new Error('Failed to create checklist');
-      const created = await response.json();
-
-      const checklistId = created?.id;
-      const itemsToCreate = initialItems.filter(
-        (item) => item.item_text && item.item_type && item.expected_value
-      );
-
-      if (checklistId && itemsToCreate.length > 0) {
-        for (const item of itemsToCreate) {
-          try {
-            const itemResponse = await fetch(
-              `${API_BASE_URL}/pokayoke-checklists/${checklistId}/items`,
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  item_text: item.item_text,
-                  item_type: item.item_type,
-                  expected_value: item.expected_value,
-                  is_required: !!item.is_required,
-                }),
-              }
-            );
-            if (!itemResponse.ok) {
-              throw new Error('Failed to create checklist item');
-            }
-          } catch (error) {
-            message.error('Failed to create one of the items: ' + error.message);
-          }
-        }
-      }
       
       message.success('Checklist created successfully');
       setCreateModalVisible(false);
@@ -115,7 +83,7 @@ const PokaYokeChecklists = () => {
 
   const handleDeleteChecklist = async (id) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${id}`, {
+      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${id}/`, {
         method: 'DELETE',
       });
 
@@ -128,16 +96,9 @@ const PokaYokeChecklists = () => {
     }
   };
 
-  const handlePreview = async (checklist) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${checklist.id}`);
-      if (!response.ok) throw new Error('Failed to fetch checklist details');
-      const data = await response.json();
-      setSelectedChecklist(data);
-      setPreviewModalVisible(true);
-    } catch (error) {
-      message.error('Failed to fetch checklist details: ' + error.message);
-    }
+  const handlePreview = (checklist) => {
+    setSelectedChecklist(checklist);
+    setPreviewModalVisible(true);
   };
 
   const handleAddItem = async (values) => {
@@ -158,8 +119,17 @@ const PokaYokeChecklists = () => {
       setAddItemModalVisible(false);
       itemForm.resetFields();
       
-      // Refresh the preview data
-      handlePreview(selectedChecklist);
+      // Fetch updated checklist to refresh preview
+      try {
+        const checklistResponse = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${selectedChecklist.id}`);
+        if (checklistResponse.ok) {
+          const updatedChecklist = await checklistResponse.json();
+          setSelectedChecklist(updatedChecklist);
+        }
+      } catch (e) {
+        console.error('Failed to refresh preview:', e);
+      }
+      
       fetchChecklists();
     } catch (error) {
       message.error('Failed to add item: ' + error.message);
@@ -375,11 +345,20 @@ const PokaYokeChecklists = () => {
         size="small"
         scroll={{ x: 1000 }}
         pagination={{
-          pageSize: 10,
+          current: pagination.current,
+          pageSize: pagination.pageSize,
           showSizeChanger: true,
           showQuickJumper: true,
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
           pageSizeOptions: ['10', '20', '50', '100'],
+          onChange: (page, pageSize) => {
+            setPagination({ current: page, pageSize: pageSize });
+            console.log('Page changed to:', page, 'Page size:', pageSize);
+          },
+          onShowSizeChange: (current, size) => {
+            setPagination({ current: 1, pageSize: size });
+            console.log('Page size changed to:', size);
+          },
         }}
         style={{
           background: '#fff',
@@ -599,7 +578,10 @@ const PokaYokeChecklists = () => {
             key="addItem"
             type="primary"
             icon={<PlusOutlined />}
-            onClick={() => setAddItemModalVisible(true)}
+            onClick={() => {
+              setPreviewModalVisible(false);
+              setAddItemModalVisible(true);
+            }}
             style={{
               background: '#1890ff',
               borderColor: '#1890ff',
