@@ -234,7 +234,7 @@ class Order(Base):
     product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
-    due_date = Column(TIMESTAMP, nullable=False)
+    due_date = Column(TIMESTAMP, nullable=True)
     # priority = Column(Integer, nullable=False)
     # supervisor_id = Column(Integer, nullable=False)
     status = Column(String, nullable=False)
@@ -341,3 +341,24 @@ class DocumentExtractedData(Base):
 
     document = relationship("Document")
     part = relationship("Part")
+
+
+
+# =======================
+# Out Source Part Status
+# =======================
+class OutSourcePartStatus(Base):
+    __tablename__ = "out_source_parts_status"
+    __table_args__ = {'schema': 'oms'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
+    start_date = Column(TIMESTAMP(timezone=True), nullable=True)
+    to_date = Column(TIMESTAMP(timezone=True), nullable=True)
+    status = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    part = relationship("Part")
+    order = relationship("Order")
