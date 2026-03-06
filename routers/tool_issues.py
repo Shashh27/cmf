@@ -18,6 +18,7 @@ from DB.schemas.inventory import (
     ToolIssueWithDetails as ToolIssueWithDetailsSchema
 )
 from DB.minio_client import get_minio_client
+from DB.models.notifications import ToolIssuesNotification as ToolIssuesNotificationModel
 
 router = APIRouter(
     prefix="/tool-issues",
@@ -176,6 +177,15 @@ async def create_tool_issue(
     db.add(db_issue)
     db.commit()
     db.refresh(db_issue)
+    
+    # Create notification for this tool issue (admin will ack)
+    try:
+        notif = ToolIssuesNotificationModel(tool_issues_id=db_issue.id, is_ack=False)
+        db.add(notif)
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Do not fail the tool issue creation if notification insert fails
     
     # Fetch sale_order_number for the response
     sale_order_number = None

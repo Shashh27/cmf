@@ -365,7 +365,7 @@ class OrderBase(BaseModel):
     product_id: int
     user_id: int
     quantity: int
-    due_date: datetime
+    due_date: Optional[datetime] = None
     status: str
 
 
@@ -648,6 +648,38 @@ class DocumentExtractedDataUpdate(BaseModel):
 class DocumentExtractedData(DocumentExtractedDataBase):
     id: int
     created_at: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+# Out Source Part Status Schemas
+# =======================
+class OutSourcePartStatusBase(BaseModel):
+    part_id: int
+    order_id: int
+    start_date: Optional[datetime] = None
+    to_date: Optional[datetime] = None
+    status: str
+
+
+class OutSourcePartStatusCreate(OutSourcePartStatusBase):
+    pass
+
+
+class OutSourcePartStatusUpdate(BaseModel):
+    part_id: Optional[int] = None
+    order_id: Optional[int] = None
+    start_date: Optional[datetime] = None
+    to_date: Optional[datetime] = None
+    status: Optional[str] = None
+
+
+class OutSourcePartStatus(OutSourcePartStatusBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

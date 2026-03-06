@@ -22,6 +22,13 @@ from .inventory import (
     RawMaterial,
     ToolsList
 )
+from .notifications import (
+    OrderNotification,
+    MachineNotification,
+    ToolIssuesNotification,
+    ComponentIssuesNotification,
+    MachineCalibrationNotification,
+)
 
 __all__ = [
     "Product",
@@ -41,5 +48,10 @@ __all__ = [
     "AccessUser",
     "RawMaterial",
     "ToolsList",
+    "OrderNotification",
+    "MachineNotification",
+    "ToolIssuesNotification",
+    "ComponentIssuesNotification",
+    "MachineCalibrationNotification",
     "Base"
 ]

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List
+from datetime import datetime, timezone, timedelta
 
 from DB.database import get_db
 from DB.models.configuration import Machine as MachineModel, WorkCenter as WorkCenterModel
@@ -13,6 +14,7 @@ from DB.schemas.configuration import (
     MachinePublic,
     MachineWithWorkCenterPublic,
 )
+from DB.models.notifications import MachineCalibrationNotification as MachineCalibrationNotificationModel
 
 router = APIRouter(
     prefix="/machines",
@@ -35,6 +37,29 @@ def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     db.add(db_machine)
     db.commit()
     db.refresh(db_machine)
+
+    # Create calibration notification immediately if due within 10 days
+    try:
+        if db_machine.calibration_due_date:
+            IST = timezone(timedelta(hours=5, minutes=30))
+            now_ist = datetime.now(IST)
+            # Assume calibration_due_date stored as naive or aware; handle both
+            due = db_machine.calibration_due_date
+            if hasattr(due, "tzinfo") and due.tzinfo is not None:
+                due_dt = due.astimezone(IST)
+            else:
+                due_dt = due.replace(tzinfo=IST)
+            if (due_dt - now_ist).days <= 10:
+                exists = db.query(MachineCalibrationNotificationModel)\
+                    .filter(MachineCalibrationNotificationModel.machine_id == db_machine.id,
+                            MachineCalibrationNotificationModel.is_ack == False).first()  # noqa: E712
+                if not exists:
+                    notif = MachineCalibrationNotificationModel(machine_id=db_machine.id, is_ack=False)
+                    db.add(notif)
+                    db.commit()
+    except Exception:
+        db.rollback()
+        # Non-blocking: machine creation should not fail if notification fails
     return db_machine
 
 
