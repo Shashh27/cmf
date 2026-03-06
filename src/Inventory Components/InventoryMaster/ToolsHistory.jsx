@@ -439,16 +439,16 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
   };
 
   const styles = StyleSheet.create({
-    page: { padding: 30, fontSize: 10, fontFamily: 'Helvetica' },
+    page: { padding: 30, fontSize: 9, fontFamily: 'Helvetica' },
     title: { fontSize: 20, marginBottom: 10, fontWeight: 'bold' },
     summary: { fontSize: 12, marginBottom: 8, color: '#333' },
     filter: { fontSize: 10, marginBottom: 4, color: '#666' },
     table: { marginTop: 6, borderWidth: 1, borderColor: '#cccccc' },
     tableRow: { flexDirection: 'row' },
     tableHeader: { backgroundColor: '#f0f0f0' },
-    cellBox: { paddingVertical: 4, paddingHorizontal: 4, borderRightWidth: 0.5, borderBottomWidth: 0.5, borderColor: '#dddddd', justifyContent: 'center' },
-    cellHeaderText: { fontWeight: 'bold' },
-    cellText: { },
+    cellBox: { paddingVertical: 3, paddingHorizontal: 3, borderRightWidth: 0.5, borderBottomWidth: 0.5, borderColor: '#dddddd', justifyContent: 'center' },
+    cellHeaderText: { fontWeight: 'bold', fontSize: 9.5 },
+    cellText: { fontSize: 9 },
     wSL: { width: 24, textAlign: 'right' },
     wProject: { width: 78 },
     wPart: { width: 70 },

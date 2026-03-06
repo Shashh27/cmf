@@ -476,7 +476,21 @@ const buildMachineFoldersTree = (folders, machine) => {
           key: `order-${order.id}`,
           selectable: false,
           isLeaf: false,
-          children: []
+          children: [
+            {
+              title: (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <FolderOutlined style={{ color: '#52c41a' }} />
+                  <span>Reports</span>
+                </span>
+              ),
+              titleText: 'Reports',
+              key: `reports-${order.id}`,
+              isLeaf: true,
+              selectable: true,
+              nodeData: { type: 'folder', category: 'Reports', orderId: order.id, folderName: 'Reports' }
+            }
+          ]
         }))
       },
       {
@@ -1506,7 +1520,7 @@ const buildMachineFoldersTree = (folders, machine) => {
             });
             
             const reportsFolder = orderNode.children.find(child => child.key === `reports-${orderId}`);
-            orderNode.children = reportsFolder ? [reportsFolder, ...partsChildren] : partsChildren;
+            orderNode.children = reportsFolder ? [...partsChildren, reportsFolder] : partsChildren;
           }
         }
         

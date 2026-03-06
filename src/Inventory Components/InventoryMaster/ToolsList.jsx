@@ -314,7 +314,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   return (
     <div style={{ maxWidth: '100%' }}>
       {/* KPI Cards */}
-      <Row gutter={16} style={{ marginBottom: '24px' }}>
+      <Row gutter={16} style={{ marginTop: 10, marginBottom: 12 }}>
         <Col xs={24} sm={12} md={8}>
           <Card 
             style={{ 
@@ -332,7 +332,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: '#f0f7ff'
             }}
             hoverable
-            bodyStyle={{ padding: '20px 24px' }}
+            bodyStyle={{ padding: '16px 20px' }}
             onClick={() => handleKpiClick('all')}
             onMouseEnter={() => setHoveredCard('all')}
             onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
@@ -376,7 +376,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: '#f6ffed'
             }}
             hoverable
-            bodyStyle={{ padding: '20px 24px' }}
+            bodyStyle={{ padding: '16px 20px' }}
             onClick={() => handleKpiClick('consumables')}
             onMouseEnter={() => setHoveredCard('consumables')}
             onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
@@ -420,7 +420,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: '#fff1f0'
             }}
             hoverable
-            bodyStyle={{ padding: '20px 24px' }}
+            bodyStyle={{ padding: '16px 20px' }}
             onClick={() => handleKpiClick('non-consumables')}
             onMouseEnter={() => setHoveredCard('non-consumables')}
             onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
@@ -501,8 +501,24 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
                 {...props}
                 style={{
                   ...(props.style || {}),
-                  paddingTop: 10,
-                  paddingBottom: 10,
+                  paddingTop: 'clamp(4px, 0.6vw, 6px)',
+                  paddingBottom: 'clamp(4px, 0.6vw, 6px)',
+                }}
+              />
+            ),
+          },
+          body: {
+            cell: (props) => (
+              <td
+                {...props}
+                style={{
+                  ...(props.style || {}),
+                  paddingTop: 'clamp(3px, 0.5vw, 5px)',
+                  paddingBottom: 'clamp(3px, 0.5vw, 5px)',
+                  paddingLeft: 'clamp(6px, 0.8vw, 10px)',
+                  paddingRight: 'clamp(6px, 0.8vw, 10px)',
+                  fontSize: 'clamp(10px, 0.9vw, 12px)',
+                  lineHeight: 1.1,
                 }}
               />
             ),

@@ -22,7 +22,7 @@ import QualityManagement from "./Quality Management Components/QualityManagement
 import InventoryMaster from "./Pages/Inventory";
 import OverviewData from "./Pages/OverviewData";
 import DocumentManagement from "./Pages/Document";
-import Notification from "./Notification Components/Notification";
+import Notification from "./Pages/Notification";
 import AccessControl from "./Pages/AccessControl";
 import ProtectedRoute from "./components/ProtectedRoute";
 
