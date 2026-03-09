@@ -130,7 +130,7 @@ class PlannedScheduleItem(Base):
     sale_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     sale_order_number = Column(String, ForeignKey("oms.orders.sale_order_number"), nullable=False)
     operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=True)
     
     planned_start_time = Column(DateTime, nullable=False)
     planned_end_time = Column(DateTime, nullable=False)

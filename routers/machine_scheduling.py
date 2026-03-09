@@ -624,8 +624,8 @@ def view_schedule(db: Session = Depends(get_db)):
         rows = (
             db.query(PlannedScheduleItem, Operation, Machine, WorkCenter)
             .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
-            .join(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
-            .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
             .filter(PlannedScheduleItem.schedule_history_id == latest.id)
             .order_by(PlannedScheduleItem.planned_start_time)
             .all()
@@ -641,12 +641,13 @@ def view_schedule(db: Session = Depends(get_db)):
                 "operation_id":       item.operation_id,
                 "operation_number":   op.operation_number,
                 "operation_name":     op.operation_name,
+                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
                 "machine_id":         item.machine_id,
-                "machine_make":       machine.make,
-                "machine_model":      machine.model,
-                "machine_type":       machine.type,
-                "work_center_id":     wc.id,
-                "work_center_name":   wc.work_center_name,
+                "machine_make":       machine.make if machine else None,
+                "machine_model":      machine.model if machine else None,
+                "machine_type":       machine.type if machine else None,
+                "work_center_id":     wc.id if wc else None,
+                "work_center_name":   wc.work_center_name if wc else None,
                 "planned_start_time": item.planned_start_time,
                 "planned_end_time":   item.planned_end_time,
                 "duration_hours":     round(
@@ -696,8 +697,8 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
         rows = (
             db.query(PlannedScheduleItem, Operation, Machine, WorkCenter)
             .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
-            .join(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
-            .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
             .filter(PlannedScheduleItem.schedule_history_id == schedule_history_id)
             .order_by(PlannedScheduleItem.planned_start_time)
             .all()
@@ -713,12 +714,13 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
                 "operation_id":       item.operation_id,
                 "operation_number":   op.operation_number,
                 "operation_name":     op.operation_name,
+                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
                 "machine_id":         item.machine_id,
-                "machine_make":       machine.make,
-                "machine_model":      machine.model,
-                "machine_type":       machine.type,
-                "work_center_id":     wc.id,
-                "work_center_name":   wc.work_center_name,
+                "machine_make":       machine.make if machine else None,
+                "machine_model":      machine.model if machine else None,
+                "machine_type":       machine.type if machine else None,
+                "work_center_id":     wc.id if wc else None,
+                "work_center_name":   wc.work_center_name if wc else None,
                 "planned_start_time": item.planned_start_time,
                 "planned_end_time":   item.planned_end_time,
                 "duration_hours":     round(
@@ -776,8 +778,8 @@ def get_gantt_data(db: Session = Depends(get_db)):
 
         items = (
             db.query(PlannedScheduleItem, Machine, WorkCenter, Operation)
-            .join(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
-            .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
             .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
             .filter(PlannedScheduleItem.schedule_history_id == latest.id)
             .order_by(PlannedScheduleItem.machine_id, PlannedScheduleItem.planned_start_time)
@@ -786,7 +788,44 @@ def get_gantt_data(db: Session = Depends(get_db)):
 
         machines_map: Dict[int, dict] = {}
 
+        # Out-source items have no machine — collect under a sentinel key
+        OUT_SOURCE_KEY = "out_source"
+
         for item, machine, wc, op in items:
+            # mid = machine.id
+            # if mid not in machines_map:
+            if machine is None:
+                if OUT_SOURCE_KEY not in machines_map:
+                    machines_map[OUT_SOURCE_KEY] = {
+                        "machine_id":       None,
+                        "machine_type":     "Out-Source",
+                        "machine_make":     None,
+                        "machine_model":    None,
+                        "work_center_id":   None,
+                        "work_center_name": "Out-Source",
+                        "work_center_code": "OS",
+                        "tasks": []
+                    }
+            machines_map[OUT_SOURCE_KEY]["tasks"].append({
+                "schedule_item_id":   item.id,
+                "sale_order_id":      item.sale_order_id,
+                "sale_order_number":  item.sale_order_number,
+                "part_id":            item.part_id,
+                "part_number":        item.part_number,
+                "operation_id":       item.operation_id,
+                "operation_number":   op.operation_number,
+                "operation_name":     op.operation_name,
+                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                "planned_start_time": item.planned_start_time,
+                "planned_end_time":   item.planned_end_time,
+                "duration_hours":     round(
+                    (item.planned_end_time - item.planned_start_time)
+                    .total_seconds() / 3600.0, 4
+                ),
+                "total_quantity":     item.total_quantity,
+                "status":             item.status,
+            })
+        else:
             mid = machine.id
             if mid not in machines_map:
                 machines_map[mid] = {
@@ -794,9 +833,9 @@ def get_gantt_data(db: Session = Depends(get_db)):
                     "machine_type":     machine.type,
                     "machine_make":     machine.make,
                     "machine_model":    machine.model,
-                    "work_center_id":   wc.id,
-                    "work_center_name": wc.work_center_name,
-                    "work_center_code": wc.code,
+                    "work_center_id":   wc.id if wc else None,
+                    "work_center_name": wc.work_center_name if wc else None,
+                    "work_center_code": wc.work_center_code if wc else None,
                     "tasks": []
                 }
             machines_map[mid]["tasks"].append({
@@ -808,6 +847,7 @@ def get_gantt_data(db: Session = Depends(get_db)):
                 "operation_id":       item.operation_id,
                 "operation_number":   op.operation_number,
                 "operation_name":     op.operation_name,
+                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
                 "planned_start_time": item.planned_start_time,
                 "planned_end_time":   item.planned_end_time,
                 "duration_hours":     round(
@@ -851,47 +891,82 @@ def get_gantt_data_by_id(schedule_history_id: int, db: Session = Depends(get_db)
 
         items = (
             db.query(PlannedScheduleItem, Machine, WorkCenter, Operation)
-            .join(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
-            .join(WorkCenter, WorkCenter.id == Machine.work_center_id)
-            .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .outerjoin(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
             .filter(PlannedScheduleItem.schedule_history_id == schedule_history_id)
             .order_by(PlannedScheduleItem.machine_id, PlannedScheduleItem.planned_start_time)
             .all()
         )
 
         machines_map: Dict[int, dict] = {}
+        OUT_SOURCE_KEY = "out_source"
 
         for item, machine, wc, op in items:
-            mid = machine.id
-            if mid not in machines_map:
-                machines_map[mid] = {
-                    "machine_id":       machine.id,
-                    "machine_type":     machine.type,
-                    "machine_make":     machine.make,
-                    "machine_model":    machine.model,
-                    "work_center_id":   wc.id,
-                    "work_center_name": wc.work_center_name,
-                    "work_center_code": wc.code,
-                    "tasks": []
-                }
-            machines_map[mid]["tasks"].append({
-                "schedule_item_id":   item.id,
-                "sale_order_id":      item.sale_order_id,
-                "sale_order_number":  item.sale_order_number,
-                "part_id":            item.part_id,
-                "part_number":        item.part_number,
-                "operation_id":       item.operation_id,
-                "operation_number":   op.operation_number,
-                "operation_name":     op.operation_name,
-                "planned_start_time": item.planned_start_time,
-                "planned_end_time":   item.planned_end_time,
-                "duration_hours":     round(
-                    (item.planned_end_time - item.planned_start_time)
-                    .total_seconds() / 3600.0, 4
-                ),
-                "total_quantity":     item.total_quantity,
-                "status":             item.status,
-            })
+            if machine is None:
+                # Out-Source operation: no machine allocated
+                if OUT_SOURCE_KEY not in machines_map:
+                    machines_map[OUT_SOURCE_KEY] = {
+                        "machine_id":       None,
+                        "machine_type":     "Out-Source",
+                        "machine_make":     None,
+                        "machine_model":    None,
+                        "work_center_id":   None,
+                        "work_center_name": "Out-Source",
+                        "work_center_code": "OS",
+                        "tasks": []
+                    }
+                machines_map[OUT_SOURCE_KEY]["tasks"].append({
+                    "schedule_item_id":   item.id,
+                    "sale_order_id":      item.sale_order_id,
+                    "sale_order_number":  item.sale_order_number,
+                    "part_id":            item.part_id,
+                    "part_number":        item.part_number,
+                    "operation_id":       item.operation_id,
+                    "operation_number":   op.operation_number,
+                    "operation_name":     op.operation_name,
+                    "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time":   item.planned_end_time,
+                    "duration_hours":     round(
+                        (item.planned_end_time - item.planned_start_time)
+                        .total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity":     item.total_quantity,
+                    "status":             item.status,
+                })
+            else:
+                mid = machine.id
+                if mid not in machines_map:
+                    machines_map[mid] = {
+                        "machine_id":       machine.id,
+                        "machine_type":     machine.type,
+                        "machine_make":     machine.make,
+                        "machine_model":    machine.model,
+                        "work_center_id":   wc.id               if wc else None,
+                        "work_center_name": wc.work_center_name  if wc else None,
+                        "work_center_code": wc.code              if wc else None,
+                        "tasks": []
+                    }
+                machines_map[mid]["tasks"].append({
+                    "schedule_item_id":   item.id,
+                    "sale_order_id":      item.sale_order_id,
+                    "sale_order_number":  item.sale_order_number,
+                    "part_id":            item.part_id,
+                    "part_number":        item.part_number,
+                    "operation_id":       item.operation_id,
+                    "operation_number":   op.operation_number,
+                    "operation_name":     op.operation_name,
+                    "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time":   item.planned_end_time,
+                    "duration_hours":     round(
+                        (item.planned_end_time - item.planned_start_time)
+                        .total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity":     item.total_quantity,
+                    "status":             item.status,
+                })
 
         return {
             "message":             f"Gantt data for schedule {schedule_history_id}",

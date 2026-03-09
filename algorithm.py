@@ -38,6 +38,9 @@ from DB.models.configuration import (
 # ── Scheduling models ─────────────────────────────────────────────────────
 from DB.models.scheduling import (
     OrderScheduleStatus,     # order_id, product_id, status, activated_at (DateTime, tz-aware)
+    PartScheduleStatus,      # part_id, sale_order_id, status ('active'/'inactive'),
+                             # start_date (DateTime) = when this part was FIRST set active,
+                             # created_at, updated_at
     ScheduleHistory,         # id, version, is_active, generated_at
     PlannedScheduleItem,     # all schedule output rows
     ShiftHoursConfiguration, # date (Date), working_day (Boolean), number_of_shifts (Integer)
@@ -49,7 +52,9 @@ from DB.models.scheduling import (
 SHIFT_START_HOUR    = 9   # 09:00 – default shift start when no config row exists
 SHIFT_HOURS_PER_DAY = 8   # hours per shift segment
 STATUS_OFF          = 2   # MachineStatus.status_id value meaning OFF
-IN_HOUSE_TYPE_ID    = 1   # Part.type_id value for IN-House parts
+IN_HOUSE_TYPE_ID    = 1   # Part.type_id for IN-House parts
+OUT_SOURCE_TYPE_ID  = 2   # Operation.part_type_id value for Out-Source (oms.part_types id=2)
+OUT_SOURCE_PROVISION = timedelta(days=7)  # Maximum vendor turnaround: 1 week
 
 
 # =============================================================================
@@ -420,34 +425,63 @@ class SchedulerEngine:
         """
         Phase A3.
 
-        Returns IN-HOUSE parts (type_id = IN_HOUSE_TYPE_ID = 1) of the
-        order's product in execution order:
-          • OrderPartPriority sorted by priority ASC  (primary)
-          • Part.id ASC fallback when no priority rows exist
+        MODIFICATION 1 — Only ACTIVE parts:
+          Joins PartScheduleStatus and returns only the IN-HOUSE parts
+          whose status = 'active' for this specific order.
+          Inactive / not-yet-activated parts are silently excluded.
 
-        Raw-material availability:
-          Looks up OrderPartsRawMaterialLinked → RawMaterial.status.
-          RawMaterial has no available_from field; the gate is purely
-          status == 'Available'.
+        MODIFICATION 2 — part_activation_time:
+          Reads PartScheduleStatus.start_date (the timestamp when this
+          part was FIRST set to active).  This is used in the main loop
+          to break the cascade for parts added after the order went live:
+
+            part_start = max(current_time, part_activation_time)
+
+          • Parts activated WITH the order → start_date ≈ order.activated_at
+            → max() returns current_time → normal cascade applies.
+          • Parts added LATER → start_date > order.activated_at
+            → max() returns start_date → cascade broken, part starts
+            at its own activation time regardless of previous part's end.
+
+        Execution order: OrderPartPriority ASC, then Part.id ASC fallback.
+
+        Raw-material gate: RawMaterial.status == 'Available'.
         """
         try:
             order_id   = order['order_id']
             product_id = order['product_id']
 
-            parts = (
-                self.db.query(Part)
+            # ── Only ACTIVE IN-HOUSE parts for this specific order ─────── #
+            # PartScheduleStatus.sale_order_id scopes the status to the order,
+            # so the same part used in two orders is handled independently.
+            active_rows = (
+                self.db.query(PartScheduleStatus, Part)
+                .join(Part, Part.id == PartScheduleStatus.part_id)
                 .filter(
                     and_(
-                        Part.product_id == product_id,
-                        Part.type_id    == IN_HOUSE_TYPE_ID,
+                        PartScheduleStatus.sale_order_id == order_id,
+                        PartScheduleStatus.status        == 'active',
+                        Part.type_id                     == IN_HOUSE_TYPE_ID,
+                        Part.product_id                  == product_id,
                     )
                 )
                 .all()
             )
-            if not parts:
+
+            if not active_rows:
                 return []
 
-            part_map = {p.id: p for p in parts}
+            part_map:            Dict[int, Part]     = {}
+            part_activation_map: Dict[int, datetime] = {}
+
+            for pss, part in active_rows:
+                part_map[part.id] = part
+                # start_date = when this part was FIRST set to active.
+                # For original parts: start_date == order.activated_at.
+                # For late-added parts: start_date > order.activated_at.
+                # Fall back to order activation if somehow NULL.
+                raw_ts = _strip_tz(pss.start_date) or order['activation_time']
+                part_activation_map[part.id] = raw_ts
 
             # ── Execution order ──────────────────────────────────────── #
             priorities = (
@@ -458,20 +492,19 @@ class SchedulerEngine:
             )
 
             if priorities:
-                ordered_ids = [opp.part_id for opp in priorities
-                               if opp.part_id in part_map]
+                ordered_ids = [
+                    opp.part_id for opp in priorities
+                    if opp.part_id in part_map        # skip inactive / non-active parts
+                ]
                 covered = set(ordered_ids)
-                # Safety-net: include any IN-HOUSE parts missing from priority table
-                for p in sorted(parts, key=lambda x: x.id):
+                # Append active parts not in priority table (safety-net)
+                for p in sorted(part_map.values(), key=lambda x: x.id):
                     if p.id not in covered:
                         ordered_ids.append(p.id)
             else:
-                ordered_ids = [p.id for p in sorted(parts, key=lambda x: x.id)]
+                ordered_ids = [p.id for p in sorted(part_map.values(), key=lambda x: x.id)]
 
             # ── Raw-material gate ────────────────────────────────────── #
-            # OrderPartsRawMaterialLinked.raw_material → RawMaterial
-            # RawMaterial.status (String): 'Available' | other
-            # RawMaterial has NO available_from column.
             rm_links = (
                 self.db.query(OrderPartsRawMaterialLinked)
                 .filter(
@@ -482,10 +515,9 @@ class SchedulerEngine:
                 )
                 .all()
             )
-            # part_id → raw material status
             rm_status_map: Dict[int, str] = {}
             for link in rm_links:
-                rm = link.raw_material           # SQLAlchemy relationship – no extra query
+                rm = link.raw_material
                 if rm:
                     rm_status_map[link.part_id] = getattr(rm, 'status', 'Available') or 'Available'
 
@@ -493,17 +525,17 @@ class SchedulerEngine:
             result = []
             for pid in ordered_ids:
                 p = part_map[pid]
-                rm_stat = rm_status_map.get(pid, 'Available')   # no link → treat as Available
+                rm_stat = rm_status_map.get(pid, 'Available')
                 result.append({
-                    'part_id':                     p.id,
-                    'part_number':                 p.part_number,
-                    'part_name':                   p.part_name,
-                    'order_id':                    order_id,
-                    'sale_order_number':            order['sale_order_number'],
-                    'quantity':                    order['quantity'],
-                    'raw_material_ok':             rm_stat == 'Available',
-                    # RawMaterial has no available_from column → always None
-                    'raw_material_available_from': None,
+                    'part_id':              p.id,
+                    'part_number':          p.part_number,
+                    'part_name':            p.part_name,
+                    'order_id':             order_id,
+                    'sale_order_number':    order['sale_order_number'],
+                    'quantity':             order['quantity'],
+                    'raw_material_ok':      rm_stat == 'Available',
+                    # Used in C2.1 to apply/break the cascade per part
+                    'part_activation_time': part_activation_map[pid],
                 })
             return result
 
@@ -696,10 +728,27 @@ class SchedulerEngine:
                 # C2: iterate parts in execution order
                 for part_data in parts:
 
-                    # C2.1: part start = current_time after previous part/order
-                    part_start = current_time
+                    # ── C2.1: determine this part's start time ─────────── #
+                    #
+                    # MODIFICATION 2 — cascade-break for late-added parts:
+                    #
+                    # part_start = max(current_time, part_activation_time)
+                    #
+                    # • Original parts (activated WITH the order):
+                    #     part_activation_time ≈ order.activated_at
+                    #     → max() == current_time → cascade applies normally
+                    #       (part starts right after the previous part ends)
+                    #
+                    # • Late-added parts (activated AFTER the order went live):
+                    #     part_activation_time > order.activated_at
+                    #     → if cascade end < activation_time, max() picks
+                    #       activation_time → part cannot start before it was
+                    #       even added to the system
+                    part_start = self.adjust_to_shift(
+                        max(current_time, part_data['part_activation_time'])
+                    )
 
-                    # Raw-material gate (RawMaterial.status != 'Available')
+                    # Raw-material gate
                     if not part_data['raw_material_ok']:
                         skipped_parts.append(
                             f"Part {part_data['part_number']} "
@@ -726,18 +775,47 @@ class SchedulerEngine:
 
                     for operation in operations:
 
-                        # ── Machine selection (3-tier priority) ──────────── #
+                        # ── MODIFICATION 3 — Out-Source operation ──────── #
                         #
-                        # Tier 1: operation.machine_id is set AND that machine
-                        #         is in a schedulable work center
-                        #         → use that exact machine (respect OFF windows)
+                        # Identified by Operation.part_type_id == 2
+                        # (oms.part_types: id=1 IN-House, id=2 Out-Source)
                         #
-                        # Tier 2: operation.machine_id is set BUT the machine
-                        #         is not schedulable (e.g. Default WC)
-                        #         → fall back to earliest-free in workcenter_id
+                        # Rules:
+                        #   • No machine is allocated (machine_id = NULL)
+                        #   • planned_start_time = end time of the previous
+                        #     IN-HOUSE operation (op_cursor)
+                        #   • planned_end_time   = planned_start_time + 7 days
+                        #     (maximum provision for vendor turnaround)
+                        #   • Status set to 'outsource_pending'
+                        #   • op_cursor advances by 7 days so the next
+                        #     IN-HOUSE operation waits for the vendor
+                        if operation.part_type_id == OUT_SOURCE_TYPE_ID:
+                            os_start = op_cursor
+                            os_end   = op_cursor + OUT_SOURCE_PROVISION
+                            all_items.append(
+                                PlannedScheduleItem(
+                                    part_id             = part_data['part_id'],
+                                    part_number         = part_data['part_number'],
+                                    sale_order_id       = part_data['order_id'],
+                                    sale_order_number   = part_data['sale_order_number'],
+                                    operation_id        = operation.id,
+                                    machine_id          = None,   # no machine for out-source
+                                    planned_start_time  = os_start,
+                                    planned_end_time    = os_end,
+                                    total_quantity      = quantity,
+                                    remaining_quantity  = 0,
+                                    status              = 'outsource_pending',
+                                    schedule_history_id = history_id,
+                                )
+                            )
+                            op_cursor = os_end        # next op waits for vendor
+                            continue                  # skip machine-selection logic
+
+                        # ── IN-HOUSE operation: machine selection ──────── #
                         #
-                        # Tier 3: operation.machine_id is None
-                        #         → earliest-free in workcenter_id (original FIFO)
+                        # Tier 1: operation.machine_id pinned + schedulable
+                        # Tier 2: pinned but not in schedulable WC → WC fallback
+                        # Tier 3: no pin → earliest-free in work center (FIFO)
 
                         if operation.machine_id and operation.machine_id in all_machines:
                             # Tier 1 – pinned machine
@@ -749,7 +827,6 @@ class SchedulerEngine:
                             avail    = self._machine_next_available(pinned, earliest)
 
                             if avail is None:
-                                # Pinned machine is permanently OFF – skip op
                                 skipped_parts.append(
                                     f"Part {part_data['part_number']}, "
                                     f"Op {operation.operation_number}: "
@@ -848,4 +925,3 @@ def generate_machine_schedule(
 ) -> Dict:
     """Instantiate SchedulerEngine and run generate_schedule."""
     return SchedulerEngine(db).generate_schedule(start_date, end_date)
-    
