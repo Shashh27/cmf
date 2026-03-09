@@ -792,9 +792,8 @@ def get_gantt_data(db: Session = Depends(get_db)):
         OUT_SOURCE_KEY = "out_source"
 
         for item, machine, wc, op in items:
-            # mid = machine.id
-            # if mid not in machines_map:
             if machine is None:
+                # Out-Source operation — no machine allocated
                 if OUT_SOURCE_KEY not in machines_map:
                     machines_map[OUT_SOURCE_KEY] = {
                         "machine_id":       None,
@@ -806,57 +805,57 @@ def get_gantt_data(db: Session = Depends(get_db)):
                         "work_center_code": "OS",
                         "tasks": []
                     }
-            machines_map[OUT_SOURCE_KEY]["tasks"].append({
-                "schedule_item_id":   item.id,
-                "sale_order_id":      item.sale_order_id,
-                "sale_order_number":  item.sale_order_number,
-                "part_id":            item.part_id,
-                "part_number":        item.part_number,
-                "operation_id":       item.operation_id,
-                "operation_number":   op.operation_number,
-                "operation_name":     op.operation_name,
-                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
-                "planned_start_time": item.planned_start_time,
-                "planned_end_time":   item.planned_end_time,
-                "duration_hours":     round(
-                    (item.planned_end_time - item.planned_start_time)
-                    .total_seconds() / 3600.0, 4
-                ),
-                "total_quantity":     item.total_quantity,
-                "status":             item.status,
-            })
-        else:
-            mid = machine.id
-            if mid not in machines_map:
-                machines_map[mid] = {
-                    "machine_id":       machine.id,
-                    "machine_type":     machine.type,
-                    "machine_make":     machine.make,
-                    "machine_model":    machine.model,
-                    "work_center_id":   wc.id if wc else None,
-                    "work_center_name": wc.work_center_name if wc else None,
-                    "work_center_code": wc.work_center_code if wc else None,
-                    "tasks": []
-                }
-            machines_map[mid]["tasks"].append({
-                "schedule_item_id":   item.id,
-                "sale_order_id":      item.sale_order_id,
-                "sale_order_number":  item.sale_order_number,
-                "part_id":            item.part_id,
-                "part_number":        item.part_number,
-                "operation_id":       item.operation_id,
-                "operation_number":   op.operation_number,
-                "operation_name":     op.operation_name,
-                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
-                "planned_start_time": item.planned_start_time,
-                "planned_end_time":   item.planned_end_time,
-                "duration_hours":     round(
-                    (item.planned_end_time - item.planned_start_time)
-                    .total_seconds() / 3600.0, 4
-                ),
-                "total_quantity":     item.total_quantity,
-                "status":             item.status,
-            })
+                machines_map[OUT_SOURCE_KEY]["tasks"].append({
+                    "schedule_item_id":   item.id,
+                    "sale_order_id":      item.sale_order_id,
+                    "sale_order_number":  item.sale_order_number,
+                    "part_id":            item.part_id,
+                    "part_number":        item.part_number,
+                    "operation_id":       item.operation_id,
+                    "operation_number":   op.operation_number,
+                    "operation_name":     op.operation_name,
+                    "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time":   item.planned_end_time,
+                    "duration_hours":     round(
+                        (item.planned_end_time - item.planned_start_time)
+                        .total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity":     item.total_quantity,
+                    "status":             item.status,
+                })
+            else:
+                mid = machine.id
+                if mid not in machines_map:
+                    machines_map[mid] = {
+                        "machine_id":       machine.id,
+                        "machine_type":     machine.type,
+                        "machine_make":     machine.make,
+                        "machine_model":    machine.model,
+                        "work_center_id":   wc.id if wc else None,
+                        "work_center_name": wc.work_center_name if wc else None,
+                        "work_center_code": wc.code              if wc else None,
+                        "tasks": []
+                    }
+                machines_map[mid]["tasks"].append({
+                    "schedule_item_id":   item.id,
+                    "sale_order_id":      item.sale_order_id,
+                    "sale_order_number":  item.sale_order_number,
+                    "part_id":            item.part_id,
+                    "part_number":        item.part_number,
+                    "operation_id":       item.operation_id,
+                    "operation_number":   op.operation_number,
+                    "operation_name":     op.operation_name,
+                    "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time":   item.planned_end_time,
+                    "duration_hours":     round(
+                        (item.planned_end_time - item.planned_start_time)
+                        .total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity":     item.total_quantity,
+                    "status":             item.status,
+                })
 
         return {
             "message":             f"Gantt data for schedule {latest.id}",
