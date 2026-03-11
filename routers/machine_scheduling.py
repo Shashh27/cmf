@@ -174,11 +174,15 @@ def set_order_status(
         summary.active_inhouse_parts = active_inhouse_count
         summary.status = order_status
         summary.updated_at = now
-        summary.activated_at = now if status == "active" else None
+        # ❌ Before — always overwrites, loses original timestamp
+        # summary.activated_at = now if status == "active" else None
 
-        # only set activated_at when transitioning to active
-        if order_status == "active" and not summary.activated_at:
-            summary.activated_at = now
+
+        if order_status == "active":
+            if not summary.activated_at:                      # Preserve earliest activation — only set once, never overwrite
+                summary.activated_at = now
+        else:
+            summary.activated_at = None                       # All parts deactivated → clear activation timestamp     
 
         # clear when inactive
         if order_status == "inactive":
@@ -447,6 +451,55 @@ def update_part_status(
         )
         db.add(record)
 
+    db.flush()
+
+
+    # ----------------------------
+    # SYNC OrderScheduleStatus
+    # ----------------------------
+    active_count = db.query(PartScheduleStatus).filter(
+        PartScheduleStatus.sale_order_id == sale_order_id,
+        PartScheduleStatus.status == "active"
+    ).count()
+
+    active_inhouse_count = db.query(PartScheduleStatus).join(
+        Part, Part.id == PartScheduleStatus.part_id
+    ).filter(
+        PartScheduleStatus.sale_order_id == sale_order_id,
+        PartScheduleStatus.status == "active",
+        Part.type_id == 1
+    ).count()
+
+    order_status = "active" if active_inhouse_count > 0 else "inactive"
+
+    summary = db.query(OrderScheduleStatus).filter(
+        OrderScheduleStatus.order_id == sale_order_id
+    ).first()
+
+    if not summary:
+        summary = OrderScheduleStatus(
+            order_id=sale_order_id,
+            product_id=order.product_id,
+            active_parts_count=active_count,
+            active_inhouse_parts=active_inhouse_count,
+            status=order_status,
+            # activated_at = the part's own start_date (this request's timestamp)
+            activated_at=record.start_date if order_status == "active" else None,
+        )
+        db.add(summary)
+    else:
+        summary.active_parts_count   = active_count
+        summary.active_inhouse_parts = active_inhouse_count
+        summary.status               = order_status
+
+        if order_status == "active":
+            # Preserve the EARLIEST activation time — never overwrite
+            if not summary.activated_at:
+                summary.activated_at = record.start_date
+        else:
+            # No more active IN-House parts → clear activation
+            summary.activated_at = None
+
     db.commit()
 
     # ----------------------------
@@ -470,7 +523,7 @@ def update_part_status(
         "part_id": part_id,
         "part_type": part_type_name,
         "status": status,
-        "will_be_scheduled": status == "active"
+        "will_be_scheduled": status == "active" and part_type_name == "IN-House"
     }
 
 
@@ -500,54 +553,70 @@ def get_order_status(sale_order_id: int, db: Session = Depends(get_db)):
         "order_status": order_status
     }
 
-@router.get("/order-summary/{sale_order_id}", response_model=OrderScheduleStatusResponse)
+# @router.get("/order-summary/{sale_order_id}", response_model=OrderScheduleStatusResponse)
+# def get_order_summary(sale_order_id: int, db: Session = Depends(get_db)):
+
+#     summary = db.query(OrderScheduleStatus).filter(
+#         OrderScheduleStatus.order_id == sale_order_id
+#     ).first()
+
+#     if not summary:
+#         raise HTTPException(404, "Summary not found")
+
+#     return summary
+
+@router.get("/order-summary/{sale_order_id}")
 def get_order_summary(sale_order_id: int, db: Session = Depends(get_db)):
+    """
+    Returns OrderScheduleStatus for the order.
+    If no row exists yet (order never had any part activated),
+    returns a computed default — never 404.
+    """
+    order = db.query(Order).filter(Order.id == sale_order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
 
     summary = db.query(OrderScheduleStatus).filter(
         OrderScheduleStatus.order_id == sale_order_id
     ).first()
 
     if not summary:
-        raise HTTPException(404, "Summary not found")
+        # Row not created yet — compute live from PartScheduleStatus
+        active_count = db.query(PartScheduleStatus).filter(
+            PartScheduleStatus.sale_order_id == sale_order_id,
+            PartScheduleStatus.status == "active"
+        ).count()
+        active_inhouse = db.query(PartScheduleStatus).join(
+            Part, Part.id == PartScheduleStatus.part_id
+        ).filter(
+            PartScheduleStatus.sale_order_id == sale_order_id,
+            PartScheduleStatus.status == "active",
+            Part.type_id == 1
+        ).count()
+        return {
+            "order_id":            sale_order_id,
+            "product_id":          order.product_id,
+            "active_parts_count":  active_count,
+            "active_inhouse_parts": active_inhouse,
+            "status":              "active" if active_inhouse > 0 else "inactive",
+            "activated_at":        None,
+            "updated_at":          None,
+        }
 
-    return summary
+    return {
+        "order_id":             summary.order_id,
+        "product_id":           summary.product_id,
+        "active_parts_count":   summary.active_parts_count,
+        "active_inhouse_parts": summary.active_inhouse_parts,
+        "status":               summary.status,
+        "activated_at":         summary.activated_at,
+        "updated_at":           summary.updated_at,
+    }
+
 
 # =========================================================
-# OPTIMIZED SCHEDULE GENERATION FOR ACTIVE IN-HOUSE PARTS
+# SCHEDULE GENERATION ENDPOINT
 # =========================================================
-
-# Now commented (5/3/26)
-
-# def _get_efficiency_factor(db: Session) -> float:
-#     """Get efficiency factor from database"""
-#     efficiency_record = db.query(EfficiencyFactor).first()
-#     return efficiency_record.efficiency_factor if efficiency_record else 0.85
-
-# def _calculate_operation_duration(operation: Operation, quantity: int, efficiency_factor: float) -> float:
-#     """Calculate operation duration in hours including setup and cycle time"""
-#     setup_seconds = 0
-#     cycle_seconds = 0
-    
-#     if operation.setup_time:
-#         setup_seconds = (
-#             operation.setup_time.hour * 3600 + 
-#             operation.setup_time.minute * 60 + 
-#             operation.setup_time.second
-#         )
-    
-#     if operation.cycle_time:
-#         cycle_seconds = (
-#             operation.cycle_time.hour * 3600 + 
-#             operation.cycle_time.minute * 60 + 
-#             operation.cycle_time.second
-#         )
-    
-#     total_seconds = setup_seconds + (cycle_seconds * quantity)
-#     total_hours = total_seconds / 3600.0
-    
-#     return total_hours / efficiency_factor
-#################################################
-
 @router.post("/generate-schedule")
 def generate_schedule_endpoint(
     start_date: Optional[datetime] = None,

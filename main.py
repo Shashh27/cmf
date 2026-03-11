@@ -16,8 +16,8 @@ from routers import (
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="CMF Backend API",
-    description="Configuration Management Framework Backend System with MinIO Integration",
+    title="Scheduling Microservice API",
+    description="APIs for managing machine scheduling",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
