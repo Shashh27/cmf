@@ -517,9 +517,15 @@ class SchedulerEngine:
             )
             rm_status_map: Dict[int, str] = {}
             for link in rm_links:
-                rm = link.raw_material
-                if rm:
-                    rm_status_map[link.part_id] = getattr(rm, 'status', 'Available') or 'Available'
+                # material_status lives on the link row itself (order_parts_raw_material_linked.material_status)
+                # Normalise to title-case so 'available' == 'Available' == 'AVAILABLE'
+                raw_stat = (link.material_status or '').strip().title()  # e.g. 'available' → 'Available'
+                if link.part_id not in rm_status_map:
+                    rm_status_map[link.part_id] = raw_stat or 'Available'
+                else:
+                    # If ANY linked material is not Available, mark the part as not ready
+                    if raw_stat != 'Available':
+                        rm_status_map[link.part_id] = raw_stat
 
             # ── Build result list ────────────────────────────────────── #
             result = []
