@@ -30,6 +30,7 @@ from routers import (
     transaction_history_router,
     tool_issues_router,
     out_source_parts_status_router,
+    maintenance_router,
 )
 
 # Import Pokayoke checklists router
@@ -133,6 +134,7 @@ app.include_router(pokayoke_checklists_router, prefix="/api/v1")
 app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
 app.include_router(tool_issues_router, prefix="/api/v1")
 app.include_router(out_source_parts_status_router, prefix="/api/v1")
+app.include_router(maintenance_router, prefix="/api/v1")
 
 
 @app.get("/")

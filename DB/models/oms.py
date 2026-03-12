@@ -195,7 +195,7 @@ class Order(Base):
     product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
-    due_date = Column(TIMESTAMP, nullable=False)
+    due_date = Column(TIMESTAMP, nullable=True)
     status = Column(String, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

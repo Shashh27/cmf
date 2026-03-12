@@ -365,7 +365,7 @@ class OrderBase(BaseModel):
     product_id: int
     user_id: int
     quantity: int
-    due_date: datetime
+    due_date: Optional[datetime] = None
     status: str
 
 
