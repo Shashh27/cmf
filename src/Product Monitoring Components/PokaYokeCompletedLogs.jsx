@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,} from 'antd';
 import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,} from '@ant-design/icons';
-import config from '../Config/config';
+import { API_BASE_URL } from "../Config/auth";
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -24,8 +24,8 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
     try {
       setLoading(true);
       const url = machineId
-        ? `${config.API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`
-        : `${config.API_BASE_URL}/pokayoke-completed-logs/`;
+        ? `${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`
+        : `${API_BASE_URL}/pokayoke-completed-logs/`;
 
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch completion logs');

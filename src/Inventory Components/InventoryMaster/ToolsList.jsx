@@ -80,7 +80,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       if (needsMigration) {
         console.log('Detected tools with null total_quantity, running migration...');
         try {
-          const migrateResponse = await fetch(`${config.API_BASE_URL}/tools-list/migrate-total-quantity`, {
+          const migrateResponse = await fetch(`${API_BASE_URL}/tools-list/migrate-total-quantity`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
           });

@@ -1,61 +1,17 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Layout, Card, Button, Select, DatePicker, Tooltip, Tabs, message, Modal } from 'antd';
-import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined,ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined } from '@ant-design/icons';
+import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined,ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import { Timeline } from "vis-timeline";
 import { DataSet } from "vis-data";
 import "vis-timeline/styles/vis-timeline-graph2d.css";
 import moment from 'moment';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth.js';
+import config from '../Config/config.js';
 
 const { Content } = Layout;
 const { Option } = Select;
 const { TabPane } = Tabs;
-
-// ─────────────────────────────────────────────────────────────
-//  MOCK DATA  –  simplified to machines-only
-// ─────────────────────────────────────────────────────────────
-const MOCK_SCHEDULE_DATA = {
-  machines: [
-    { id: "DMU-60T",    name: "DMU-60T" },
-    { id: "VCP800W",    name: "VCP800W Duro" },
-    { id: "CTX-Beta",   name: "CTX Beta 1250TC4A" },
-    { id: "DMU-60MB",   name: "DMU-60MB 5 Axis" },
-    { id: "TEST_MIL",   name: "TEST_MIL" },
-    { id: "UMEE",       name: "UMEE" },
-    { id: "DMU60eVo",   name: "DMU 60eVo Linear" },
-    { id: "DeckelMaho", name: "Deckel Maho" },
-    { id: "Robofil240", name: "Robofil 240" },
-    { id: "Makino",     name: "Makino" },
-    { id: "NU7B",       name: "NU7B" },
-    { id: "TUR26",      name: "TUR26" },
-    { id: "Pilatus20T", name: "Pilatus 20T-L3" },
-    { id: "SCH-125",    name: "SCH-125 CCN" },
-    { id: "SCH-180",    name: "SCH-180 CCN-RT" },
-    { id: "SCH-110",    name: "SCH-110" },
-  ],
-
-  // machine field now just equals the machine id
-  scheduled_operations: [
-    { machine: "DMU-60T",    component: "210226020001", production_order: "10485522", description: "Turning OD",    start_time: "2026-02-23T06:00:00", end_time: "2026-02-23T14:00:00", quantity: 120 },
-    { machine: "DMU-60T",    component: "210226020002", production_order: "10485521", description: "Facing",        start_time: "2026-02-23T14:00:00", end_time: "2026-02-24T08:00:00", quantity: 85  },
-    { machine: "DMU-60T",    component: "210226020003", production_order: "105",      description: "Rough Mill",    start_time: "2026-02-25T06:00:00", end_time: "2026-02-25T18:00:00", quantity: 200 },
-    { machine: "VCP800W",    component: "210226020001", production_order: "10485525", description: "Milling",       start_time: "2026-02-23T06:00:00", end_time: "2026-02-28T18:00:00", quantity: 120 },
-    { machine: "CTX-Beta",   component: "210226020001", production_order: "10594406", description: "Milling",       start_time: "2026-02-23T06:00:00", end_time: "2026-02-25T12:00:00", quantity: 100 },
-    { machine: "CTX-Beta",   component: "210226020002", production_order: "10606679", description: "Finish",        start_time: "2026-02-25T12:00:00", end_time: "2026-02-28T18:00:00", quantity: 80  },
-    { machine: "DMU-60MB",   component: "210226020126", production_order: "10560168", description: "4 Side finish", start_time: "2026-02-24T19:18:34", end_time: "2026-02-27T07:18:34", quantity: 60  },
-    { machine: "DMU-60MB",   component: "210226020005", production_order: "10485504", description: "Pocket",        start_time: "2026-02-27T08:00:00", end_time: "2026-02-28T18:00:00", quantity: 150 },
-    { machine: "DMU60eVo",   component: "210226020003", production_order: "10593133", description: "Linear Mill",   start_time: "2026-02-23T06:00:00", end_time: "2026-02-28T18:00:00", quantity: 200 },
-    { machine: "DeckelMaho", component: "210226020001", production_order: "10601849", description: "Milling",       start_time: "2026-02-23T06:00:00", end_time: "2026-02-27T18:00:00", quantity: 120 },
-    { machine: "DeckelMaho", component: "210226020002", production_order: "10608883", description: "Drill",         start_time: "2026-02-27T18:00:00", end_time: "2026-02-28T12:00:00", quantity: 85  },
-    { machine: "Robofil240", component: "210226020003", production_order: "10593133", description: "EDM Wire",      start_time: "2026-02-28T12:00:00", end_time: "2026-02-28T18:00:00", quantity: 50  },
-    { machine: "Makino",     component: "210226020004", production_order: "10603122", description: "Makino Op",     start_time: "2026-02-24T12:00:00", end_time: "2026-02-28T18:00:00", quantity: 60  },
-    { machine: "SCH-125",    component: "210226020002", production_order: "10606680", description: "Turning",       start_time: "2026-02-23T06:00:00", end_time: "2026-02-28T18:00:00", quantity: 85  },
-    { machine: "SCH-110",    component: "210226020001", production_order: "10592505", description: "Turning",       start_time: "2026-02-23T06:00:00", end_time: "2026-02-28T12:00:00", quantity: 120 },
-  ],
-
-  component_status: {}
-};
 
 // ─────────────────────────────────────────────────────────────
 //  COLOUR HELPERS
@@ -163,7 +119,7 @@ const ComponentLegend = ({ componentColors, title, onToggle, active }) => (
 const MachineScheduling = () => {
   const [scheduleData, setScheduleData] = useState({
     machines: [],
-    scheduled_operations: MOCK_SCHEDULE_DATA.scheduled_operations,
+    scheduled_operations: [],
     component_status: {},
   });
 
@@ -177,10 +133,67 @@ const MachineScheduling = () => {
   const [parts,                    setParts]                    = useState([]);
   const [selectedProjectId,        setSelectedProjectId]        = useState(null);
   const [helpOpen,                 setHelpOpen]                 = useState(false);
+  const [updateModalOpen,          setUpdateModalOpen]          = useState(false);
+  const [updateScheduleLoading,    setUpdateScheduleLoading]    = useState(false);
 
   const timelineRef          = useRef(null);
   const timelineContainerRef = useRef(null);
   const styleElementRef      = useRef(null);
+
+  const fetchSchedule = async () => {
+    try {
+      const res = await fetch(`${config.API_BASE_URL}/scheduling/gantt-data`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const ops = [];
+      const gantt = Array.isArray(data?.gantt) ? data.gantt : [];
+      gantt.forEach(g => {
+        const machineName = [g.machine_make, g.machine_model].filter(Boolean).join(' ').trim();
+        const tasks = Array.isArray(g.tasks) ? g.tasks : [];
+        tasks.forEach(t => {
+          if (g.machine_id != null) {
+            ops.push({
+              machineId: g.machine_id,
+              machineName: machineName || '',
+              component: t.part_number || '',
+              production_order: t.sale_order_number || String(t.sale_order_id ?? t.schedule_item_id ?? ''),
+              description: t.operation_name || String(t.operation_number ?? ''),
+              start_time: t.planned_start_time,
+              end_time: t.planned_end_time,
+              quantity: t.total_quantity ?? 0,
+            });
+          }
+        });
+      });
+      setScheduleData(prev => ({
+        ...prev,
+        scheduled_operations: ops,
+      }));
+    } catch (e) { console.error(e); }
+  };
+
+  const handleUpdateSchedule = async () => {
+    setUpdateScheduleLoading(true);
+    try {
+      const res = await fetch(`${config.API_BASE_URL}/scheduling/generate-schedule`, {
+        method: 'POST',
+        headers: { 'accept': 'application/json' },
+      });
+      if (res.ok) {
+        setUpdateModalOpen(false);
+        message.success('Schedule generated');
+        await fetchSchedule();
+      } else {
+        const err = await res.text().catch(() => '');
+        message.error(err || 'Failed to generate schedule');
+      }
+    } catch (e) {
+      console.error(e);
+      message.error('Update failed: ' + e.message);
+    } finally {
+      setUpdateScheduleLoading(false);
+    }
+  };
 
   // ── Derived lists ──────────────────────────────────────────
   const availableMachines = useMemo(() => {
@@ -213,7 +226,7 @@ const MachineScheduling = () => {
         const formatted = (machines || []).map(m => {
           const modelName = [m.make, m.model].filter(Boolean).join(' ').trim() || m.model || m.make || `Machine-${m.id}`;
           return {
-            id: modelName,
+            id: m.id,
             name: modelName,
             type: m.type || null,
           };
@@ -222,7 +235,7 @@ const MachineScheduling = () => {
           ...prev,
           machines: formatted,
         }));
-      } catch {}
+      } catch (e) { console.error(e); }
     };
     const fetchOrders = async () => {
       try {
@@ -231,12 +244,15 @@ const MachineScheduling = () => {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
         }
-      } catch {
-        // ignore
-      }
+      } catch (e) { console.error(e); }
     };
     fetchMachines();
     fetchOrders();
+  }, []);
+
+  useEffect(() => {
+    const id = setTimeout(() => { fetchSchedule(); }, 0);
+    return () => clearTimeout(id);
   }, []);
 
   const handleProjectChange = (orderId) => {
@@ -264,7 +280,7 @@ const MachineScheduling = () => {
         let operations = scheduleData.scheduled_operations.filter(op => {
           const mc = selectedComponents.length === 0        || selectedComponents.includes(op.component);
           const mo = selectedProductionOrders.length === 0  || selectedProductionOrders.includes(op.production_order);
-          const mm = selectedMachines.length === 0          || selectedMachines.includes(machineMapping.get(op.machine));
+          const mm = selectedMachines.length === 0          || selectedMachines.includes(op.machineId);
           return mc && mo && mm;
         });
 
@@ -276,7 +292,7 @@ const MachineScheduling = () => {
         const items = new DataSet(
           operations.map((op, index) => ({
             id:        index,
-            group:     machineMapping.get(op.machine) || op.machine,
+            group:     op.machineId,
             content:   `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.production_order}</div><div style="font-size:10px;opacity:0.85;">${op.component} · ${op.description}</div></div>`,
             start:     new Date(op.start_time),
             end:       new Date(op.end_time),
@@ -289,23 +305,27 @@ const MachineScheduling = () => {
         // 4. Groups
         const groupsArr = availableMachines
           .filter(machine => {
+            const machineSelected = selectedMachines.length === 0 || selectedMachines.includes(machine.machineId);
             if (selectedComponents.length === 0 && selectedProductionOrders.length === 0) {
-              return selectedMachines.length === 0 || selectedMachines.includes(machine.machineId);
+              return machineSelected;
             }
             const hasComp  = selectedComponents.length === 0 ||
-              operations.some(op => selectedComponents.includes(op.component) && machineMapping.get(op.machine) === machine.machineId);
+              operations.some(op => selectedComponents.includes(op.component) && op.machineId === machine.machineId);
             const hasOrder = selectedProductionOrders.length === 0 ||
-              operations.some(op => selectedProductionOrders.includes(op.production_order) && machineMapping.get(op.machine) === machine.machineId);
-            return hasComp && hasOrder && (selectedMachines.length === 0 || selectedMachines.includes(machine.machineId));
+              operations.some(op => selectedProductionOrders.includes(op.production_order) && op.machineId === machine.machineId);
+            return hasComp && hasOrder && machineSelected;
           })
           .map(machine => ({
             id:        machine.machineId,
             content:   `<div style="padding:4px 10px;font-size:13px;font-weight:500;white-space:nowrap;">${machine.displayName}</div>`,
-            className: operations.some(op => machineMapping.get(op.machine) === machine.machineId) ? 'machine-with-ops' : 'machine-without-ops',
+            className: operations.some(op => op.machineId === machine.machineId) ? 'machine-with-ops' : 'machine-without-ops',
             order:     machine.order,
           }));
 
         const groups = new DataSet(groupsArr);
+        const groupCount = groupsArr.length;
+        const rowHeight = 40;
+        const timelineHeightPx = Math.max(560, groupCount * rowHeight);
 
         // 5. Dynamic styles
         if (styleElementRef.current) styleElementRef.current.remove();
@@ -335,7 +355,7 @@ const MachineScheduling = () => {
           zoomable:    true,
           zoomKey:     '',
           orientation: 'top',
-          height:           '560px',
+          height:           `${timelineHeightPx}px`,
           margin: {
             item:  { horizontal:10, vertical: 4 },
             axis:  5,
@@ -352,10 +372,9 @@ const MachineScheduling = () => {
               const op = item.operation;
               if (!op) return '';
               return `<div style="padding:10px 14px;min-width:220px;font-size:13px;line-height:1.9;background:#fff;border-radius:6px;">
-                <div style="font-weight:700;border-bottom:1px solid #f0f0f0;padding-bottom:6px;margin-bottom:6px;">PO: ${op.production_order}</div>
-                <div><b>Part Number:</b> ${op.component}</div>
-                <div><b>Machine:</b> ${op.machine}</div>
                 <div><b>Production Order:</b> ${op.production_order}</div>
+                <div><b>Part Number:</b> ${op.component}</div>
+                <div><b>Machine:</b> ${op.machineName}</div>
                 <div><b>Operation:</b> ${op.description}</div>
                 <div><b>Quantity:</b> ${op.quantity}</div>
                 <div><b>Start:</b> ${new Date(op.start_time).toLocaleString()}</div>
@@ -387,7 +406,7 @@ const MachineScheduling = () => {
         timelineRef.current = tl;
         tl.setWindow(timeRange.start, timeRange.end, { animation: false });
 
-        try { tl.addCustomTime(new Date(), 'now'); } catch {}
+        try { tl.addCustomTime(new Date(), 'now'); } catch (e) { console.error(e); }
 
       } catch (err) {
         console.error('Timeline init error:', err);
@@ -399,11 +418,11 @@ const MachineScheduling = () => {
     return () => {
       cancelAnimationFrame(raf);
       if (timelineRef.current) {
-        try { timelineRef.current.destroy(); } catch {}
+        try { timelineRef.current.destroy(); } catch (e) { console.error(e); }
         timelineRef.current = null;
       }
       if (styleElementRef.current) {
-        try { styleElementRef.current.remove(); } catch {}
+        try { styleElementRef.current.remove(); } catch (e) { console.error(e); }
         styleElementRef.current = null;
       }
     };
@@ -528,22 +547,31 @@ const MachineScheduling = () => {
 
                 <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
 
-                <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background:'#1677ff' }}>Update</Button>
+                <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background:'#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
                 <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
               </div>
 
-              {/* Timeline */}
+              {/* Timeline - scrollable when many machines */}
               <div style={{ padding:'12px 16px' }}>
                 <div
-                  ref={timelineContainerRef}
                   style={{
-                    height: 660,
-                    background:'#fff',
-                    borderRadius:8,
-                    border:'1px solid #e8e8e8',
-                    boxShadow:'0 1px 3px rgba(0,0,0,0.06)',
+                    maxHeight: '70vh',
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    border: '1px solid #e8e8e8',
+                    borderRadius: 8,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                    background: '#fff',
                   }}
-                />
+                >
+                  <div
+                    ref={timelineContainerRef}
+                    style={{
+                      minHeight: 560,
+                      background: '#fff',
+                    }}
+                  />
+                </div>
 
                 {Object.keys(componentColors).length > 0 && (
                   <ComponentLegend
@@ -590,6 +618,30 @@ const MachineScheduling = () => {
                       <span>Hold CTRL and use mouse wheel to zoom at cursor position</span>
                     </div>
                   </div>
+                </Modal>
+                <Modal
+                  title={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <WarningOutlined style={{ color: '#faad14', fontSize: 22 }} />
+                      Update Schedule
+                    </span>
+                  }
+                  open={updateModalOpen}
+                  onCancel={() => !updateScheduleLoading && setUpdateModalOpen(false)}
+                  footer={[
+                    <Button key="cancel" onClick={() => setUpdateModalOpen(false)} disabled={updateScheduleLoading}>
+                      Cancel
+                    </Button>,
+                    <Button key="ok" type="primary" loading={updateScheduleLoading} onClick={handleUpdateSchedule}>
+                      OK
+                    </Button>,
+                  ]}
+                  closable={!updateScheduleLoading}
+                  maskClosable={!updateScheduleLoading}
+                >
+                  <p style={{ margin: 0 }}>
+                    Do you want to generate a new schedule? Please wait while we generate the new schedule.
+                  </p>
                 </Modal>
               </div>
             </TabPane>

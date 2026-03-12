@@ -78,10 +78,17 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     return Math.max(0, (req.quantity || 0) - returned - issues);
   };
 
+  const isConsumableType = (record) => {
+    // Check if the tool is consumable based on tool type or category
+    // You may need to adjust this logic based on your data structure
+    return record.tool_type?.toLowerCase()?.includes('consumable') || 
+           record.category?.toLowerCase()?.includes('consumable') ||
+           record.is_consumable === true;
+  };
+
   useEffect(() => {
     fetchRequests();
     fetchReturnRequests();
-    fetchToolsList();
     fetchToolIssues();
   }, []);
 
@@ -120,12 +127,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     return rr.status === 'collected' ? sum + (rr.returned_qty || 0) : sum;
   }, 0);
   const totalToBeReturned = requests.reduce((sum, r) => {
-    const isConsum = isConsumableType(r);
-    if (r.status === 'approved' && !isConsum) {
-      const remaining = computeRemaining(r);
-      return sum + (remaining > 0 ? remaining : 0);
-    }
-    return sum;
+    if (r.status !== 'approved') return sum;
+    const remaining = computeRemaining(r);
+    return sum + remaining;
   }, 0);
   const yetToBeCollected = returnRequests.reduce((sum, r) => {
     if (r.status === 'pending' || r.status === 'not_collected') {
@@ -464,7 +468,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       },
     },
     {
-      title: 'Supervisor',
+      title: 'Approved By',
       dataIndex: 'admin_name',
       key: 'admin_name',
       width: 150,

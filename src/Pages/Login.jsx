@@ -22,6 +22,9 @@ const Login = () => {
   const [operatorForm] = Form.useForm();
   const [adminForm] = Form.useForm();
   const [coordinatorForm] = Form.useForm();
+  const [mcForm] = Form.useForm();
+  const [supervisorForm] = Form.useForm();
+  const [invSupervisorForm] = Form.useForm();
 
   // Fetch machines when operator role is selected
   React.useEffect(() => {
@@ -52,6 +55,9 @@ const Login = () => {
     operatorForm.resetFields();
     adminForm.resetFields();
     coordinatorForm.resetFields();
+    mcForm.resetFields();
+    supervisorForm.resetFields();
+    invSupervisorForm.resetFields();
   };
 
   const onMachineSubmit = async (values) => {
@@ -110,13 +116,25 @@ const Login = () => {
         const normalize = (s) => String(s || '').toLowerCase().replace(/_/g, ' ').trim();
         const selected = normalize(role);
         const actual = normalize(data.role);
-        const rolePrefix = actual === 'admin' ? '/admin' : actual.includes('project coordinator') ? '/project_coordinator' : '/operator';
+        const rolePrefix =
+          actual === 'admin' ? '/admin' :
+          actual.includes('project coordinator') ? '/project_coordinator' :
+          actual.includes('manufacturing coordinator') ? '/manufacturing_coordinator' :
+          actual.includes('inventory supervisor') ? '/inventory_supervisor' :
+          actual.includes('supervisor') ? '/supervisor' :
+          '/operator';
 
         if (selected !== actual) {
           if (selected === 'admin') {
             message.error('You do not have admin access');
           } else if (selected.includes('project coordinator')) {
             message.error('You do not have project coordinator access');
+          } else if (selected.includes('manufacturing coordinator')) {
+            message.error('You do not have manufacturing coordinator access');
+          } else if (selected.includes('inventory supervisor')) {
+            message.error('You do not have inventory supervisor access');
+          } else if (selected.includes('supervisor')) {
+            message.error('You do not have supervisor access');
           } else {
             message.error('You do not have operator access');
           }
@@ -144,6 +162,12 @@ const Login = () => {
              navigate('/admin/dashboard');
           } else if (actual.includes('project coordinator')) {
              navigate('/project_coordinator/oms/orders');
+          } else if (actual.includes('manufacturing coordinator')) {
+             navigate('/manufacturing_coordinator/dashboard');
+          } else if (actual.includes('inventory supervisor')) {
+             navigate('/inventory_supervisor/dashboard');
+          } else if (actual.includes('supervisor')) {
+             navigate('/supervisor/dashboard');
           } else {
              navigate('/operator/dashboard');
           }
@@ -159,34 +183,14 @@ const Login = () => {
     }
   };
 
-  // Custom Button Component for Role Selection
-  const RoleButton = ({ role, label, icon, isActive, onClick }) => (
-    <div
-      onClick={() => onClick(role)}
-      style={{
-        cursor: 'pointer',
-        background: isActive ? '#1890ff' : '#fff',
-        border: isActive ? '1px solid #1890ff' : '1px solid #d9d9d9',
-        borderRadius: '8px',
-        padding: '12px 24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '10px',
-        color: isActive ? '#fff' : 'rgba(0, 0, 0, 0.85)',
-        fontWeight: 500,
-        boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-        transition: 'all 0.3s',
-        width: '100%',
-        maxWidth: '240px',
-        whiteSpace: 'nowrap'
-      }}
-      className="role-select-btn"
-    >
-      {icon}
-      <span>{label}</span>
-    </div>
-  );
+  const roleOptions = [
+    { value: 'admin', label: 'Admin' },
+    { value: 'supervisor', label: 'Supervisor' },
+    { value: 'coordinator', label: 'Project Coordinator' },
+    { value: 'inventory_supervisor', label: 'Inventory Supervisor' },
+    { value: 'manufacturing_coordinator', label: 'Manufacturing Coordinator' },
+    { value: 'operator', label: 'Operator' },
+  ];
 
   return (
           <div
@@ -272,33 +276,19 @@ const Login = () => {
             }
           `}</style>
           
-          {/* Role Selection Buttons */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
-            <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
-              <RoleButton 
-                role="operator" 
-                label="Operator Login" 
-                icon={<DesktopOutlined style={{ fontSize: '18px' }}/>}
-                isActive={activeRole === 'operator'}
-                onClick={handleRoleSelect}
-              />
-              <RoleButton 
-                role="admin" 
-                label="Admin Login" 
-                icon={<UserOutlined style={{ fontSize: '18px' }}/>}
-                isActive={activeRole === 'admin'}
-                onClick={handleRoleSelect}
-              />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-              <RoleButton 
-                role="coordinator" 
-                label="Project Coordinator Login"
-                icon={<TeamOutlined style={{ fontSize: '18px' }}/>}
-                isActive={activeRole === 'coordinator'}
-                onClick={handleRoleSelect}
-              />
-            </div>
+          <div style={{ display:'flex', justifyContent:'center', marginBottom:'24px' }}>
+            <Select
+              placeholder="Select Your Role"
+              value={activeRole}
+              onChange={handleRoleSelect}
+              size="large"
+              style={{ width: 360 }}
+              prefix={<UserOutlined style={{ color: '#000000', opacity: 0.65 }} />}
+            >
+              {roleOptions.map(opt => (
+                <Option key={opt.value} value={opt.value}>{opt.label}</Option>
+              ))}
+            </Select>
           </div>
 
           {/* Login Forms Area */}
@@ -376,10 +366,88 @@ const Login = () => {
               </div>
             )}
 
-            {/* Project Coordinator (Supervisor) Login Form */}
+            {/* Project Coordinator Login Form */}
             {activeRole === 'coordinator' && (
               <Form form={coordinatorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Project Coordinator')} autoComplete="off">
                 <Text strong style={{ display: 'block', marginBottom: '16px' }}>Project Coordinator Credentials</Text>
+                <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
+                  <Input 
+                    prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 
+                    placeholder="Enter your name" 
+                    size="large" 
+                    autoComplete="off"
+                  />
+                </Form.Item>
+                <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
+                  <Input.Password 
+                    prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
+                    placeholder="Enter your password" 
+                    size="large" 
+                    autoComplete="new-password"
+                  />
+                </Form.Item>
+                <Button type="primary" htmlType="submit" block size="large" loading={loading} className="hover-blue-btn">
+                  Next
+                </Button>
+              </Form>
+            )}
+
+            {/* Manufacturing Coordinator Login Form */}
+            {activeRole === 'manufacturing_coordinator' && (
+              <Form form={mcForm} layout="vertical" onFinish={(v) => onLogin(v, 'Manufacturing Coordinator')} autoComplete="off">
+                <Text strong style={{ display: 'block', marginBottom: '16px' }}>Manufacturing Coordinator Credentials</Text>
+                <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
+                  <Input 
+                    prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 
+                    placeholder="Enter your name" 
+                    size="large" 
+                    autoComplete="off"
+                  />
+                </Form.Item>
+                <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
+                  <Input.Password 
+                    prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
+                    placeholder="Enter your password" 
+                    size="large" 
+                    autoComplete="new-password"
+                  />
+                </Form.Item>
+                <Button type="primary" htmlType="submit" block size="large" loading={loading} className="hover-blue-btn">
+                  Next
+                </Button>
+              </Form>
+            )}
+
+            {/* Supervisor Login Form */}
+            {activeRole === 'supervisor' && (
+              <Form form={supervisorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Supervisor')} autoComplete="off">
+                <Text strong style={{ display: 'block', marginBottom: '16px' }}>Supervisor Credentials</Text>
+                <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
+                  <Input 
+                    prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 
+                    placeholder="Enter your name" 
+                    size="large" 
+                    autoComplete="off"
+                  />
+                </Form.Item>
+                <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
+                  <Input.Password 
+                    prefix={<LockOutlined style={{ color: '#bfbfbf' }} />} 
+                    placeholder="Enter your password" 
+                    size="large" 
+                    autoComplete="new-password"
+                  />
+                </Form.Item>
+                <Button type="primary" htmlType="submit" block size="large" loading={loading} className="hover-blue-btn">
+                  Next
+                </Button>
+              </Form>
+            )}
+
+            {/* Inventory Supervisor Login Form */}
+            {activeRole === 'inventory_supervisor' && (
+              <Form form={invSupervisorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Inventory Supervisor')} autoComplete="off">
+                <Text strong style={{ display: 'block', marginBottom: '16px' }}>Inventory Supervisor Credentials</Text>
                 <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
                   <Input 
                     prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 

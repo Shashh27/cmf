@@ -19,9 +19,17 @@ const ProtectedRoute = ({ children }) => {
     'admin': '/admin',
     'project_coordinator': '/project_coordinator',
     'project coordinator': '/project_coordinator',
+    'manufacturing_coordinator': '/manufacturing_coordinator',
+    'manufacturing coordinator': '/manufacturing_coordinator',
+    'supervisor': '/supervisor',
+    'inventory_supervisor': '/inventory_supervisor',
+    'inventory supervisor': '/inventory_supervisor',
     'operator': '/operator',
     'Admin': '/admin',
     'Project Coordinator': '/project_coordinator',
+    'Manufacturing Coordinator': '/manufacturing_coordinator',
+    'Supervisor': '/supervisor',
+    'Inventory Supervisor': '/inventory_supervisor',
     'Operator': '/operator'
   };
 

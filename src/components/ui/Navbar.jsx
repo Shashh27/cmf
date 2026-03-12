@@ -18,6 +18,9 @@ const Navbar = () => {
     if (path.startsWith('/admin')) role = 'Admin';
     else if (path.startsWith('/project_coordinator')) role = 'Project Coordinator';
     else if (path.startsWith('/operator')) role = 'Operator';
+    else if (path.startsWith('/manufacturing_coordinator')) role = 'Manufacturing Coordinator';
+    else if (path.startsWith('/supervisor')) role = 'Supervisor';
+    else if (path.startsWith('/inventory_supervisor')) role = 'Inventory Supervisor';
     let name = role;
     try {
       const stored = localStorage.getItem('user');

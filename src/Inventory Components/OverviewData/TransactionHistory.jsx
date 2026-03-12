@@ -1,32 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Table, 
-  Space, 
-  Tag, 
-  Alert,
-  Spin,
-  Empty,
-  Input,
-  Button,
-  Row,
-  Col,
-  DatePicker,
-  Select
-} from 'antd';
+import { Table, Space, Tag, Alert,Spin,Empty,Input,Button,Row,Col,DatePicker,Select } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import config from '../../Config/config';
+import { API_BASE_URL } from "../../Config/auth";
 const { RangePicker } = DatePicker;
 const TransactionHistory = () => {
-  const [allTransactionsLoading, setAllTransactionsLoading] = useState(false);
-  const [allTransactionsData, setAllTransactionsData] = useState(null);
-  const [error, setError] = useState(null);
-  const [searchProjectNumber, setSearchProjectNumber] = useState('');
-  const [dateRange, setDateRange] = useState([null, null]);
-  const [typeFilter, setTypeFilter] = useState('all'); // all | requests | returns
-  const [pagination, setPagination] = useState({
-    current: 1,
-    pageSize: 10,
-  });
+const [allTransactionsLoading, setAllTransactionsLoading] = useState(false);
+const [allTransactionsData, setAllTransactionsData] = useState(null);
+const [error, setError] = useState(null);
+const [searchProjectNumber, setSearchProjectNumber] = useState('');
+const [dateRange, setDateRange] = useState([null, null]);
+const [typeFilter, setTypeFilter] = useState('all'); // all | requests | returns
+const [pagination, setPagination] = useState({current: 1, pageSize: 10,});
 
   useEffect(() => {
     fetchAllTransactions();

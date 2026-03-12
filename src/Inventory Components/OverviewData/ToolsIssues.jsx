@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Tag, Space, message, Modal, Input, Row, Col, Card, DatePicker, Select } from 'antd';
-import config from '../../Config/config';
+import { API_BASE_URL } from "../../Config/auth";
 
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
@@ -41,9 +41,9 @@ const ToolsIssues = () => {
   const fetchIssues = async (status = statusFilter) => {
     setLoading(true);
     try {
-      let url = `${config.API_BASE_URL}/tool-issues/`;
+      let url = `${API_BASE_URL}/tool-issues/`;
       if (status !== 'all') {
-        url = `${config.API_BASE_URL}/tool-issues/by-status/${status}`;
+        url = `${API_BASE_URL}/tool-issues/by-status/${status}`;
       }
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -131,7 +131,7 @@ const ToolsIssues = () => {
         remarks: remarks.trim()
       };
 
-      const url = `${config.API_BASE_URL}/tool-issues/${selectedIssue.id}/status`;
+      const url = `${API_BASE_URL}/tool-issues/${selectedIssue.id}/status`;
       const resp = await fetch(url, { 
         method: 'PUT',
         headers: {

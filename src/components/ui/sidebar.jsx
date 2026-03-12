@@ -48,6 +48,9 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     if (path.startsWith('/admin')) return '/admin';
     if (path.startsWith('/project_coordinator')) return '/project_coordinator';
     if (path.startsWith('/operator')) return '/operator';
+    if (path.startsWith('/manufacturing_coordinator')) return '/manufacturing_coordinator';
+    if (path.startsWith('/supervisor')) return '/supervisor';
+    if (path.startsWith('/inventory_supervisor')) return '/inventory_supervisor';
     return ''; // Default fallback
   };
 
@@ -182,6 +185,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/pdm`,
         label: <Link to={`${prefix}/pdm`} onClick={() => setMobileDrawerOpen(false)}>PDM</Link>,
         icon: <DeploymentUnitOutlined />,
+      },
+    ];
+  } else if (prefix === '/manufacturing_coordinator' || prefix === '/supervisor' || prefix === '/inventory_supervisor') {
+    items = [
+      {
+        key: `${prefix}/dashboard`,
+        label: <Link to={`${prefix}/dashboard`} onClick={() => setMobileDrawerOpen(false)}>Dashboard</Link>,
+        icon: <DashboardOutlined />,
       },
     ];
   } else {

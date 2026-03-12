@@ -13,6 +13,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   const [loading, setLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [decimalWarnings, setDecimalWarnings] = useState({});
+  const orderDateWatch = Form.useWatch('order_date', form);
 
   const limitDecimals = (value, fieldName, precision = 3) => {
     if (value === null || value === undefined || value === '') return value;
@@ -55,21 +56,27 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   const blockExtraDecimals = (e, fieldName, precision = 3) => {
     const { value } = e.target;
     
-    // 1. Strictly block negative sign and common symbols/letters
+    // 1. Always allow control keys (Backspace, Delete, Arrows, etc.)
+    const controlKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Control'];
+    if (controlKeys.includes(e.key) || e.ctrlKey || e.metaKey) {
+      return;
+    }
+
+    // 2. Strictly block negative sign and common symbols/letters
     const forbiddenKeys = ['-', '+', 'e', 'E', '@', '#', '$', '%', '&', '*', '(', ')', '_', '=', '<', '>', '/', '?', ';', ':', '"', "'", '[', ']', '{', '}', '|', '\\', '`', '~'];
     if (forbiddenKeys.includes(e.key)) {
       e.preventDefault();
       return;
     }
 
-    // 2. Block decimal point if precision is 0 (whole numbers only)
+    // 3. Block decimal point if precision is 0 (whole numbers only)
     if (precision === 0 && e.key === '.') {
       showDecimalWarning(fieldName, 0);
       e.preventDefault();
       return;
     }
 
-    // 3. If precision is 0, enforce max 5 digits in real-time
+    // 4. If precision is 0, enforce max 5 digits in real-time
     if (precision === 0 && /[0-9]/.test(e.key)) {
       const digitsOnly = String(value).replace(/\D/g, '');
       const hasSelection = e.target.selectionStart !== e.target.selectionEnd;
@@ -80,20 +87,13 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       }
     }
 
-    // Allow navigation, delete, backspace, etc.
-    const allowedKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Control', '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-    
-    // If it's not an allowed key and not a combo (Ctrl+C, etc.), block it
-    if (!allowedKeys.includes(e.key) && !e.ctrlKey && !e.metaKey) {
+    // 5. Block multiple dots
+    if (e.key === '.' && value.includes('.')) {
       e.preventDefault();
       return;
     }
 
-    if (e.key === '.' && value.includes('.')) {
-      e.preventDefault(); // Block multiple dots
-      return;
-    }
-
+    // 6. Block typing beyond decimal precision
     if (value.includes('.')) {
       const parts = value.split('.');
       const selectionStart = e.target.selectionStart;
@@ -159,6 +159,23 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
     }
   }, [isOpen, editingOrder, form]);
 
+  // Keep due_date consistent with order_date:
+  // - Disable due_date when no order_date
+  // - Clear due_date if it is same day or before order_date
+  useEffect(() => {
+    const od = orderDateWatch;
+    if (!od) {
+      if (form.getFieldValue('due_date')) {
+        form.setFieldsValue({ due_date: null });
+      }
+      return;
+    }
+    const due = form.getFieldValue('due_date');
+    if (due && (!dayjs(due).isAfter(dayjs(od), 'day'))) {
+      form.setFieldsValue({ due_date: null });
+    }
+  }, [orderDateWatch, form]);
+
 
   const handleSubmit = async (values) => {
     setLoading(true);
@@ -172,32 +189,23 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       
       const payload = {
         ...values,
-        sale_order_number: values.sale_order_number?.trim(),
+        sale_order_number: values.sale_order_number?.trim()?.toUpperCase(),
         quantity: parseInt(values.quantity),
         customer_id: parseInt(values.customer_id),
         product_id: parseInt(values.product_id),
         user_id: values.user_id ? parseInt(values.user_id) : undefined,
       };
 
-      if (values.due_date) {
-        try {
-          payload.due_date = dayjs(values.due_date).toISOString();
-        } catch {
-          delete payload.due_date;
-        }
-      } else {
-        delete payload.due_date;
-      }
-
+      // Dates: include null explicitly when cleared so updates can remove values
       if (values.order_date) {
-        try {
-          payload.order_date = dayjs(values.order_date).toISOString();
-        } catch {
-          delete payload.order_date;
-        }
-      } else {
-        delete payload.order_date;
-      }
+        try { payload.order_date = dayjs(values.order_date).toISOString(); }
+        catch { payload.order_date = null; }
+      } else { payload.order_date = null; }
+      
+      if (values.due_date) {
+        try { payload.due_date = dayjs(values.due_date).toISOString(); }
+        catch { payload.due_date = null; }
+      } else { payload.due_date = null; }
 
       if (!editingOrder && documents.some(doc =>
         doc.document_type === "Other" &&
@@ -252,7 +260,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         document_name: "",
         document_type: "Other",
         document_type_other: "",
-        document_version: "1.0",
+        document_version: "v1.0",
       },
     ]);
   };
@@ -279,7 +287,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           docType = doc.document_type_other.trim();
         }
         uploadFormData.append("document_type", docType);
-        uploadFormData.append("document_version", "1.0"); // Hardcoded to 1.0 for new order creation
+        uploadFormData.append("document_version", "v1.0"); // Hardcoded to v1.0 for new order creation
 
         try {
           await fetch(`${API_BASE_URL}/order-documents/upload/${orderId}`, {
@@ -328,7 +336,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         layout="vertical"
         onFinish={handleSubmit}
         className="mt-2"
-        requiredMark="optional"
         initialValues={{
           sale_order_number: "",
           project_name: "",
@@ -459,6 +466,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                   className="h-10 rounded-md border-gray-300 w-full" 
                   format="DD-MM-YYYY"
                   placeholder="DD-MM-YYYY"
+                  inputReadOnly
                 />
               </Form.Item>
             </Col>
@@ -466,13 +474,39 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
               <Form.Item
                 name="due_date"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Due Date</span>}
-                rules={[{ required: true, message: 'Required' }]}
+                rules={[
+                  {
+                    validator: (_, value) => {
+                      const od = form.getFieldValue('order_date');
+                      if (!value) return Promise.resolve();
+                      if (!od) return Promise.reject(new Error('Select Order Date first'));
+                      return dayjs(value).isAfter(dayjs(od), 'day')
+                        ? Promise.resolve()
+                        : Promise.reject(new Error('Due Date must be after Order Date'));
+                    }
+                  }
+                ]}
                 className="mb-0"
               >
                 <DatePicker 
                   className="h-10 rounded-md border-gray-300 w-full" 
                   format="DD-MM-YYYY"
                   placeholder="DD-MM-YYYY"
+                  inputReadOnly
+                  onOpenChange={(open) => {
+                    if (open && !form.getFieldValue('order_date')) {
+                      // Prevent opening Due Date calendar without Order Date
+                      return false;
+                    }
+                  }}
+                  allowClear
+                  disabled={!orderDateWatch}
+                  disabledDate={(current) => {
+                    const od = form.getFieldValue('order_date');
+                    if (!od) return true;
+                    // Disable same-day and earlier; allow only strictly after
+                    return current && !current.isAfter(dayjs(od), 'day');
+                  }}
                 />
               </Form.Item>
             </Col>
@@ -607,7 +641,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                         </td>
                         <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">
                           <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 sm:px-3 py-1.5 rounded-md border border-gray-200">
-                            1.0
+                            v1.0
                           </span>
                         </td>
                         <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">

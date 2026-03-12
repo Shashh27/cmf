@@ -1,11 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Tree, Spin, message } from 'antd';
-import { 
-  FolderOutlined, 
-  FileOutlined,
-  DesktopOutlined
-} from '@ant-design/icons';
-import config from '../../Config/config';
+import { FolderOutlined, FileOutlined,DesktopOutlined } from '@ant-design/icons';
+import { API_BASE_URL } from "../../Config/auth";
 
 const OperatorDocumentTree = ({ onNodeSelect }) => {
   const [loading, setLoading] = useState(false);
@@ -70,7 +66,7 @@ const OperatorDocumentTree = ({ onNodeSelect }) => {
         }
       }
 
-      const baseUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
+      const baseUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
 
       const requests = [];
       if (machineId != null) {

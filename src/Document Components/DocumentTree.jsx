@@ -1,7 +1,7 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Tree, Spin, message, Button, Modal, Input, Upload, Card } from 'antd';
 import { FolderOutlined,  FileOutlined, CaretDownOutlined, CaretRightOutlined,ShoppingOutlined, AppstoreOutlined, PlusOutlined, FileAddOutlined, DeleteOutlined, UploadOutlined,ShoppingCartOutlined,ApiOutlined,SettingOutlined,DesktopOutlined} from '@ant-design/icons';
-import config from '../Config/config';
+import { API_BASE_URL } from "../Config/auth";
 
 const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsChange }, ref) => {
   const [loading, setLoading] = useState(false);
@@ -113,7 +113,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
 
   const fetchCommonFolders = async () => {
     try {
-      const baseUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
+      const baseUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
       const [foldersResponse, docsResponse] = await Promise.all([
         fetch(`${baseUrl}common-documents/folders/tree`),
         fetch(`${baseUrl}common-documents/all/documents`)
@@ -140,7 +140,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
 
   const fetchMachines = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/machines/?skip=0&limit=100`);
+      const response = await fetch(`${API_BASE_URL}/machines/?skip=0&limit=100`);
       if (!response.ok) {
         throw new Error('Failed to fetch machines');
       }
@@ -186,7 +186,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
       }
     }
 
-    const baseUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
+    const baseUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
     const response = await fetch(`${baseUrl}machine-documents/machines/${resolvedMachineId}/folders`);
     if (!response.ok) {
       throw new Error('Failed to fetch machine folders');
@@ -808,7 +808,7 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
 
     try {
-      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders`, {
+      const response = await fetch(`http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -875,7 +875,7 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (!commonFolderToDelete) return;
 
     try {
-      const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders/${commonFolderToDelete.id}`, {
+      const response = await fetch(`http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders/${commonFolderToDelete.id}`, {
         method: 'DELETE'
       });
 
@@ -930,7 +930,7 @@ const buildMachineFoldersTree = (folders, machine) => {
     let uploadUrl;
     // General folder upload
     formData.append('folder_id', uploadFolderId.toString());
-    uploadUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
+    uploadUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
     
     try {
       setLoading(true);
@@ -998,7 +998,7 @@ const buildMachineFoldersTree = (folders, machine) => {
 
     try {
       setLoading(true);
-      const baseUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
+      const baseUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
       const uploadUrl = `${baseUrl}common-documents/upload`;
 
       const response = await fetch(uploadUrl, {
@@ -1044,7 +1044,7 @@ const buildMachineFoldersTree = (folders, machine) => {
 
     try {
       const targetMachineId = machineParentMachineId;
-      const baseUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
+      const baseUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
       const response = await fetch(`${baseUrl}machine-documents/folders`, {
         method: 'POST',
         headers: {
@@ -1105,7 +1105,7 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (!machineFolderToDelete) return;
 
     try {
-      const baseUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
+      const baseUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
       const response = await fetch(`${baseUrl}machine-documents/folders/${machineFolderToDelete.id}`, {
         method: 'DELETE'
       });
@@ -1178,7 +1178,7 @@ const buildMachineFoldersTree = (folders, machine) => {
 
     try {
       setLoading(true);
-      const baseUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
+      const baseUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
       const uploadUrl = `${baseUrl}machine-documents/upload`;
 
       const response = await fetch(uploadUrl, {
