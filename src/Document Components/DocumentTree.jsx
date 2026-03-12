@@ -1,12 +1,11 @@
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { Tree, Spin, message, Button, Modal, Input, Upload, Card } from 'antd';
-import { FolderOutlined,  FileOutlined, CaretDownOutlined, CaretRightOutlined,ShoppingOutlined, AppstoreOutlined, PlusOutlined, FileAddOutlined, DeleteOutlined, UploadOutlined,ShoppingCartOutlined,ApiOutlined,SettingOutlined,DesktopOutlined} from '@ant-design/icons';
+import { FolderOutlined,  FileOutlined, CaretDownOutlined, CaretRightOutlined,ShoppingOutlined, AppstoreOutlined, PlusOutlined, FileAddOutlined, DeleteOutlined, UploadOutlined,ShoppingCartOutlined,DesktopOutlined} from '@ant-design/icons';
 import config from '../Config/config';
 
 const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsChange }, ref) => {
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState([]);
-  const [parts, setParts] = useState([]);
   const [machines, setMachines] = useState([]);
   const [treeData, setTreeData] = useState([]);
   const [expandedKeys, setExpandedKeys] = useState([]);
@@ -16,7 +15,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const [loadedOperations, setLoadedOperations] = useState({}); // Track which parts have operations loaded
   const [loadedMachineFolders, setLoadedMachineFolders] = useState({}); // Track which machines have folders loaded
   
-  // General Documents state
+  // General Documents statesss
   const [generalFolders, setGeneralFolders] = useState([]);
   const [commonFolders, setCommonFolders] = useState([]);
   const [newFolderModalVisible, setNewFolderModalVisible] = useState(false);
@@ -55,18 +54,17 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   // Fetch orders, parts and general folders on component mount
   useEffect(() => {
     fetchOrders();
-    fetchPartsList();
     fetchGeneralFolders();
     fetchCommonFolders();
     fetchMachines();
   }, []);
 
-  // Reinitialize tree data when general folders, common folders, orders, or parts change
+  // Reinitialize tree data when general folders, common folders, orders, or machines change
   useEffect(() => {
-    if (orders.length > 0 || parts.length > 0 || machines.length > 0 || generalFolders.length > 0 || commonFolders.length > 0) {
-      initializeTreeData(orders, parts, machines);
+    if (orders.length > 0 || machines.length > 0 || generalFolders.length > 0 || commonFolders.length > 0) {
+      initializeTreeData(orders, machines);
     }
-  }, [generalFolders, commonFolders, orders, parts, machines]);
+  }, [generalFolders, commonFolders, orders, machines]);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -77,24 +75,11 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
       }
       const data = await response.json();
       setOrders(data);
-      initializeTreeData(data, parts, machines);
+      initializeTreeData(data, machines);
     } catch (error) {
       message.error('Failed to fetch orders: ' + error.message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchPartsList = async () => {
-    try {
-      const response = await fetch(`${config.API_BASE_URL}/parts/`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch parts');
-      }
-      const data = await response.json();
-      setParts(data);
-    } catch (error) {
-      message.error('Failed to fetch parts: ' + error.message);
     }
   };
 
@@ -451,7 +436,7 @@ const buildMachineFoldersTree = (folders, machine) => {
     };
   };
 
-  const initializeTreeData = (ordersData, partsData, machinesData = []) => {
+  const initializeTreeData = (ordersData, machinesData = []) => {
     const filteredGeneralFolders = generalFolders.filter(folder => folder.folder_name !== 'Common Folder');
 
     const initialTreeData = [
@@ -491,35 +476,6 @@ const buildMachineFoldersTree = (folders, machine) => {
               nodeData: { type: 'folder', category: 'Reports', orderId: order.id, folderName: 'Reports' }
             }
           ]
-        }))
-      },
-      {
-        title: (
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <SettingOutlined style={{ color: '#faad14' }} />
-            <span>Parts</span>
-          </span>
-        ),
-        titleText: 'Parts',
-        key: 'parts-root',
-        selectable: false,
-        children: partsData.map(part => ({
-          title: (
-            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <ApiOutlined style={{ color: '#13c2c2', fontSize: '14px' }} />
-              <span>{part.part_name}</span>
-            </span>
-          ),
-          titleText: part.part_name,
-          key: `part-${part.id}`,
-          selectable: true,
-          isLeaf: false,
-          nodeData: { 
-            type: 'part',
-            partId: part.id,
-            partName: part.part_name
-          },
-          children: buildPartNode(part, null, [], false).children
         }))
       },
       {
@@ -1350,7 +1306,7 @@ const buildMachineFoldersTree = (folders, machine) => {
       fetchGeneralFolders();
       fetchCommonFolders().then(() => {
         // Reinitialize tree data with existing data to preserve machine folders
-        initializeTreeData(orders, parts, machines);
+        initializeTreeData(orders, machines);
         
         // Restore expanded state after tree rebuild
         setTimeout(() => {
@@ -1621,7 +1577,9 @@ const buildMachineFoldersTree = (folders, machine) => {
       className="tree-scroll-container"
       style={{ 
         padding: isMobile ? '8px' : '16px',
-        minWidth: 'max-content' // Ensure tree items don't get cut off
+        width: '100%',
+        overflowX: 'auto',
+        overflowY: 'hidden' // Vertical scroll is handled by the parent div in Document.jsx
       }}
     >
       <style>
@@ -1658,7 +1616,6 @@ const buildMachineFoldersTree = (folders, machine) => {
           style={{ 
             background: 'transparent',
             fontSize: isMobile ? '14px' : '16px', // Increased font size
-            minWidth: 'max-content' // Ensure tree items don't get cut off
           }}
           showLine={false}
           blockNode={isMobile}

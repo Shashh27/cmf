@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {Modal,Button,Typography,List,Input,InputNumber,Select,Spin,message} from 'antd';
 import {CheckCircleOutlined,CloseOutlined,FileTextOutlined,InfoCircleOutlined,CheckOutlined} from '@ant-design/icons';
-import config from '../Config/config';
+import { API_BASE_URL } from '../Config/auth.js';
 
 const { Title, Text } = Typography;
 
@@ -98,7 +98,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       setLoading(true);
       try {
         const res = await fetch(
-          `${config.API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`,
+          `${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`,
           {
             headers: { accept: 'application/json' },
           }
@@ -114,7 +114,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
           const results = await Promise.all(
             missing.map(async (id) => {
               try {
-                const r = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${id}`, {
+                const r = await fetch(`${API_BASE_URL}/pokayoke-checklists/${id}`, {
                   headers: { accept: 'application/json' },
                 });
                 const d = await r.json();
@@ -159,7 +159,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
         return;
       }
       try {
-        const res = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${checklistId}/items`, {
+        const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/${checklistId}/items`, {
           headers: { accept: 'application/json' },
         });
         const data = await res.json();
@@ -200,7 +200,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       if (!selectedOrderId) return;
       setPartsLoading(true);
       try {
-        const res = await fetch(`${config.API_BASE_URL}/orders/${selectedOrderId}/part-priorities`, {
+        const res = await fetch(`${API_BASE_URL}/orders/${selectedOrderId}/part-priorities`, {
           headers: { accept: 'application/json' },
         });
         const data = await res.json();
@@ -297,7 +297,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
           })
           .filter(Boolean),
       };
-      const res = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/`, {
+      const res = await fetch(`${API_BASE_URL}/pokayoke-completed-logs/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify(payload),
@@ -356,7 +356,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
               is_confirming: Boolean(isConfirming),
               timestamp: nowIST(),
             };
-            await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/item-responses`, {
+            await fetch(`${API_BASE_URL}/pokayoke-completed-logs/item-responses`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', accept: 'application/json' },
               body: JSON.stringify(singlePayload),

@@ -1,28 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Table, 
-  Button, 
-  Modal, 
-  Form, 
-  Input, 
-  message, 
-  Space, 
-  Popconfirm,
-  Tag,
-  Card,
-  Typography,
-  Divider,
-  Tooltip
-} from 'antd';
-import { 
-  PlusOutlined, 
-  EyeOutlined, 
-  DeleteOutlined,
-  EditOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined
-} from '@ant-design/icons';
-import config from '../Config/config';
+import { Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Card, Typography, Divider, Tooltip } from 'antd';
+import { PlusOutlined, EyeOutlined, DeleteOutlined,EditOutlined,CheckCircleOutlined,ClockCircleOutlined } from '@ant-design/icons';
+import { API_BASE_URL } from '../Config/auth.js';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -49,7 +28,7 @@ const PokaYokeChecklists = () => {
   const fetchChecklists = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/`);
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/`);
       if (!response.ok) throw new Error('Failed to fetch checklists');
       const data = await response.json();
       
@@ -126,7 +105,7 @@ const PokaYokeChecklists = () => {
     if (!selectedChecklist) return;
     
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${selectedChecklist.id}/items`, {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${selectedChecklist.id}/items`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -168,7 +147,7 @@ const PokaYokeChecklists = () => {
 
   const handleUpdateChecklist = async (values) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${editingChecklist.id}`, {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${editingChecklist.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

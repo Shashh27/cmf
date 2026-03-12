@@ -26,10 +26,10 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   
   // Helper function to notify parent of document changes
   const notifyDocumentsChange = () => {
-    // For machine folders, refresh only the specific machine tree to preserve expansion
+    // For machine folders or machine nodes, refresh only the specific machine tree to preserve expansion
     if (
       selectedNode &&
-      selectedNode.type === 'machine-folder' &&
+      (selectedNode.type === 'machine-folder' || selectedNode.type === 'machine') &&
       documentTreeRef &&
       documentTreeRef.current &&
       typeof documentTreeRef.current.refreshMachineFolders === 'function'
@@ -75,7 +75,6 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       if (selectedNode.type === 'general-folder' || 
           selectedNode.type === 'common-folder' ||
           selectedNode.type === 'common-root' ||
-          selectedNode.type === 'part' ||
           selectedNode.type === 'part-category' || 
           selectedNode.type === 'operation-folder' ||
           selectedNode.type === 'machine-folder' ||
@@ -103,8 +102,6 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       } else if (selectedNode.type === 'common-root') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/all/documents`;
       } else if (selectedNode.type === 'part-category') {
-        url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
-      } else if (selectedNode.type === 'part') {
         url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
       } else if (selectedNode.type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/operation/${selectedNode.operationId}`;
@@ -177,6 +174,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       // For machine and common documents, each document already represents a family with versions array
       if (
         (doc.doc_source_type === 'machine-folder' || 
+         doc.doc_source_type === 'machine' ||
          doc.doc_source_type === 'common-folder' ||
          doc.doc_source_type === 'common-root') 
         && doc.versions
@@ -460,6 +458,9 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       } else if (editingDocument.doc_source_type === 'machine-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
+      } else if (editingDocument.doc_source_type === 'machine') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${editingDocument.id}`;
+        body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'common-folder' || editingDocument.doc_source_type === 'common-root') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
@@ -469,7 +470,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       }
 
       const response = await fetch(url, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -506,6 +507,8 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     } else if (document.doc_source_type === 'folder') {
       downloadUrl = `${config.API_BASE_URL}/order-documents/download/${document.id}`;
     } else if (document.doc_source_type === 'machine-folder') {
+      downloadUrl = document.url;
+    } else if (document.doc_source_type === 'machine') {
       downloadUrl = document.url;
     }
 
@@ -591,6 +594,10 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       } else if (uploadingDocument.doc_source_type === 'machine-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
         formData.append('folder_id', (uploadingDocument.machine_folder_id || selectedNode.folderId).toString());
+        formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+      } else if (uploadingDocument.doc_source_type === 'machine') {
+        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
+        formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
       } else if (uploadingDocument.doc_source_type === 'common-folder' || uploadingDocument.doc_source_type === 'common-root') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
@@ -796,6 +803,8 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
             url = `${config.API_BASE_URL}/operation-documents/${document.id}`;
           } else if (document.doc_source_type === 'machine-folder') {
             url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${document.id}`;
+          } else if (document.doc_source_type === 'machine') {
+            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'common-folder' || document.doc_source_type === 'common-root') {
             url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'folder') {
@@ -874,6 +883,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     if (selectedNode.type === 'machine') return `${selectedNode.machineName}`;
     if (selectedNode.type === 'general-folder') return selectedNode.folderName;
     if (selectedNode.type === 'common-folder') return selectedNode.folderName;
+    if (selectedNode.type === 'common-root') return 'Common Documents';
     return selectedNode.folderName;
   };
 

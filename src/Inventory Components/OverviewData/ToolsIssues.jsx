@@ -88,10 +88,12 @@ const ToolsIssues = () => {
     }
     if (searchText) {
       const s = searchText.toLowerCase();
-      data = data.filter(r =>
-        (r.tool_name || '').toLowerCase().includes(s) ||
-        (r.sale_order_number || '').toLowerCase().includes(s)
-      );
+      data = data.filter(r => {
+        return Object.values(r).some(val => {
+          if (val === null || val === undefined || typeof val === 'object') return false;
+          return String(val).toLowerCase().includes(s);
+        });
+      });
     }
     setFilteredIssues(data);
     setPagination(prev => ({ ...prev, current: 1 }));
@@ -334,6 +336,7 @@ const ToolsIssues = () => {
                 value={dateRange}
                 onChange={(vals) => setDateRange(vals)}
                 allowClear
+                inputReadOnly
               />
             </div>
           </Col>
@@ -357,8 +360,9 @@ const ToolsIssues = () => {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Search</span>
               <Input.Search
-                placeholder="Search by project number or tool name"
+                placeholder="Search issues by any field..."
                 allowClear
+                maxLength={20}
                 onSearch={(v) => setSearchText(v || '')}
                 onChange={(e) => setSearchText(e.target.value)}
               />

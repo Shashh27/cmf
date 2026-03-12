@@ -44,7 +44,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [returnLoading, setReturnLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
-  const [toolsById, setToolsById] = useState({});
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -79,10 +78,17 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     return Math.max(0, (req.quantity || 0) - returned - issues);
   };
 
+  const isConsumableType = (record) => {
+    // Check if the tool is consumable based on tool type or category
+    // You may need to adjust this logic based on your data structure
+    return record.tool_type?.toLowerCase()?.includes('consumable') || 
+           record.category?.toLowerCase()?.includes('consumable') ||
+           record.is_consumable === true;
+  };
+
   useEffect(() => {
     fetchRequests();
     fetchReturnRequests();
-    fetchToolsList();
     fetchToolIssues();
   }, []);
 
@@ -93,18 +99,11 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
         const user = JSON.parse(storedUser);
         if (user && user.id != null) return parseInt(user.id);
       }
-    } catch (e) {
-      
+    } catch {
+      void 0;
     }
     const fallback = localStorage.getItem('operator_id');
     return fallback ? parseInt(fallback) : null;
-  };
-
-  const isConsumableType = (item) => {
-    const v = (item?.tool_type ?? item?.type ?? '').toString().trim().toLowerCase();
-    if (!v) return false;
-    if (v.includes('non')) return false;
-    return v.includes('consum');
   };
 
   const handleTableChange = (newPagination) => {
@@ -128,18 +127,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     return rr.status === 'collected' ? sum + (rr.returned_qty || 0) : sum;
   }, 0);
   const totalToBeReturned = requests.reduce((sum, r) => {
-    const isConsum = isConsumableType(r);
-    if (r.status === 'approved' && !isConsum) {
-      const remaining = computeRemaining(r);
-      return sum + (remaining > 0 ? remaining : 0);
-    }
-    return sum;
-  }, 0);
-  const totalPending = requests.reduce((sum, r) => {
-    if (r.status === 'pending') {
-      return sum + (r.quantity || 0);
-    }
-    return sum;
+    if (r.status !== 'approved') return sum;
+    const remaining = computeRemaining(r);
+    return sum + remaining;
   }, 0);
   const yetToBeCollected = returnRequests.reduce((sum, r) => {
     if (r.status === 'pending' || r.status === 'not_collected') {
@@ -163,10 +153,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
               return oid == null ? true : parseInt(oid) === currentOpId;
             })
           : sortedData;
-        setRequests(filteredSorted.map(r => ({
-          ...r,
-          tool_type: r.tool_type || toolsById[r.tool_id] || r.tool_type
-        })));
+        setRequests(filteredSorted);
       }
     } catch (error) {
       console.error('Failed to fetch requests:', error);
@@ -175,22 +162,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     }
   };
 
-  const fetchToolsList = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/tools-list/`);
-      if (res.ok) {
-        const tools = await res.json();
-        const map = {};
-        (Array.isArray(tools) ? tools : []).forEach(t => {
-          if (t && t.id != null) map[t.id] = t.type || '';
-        });
-        setToolsById(map);
-        setRequests(prev => prev.map(r => ({ ...r, tool_type: r.tool_type || map[r.tool_id] })));
-      }
-    } catch (e) {
-      console.error('Failed to fetch tools list', e);
-    }
-  };
   const fetchReturnRequests = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
@@ -436,6 +407,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       key: 'tool_name',
       width: 150,
       ellipsis: true,
+      fixed: 'left',
       filteredValue: [searchText],
       onFilter: (value, record) => {
         return (
@@ -446,7 +418,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       },
     },
     {
-      title: 'Quantity',
+      title: 'Total Quantity',
       dataIndex: 'quantity',
       key: 'quantity',
       width: 100,
@@ -552,9 +524,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
         </Col>
         <Col xs={24} sm={12} md={6}>
           <KpiCard
-            title="Total Tool Returned"
+            title="Total Tool Collected"
             count={totalReturned}
-            label="Returned"
+            label="Collected"
             icon={<CheckCircleOutlined style={{ fontSize: '20px', color: '#52C41A' }} />}
             color="#237804"
             bgColor="#F6FFED"

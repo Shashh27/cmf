@@ -1,19 +1,24 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Table, Button, message, Spin, Empty, Tag } from 'antd';
+import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
 import config from '../Config/config';
 import dayjs from 'dayjs';
 
-const OrderNotifications = () => {
+const OrderNotifications = ({ dateRange, onCount }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [query, setQuery] = useState('');
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
-      const url = `${config.API_BASE_URL}/order-notifications/`;
+      const base = `${config.API_BASE_URL}/order-notifications/`;
+      const params = new URLSearchParams();
+      if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
+      if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
+      const url = `${base}?${params.toString()}`;
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -21,12 +26,13 @@ const OrderNotifications = () => {
       }
       const data = await response.json();
       setNotifications(data);
+      if (onCount) onCount(Array.isArray(data) ? data.filter(n => !n.is_ack).length : 0);
     } catch (error) {
       message.error(error.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dateRange]);
 
   useEffect(() => {
     fetchNotifications();
@@ -85,18 +91,18 @@ const OrderNotifications = () => {
     },
     {
       title: 'Status',
-      dataIndex: 'order_status',
-      key: 'order_status',
-      render: (status) => {
-        const color = status === 'Completed' ? 'green' : status === 'Ongoing' ? 'blue' : 'orange';
-        return <Tag color={color}>{status || '-'}</Tag>;
-      },
+      dataIndex: 'is_ack',
+      key: 'is_ack',
+      render: (is_ack) => (
+        <Tag color={is_ack ? 'green' : 'orange'}>
+          {is_ack ? 'Acknowledged' : 'Pending'}
+        </Tag>
+      ),
       filters: [
-        { text: 'Ongoing', value: 'Ongoing' },
-        { text: 'Pending', value: 'Pending' },
-        { text: 'Completed', value: 'Completed' },
+        { text: 'Acknowledged', value: true },
+        { text: 'Pending', value: false },
       ],
-      onFilter: (value, record) => record.order_status === value,
+      onFilter: (value, record) => record.is_ack === value,
       responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
     },
     {
@@ -151,9 +157,19 @@ const OrderNotifications = () => {
           }
         }
       `}</style>
+      <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
+        <Input.Search
+          placeholder="Search orders"
+          allowClear
+          maxLength={20}
+          onSearch={(val) => setQuery(val)}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ maxWidth: 320 }}
+        />
+      </div>
       <Table
         columns={columns.map(col => ({ ...col, title: <span style={{ fontWeight: 'bold' }}>{col.title}</span> }))}
-        dataSource={notifications}
+        dataSource={notifications.filter(n => (n.sale_order_number || '').toLowerCase().includes(query.trim().toLowerCase()))}
         rowKey="id"
         pagination={{
           current: currentPage,

@@ -231,14 +231,7 @@ const TransactionHistory = () => {
           return_updated_at: null,
         };
         
-        // Filter by project number if search is active
-        if (searchProjectNumber.trim()) {
-          if (requestRow.project_name.toLowerCase().includes(searchProjectNumber.toLowerCase())) {
-            allRows.push(requestRow);
-          }
-        } else {
-          allRows.push(requestRow);
-        }
+        allRows.push(requestRow);
       }
       
       // Add each return request as a separate row
@@ -261,18 +254,21 @@ const TransactionHistory = () => {
             return_status: returnRequest.status || '-',
             return_updated_at: returnRequest.updated_at,
           };
-          
-          // Filter by project number if search is active
-          if (searchProjectNumber.trim()) {
-            if (returnRow.project_name.toLowerCase().includes(searchProjectNumber.toLowerCase())) {
-              allRows.push(returnRow);
-            }
-          } else {
-            allRows.push(returnRow);
-          }
+          allRows.push(returnRow);
         });
       }
     });
+    
+    // Filter by any field
+    if (searchProjectNumber.trim()) {
+      const s = searchProjectNumber.toLowerCase();
+      allRows = allRows.filter(row => {
+        return Object.values(row).some(val => {
+          if (val === null || val === undefined) return false;
+          return String(val).toLowerCase().includes(s);
+        });
+      });
+    }
     
     // Type filter
     if (typeFilter === 'requests') {
@@ -308,6 +304,7 @@ const TransactionHistory = () => {
                     value={dateRange}
                     onChange={(vals) => setDateRange(vals)}
                     allowClear
+                    inputReadOnly
                   />
                 </div>
               </Col>
@@ -330,9 +327,10 @@ const TransactionHistory = () => {
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Search</span>
                   <Input.Search
-                    placeholder="Search by Project Number"
+                    placeholder="Search transactions by any field..."
                     value={searchProjectNumber}
                     onChange={(e) => setSearchProjectNumber(e.target.value)}
+                    maxLength={20}
                     prefix={<SearchOutlined />}
                     allowClear
                   />

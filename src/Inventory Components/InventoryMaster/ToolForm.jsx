@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Form, Input, InputNumber, Button, Modal, message, Row, Col, Select } from 'antd';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -35,7 +35,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
       
       if (editingTool) {
         // Update existing tool
-        const response = await fetch(`${config.API_BASE_URL}/tools-list/${editingTool.id}`, {
+        const response = await fetch(`${API_BASE_URL}/tools-list/${editingTool.id}`, {
           method: 'PUT',
           headers: { 
             'Content-Type': 'application/json',
@@ -51,7 +51,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
         message.success('Tool updated successfully');
       } else {
         // Create new tool
-        const response = await fetch(`${config.API_BASE_URL}/tools-list/`, {
+        const response = await fetch(`${API_BASE_URL}/tools-list/`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -107,17 +107,21 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
             <Form.Item
               name="item_description"
               label="Item Description"
-              rules={[{ required: true, message: 'Please enter item description' }]}
+              rules={[
+                { required: true, message: 'Please enter item description' },
+                { max: 30, message: 'Item description cannot exceed 30 characters' }
+              ]}
             >
-              <Input placeholder="Enter item description" />
+              <Input placeholder="Enter item description" maxLength={30} />
             </Form.Item>
           </Col>
           <Col span={12}>
             <Form.Item
               name="range"
               label="Range"
+              rules={[{ max: 10, message: 'Range cannot exceed 10 characters' }]}
             >
-              <Input placeholder="Enter range (e.g., 0-150mm)" />
+              <Input placeholder="Enter range (e.g., 0-150mm)" maxLength={10} />
             </Form.Item>
           </Col>
         </Row>
@@ -127,16 +131,18 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
             <Form.Item
               name="identification_code"
               label="Identification Code"
+              rules={[{ max: 10, message: 'Identification code cannot exceed 10 characters' }]}
             >
-              <Input placeholder="Enter identification code" />
+              <Input placeholder="Enter identification code" maxLength={10} />
             </Form.Item>
           </Col>
           <Col span={12}>
             <Form.Item
               name="make"
               label="Make"
+              rules={[{ max: 20, message: 'Make cannot exceed 20 characters' }]}
             >
-              <Input placeholder="Enter make/manufacturer" />
+              <Input placeholder="Enter make/manufacturer" maxLength={20} />
             </Form.Item>
           </Col>
         </Row>
@@ -146,12 +152,31 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
             <Form.Item
               name="quantity"
               label="Available Qty"
-              rules={[{ type: 'number', min: 0, message: 'Quantity must be a positive number' }]}
+              rules={[
+                { required: true, message: 'Required' },
+                {
+                  validator: (_, value) => {
+                    const totalQty = form.getFieldValue('total_quantity');
+                    if (value != null && totalQty != null && value > totalQty) {
+                      return Promise.reject(new Error('Cannot exceed Total Qty'));
+                    }
+                    return Promise.resolve();
+                  }
+                }
+              ]}
             >
               <InputNumber
-                placeholder="Enter available quantity"
+                placeholder="Qty"
                 style={{ width: '100%' }}
                 min={0}
+                max={9999999}
+                precision={0}
+                maxLength={7}
+                onKeyPress={(event) => {
+                  if (!/[0-9]/.test(event.key)) {
+                    event.preventDefault();
+                  }
+                }}
               />
             </Form.Item>
           </Col>
@@ -159,26 +184,56 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
             <Form.Item
               name="total_quantity"
               label="Total Qty"
-              rules={[{ type: 'number', min: 0, message: 'Total quantity must be a positive number' }]}
+              rules={[
+                { required: true, message: 'Required' },
+                ({ getFieldValue }) => ({
+                  validator(_, value) {
+                    const qty = getFieldValue('quantity');
+                    if (value != null && qty != null && value < qty) {
+                      form.validateFields(['quantity']);
+                    }
+                    return Promise.resolve();
+                  },
+                }),
+              ]}
             >
               <InputNumber
-                placeholder="Enter total quantity"
+                placeholder="Total"
                 style={{ width: '100%' }}
                 min={0}
+                max={9999999}
+                precision={0}
+                maxLength={7}
+                onKeyPress={(event) => {
+                  if (!/[0-9]/.test(event.key)) {
+                    event.preventDefault();
+                  }
+                }}
               />
             </Form.Item>
           </Col>
           <Col span={6}>
             <Form.Item
               name="amount"
-              label="Amount ($)"
-              rules={[{ type: 'number', min: 0, message: 'Amount must be a positive number' }]}
+              label="Amount (₹)"
             >
               <InputNumber
-                placeholder="Enter amount"
+                placeholder="Amount"
                 style={{ width: '100%' }}
                 min={0}
+                max={9999999.99}
                 step={0.01}
+                precision={2}
+                maxLength={10}
+                onKeyPress={(event) => {
+                  // Allow digits and one dot
+                  const isDigit = /[0-9]/.test(event.key);
+                  const isDot = event.key === '.';
+                  const hasDot = (event.target.value || '').includes('.');
+                  if (!isDigit && (!isDot || hasDot)) {
+                    event.preventDefault();
+                  }
+                }}
               />
             </Form.Item>
           </Col>
@@ -200,16 +255,18 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
             <Form.Item
               name="location"
               label="Location"
+              rules={[{ max: 30, message: 'Location cannot exceed 30 characters' }]}
             >
-              <Input placeholder="Enter location" />
+              <Input placeholder="Enter location" maxLength={30} />
             </Form.Item>
           </Col>
           <Col span={12}>
             <Form.Item
               name="gauge"
               label="Gauge"
+              rules={[{ max: 30, message: 'Gauge cannot exceed 30 characters' }]}
             >
-              <Input placeholder="Enter gauge specification" />
+              <Input placeholder="Enter gauge specification" maxLength={30} />
             </Form.Item>
           </Col>
         </Row>
@@ -219,8 +276,9 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
             <Form.Item
               name="ref_ledger"
               label="Reference Ledger"
+              rules={[{ max: 30, message: 'Ref Ledger cannot exceed 30 characters' }]}
             >
-              <Input placeholder="Enter reference ledger" />
+              <Input placeholder="Enter reference ledger" maxLength={30} />
             </Form.Item>
           </Col>
         </Row>
@@ -228,10 +286,13 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
         <Form.Item
           name="remarks"
           label="Remarks"
+          rules={[{ max: 30, message: 'Remarks cannot exceed 30 characters' }]}
         >
           <TextArea
             rows={3}
             placeholder="Enter any additional remarks"
+            maxLength={30}
+            showCount
           />
         </Form.Item>
       </Form>

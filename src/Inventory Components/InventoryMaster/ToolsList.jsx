@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Table, Button, Space, message, Input, Select, Card, Row, Col } from 'antd';
-import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, BlockOutlined, HistoryOutlined } from '@ant-design/icons';
-import config from '../../Config/config';
+import { Table, Button, Space, message, Input, Select, Card, Row, Col, Upload } from 'antd';
+import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, BlockOutlined, HistoryOutlined, UploadOutlined } from '@ant-design/icons';
+import {API_BASE_URL} from '../../Config/auth';
 import ToolsHistory from './ToolsHistory';
 
 const { Option } = Select;
@@ -66,7 +66,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     setLoading(true);
     
     try {
-      const response = await fetch(`${config.API_BASE_URL}/tools-list/`);
+      const response = await fetch(`${API_BASE_URL}/tools-list/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -115,20 +115,54 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       filtered = filtered.filter(tool => tool.type === 'NON-CONSUMABLES');
     }
 
-    // Then apply search filter
+    // Then apply search filter - Search by any field
     if (searchText) {
-      filtered = filtered.filter(tool => 
-        tool.item_description?.toLowerCase().includes(searchText.toLowerCase()) ||
-        tool.identification_code?.toLowerCase().includes(searchText.toLowerCase()) ||
-        tool.make?.toLowerCase().includes(searchText.toLowerCase()) ||
-        tool.location?.toLowerCase().includes(searchText.toLowerCase()) ||
-        tool.type?.toLowerCase().includes(searchText.toLowerCase())
-      );
+      const lowerSearch = searchText.toLowerCase();
+      filtered = filtered.filter(tool => {
+        return Object.values(tool).some(value => {
+          if (value === null || value === undefined) return false;
+          return String(value).toLowerCase().includes(lowerSearch);
+        });
+      });
     }
     
     setFilteredData(filtered);
     // Reset to first page when filtering
     setPagination(prev => ({ ...prev, current: 1 }));
+  };
+
+  const handleBulkUpload = async (info) => {
+    const { file } = info;
+    if (file.status === 'uploading') {
+      setLoading(true);
+      return;
+    }
+    
+    if (file.status === 'done' || file.originFileObj) {
+      const formData = new FormData();
+      formData.append('file', file.originFileObj || file);
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.detail || 'Failed to upload tools');
+        }
+
+        const result = await response.json();
+        message.success(`Successfully uploaded ${result.length} tools`);
+        fetchTools(); // Refresh the list
+      } catch (error) {
+        console.error('Bulk upload failed:', error);
+        message.error('Bulk upload failed: ' + error.message);
+      } finally {
+        setLoading(false);
+      }
+    }
   };
 
   const handleKpiClick = (filterType) => {
@@ -266,7 +300,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       width: 100,
       align: 'right',
       className: 'table-header-styled',
-      render: (amount) => amount ? `$${amount.toFixed(2)}` : '-'
+      render: (amount) => amount ? `${amount.toFixed(2)}` : '-'
     },
     {
       title: 'Ref Ledger',
@@ -451,20 +485,35 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
 
       <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Search
-          placeholder="Search tools..."
+          placeholder="Search tools by any field..."
           allowClear
           enterButton={<SearchOutlined />}
           size="medium"
           style={{ width: 300 }}
+          maxLength={20}
           onSearch={handleSearch}
           onChange={(e) => setSearchText(e.target.value)}
         />
-        <Button 
-          type="primary" 
-          onClick={onCreateNew}
-        >
-          Create New Tool
-        </Button>
+        <Space>
+          <Upload
+            beforeUpload={(file) => {
+              handleBulkUpload({ file });
+              return false; // Prevent automatic upload
+            }}
+            showUploadList={false}
+            accept=".xlsx,.xls"
+          >
+            <Button icon={<UploadOutlined />} loading={loading}>
+              Bulk Upload
+            </Button>
+          </Upload>
+          <Button 
+            type="primary" 
+            onClick={onCreateNew}
+          >
+            Create New Tool
+          </Button>
+        </Space>
       </div>
       
       <Table

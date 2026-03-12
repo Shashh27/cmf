@@ -37,7 +37,12 @@ const Document = () => {
   };
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ 
+      height: isMobile ? 'auto' : 'calc(100vh - 100px)', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      overflow: 'hidden' 
+    }}>
       {/* Main Content */}
       <div
         style={{
@@ -46,7 +51,8 @@ const Document = () => {
           gap: isMobile ? '8px' : '12px',
           padding: isMobile ? '8px' : '12px',
           flexDirection: isMobile ? 'column' : 'row',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          minHeight: 0 // Crucial for nested flex scrolling
         }}
       >
         {/* Left Panel - Document Tree */}

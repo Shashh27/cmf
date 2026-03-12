@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Tabs, message, Card, Typography } from 'antd';
 import { DatabaseOutlined } from '@ant-design/icons';
 import { ToolsList, InstrumentsList, ToolForm } from '../Inventory Components/InventoryMaster';
-import config from '../Config/config';
+import { API_BASE_URL } from '../Config/auth.js';
 
 const { TabPane } = Tabs;
 const { Title, Text } = Typography;
@@ -23,7 +23,7 @@ const Inventory = () => {
 
   const handleDeleteTool = async (tool) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/tools-list/${tool.id}`, {
+      const response = await fetch(`${API_BASE_URL}/tools-list/${tool.id}`, {
         method: 'DELETE'
       });
       

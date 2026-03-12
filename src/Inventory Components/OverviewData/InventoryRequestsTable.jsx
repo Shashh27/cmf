@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Input, Select, Row, Col } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
@@ -43,7 +43,7 @@ const InventoryRequestsTable = () => {
 
   const fetchInventoryRequests = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/inventory-requests/`);
+      const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -69,7 +69,7 @@ const InventoryRequestsTable = () => {
             return;
           }
 
-          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=approved`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=approved`, {
             method: 'PUT'
           });
           
@@ -80,7 +80,12 @@ const InventoryRequestsTable = () => {
           
           message.success('Inventory request approved successfully');
           
-          // Update only the specific row instead of refetching all data
+          let result = {};
+          try {
+            result = await response.json();
+          } catch {
+            result = {};
+          }
           setRequests(prev => prev.map(req => 
             req.id === record.id 
               ? { 
@@ -113,7 +118,7 @@ const InventoryRequestsTable = () => {
             return;
           }
 
-          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=rejected`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=rejected`, {
             method: 'PUT'
           });
           
@@ -124,7 +129,12 @@ const InventoryRequestsTable = () => {
           
           message.success('Inventory request rejected successfully');
           
-          // Update only the specific row instead of refetching all data
+          let result = {};
+          try {
+            result = await response.json();
+          } catch {
+            result = {};
+          }
           setRequests(prev => prev.map(req => 
             req.id === record.id 
               ? { 
@@ -142,11 +152,6 @@ const InventoryRequestsTable = () => {
     });
   };
 
-  const handleViewDetails = (record) => {
-    setSelectedRequest(record);
-    setDetailModalVisible(true);
-  };
-
   const getStatusColor = (status) => {
     switch (status?.toLowerCase()) {
       case 'pending':
@@ -158,16 +163,6 @@ const InventoryRequestsTable = () => {
       default:
         return 'default';
     }
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    // Format: DD/MM/YYYY
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
   };
 
   const formatDateTime = (dateString) => {
@@ -199,13 +194,22 @@ const InventoryRequestsTable = () => {
         return created >= startDate && created <= endDate;
       });
     }
-    // Text search on project number (project_name) or tool name
+    // Text search on any field
     if (searchText) {
       const s = searchText.toLowerCase();
-      data = data.filter(r =>
-        (r.project_name || '').toLowerCase().includes(s) ||
-        (r.tool_name || '').toLowerCase().includes(s)
-      );
+      data = data.filter(r => {
+        // Search through all properties of the record
+        return Object.values(r).some(val => {
+          if (val === null || val === undefined) return false;
+          // If it's an object (like nested details), stringify it or search its values
+          if (typeof val === 'object') {
+            return Object.values(val).some(nestedVal => 
+              String(nestedVal).toLowerCase().includes(s)
+            );
+          }
+          return String(val).toLowerCase().includes(s);
+        });
+      });
     }
     setFilteredRequests(data);
     setPagination(prev => ({ ...prev, current: 1 }));
@@ -346,6 +350,7 @@ const InventoryRequestsTable = () => {
                 value={dateRange}
                 onChange={(vals) => setDateRange(vals)}
                 allowClear
+                inputReadOnly
               />
             </div>
           </Col>
@@ -369,8 +374,9 @@ const InventoryRequestsTable = () => {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Search</span>
               <Input.Search
-                placeholder="Search by project number or tool name"
+                placeholder="Search inventory requests by any field..."
                 allowClear
+                maxLength={20}
                 onSearch={(v) => setSearchText(v || '')}
                 onChange={(e) => setSearchText(e.target.value)}
               />
@@ -430,37 +436,6 @@ const InventoryRequestsTable = () => {
         }}
         scroll={{ x: 1200 }}
       />
-
-      <Modal
-        title="Inventory Request Details"
-        open={detailModalVisible}
-        onCancel={() => setDetailModalVisible(false)}
-        footer={[
-          <Button key="close" onClick={() => setDetailModalVisible(false)}>
-            Close
-          </Button>
-        ]}
-        width={800}
-      >
-        {selectedRequest && (
-          <div>
-            <p><strong>Tool Name:</strong> {selectedRequest.tool_name || '-'}</p>
-            <p><strong>Project Number:</strong> {selectedRequest.project_name || '-'}</p>
-            <p><strong>Part Name:</strong> {selectedRequest.part_name || '-'}</p>
-            <p><strong>Quantity:</strong> {selectedRequest.quantity}</p>
-            <p><strong>Purpose of Use:</strong> {selectedRequest.purpose_of_use || '-'}</p>
-            <p><strong>Status:</strong> 
-              <Tag color={getStatusColor(selectedRequest.status)} style={{ marginLeft: 8 }}>
-                {selectedRequest.status?.toUpperCase() || '-'}
-              </Tag>
-            </p>
-            <p><strong>Requested By:</strong> {selectedRequest.operator_name || '-'}</p>
-            <p><strong>Approved By:</strong> {selectedRequest.admin_name || '-'}</p>
-            <p><strong>Created At:</strong> {formatDateTime(selectedRequest.created_at)}</p>
-            <p><strong>Updated At:</strong> {formatDateTime(selectedRequest.updated_at)}</p>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 };

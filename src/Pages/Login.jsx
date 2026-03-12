@@ -4,7 +4,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { UserOutlined, LockOutlined, DesktopOutlined, TeamOutlined,CheckCircleOutlined } from '@ant-design/icons';
 import logo from '../assets/cmtis.png';
 import loginBg from '../assets/bg.jpg';
-import config from '../Config/config';
+import { API_BASE_URL } from '../Config/auth.js';
+
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -31,7 +32,7 @@ const Login = () => {
 
   const fetchMachines = async () => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/machines/`);
+      const response = await fetch(`${API_BASE_URL}/machines/`);
       if (response.ok) {
         const data = await response.json();
         setMachines(data);
@@ -57,7 +58,7 @@ const Login = () => {
     setLoading(true);
     try {
       const response = await fetch(
-        `${config.API_BASE_URL}/machines/verify?machine_id=${values.machine}&password=${values.machine_password}`,
+        `${API_BASE_URL}/machines/verify?machine_id=${values.machine}&password=${values.machine_password}`,
         {
           method: 'GET',
           headers: {
@@ -92,7 +93,7 @@ const Login = () => {
         userName = values.operator_id;
       }
 
-      const response = await fetch(`${config.API_BASE_URL}/login/`, {
+      const response = await fetch(`${API_BASE_URL}/login/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

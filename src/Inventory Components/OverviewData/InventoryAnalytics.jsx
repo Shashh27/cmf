@@ -1,39 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Card, 
-  Row, 
-  Col, 
-  Statistic, 
-  Spin, 
-  Empty, 
-  Space,
-  Select,
-  Typography
-} from 'antd';
-import { 
-  ToolOutlined, 
-  RollbackOutlined, 
-  ClockCircleOutlined,
-  BarChartOutlined,
-  LineChartOutlined,
-  PieChartOutlined
-} from '@ant-design/icons';
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
-  ResponsiveContainer,
-  PieChart, 
-  Pie, 
-  Cell,
-  LineChart,
-  Line
-} from 'recharts';
-import config from '../../Config/config';
+import { Card, Row, Col, Statistic, Spin, Empty, Space,Select,Typography } from 'antd';
+import { ToolOutlined, RollbackOutlined, ClockCircleOutlined,BarChartOutlined,LineChartOutlined,PieChartOutlined } from '@ant-design/icons';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,PieChart, Pie, Cell,LineChart,Line } from 'recharts';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const { Text } = Typography;
 
@@ -58,11 +27,11 @@ const InventoryAnalytics = () => {
   const fetchAnalyticsData = async (year) => {
     try {
       // Fetch inventory requests
-      const requestsResponse = await fetch(`${config.API_BASE_URL}/inventory-requests/`);
+      const requestsResponse = await fetch(`${API_BASE_URL}/inventory-requests/`);
       const requestsData = await requestsResponse.json();
       
       // Fetch return requests
-      const returnsResponse = await fetch(`${config.API_BASE_URL}/inventory-return-requests/`);
+      const returnsResponse = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
       const returnsData = await returnsResponse.json();
       
       // Process analytics data
