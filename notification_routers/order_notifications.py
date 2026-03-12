@@ -23,8 +23,17 @@ def get_admin_username(db: Session) -> str:
 
 
 @router.get("/", response_model=List[OrderNotificationSchema])
-def list_order_notifications(db: Session = Depends(get_db)):
-    notifs = db.query(OrderNotificationModel).order_by(OrderNotificationModel.id.desc()).all()
+def list_order_notifications(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(OrderNotificationModel)
+    if start_date:
+        q = q.filter(OrderNotificationModel.created_at >= start_date)
+    if end_date:
+        q = q.filter(OrderNotificationModel.created_at <= end_date)
+    notifs = q.order_by(OrderNotificationModel.id.desc()).all()
     # Preload related orders to avoid N+1 queries
     order_ids = [n.order_id for n in notifs]
     orders = (
@@ -54,13 +63,17 @@ def list_order_notifications(db: Session = Depends(get_db)):
 
 
 @router.get("/pending", response_model=List[OrderNotificationSchema])
-def list_pending_order_notifications(db: Session = Depends(get_db)):
-    notifs = (
-        db.query(OrderNotificationModel)
-        .filter(OrderNotificationModel.is_ack == False)  # noqa: E712
-        .order_by(OrderNotificationModel.id.desc())
-        .all()
-    )
+def list_pending_order_notifications(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    db: Session = Depends(get_db)
+):
+    q = db.query(OrderNotificationModel).filter(OrderNotificationModel.is_ack == False)  # noqa: E712
+    if start_date:
+        q = q.filter(OrderNotificationModel.created_at >= start_date)
+    if end_date:
+        q = q.filter(OrderNotificationModel.created_at <= end_date)
+    notifs = q.order_by(OrderNotificationModel.id.desc()).all()
     order_ids = [n.order_id for n in notifs]
     orders = (
         db.query(OrderModel)
@@ -88,13 +101,6 @@ def list_pending_order_notifications(db: Session = Depends(get_db)):
     return result
 
 
-@router.post("/", response_model=OrderNotificationSchema, status_code=status.HTTP_201_CREATED)
-def create_order_notification(payload: OrderNotificationCreateSchema, db: Session = Depends(get_db)):
-    notif = OrderNotificationModel(order_id=payload.order_id, is_ack=False)
-    db.add(notif)
-    db.commit()
-    db.refresh(notif)
-    return notif
 
 
 @router.put("/{notification_id}/ack", response_model=OrderNotificationSchema)

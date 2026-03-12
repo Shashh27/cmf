@@ -29,6 +29,8 @@ from routers import (
     inventory_return_requests_router,
     transaction_history_router,
     tool_issues_router,
+    out_source_parts_status_router,
+    maintenance_router
 )
 
 # Import Pokayoke checklists router
@@ -147,6 +149,8 @@ app.include_router(component_issues_notifications_router, prefix="/api/v1")
 app.include_router(machine_calibration_notifications_router, prefix="/api/v1")
 app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
 app.include_router(tool_issues_router, prefix="/api/v1")
+app.include_router(out_source_parts_status_router, prefix="/api/v1")
+app.include_router(maintenance_router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -215,7 +219,8 @@ def system_info():
             "inventory_requests": "/api/v1/inventory-requests",
             "inventory_return_requests": "/api/v1/inventory-return-requests",
             "tool_issues": "/api/v1/tool-issues",
-            "general_documents": "/general-documents"
+            "general_documents": "/general-documents",
+            "maintenance": "/api/v1/maintenance"
         }
     }
 

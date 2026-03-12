@@ -10,6 +10,7 @@ from DB.models.inventory import ToolsList
 from DB.models.configuration import Machine
 from DB.models.oms import Order, Part
 from sqlalchemy import text
+from sqlalchemy.sql import bindparam
 from DB.schemas.notifications import (
     ComponentIssuesNotification as ComponentIssuesNotificationSchema,
     ComponentIssuesNotificationCreate as ComponentIssuesNotificationCreateSchema,
@@ -27,8 +28,17 @@ def get_admin_username(db: Session) -> str:
 
 
 @router.get("/", response_model=List[ComponentIssuesNotificationWithDetails])
-def list_component_issues_notifications(db: Session = Depends(get_db)):
-    notifications = db.query(ComponentIssuesNotificationModel).order_by(ComponentIssuesNotificationModel.id.desc()).all()
+def list_component_issues_notifications(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(ComponentIssuesNotificationModel)
+    if start_date:
+        q = q.filter(ComponentIssuesNotificationModel.created_at >= start_date)
+    if end_date:
+        q = q.filter(ComponentIssuesNotificationModel.created_at <= end_date)
+    notifications = q.order_by(ComponentIssuesNotificationModel.id.desc()).all()
     comp_issue_ids = [n.comp_issues_id for n in notifications]
     issues_map = {}
     machine_ids = set()
@@ -36,14 +46,12 @@ def list_component_issues_notifications(db: Session = Depends(get_db)):
     part_ids = set()
     operator_ids = set()
     if comp_issue_ids:
-        rows = db.execute(
-            text("""
-                SELECT id, machine_id, production_order_id, part_id, component_status, description, created_at, operator_id
-                FROM maintenance.component_issues
-                WHERE id = ANY(:ids)
-            """),
-            {"ids": comp_issue_ids},
-        ).fetchall()
+        stmt = text("""
+            SELECT id, machine_id, production_order_id, part_id, component_status, description, reported_by
+            FROM maintenance.component_issues
+            WHERE id IN :ids
+        """).bindparams(bindparam("ids", expanding=True))
+        rows = db.execute(stmt, {"ids": comp_issue_ids}).fetchall()
         for r in rows:
             issues_map[int(r[0])] = {
                 "machine_id": r[1],
@@ -51,8 +59,7 @@ def list_component_issues_notifications(db: Session = Depends(get_db)):
                 "part_id": r[3],
                 "component_status": r[4],
                 "description": r[5],
-                "created_at": r[6],
-                "operator_id": r[7],
+                "reported_by": r[6],
             }
             if r[1] is not None:
                 machine_ids.add(int(r[1]))
@@ -60,8 +67,8 @@ def list_component_issues_notifications(db: Session = Depends(get_db)):
                 order_ids.add(int(r[2]))
             if r[3] is not None:
                 part_ids.add(int(r[3]))
-            if r[7] is not None:
-                operator_ids.add(int(r[7]))
+            if r[6] is not None:
+                operator_ids.add(int(r[6]))
     machine_map = {m.id: m for m in db.query(Machine).filter(Machine.id.in_(list(machine_ids))).all()} if machine_ids else {}
     order_map = {o.id: o for o in db.query(Order).filter(Order.id.in_(list(order_ids))).all()} if order_ids else {}
     part_map = {p.id: p for p in db.query(Part).filter(Part.id.in_(list(part_ids))).all()} if part_ids else {}
@@ -73,7 +80,7 @@ def list_component_issues_notifications(db: Session = Depends(get_db)):
         m = machine_map.get(issue.get("machine_id"))
         o = order_map.get(issue.get("production_order_id"))
         p = part_map.get(issue.get("part_id"))
-        op = operator_map.get(issue.get("operator_id"))
+        op = operator_map.get(issue.get("reported_by"))
         response.append(ComponentIssuesNotificationWithDetails(
             id=n.id,
             comp_issues_id=n.comp_issues_id,
@@ -92,38 +99,12 @@ def list_component_issues_notifications(db: Session = Depends(get_db)):
         ))
     return response
 
-def get_admin_username(db: Session) -> str:
-    admin = db.query(AccessUserModel).filter(AccessUserModel.role.ilike("%admin%")).first()
-    return admin.user_name if admin else "admin"
-
-
-@router.get("/", response_model=List[ComponentIssuesNotificationWithDetails])
-def list_component_issues_notifications(db: Session = Depends(get_db)):
-    notifications = db.query(ComponentIssuesNotificationModel).order_by(ComponentIssuesNotificationModel.id.desc()).all()
-    response = []
-    for notif in notifications:
-        tool = db.query(ToolsList).filter(ToolsList.id == notif.comp_issues_id).first()
-        response.append(
-            ComponentIssuesNotificationWithDetails(
-                **notif.__dict__,
-                component_name=tool.item_description if tool else None,
-            )
-        )
-    return response
-
 
 @router.get("/pending", response_model=List[ComponentIssuesNotificationSchema])
 def list_pending_component_issues_notifications(db: Session = Depends(get_db)):
     return db.query(ComponentIssuesNotificationModel).filter(ComponentIssuesNotificationModel.is_ack == False).order_by(ComponentIssuesNotificationModel.id.desc()).all()  # noqa: E712
 
 
-@router.post("/", response_model=ComponentIssuesNotificationSchema, status_code=status.HTTP_201_CREATED)
-def create_component_issues_notification(payload: ComponentIssuesNotificationCreateSchema, db: Session = Depends(get_db)):
-    notif = ComponentIssuesNotificationModel(comp_issues_id=payload.comp_issues_id, is_ack=False)
-    db.add(notif)
-    db.commit()
-    db.refresh(notif)
-    return notif
 
 
 @router.put("/{notification_id}/ack", response_model=ComponentIssuesNotificationSchema)

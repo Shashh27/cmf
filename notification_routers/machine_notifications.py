@@ -8,6 +8,7 @@ from DB.models.notifications import MachineNotification as MachineNotificationMo
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.configuration import Machine
 from sqlalchemy import text
+from sqlalchemy.sql import bindparam
 from DB.schemas.notifications import (
     MachineNotification as MachineNotificationSchema,
     MachineNotificationCreate as MachineNotificationCreateSchema,
@@ -25,34 +26,40 @@ def get_admin_username(db: Session) -> str:
 
 
 @router.get("/", response_model=List[MachineNotificationWithDetails])
-def list_machine_notifications(db: Session = Depends(get_db)):
-    notifications = db.query(MachineNotificationModel).order_by(MachineNotificationModel.id.desc()).all()
+def list_machine_notifications(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(MachineNotificationModel)
+    if start_date:
+        q = q.filter(MachineNotificationModel.created_at >= start_date)
+    if end_date:
+        q = q.filter(MachineNotificationModel.created_at <= end_date)
+    notifications = q.order_by(MachineNotificationModel.id.desc()).all()
     breakdown_ids = [n.machine_breakdown_id for n in notifications]
     breakdown_map = {}
     machine_ids = set()
     operator_ids = set()
     if breakdown_ids:
-        rows = db.execute(
-            text("""
-                SELECT id, machine_id, machine_status, issue_category, issues_reason, created_at, operator_id
-                FROM maintenance.machine_breakdowns
-                WHERE id = ANY(:ids)
-            """),
-            {"ids": breakdown_ids},
-        ).fetchall()
+        stmt = text("""
+            SELECT id, machine_id, machine_status, issue_category, issue_reason, reported_by
+            FROM maintenance.machine_breakdown
+            WHERE id IN :ids
+        """).bindparams(bindparam("ids", expanding=True))
+        rows = db.execute(stmt, {"ids": breakdown_ids}).fetchall()
         for r in rows:
             breakdown_map[int(r[0])] = {
                 "machine_id": r[1],
                 "machine_status": r[2],
                 "issue_category": r[3],
                 "issues_reason": r[4],
-                "created_at": r[5],
-                "operator_id": r[6],
+                "reported_by": r[5],
             }
             if r[1] is not None:
                 machine_ids.add(int(r[1]))
-            if r[6] is not None:
-                operator_ids.add(int(r[6]))
+            if r[5] is not None:
+                operator_ids.add(int(r[5]))
     machines = []
     if machine_ids:
         machines = db.query(Machine).filter(Machine.id.in_(list(machine_ids))).all()
@@ -65,7 +72,7 @@ def list_machine_notifications(db: Session = Depends(get_db)):
     for n in notifications:
         bd = breakdown_map.get(n.machine_breakdown_id, {})
         m = machine_map.get(bd.get("machine_id"))
-        op = operator_map.get(bd.get("operator_id"))
+        op = operator_map.get(bd.get("reported_by"))
         response.append(MachineNotificationWithDetails(
             id=n.id,
             machine_breakdown_id=n.machine_breakdown_id,
@@ -88,13 +95,6 @@ def list_pending_machine_notifications(db: Session = Depends(get_db)):
     return db.query(MachineNotificationModel).filter(MachineNotificationModel.is_ack == False).order_by(MachineNotificationModel.id.desc()).all()  # noqa: E712
 
 
-@router.post("/", response_model=MachineNotificationSchema, status_code=status.HTTP_201_CREATED)
-def create_machine_notification(payload: MachineNotificationCreateSchema, db: Session = Depends(get_db)):
-    notif = MachineNotificationModel(machine_breakdown_id=payload.machine_breakdown_id, is_ack=False)
-    db.add(notif)
-    db.commit()
-    db.refresh(notif)
-    return notif
 
 
 @router.put("/{notification_id}/ack", response_model=MachineNotificationSchema)

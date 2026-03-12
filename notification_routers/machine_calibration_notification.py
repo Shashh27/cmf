@@ -24,9 +24,41 @@ def get_admin_username(db: Session) -> str:
     return admin.user_name if admin else "admin"
 
 
+def _generate_due_calibration_notifications(db: Session):
+    try:
+        rows = db.execute(text("""
+            SELECT id, calibration_due_date
+            FROM configuration.machines
+            WHERE calibration_due_date IS NOT NULL
+              AND calibration_due_date::date >= CURRENT_DATE
+              AND calibration_due_date::date <= (CURRENT_DATE + INTERVAL '10 days')
+        """)).fetchall()
+        for r in rows:
+            machine_id = int(r[0])
+            exists = db.query(MachineCalibrationNotificationModel)\
+                .filter(MachineCalibrationNotificationModel.machine_id == machine_id).first()
+            if exists:
+                continue
+            notif = MachineCalibrationNotificationModel(machine_id=machine_id, is_ack=False)
+            db.add(notif)
+        db.commit()
+    except Exception:
+        db.rollback()
+
+
 @router.get("/", response_model=List[MachineCalibrationNotificationWithDetails])
-def list_machine_calibration_notifications(db: Session = Depends(get_db)):
-    notifications = db.query(MachineCalibrationNotificationModel).order_by(MachineCalibrationNotificationModel.id.desc()).all()
+def list_machine_calibration_notifications(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    _generate_due_calibration_notifications(db)
+    q = db.query(MachineCalibrationNotificationModel)
+    if start_date:
+        q = q.filter(MachineCalibrationNotificationModel.created_at >= start_date)
+    if end_date:
+        q = q.filter(MachineCalibrationNotificationModel.created_at <= end_date)
+    notifications = q.order_by(MachineCalibrationNotificationModel.id.desc()).all()
     machine_ids = [n.machine_id for n in notifications]
     machines = db.query(Machine).filter(Machine.id.in_(machine_ids)).all() if machine_ids else []
     machine_map = {m.id: m for m in machines}
@@ -61,48 +93,6 @@ def list_pending_machine_calibration_notifications(db: Session = Depends(get_db)
     return db.query(MachineCalibrationNotificationModel).filter(MachineCalibrationNotificationModel.is_ack == False).order_by(MachineCalibrationNotificationModel.id.desc()).all()  # noqa: E712
 
 
-@router.post("/", response_model=MachineCalibrationNotificationSchema, status_code=status.HTTP_201_CREATED)
-def create_machine_calibration_notification(payload: MachineCalibrationNotificationCreateSchema, db: Session = Depends(get_db)):
-    notif = MachineCalibrationNotificationModel(machine_id=payload.machine_id, is_ack=False)
-    db.add(notif)
-    db.commit()
-    db.refresh(notif)
-    return notif
-
-
-@router.post("/generate", response_model=List[MachineCalibrationNotificationSchema])
-def generate_due_calibration_notifications(db: Session = Depends(get_db)):
-    """
-    Create notifications for machines whose calibration_due_date is within the next 10 days
-    and for which a notification does not already exist (unacknowledged).
-    """
-    now_ist = datetime.now(IST)
-    # Fetch machines due within 10 days using raw SQL to avoid cross-model dependencies
-    # Assumes configuration.machines has id, calibration_due_date (timestamp)
-    rows = db.execute(text("""
-        SELECT id, calibration_due_date
-        FROM configuration.machines
-        WHERE calibration_due_date IS NOT NULL
-          AND calibration_due_date::date - INTERVAL '10 days' <= CURRENT_DATE
-    """)).fetchall()
-
-    created = []
-    for r in rows:
-        machine_id = int(r[0])
-        # Check if an unacknowledged notification already exists
-        exists = db.query(MachineCalibrationNotificationModel)\
-            .filter(MachineCalibrationNotificationModel.machine_id == machine_id,
-                    MachineCalibrationNotificationModel.is_ack == False).first()  # noqa: E712
-        if exists:
-            continue
-        notif = MachineCalibrationNotificationModel(machine_id=machine_id, is_ack=False)
-        db.add(notif)
-        db.flush()
-        created.append(notif)
-    db.commit()
-    for n in created:
-        db.refresh(n)
-    return created
 
 
 @router.put("/{notification_id}/ack", response_model=MachineCalibrationNotificationSchema)

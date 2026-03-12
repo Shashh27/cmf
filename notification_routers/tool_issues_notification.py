@@ -8,6 +8,7 @@ from DB.models.notifications import ToolIssuesNotification as ToolIssuesNotifica
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.inventory import ToolsList
 from sqlalchemy import text
+from sqlalchemy.sql import bindparam
 from DB.schemas.notifications import (
     ToolIssuesNotification as ToolIssuesNotificationSchema,
     ToolIssuesNotificationCreate as ToolIssuesNotificationCreateSchema,
@@ -25,21 +26,28 @@ def get_admin_username(db: Session) -> str:
 
 
 @router.get("/", response_model=List[ToolIssuesNotificationWithDetails])
-def list_tool_issues_notifications(db: Session = Depends(get_db)):
-    notifications = db.query(ToolIssuesNotificationModel).order_by(ToolIssuesNotificationModel.id.desc()).all()
+def list_tool_issues_notifications(
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    q = db.query(ToolIssuesNotificationModel)
+    if start_date:
+        q = q.filter(ToolIssuesNotificationModel.created_at >= start_date)
+    if end_date:
+        q = q.filter(ToolIssuesNotificationModel.created_at <= end_date)
+    notifications = q.order_by(ToolIssuesNotificationModel.id.desc()).all()
     issue_ids = [n.tool_issues_id for n in notifications]
     issues_map = {}
     tool_ids = set()
     operator_ids = set()
     if issue_ids:
-        rows = db.execute(
-            text("""
-                SELECT id, tool_id, tool_issue_qty, status, operator_id, created_at
-                FROM inventory.tool_issues
-                WHERE id = ANY(:ids)
-            """),
-            {"ids": issue_ids},
-        ).fetchall()
+        stmt = text("""
+            SELECT id, tool_id, tool_issue_qty, status, operator_id, created_at
+            FROM inventory.tool_issues
+            WHERE id IN :ids
+        """).bindparams(bindparam("ids", expanding=True))
+        rows = db.execute(stmt, {"ids": issue_ids}).fetchall()
         for r in rows:
             issues_map[int(r[0])] = {
                 "tool_id": r[1],
@@ -86,13 +94,6 @@ def list_pending_tool_issues_notifications(db: Session = Depends(get_db)):
     return db.query(ToolIssuesNotificationModel).filter(ToolIssuesNotificationModel.is_ack == False).order_by(ToolIssuesNotificationModel.id.desc()).all()  # noqa: E712
 
 
-@router.post("/", response_model=ToolIssuesNotificationSchema, status_code=status.HTTP_201_CREATED)
-def create_tool_issues_notification(payload: ToolIssuesNotificationCreateSchema, db: Session = Depends(get_db)):
-    notif = ToolIssuesNotificationModel(tool_issues_id=payload.tool_issues_id, is_ack=False)
-    db.add(notif)
-    db.commit()
-    db.refresh(notif)
-    return notif
 
 
 @router.put("/{notification_id}/ack", response_model=ToolIssuesNotificationSchema)

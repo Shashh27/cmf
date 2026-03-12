@@ -10,7 +10,8 @@ from .oms import (
     Order,
     OrderDocument,
     OperationDocument,
-    OrderPartsRawMaterialLinked
+    OrderPartsRawMaterialLinked,
+    OutSourcePartStatus
 )
 from .configuration import (
     WorkCenter,
@@ -22,12 +23,10 @@ from .inventory import (
     RawMaterial,
     ToolsList
 )
-from .notifications import (
-    OrderNotification,
-    MachineNotification,
-    ToolIssuesNotification,
-    ComponentIssuesNotification,
-    MachineCalibrationNotification,
+from .maintenance import (
+    OEEIssue,
+    MachineBreakdown,
+    ComponentIssue
 )
 
 __all__ = [
@@ -42,16 +41,15 @@ __all__ = [
     "OrderDocument",
     "OperationDocument",
     "OrderPartsRawMaterialLinked",
+    "OutSourcePartStatus",
     "WorkCenter",
     "Machine",
     "Customer",
     "AccessUser",
     "RawMaterial",
     "ToolsList",
-    "OrderNotification",
-    "MachineNotification",
-    "ToolIssuesNotification",
-    "ComponentIssuesNotification",
-    "MachineCalibrationNotification",
+    "OEEIssue",
+    "MachineBreakdown",
+    "ComponentIssue",
     "Base"
 ]

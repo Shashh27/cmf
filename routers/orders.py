@@ -17,6 +17,7 @@ from DB.models.oms import (
 from DB.models.configuration import Customer, PokayokeCompletedLog
 from DB.models.inventory import InventoryRequest, InventoryReturnRequest
 from DB.models.access_control import AccessUser
+from DB.models.notifications import OrderNotification as OrderNotificationModel
 from DB.schemas.oms import (
     Order as OrderResponse,
     OrderCreate,
@@ -67,6 +68,18 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     db.add(db_order)
     db.commit()
     db.refresh(db_order)
+
+    # Create order notification only if created by Project Coordinator (not admin)
+    role = (user.role or "").strip().lower()
+    is_project_coordinator = ("project" in role and "coordinator" in role)
+    is_admin = ("admin" in role)
+    if is_project_coordinator and not is_admin:
+        try:
+            notif = OrderNotificationModel(order_id=db_order.id, is_ack=False)
+            db.add(notif)
+            db.commit()
+        except Exception:
+            db.rollback()
 
     # Populate default part priorities (FIFO based on creation) only for IN-House parts
     parts = (
