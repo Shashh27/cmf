@@ -1,4 +1,4 @@
-#!D:\vinod\CMF_DIGITIZATION\backend\venv\Scripts\python.exe
+#!C:\cmf\cmf\venv\Scripts\python.exe
 """Extract pdf structure in XML format"""
 import logging
 import os.path

@@ -30,9 +30,9 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 # Pydantic model for status update request
 class ToolIssueStatusUpdate(BaseModel):
-    admin_id: int
+    inventory_supervisor_id: int
     status: str  # 'approved' or 'rejected'
-    remarks: str  # Mandatory remarks from admin
+    remarks: str  # Mandatory remarks from inventory supervisor
 
 
 # =======================
@@ -168,7 +168,7 @@ async def create_tool_issue(
         tool_issue_qty=tool_issue_qty,
         operator_id=operator_id,
         status="pending",
-        admin_id=None,
+        inventory_supervisor_id=None,
         created_at=datetime.now(IST).replace(tzinfo=None),
         issue_category=issue_category,
         description=description,
@@ -178,7 +178,7 @@ async def create_tool_issue(
     db.commit()
     db.refresh(db_issue)
     
-    # Create notification for this tool issue (admin will ack)
+    # Create notification for this tool issue (supervisor will ack)
     try:
         notif = ToolIssuesNotificationModel(tool_issues_id=db_issue.id, is_ack=False)
         db.add(notif)
@@ -206,7 +206,7 @@ async def create_tool_issue(
         request_id=db_issue.request_id,
         tool_issue_qty=db_issue.tool_issue_qty,
         operator_id=db_issue.operator_id,
-        admin_id=db_issue.admin_id,
+        inventory_supervisor_id=db_issue.inventory_supervisor_id,
         status=db_issue.status,
         created_at=db_issue.created_at,
         updated_at=db_issue.updated_at,
@@ -216,7 +216,7 @@ async def create_tool_issue(
         document_url=db_issue.document_url,
         tool_name=tool.item_description if tool else None,
         operator_name=operator.user_name if operator else None,
-        admin_name=None,  # No admin assigned yet on creation
+        inventory_supervisor_name=None,  # No inventory supervisor assigned yet on creation
         sale_order_number=sale_order_number
     )
 
@@ -228,7 +228,7 @@ def get_all_tool_issues(db: Session = Depends(get_db)):
     for issue in issues:
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
-        admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+        inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
         
         # Fetch sale_order_number
         sale_order_number = None
@@ -245,7 +245,7 @@ def get_all_tool_issues(db: Session = Depends(get_db)):
             request_id=issue.request_id,
             tool_issue_qty=issue.tool_issue_qty,
             operator_id=issue.operator_id,
-            admin_id=issue.admin_id,
+            inventory_supervisor_id=issue.inventory_supervisor_id,
             status=issue.status,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
@@ -255,7 +255,7 @@ def get_all_tool_issues(db: Session = Depends(get_db)):
             document_url=issue.document_url,
             tool_name=tool.item_description if tool else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None,
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
             sale_order_number=sale_order_number
         ))
     return results
@@ -269,7 +269,7 @@ def get_tool_issue(issue_id: int, db: Session = Depends(get_db)):
 
     tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
     operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
-    admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+    inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
     
     # Fetch sale_order_number
     sale_order_number = None
@@ -286,7 +286,7 @@ def get_tool_issue(issue_id: int, db: Session = Depends(get_db)):
         request_id=issue.request_id,
         tool_issue_qty=issue.tool_issue_qty,
         operator_id=issue.operator_id,
-        admin_id=issue.admin_id,
+        inventory_supervisor_id=issue.inventory_supervisor_id,
         status=issue.status,
         created_at=issue.created_at,
         updated_at=issue.updated_at,
@@ -296,7 +296,7 @@ def get_tool_issue(issue_id: int, db: Session = Depends(get_db)):
         document_url=issue.document_url,
         tool_name=tool.item_description if tool else None,
         operator_name=operator.user_name if operator else None,
-        admin_name=admin.user_name if admin else None,
+        inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
         sale_order_number=sale_order_number
     )
 
@@ -438,9 +438,9 @@ def update_tool_issue_status(
     if not issue:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Tool issue with id {issue_id} not found")
 
-    admin = db.query(AccessUserModel).filter(AccessUserModel.id == status_update.admin_id).first()
-    if not admin:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Admin with id {status_update.admin_id} not found")
+    inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == status_update.inventory_supervisor_id).first()
+    if not inventory_supervisor:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Inventory Supervisor with id {status_update.inventory_supervisor_id} not found")
 
     tool = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
     if not tool:
@@ -460,7 +460,7 @@ def update_tool_issue_status(
         # The available quantity is calculated dynamically in transaction_history endpoint
         # tool.quantity remains unchanged - it represents the physical available stock
 
-    issue.admin_id   = status_update.admin_id
+    issue.inventory_supervisor_id   = status_update.inventory_supervisor_id
     issue.status     = status_update.status
     issue.remarks    = status_update.remarks  # Save the mandatory remarks
     issue.updated_at = datetime.now(IST).replace(tzinfo=None)
@@ -499,7 +499,7 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
     for issue in issues:
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
-        admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+        inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
         # Fetch sale_order_number for operator-specific listing
         sale_order_number = None
         if issue.request_id:
@@ -514,7 +514,7 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
             request_id=issue.request_id,
             tool_issue_qty=issue.tool_issue_qty,
             operator_id=issue.operator_id,
-            admin_id=issue.admin_id,
+            inventory_supervisor_id=issue.inventory_supervisor_id,
             status=issue.status,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
@@ -524,7 +524,7 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
             document_url=issue.document_url,
             tool_name=tool.item_description if tool else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None,
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
             sale_order_number=sale_order_number
         ))
     return results
@@ -537,14 +537,14 @@ def get_tool_issues_by_status(status: str, db: Session = Depends(get_db)):
     for issue in issues:
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
-        admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+        inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
         results.append(ToolIssueWithDetailsSchema(
             id=issue.id,
             tool_id=issue.tool_id,
             request_id=issue.request_id,
             tool_issue_qty=issue.tool_issue_qty,
             operator_id=issue.operator_id,
-            admin_id=issue.admin_id,
+            inventory_supervisor_id=issue.inventory_supervisor_id,
             status=issue.status,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
@@ -554,6 +554,6 @@ def get_tool_issues_by_status(status: str, db: Session = Depends(get_db)):
             document_url=issue.document_url,
             tool_name=tool.item_description if tool else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None
         ))
     return results

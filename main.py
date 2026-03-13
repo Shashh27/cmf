@@ -30,7 +30,7 @@ from routers import (
     transaction_history_router,
     tool_issues_router,
     out_source_parts_status_router,
-    maintenance_router
+    maintenance_router,
 )
 
 # Import Pokayoke checklists router

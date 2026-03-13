@@ -6,7 +6,7 @@ class AccessUser(Base):
     __table_args__ = {'schema': 'accesscontrol'}
 
     id = Column(Integer, primary_key=True, index=True)
-    user_name = Column(String, nullable=False)
+    user_name = Column(String, unique=True, nullable=False)
     gmail = Column(String, unique=True, nullable=False)
     role = Column(String, nullable=False)
     center = Column(String)

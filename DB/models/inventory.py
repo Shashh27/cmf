@@ -73,14 +73,14 @@ class InventoryRequest(Base):
     quantity = Column(Integer, nullable=False)
     purpose_of_use = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, nullable=False)
-    admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    inventory_supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     status = Column(String, nullable=False, default="pending")  # pending, approved, rejected
     updated_at = Column(TIMESTAMP, nullable=True)
 
     # Relationships
     tool = relationship("ToolsList")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
-    admin = relationship("AccessUser", foreign_keys=[admin_id])
+    inventory_supervisor = relationship("AccessUser", foreign_keys=[inventory_supervisor_id])
     project = relationship("Order")
     part = relationship("Part")
     return_requests = relationship("InventoryReturnRequest", back_populates="inventory_request")
@@ -100,14 +100,14 @@ class InventoryReturnRequest(Base):
     returned_qty = Column(Integer, nullable=False, default=0)
     remarks = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, nullable=False)
-    admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # Added admin_id
+    inventory_supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # Added inventory_supervisor_id
     status = Column(String, nullable=False, default="pending")  # pending, collected
     updated_at = Column(TIMESTAMP, nullable=True)
 
     # Relationships
     inventory_request = relationship("InventoryRequest", back_populates="return_requests")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
-    admin = relationship("AccessUser", foreign_keys=[admin_id])  # Added admin relationship
+    inventory_supervisor = relationship("AccessUser", foreign_keys=[inventory_supervisor_id])  # Added inventory_supervisor relationship
 
 
 # =======================
@@ -122,7 +122,7 @@ class ToolIssue(Base):
     request_id = Column(Integer, ForeignKey("inventory.inventory_requests.id"), nullable=False)
     tool_issue_qty = Column(Integer, nullable=False)
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
-    admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    inventory_supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     status = Column(String, nullable=False, default="pending")  # pending, approved, rejected
     created_at = Column(TIMESTAMP, nullable=False)
     updated_at = Column(TIMESTAMP, nullable=True)
@@ -130,11 +130,11 @@ class ToolIssue(Base):
     # New fields for tool issue details
     issue_category = Column(String, nullable=True)  # "wear and tear", "Calibration Drift", "other"
     description = Column(Text, nullable=True)  # Entered by operator
-    remarks = Column(Text, nullable=True)  # Entered by admin
+    remarks = Column(Text, nullable=True)  # Entered by supervisor
     document_url = Column(String, nullable=True)  # URL to uploaded document in MinIO
 
     # Relationships
     tool = relationship("ToolsList")
     request = relationship("InventoryRequest")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
-    admin = relationship("AccessUser", foreign_keys=[admin_id])
+    inventory_supervisor = relationship("AccessUser", foreign_keys=[inventory_supervisor_id])

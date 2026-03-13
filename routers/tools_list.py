@@ -54,142 +54,131 @@ async def upload_tools_excel(
     try:
         contents = await file.read()
         
-        # Read Excel - headers in row 2 (index 1), row 1 has serial numbers
-        df = pd.read_excel(io.BytesIO(contents), header=1)
+        # Detect if it's a valid Excel file
+        try:
+            # Read first few rows to inspect structure
+            df_inspect = pd.read_excel(io.BytesIO(contents), header=None, nrows=10)
+        except Exception as excel_err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid Excel file: {str(excel_err)}"
+            )
         
-        # Helper functions to safely extract and convert any value
-        def safe_str(value, default=""):
-            """Convert any value to string, return default if empty/NaN"""
-            if value is None or pd.isna(value):
-                return default
-            str_val = str(value).strip()
-            if str_val.lower() == 'nan' or str_val == '':
-                return default
-            return str_val
+        # Header detection logic
+        header_row_idx = 0
+        header_keywords = ['item description', 'identification code', 'item_description', 'identification_code', 'id code', 'range', 'description', 'make']
         
+        for i in range(len(df_inspect)):
+            row_values = [str(val).lower().strip() for val in df_inspect.iloc[i].values if not pd.isna(val)]
+            # Check if this row contains at least two of our keywords
+            matches = sum(1 for kw in header_keywords if any(kw in val for val in row_values))
+            if matches >= 2:
+                header_row_idx = i
+                break
+        
+        # Read the actual data
+        df = pd.read_excel(io.BytesIO(contents), header=header_row_idx)
+        
+        # Data conversion helpers
+        def safe_str(value, default=None):
+            if value is None or pd.isna(value): return default
+            val = str(value).strip()
+            return None if val.lower() in ['nan', 'none', 'null', ''] else val
+            
         def safe_int(value, default=0):
-            """Convert any value to int, return default if not possible"""
-            if value is None or pd.isna(value):
-                return default
-            try:
-                if isinstance(value, str):
-                    cleaned = value.strip().strip("'\"")
-                    if cleaned in ['-', '--', '---', '', 'nan', 'NaN']:
-                        return default
-                    return int(float(cleaned))
-                return int(float(value))
-            except (ValueError, TypeError):
-                return default
-        
+            if value is None or pd.isna(value): return default
+            try: return int(float(str(value).strip()))
+            except: return default
+            
         def safe_float(value, default=None):
-            """Convert any value to float, return default if not possible"""
-            if value is None or pd.isna(value):
-                return default
-            try:
-                if isinstance(value, str):
-                    cleaned = value.strip().strip("'\"")
-                    if cleaned in ['-', '--', '---', '', 'nan', 'NaN']:
-                        return default
-                    return float(cleaned)
-                return float(value)
-            except (ValueError, TypeError):
-                return default
-        
-        def is_row_empty(row_dict):
-            """Check if entire row is empty (all values are NaN/None)"""
-            return all(pd.isna(v) or v is None or str(v).strip() == '' for v in row_dict.values())
-        
-        # Map column names (case-insensitive matching)
-        def find_column(df_columns, possible_names):
-            """Find actual column name from possible alternatives"""
-            df_cols_lower = {str(col).strip().lower(): col for col in df_columns}
-            for possible in possible_names:
-                if possible.lower() in df_cols_lower:
-                    return df_cols_lower[possible.lower()]
+            if value is None or pd.isna(value): return default
+            try: return float(str(value).strip())
+            except: return default
+
+        # Improved column mapping
+        def find_col(possible_names):
+            cols = {str(c).lower().strip(): c for c in df.columns}
+            # Try exact match first
+            for p in possible_names:
+                if p.lower() in cols: return cols[p.lower()]
+            # Try partial match
+            for p in possible_names:
+                for c_lower, original in cols.items():
+                    if p.lower() in c_lower: return original
             return None
-        
-        # Find actual column names in DataFrame
-        col_item_desc = find_column(df.columns, ['item description', 'item_description', 'item'])
-        col_range = find_column(df.columns, ['range in mm', 'range', 'range_in_mm'])
-        col_ident_code = find_column(df.columns, ['identification code', 'identification_code', 'id code', 'code'])
-        col_make = find_column(df.columns, ['make'])
-        col_quantity = find_column(df.columns, ['quantity', 'qty'])
-        col_location = find_column(df.columns, ['location'])
-        col_gauge = find_column(df.columns, ['gauge'])
-        col_remarks = find_column(df.columns, ['remarks', 'remark'])
-        col_amount = find_column(df.columns, ['amount'])
-        col_ref_ledger = find_column(df.columns, ['ref ledger', 'ref_ledger', 'reference'])
-        col_type = find_column(df.columns, ['type', 'TYPE'])
-        
-        # Verify essential columns exist
-        if not col_item_desc:
+
+        # Map all columns
+        col_map = {
+            'item_description': find_col(['item description', 'item_description', 'item', 'description']),
+            'range': find_col(['range', 'range in mm']),
+            'identification_code': find_col(['identification code', 'identification_code', 'id code', 'code', 'id']),
+            'make': find_col(['make', 'brand', 'manufacturer']),
+            'quantity': find_col(['quantity', 'qty', 'stock', 'available']),
+            'location': find_col(['location', 'rack', 'bin']),
+            'gauge': find_col(['gauge', 'size']),
+            'remarks': find_col(['remarks', 'remark', 'note']),
+            'amount': find_col(['amount', 'price', 'cost']),
+            'ref_ledger': find_col(['ref ledger', 'ref_ledger', 'reference']),
+            'type': find_col(['type', 'category'])
+        }
+
+        if not col_map['item_description']:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Column 'Item Description' not found in Excel file"
+                detail="Could not find 'Item Description' column. Please check your Excel headers."
             )
-        if not col_ident_code:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Column 'Identification Code' not found in Excel file"
-            )
-        
-        # Process rows
-        created_tools = []
-        
-        for idx, row in df.iterrows():
-            # Skip completely empty rows
-            if is_row_empty(row.to_dict()):
-                continue
+
+        processed_count = 0
+        for _, row in df.iterrows():
+            item_desc = safe_str(row.get(col_map['item_description']))
+            ident_code = safe_str(row.get(col_map['identification_code']))
             
-            # Extract all values with safe conversion
-            item_desc = safe_str(row.get(col_item_desc) if col_item_desc else None, None)
-            ident_code = safe_str(row.get(col_ident_code) if col_ident_code else None, None)
-            range_val = safe_str(row.get(col_range) if col_range else None, None)
-            make_val = safe_str(row.get(col_make) if col_make else None, None)
-            quantity_val = safe_int(row.get(col_quantity) if col_quantity else None, 0)
-            location_val = safe_str(row.get(col_location) if col_location else None, None)
-            gauge_val = safe_str(row.get(col_gauge) if col_gauge else None, None)
-            remarks_val = safe_str(row.get(col_remarks) if col_remarks else None, None)
-            amount_val = safe_float(row.get(col_amount) if col_amount else None, None)
-            ref_ledger_val = safe_str(row.get(col_ref_ledger) if col_ref_ledger else None, None)
-            type_val = safe_str(row.get(col_type) if col_type else None, None)
+            if not item_desc and not ident_code: continue
             
-            # Check for duplicate identification code (only if ident_code is not None)
-            if ident_code:
-                existing_tool = db.query(ToolsListModel).filter(
-                    ToolsListModel.identification_code == ident_code
-                ).first()
-                if existing_tool:
-                    continue
+            # Use item_desc as ident_code if missing, or vice versa
+            if not ident_code: ident_code = item_desc
+            if not item_desc: item_desc = ident_code
+
+            quantity_val = safe_int(row.get(col_map['quantity']), 0)
             
-            # Create tool record
+            # Check for existing
+            existing = db.query(ToolsListModel).filter(
+                ToolsListModel.identification_code == ident_code
+            ).first()
+            
             tool_data = {
                 'item_description': item_desc,
-                'identification_code': ident_code,
-                'range': range_val,
-                'make': make_val,
+                'range': safe_str(row.get(col_map['range'])),
+                'make': safe_str(row.get(col_map['make'])),
                 'quantity': quantity_val,
-                'total_quantity': quantity_val,  # Set total_quantity = quantity initially
-                'location': location_val,
-                'gauge': gauge_val,
-                'remarks': remarks_val,
-                'amount': amount_val,
-                'ref_ledger': ref_ledger_val,
-                'type': type_val
+                'total_quantity': quantity_val,
+                'location': safe_str(row.get(col_map['location'])),
+                'gauge': safe_str(row.get(col_map['gauge'])),
+                'remarks': safe_str(row.get(col_map['remarks'])),
+                'amount': safe_float(row.get(col_map['amount'])),
+                'ref_ledger': safe_str(row.get(col_map['ref_ledger'])),
+                'type': safe_str(row.get(col_map['type']), "NON-CONSUMABLES")
             }
             
-            db_tool = ToolsListModel(**tool_data)
-            db.add(db_tool)
-            created_tools.append(db_tool)
-        
-        # Commit all changes
+            if existing:
+                for key, value in tool_data.items():
+                    setattr(existing, key, value)
+            else:
+                new_tool = ToolsListModel(identification_code=ident_code, **tool_data)
+                db.add(new_tool)
+            
+            processed_count += 1
+            if processed_count % 50 == 0:
+                db.flush() # Flush every 50 rows for performance and consistency
+
         db.commit()
+        return db.query(ToolsListModel).order_by(ToolsListModel.id.desc()).limit(processed_count).all()
         
-        # Refresh all created tools
-        for tool in created_tools:
-            db.refresh(tool)
-        
-        return created_tools
+    except HTTPException: raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Error processing Excel file: {str(e)}")
+
         
     except HTTPException:
         raise

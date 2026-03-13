@@ -33,7 +33,7 @@ class ReturnInfo(BaseModel):
     qty: int
     status: str
     remarks: str | None
-    admin_name: str | None
+    inventory_supervisor_name: str | None
 
 class IssueInfo(BaseModel):
     date: str | None
@@ -97,7 +97,7 @@ def get_transaction_history(
         # Get related details for the inventory request
         tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == inventory_request.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == inventory_request.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_request.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
         
@@ -114,7 +114,7 @@ def get_transaction_history(
             "updated_at": inventory_request.updated_at,
             "tool_name": tool.item_description if tool else None,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
             "part_name": part.part_name if part else None
         }
@@ -132,7 +132,7 @@ def get_transaction_history(
             # Process all return requests
             for return_request in return_requests:
                 operator = db.query(AccessUser).filter(AccessUser.id == return_request.operator_id).first()
-                admin = db.query(AccessUser).filter(AccessUser.id == return_request.admin_id).first()
+                inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == return_request.inventory_supervisor_id).first()
                 
                 return_request_details = {
                     "id": return_request.id,
@@ -145,7 +145,7 @@ def get_transaction_history(
                     "created_at": return_request.created_at,
                     "updated_at": return_request.updated_at,
                     "operator_name": operator.user_name if operator else None,
-                    "admin_name": admin.user_name if admin else None,
+                    "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
                     "inventory_request_details": inventory_request_details
                 }
                 
@@ -157,7 +157,7 @@ def get_transaction_history(
     elif inventory_return_request:
         # Get related details for the return request
         operator = db.query(AccessUser).filter(AccessUser.id == inventory_return_request.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == inventory_return_request.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_return_request.inventory_supervisor_id).first()
         
         # Get the original inventory request details
         inventory_request_details = None
@@ -171,7 +171,7 @@ def get_transaction_history(
             if original_inventory_request:
                 tool = db.query(ToolsList).filter(ToolsList.id == original_inventory_request.tool_id).first()
                 inv_operator = db.query(AccessUser).filter(AccessUser.id == original_inventory_request.operator_id).first()
-                inv_admin = db.query(AccessUser).filter(AccessUser.id == original_inventory_request.admin_id).first()
+                inv_req_supervisor = db.query(AccessUser).filter(AccessUser.id == original_inventory_request.inventory_supervisor_id).first()
                 project = db.query(Order).filter(Order.id == original_inventory_request.project_id).first()
                 part = db.query(Part).filter(Part.id == original_inventory_request.part_id).first()
                 
@@ -188,7 +188,7 @@ def get_transaction_history(
                     "updated_at": original_inventory_request.updated_at,
                     "tool_name": tool.item_description if tool else None,
                     "operator_name": inv_operator.user_name if inv_operator else None,
-                    "admin_name": inv_admin.user_name if inv_admin else None,
+                    "inventory_supervisor_name": inv_req_supervisor.user_name if inv_req_supervisor else None,
                     "project_name": project.sale_order_number if project else None,
                     "part_name": part.part_name if part else None
                 }
@@ -204,7 +204,7 @@ def get_transaction_history(
             "created_at": inventory_return_request.created_at,
             "updated_at": inventory_return_request.updated_at,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "inventory_request_details": inventory_request_details
         }
         
@@ -220,7 +220,7 @@ def get_transaction_history(
         if all_related_returns:
             for return_request in all_related_returns:
                 operator = db.query(AccessUser).filter(AccessUser.id == return_request.operator_id).first()
-                admin = db.query(AccessUser).filter(AccessUser.id == return_request.admin_id).first()
+                inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == return_request.inventory_supervisor_id).first()
                 
                 related_return_details = {
                     "id": return_request.id,
@@ -233,7 +233,7 @@ def get_transaction_history(
                     "created_at": return_request.created_at,
                     "updated_at": return_request.updated_at,
                     "operator_name": operator.user_name if operator else None,
-                    "admin_name": admin.user_name if admin else None,
+                    "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
                     "inventory_request_details": inventory_request_details
                 }
                 
@@ -262,7 +262,7 @@ def get_all_transactions(db: Session = Depends(get_db)):
         # Get related details for the inventory request
         tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == inventory_request.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == inventory_request.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_request.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
         
@@ -279,7 +279,7 @@ def get_all_transactions(db: Session = Depends(get_db)):
             "updated_at": inventory_request.updated_at,
             "tool_name": tool.item_description if tool else None,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
             "part_name": part.part_name if part else None
         }
@@ -294,7 +294,7 @@ def get_all_transactions(db: Session = Depends(get_db)):
         if return_requests:
             for return_request in return_requests:
                 return_operator = db.query(AccessUser).filter(AccessUser.id == return_request.operator_id).first()
-                return_admin = db.query(AccessUser).filter(AccessUser.id == return_request.admin_id).first()
+                return_inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == return_request.inventory_supervisor_id).first()
                 
                 return_request_details = {
                     "id": return_request.id,
@@ -307,7 +307,7 @@ def get_all_transactions(db: Session = Depends(get_db)):
                     "created_at": return_request.created_at,
                     "updated_at": return_request.updated_at,
                     "operator_name": return_operator.user_name if return_operator else None,
-                    "admin_name": return_admin.user_name if return_admin else None,
+                    "inventory_supervisor_name": return_inventory_supervisor.user_name if return_inventory_supervisor else None,
                     "inventory_request_details": inventory_request_details
                 }
                 
@@ -354,7 +354,7 @@ def get_all_transactions(db: Session = Depends(get_db)):
         # Get related details
         tool_detail = db.query(ToolsList).filter(ToolsList.id == issue.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == issue.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == issue.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == issue.inventory_supervisor_id).first()
         
         # Fetch sale_order_number
         sale_order_number = None
@@ -371,7 +371,7 @@ def get_all_transactions(db: Session = Depends(get_db)):
             request_id=issue.request_id,
             tool_issue_qty=issue.tool_issue_qty,
             operator_id=issue.operator_id,
-            admin_id=issue.admin_id,
+            inventory_supervisor_id=issue.inventory_supervisor_id,
             status=issue.status,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
@@ -381,7 +381,7 @@ def get_all_transactions(db: Session = Depends(get_db)):
             document_url=issue.document_url,
             tool_name=tool_detail.item_description if tool_detail else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None,
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
             sale_order_number=sale_order_number
         )
         
@@ -437,7 +437,7 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
     for inventory_request in inventory_requests:
         tool_detail = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == inventory_request.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == inventory_request.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_request.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
         
@@ -454,7 +454,7 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
             "updated_at": inventory_request.updated_at,
             "tool_name": tool_detail.item_description if tool_detail else None,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
             "part_name": part.part_name if part else None
         }
@@ -468,7 +468,7 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
         if return_requests:
             for return_request in return_requests:
                 return_operator = db.query(AccessUser).filter(AccessUser.id == return_request.operator_id).first()
-                return_admin = db.query(AccessUser).filter(AccessUser.id == return_request.admin_id).first()
+                return_inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == return_request.inventory_supervisor_id).first()
                 
                 return_request_details = {
                     "id": return_request.id,
@@ -481,7 +481,7 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
                     "created_at": return_request.created_at,
                     "updated_at": return_request.updated_at,
                     "operator_name": return_operator.user_name if return_operator else None,
-                    "admin_name": return_admin.user_name if return_admin else None,
+                    "inventory_supervisor_name": return_inventory_supervisor.user_name if return_inventory_supervisor else None,
                     "inventory_request_details": inventory_request_details
                 }
                 
@@ -520,7 +520,7 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
         # Get related details
         tool_detail = db.query(ToolsList).filter(ToolsList.id == issue.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == issue.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == issue.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == issue.inventory_supervisor_id).first()
         
         # Fetch sale_order_number
         sale_order_number = None
@@ -537,7 +537,7 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
             request_id=issue.request_id,
             tool_issue_qty=issue.tool_issue_qty,
             operator_id=issue.operator_id,
-            admin_id=issue.admin_id,
+            inventory_supervisor_id=issue.inventory_supervisor_id,
             status=issue.status,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
@@ -547,7 +547,7 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
             document_url=issue.document_url,
             tool_name=tool_detail.item_description if tool_detail else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None,
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
             sale_order_number=sale_order_number
         )
         
@@ -606,12 +606,12 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
                 qty=ret.returned_qty or 0,
                 status=ret.status or '-',
                 remarks=ret.remarks,
-                admin_name=ret.admin_name
+                supervisor_name=ret.supervisor_name
             ) for ret in returns_data],
             issues=[IssueInfo(
                 date=str(issue.created_at) if issue.created_at else None,
                 qty=issue.tool_issue_qty or 0,
-                approved_by=issue.admin_name,
+                approved_by=issue.supervisor_name,
                 remarks=issue.remarks
             ) for issue in related_issues],
             total_returned_qty=total_returned_qty_req,
