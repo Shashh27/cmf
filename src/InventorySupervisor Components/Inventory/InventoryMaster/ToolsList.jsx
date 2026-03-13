@@ -1,14 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Table, Button, Space, message, Input, Select, Card, Row, Col, Upload } from 'antd';
 import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, BlockOutlined, HistoryOutlined, UploadOutlined } from '@ant-design/icons';
-import {API_BASE_URL} from '../../Config/auth';
+import {API_BASE_URL} from '../../../Config/auth';
 import ToolsHistory from './ToolsHistory';
 
 const { Option } = Select;
 const { Search } = Input;
 
 const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
-  const [tools, setTools] = useState([]);
+  const [tools, setTools] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('tools_list_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) {
+      console.error('Failed to parse tools cache', e);
+      return [];
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [filteredData, setFilteredData] = useState([]);
@@ -63,7 +71,10 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     if (isFetchingRef.current) return; // Prevent multiple calls
     
     isFetchingRef.current = true;
-    setLoading(true);
+    // Only show loading spinner if we don't have cached data
+    if (tools.length === 0) {
+      setLoading(true);
+    }
     
     try {
       const response = await fetch(`${API_BASE_URL}/tools-list/`);
@@ -75,12 +86,16 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         ? [...data].sort((a, b) => (a.id || 0) - (b.id || 0))
         : [];
       
+      // Update cache and state
+      sessionStorage.setItem('tools_list_cache', JSON.stringify(sortedData));
+      setTools(sortedData);
+      
       // Check if any tools have null total_quantity and migrate if needed
       const needsMigration = sortedData.some(tool => tool.total_quantity === null);
       if (needsMigration) {
         console.log('Detected tools with null total_quantity, running migration...');
         try {
-          const migrateResponse = await fetch(`${config.API_BASE_URL}/tools-list/migrate-total-quantity`, {
+          const migrateResponse = await fetch(`${API_BASE_URL}/tools-list/migrate-total-quantity`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
           });
@@ -88,14 +103,13 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
             const migrateResult = await migrateResponse.json();
             console.log('Migration completed:', migrateResult);
             // Refetch tools after migration
+            isFetchingRef.current = false; // Reset ref to allow recursive call
             return fetchTools(); // Recursive call to get updated data
           }
         } catch (migrationError) {
           console.error('Migration failed:', migrationError);
         }
       }
-      
-      setTools(sortedData);
     } catch (error) {
       console.error('Failed to fetch tools:', error);
       message.error('Failed to fetch tools: ' + error.message);
@@ -131,37 +145,32 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     setPagination(prev => ({ ...prev, current: 1 }));
   };
 
-  const handleBulkUpload = async (info) => {
-    const { file } = info;
-    if (file.status === 'uploading') {
-      setLoading(true);
-      return;
-    }
+  const handleBulkUpload = async (file) => {
+    if (!file) return;
     
-    if (file.status === 'done' || file.originFileObj) {
-      const formData = new FormData();
-      formData.append('file', file.originFileObj || file);
+    setLoading(true);
+    const formData = new FormData();
+    formData.append('file', file);
 
-      try {
-        const response = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
-          method: 'POST',
-          body: formData,
-        });
+    try {
+      const response = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
+        method: 'POST',
+        body: formData,
+      });
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || 'Failed to upload tools');
-        }
-
-        const result = await response.json();
-        message.success(`Successfully uploaded ${result.length} tools`);
-        fetchTools(); // Refresh the list
-      } catch (error) {
-        console.error('Bulk upload failed:', error);
-        message.error('Bulk upload failed: ' + error.message);
-      } finally {
-        setLoading(false);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to upload tools');
       }
+
+      const result = await response.json();
+      message.success(`Successfully uploaded ${result.length} tools`);
+      fetchTools(); // Refresh the list
+    } catch (error) {
+      console.error('Bulk upload failed:', error);
+      message.error('Bulk upload failed: ' + error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -497,7 +506,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         <Space>
           <Upload
             beforeUpload={(file) => {
-              handleBulkUpload({ file });
+              handleBulkUpload(file);
               return false; // Prevent automatic upload
             }}
             showUploadList={false}

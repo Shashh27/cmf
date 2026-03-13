@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Tabs, message, Card, Typography } from 'antd';
 import { DatabaseOutlined } from '@ant-design/icons';
-import { ToolsList, InstrumentsList, ToolForm } from '../Inventory Components/InventoryMaster';
+import { ToolsList, InstrumentsList, ToolForm } from '../InventorySupervisor Components/Inventory/InventoryMaster';
 import { API_BASE_URL } from '../Config/auth.js';
 
 const { TabPane } = Tabs;

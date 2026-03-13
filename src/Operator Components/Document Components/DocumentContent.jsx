@@ -6,7 +6,7 @@ import {
   EyeOutlined,
   DownloadOutlined
 } from '@ant-design/icons';
-import config from '../../Config/config';
+import { API_BASE_URL } from "../../Config/auth";
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -33,13 +33,13 @@ const OperatorDocumentContent = ({ selectedNode }) => {
     try {
       let url = '';
       if (selectedNode.type === 'common-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders/${selectedNode.folderId}/documents`;
+        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders/${selectedNode.folderId}/documents`;
       } else if (selectedNode.type === 'common-root') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/all/documents`;
+        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/all/documents`;
       } else if (selectedNode.type === 'machine-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/folders/${selectedNode.folderId}/documents`;
+        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/folders/${selectedNode.folderId}/documents`;
       } else if (selectedNode.type === 'machine') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/machines/${selectedNode.machineId}/documents`;
+        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/machines/${selectedNode.machineId}/documents`;
       }
 
       if (!url) {

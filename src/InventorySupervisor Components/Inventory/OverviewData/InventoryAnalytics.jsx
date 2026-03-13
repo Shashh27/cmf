@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Statistic, Spin, Empty, Space,Select,Typography } from 'antd';
 import { ToolOutlined, RollbackOutlined, ClockCircleOutlined,BarChartOutlined,LineChartOutlined,PieChartOutlined } from '@ant-design/icons';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,PieChart, Pie, Cell,LineChart,Line } from 'recharts';
-import { API_BASE_URL } from '../../Config/auth.js';
+import { API_BASE_URL } from '../../../Config/auth.js';
 
 const { Text } = Typography;
 

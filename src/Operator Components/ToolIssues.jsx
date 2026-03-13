@@ -124,8 +124,8 @@ const ToolIssues = () => {
     },
     {
       title: 'Approved By',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 140,
       render: (text) => text || '-',
     },

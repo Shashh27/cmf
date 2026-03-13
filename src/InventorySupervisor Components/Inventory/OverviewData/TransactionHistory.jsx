@@ -1,32 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Table, 
-  Space, 
-  Tag, 
-  Alert,
-  Spin,
-  Empty,
-  Input,
-  Button,
-  Row,
-  Col,
-  DatePicker,
-  Select
-} from 'antd';
+import { Table, Space, Tag, Alert,Spin,Empty,Input,Button,Row,Col,DatePicker,Select } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../../Config/auth';
 const { RangePicker } = DatePicker;
 const TransactionHistory = () => {
-  const [allTransactionsLoading, setAllTransactionsLoading] = useState(false);
-  const [allTransactionsData, setAllTransactionsData] = useState(null);
-  const [error, setError] = useState(null);
-  const [searchProjectNumber, setSearchProjectNumber] = useState('');
-  const [dateRange, setDateRange] = useState([null, null]);
-  const [typeFilter, setTypeFilter] = useState('all'); // all | requests | returns
-  const [pagination, setPagination] = useState({
-    current: 1,
-    pageSize: 10,
-  });
+const [allTransactionsLoading, setAllTransactionsLoading] = useState(false);
+const [allTransactionsData, setAllTransactionsData] = useState(null);
+const [error, setError] = useState(null);
+const [searchProjectNumber, setSearchProjectNumber] = useState('');
+const [dateRange, setDateRange] = useState([null, null]);
+const [typeFilter, setTypeFilter] = useState('all'); // all | requests | returns
+const [pagination, setPagination] = useState({current: 1, pageSize: 10,});
 
   useEffect(() => {
     fetchAllTransactions();
@@ -35,7 +19,7 @@ const TransactionHistory = () => {
   const fetchAllTransactions = async () => {
     try {
       console.log('Fetching all transactions...');
-      const response = await fetch(`${config.API_BASE_URL}/transaction-history/all`);
+      const response = await fetch(`${API_BASE_URL}/transaction-history/all`);
       console.log('Response status:', response.status);
       
       if (!response.ok) {
@@ -221,7 +205,7 @@ const TransactionHistory = () => {
           requested_qty: inventoryRequest.quantity || '-',
           requested_by: inventoryRequest.operator_name || '-',
           request_created_at: inventoryRequest.created_at,
-          approved_by: inventoryRequest.admin_name || '-',
+          approved_by: inventoryRequest.inventory_supervisor_name || '-',
           request_status: inventoryRequest.status || '-',
           request_updated_at: inventoryRequest.updated_at,
           returned_qty: '-',
@@ -245,12 +229,12 @@ const TransactionHistory = () => {
             requested_qty: inventoryRequest.quantity || '-',
             requested_by: inventoryRequest.operator_name || '-',
             request_created_at: inventoryRequest.created_at,
-            approved_by: inventoryRequest.admin_name || '-',
+            approved_by: inventoryRequest.inventory_supervisor_name || '-',
             request_status: inventoryRequest.status || '-',
             request_updated_at: inventoryRequest.updated_at,
             returned_qty: returnRequest.returned_qty || '-',
             return_created_at: returnRequest.created_at,
-            collected_by: returnRequest.admin_name || '-',
+            collected_by: returnRequest.inventory_supervisor_name || '-',
             return_status: returnRequest.status || '-',
             return_updated_at: returnRequest.updated_at,
           };

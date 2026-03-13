@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Tabs } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Tabs, message } from 'antd';
 import PokaYokeChecklists from './PokaYokeChecklists';
 import PokaYokeCompletedLogs from './PokaYokeCompletedLogs';
 import PokaYokeMachineAssignments from './PokaYokeMachineAssignments';
@@ -10,29 +10,49 @@ const PokaYoke = () => {
   const [machines, setMachines] = useState([]);
   const [machinesLoading, setMachinesLoading] = useState(false);
 
-  const fetchMachines = useCallback(async () => {
+  const fetchMachines = async () => {
+    setMachinesLoading(true);
     try {
-      setMachinesLoading(true);
-      const response = await fetch(`${config.API_BASE_URL}/machines/`);
-      if (!response.ok) {
-        setMachines([]);
-        return;
-      }
-      const data = await response.json();
+      const res = await fetch(`${config.API_BASE_URL}/machines/`);
+      if (!res.ok) throw new Error('Failed to fetch machines');
+      const data = await res.json();
       setMachines(Array.isArray(data) ? data : []);
+    } catch (e) {
+      message.error(e.message || 'Failed to load machines');
     } finally {
       setMachinesLoading(false);
     }
-  }, []);
+  };
 
   useEffect(() => {
+    // Preload machines so dropdowns have options immediately
     fetchMachines();
-  }, [fetchMachines]);
+  }, []);
 
   const tabItems = [
     { key: 'checklists', label: 'Checklists', children: <PokaYokeChecklists /> },
-    { key: 'machine-assignments', label: 'Machine Assignments', children: <PokaYokeMachineAssignments machines={machines} fetchMachines={fetchMachines} machinesLoading={machinesLoading} /> },
-    { key: 'completion-logs', label: 'Completion Logs', children: <PokaYokeCompletedLogs machines={machines} fetchMachines={fetchMachines} machinesLoading={machinesLoading} /> },
+    { 
+      key: 'machine-assignments', 
+      label: 'Machine Assignments', 
+      children: (
+        <PokaYokeMachineAssignments 
+          machines={machines} 
+          fetchMachines={fetchMachines} 
+          machinesLoading={machinesLoading} 
+        />
+      ) 
+    },
+    { 
+      key: 'completion-logs', 
+      label: 'Completion Logs', 
+      children: (
+        <PokaYokeCompletedLogs 
+          machines={machines} 
+          fetchMachines={fetchMachines} 
+          machinesLoading={machinesLoading} 
+        />
+      ) 
+    },
   ];
 
   return (

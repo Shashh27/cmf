@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Form, Input, InputNumber, Button, Modal, message, Row, Col, Select } from 'antd';
-import { API_BASE_URL } from '../../Config/auth.js';
+import { API_BASE_URL } from '../../../Config/auth.js';
 
 const { Option } = Select;
 const { TextArea } = Input;

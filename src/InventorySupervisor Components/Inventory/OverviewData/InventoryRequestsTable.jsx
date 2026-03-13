@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Input, Select, Row, Col } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
-import { API_BASE_URL } from '../../Config/auth.js';
+import { API_BASE_URL } from '../../../Config/auth.js';
 
 const InventoryRequestsTable = () => {
   const [requests, setRequests] = useState([]);
@@ -27,17 +27,18 @@ const InventoryRequestsTable = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, dateRange, typeFilter, searchText]);
 
-  const getCurrentAdminInfo = () => {
+  const getCurrentUserInfo = () => {
     try {
       const stored = localStorage.getItem('user');
-      if (!stored) return { id: null, name: null };
+      if (!stored) return { id: null, name: null, role: null };
       const u = JSON.parse(stored);
       const id = u?.id != null ? parseInt(u.id) : null;
       const name = u?.user_name || u?.username || null;
-      return { id, name };
+      const role = u?.role || null;
+      return { id, name, role };
     } catch (e) {
       console.error('Failed to parse user from localStorage', e);
-      return { id: null, name: null };
+      return { id: null, name: null, role: null };
     }
   };
 
@@ -63,13 +64,19 @@ const InventoryRequestsTable = () => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          const { id: adminId, name: adminName } = getCurrentAdminInfo();
-          if (!adminId) {
+          const { id: userId, name: userName, role } = getCurrentUserInfo();
+          if (!userId) {
             message.error('Unable to determine current user. Please log in again.');
             return;
           }
 
-          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=approved`, {
+          // Only inventory_supervisor can approve
+          if (role !== 'inventory_supervisor') {
+            message.error('Only inventory supervisors can approve requests');
+            return;
+          }
+
+          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=approved`, {
             method: 'PUT'
           });
           
@@ -91,7 +98,7 @@ const InventoryRequestsTable = () => {
               ? { 
                   ...req, 
                   status: 'approved',
-                  admin_name: adminName || req.admin_name 
+                  inventory_supervisor_name: userName || req.inventory_supervisor_name 
                 } 
               : req
           ));
@@ -112,13 +119,19 @@ const InventoryRequestsTable = () => {
       okType: 'danger',
       onOk: async () => {
         try {
-          const { id: adminId, name: adminName } = getCurrentAdminInfo();
-          if (!adminId) {
+          const { id: userId, name: userName, role } = getCurrentUserInfo();
+          if (!userId) {
             message.error('Unable to determine current user. Please log in again.');
             return;
           }
 
-          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=rejected`, {
+          // Only inventory_supervisor can reject
+          if (role !== 'inventory_supervisor') {
+            message.error('Only inventory supervisors can reject requests');
+            return;
+          }
+
+          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=rejected`, {
             method: 'PUT'
           });
           
@@ -140,7 +153,7 @@ const InventoryRequestsTable = () => {
               ? { 
                   ...req, 
                   status: 'rejected',
-                  admin_name: adminName || req.admin_name 
+                  inventory_supervisor_name: userName || req.inventory_supervisor_name 
                 } 
               : req
           ));
@@ -300,8 +313,8 @@ const InventoryRequestsTable = () => {
     },
     {
       title: 'Approved By',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 140,
       className: 'table-header-styled',
       render: (text) => text || '-',
@@ -313,30 +326,44 @@ const InventoryRequestsTable = () => {
       fixed: 'right',
       align: 'center',
       className: 'table-header-styled',
-      render: (_, record) => (
-        <Space size="small">
-          <Button
-            type="primary"
-            size="small"
-            onClick={() => handleApprove(record)}
-            disabled={record.status !== 'pending'}
-            title={record.status !== 'pending' ? `Cannot approve: request is ${record.status}` : 'Approve this request'}
-          >
-            Approve
-          </Button>
-          <Button
-            danger
-            size="small"
-            onClick={() => handleReject(record)}
-            disabled={record.status !== 'pending'}
-            title={record.status !== 'pending' ? `Cannot reject: request is ${record.status}` : 'Reject this request'}
-          >
-            Reject
-          </Button>
-        </Space>
-      ),
+      render: (_, record) => {
+        const { role } = getCurrentUserInfo();
+        // Only show actions for inventory_supervisor
+        if (role !== 'inventory_supervisor') {
+          return '-';
+        }
+        
+        return (
+          <Space size="small">
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => handleApprove(record)}
+              disabled={record.status !== 'pending'}
+              title={record.status !== 'pending' ? `Cannot approve: request is ${record.status}` : 'Approve this request'}
+            >
+              Approve
+            </Button>
+            <Button
+              danger
+              size="small"
+              onClick={() => handleReject(record)}
+              disabled={record.status !== 'pending'}
+              title={record.status !== 'pending' ? `Cannot reject: request is ${record.status}` : 'Reject this request'}
+            >
+              Reject
+            </Button>
+          </Space>
+        );
+      },
     },
-  ];
+  ].filter(col => {
+    if (col.key === 'action') {
+      const { role } = getCurrentUserInfo();
+      return role === 'inventory_supervisor';
+    }
+    return true;
+  });
 
   return (
     <div>

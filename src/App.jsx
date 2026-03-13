@@ -19,6 +19,9 @@ import DocumentManagement from "./Pages/Document";
 import Notification from "./Pages/Notification";
 import AccessControl from "./Pages/AccessControl";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
+import SupervisorDashboard from "./Pages/SupervisorDashboard";
+import InventorySupervisor from "./Pages/InventorySupervisor";
 
 function App() {
   return (
@@ -76,6 +79,20 @@ function App() {
           <Route path="/project_coordinator/oms/product/:productId" element={<ProjectCoordinatorDashboard />} />
           <Route path="/project_coordinator/pdm" element={<ProjectCoordinatorDashboard />} />
          
+          {/* Manufacturing Coordinator */}
+          <Route path="/manufacturing_coordinator" element={<Navigate to="/manufacturing_coordinator/dashboard" replace />} />
+          <Route path="/manufacturing_coordinator/dashboard" element={<ManufacturingCoordinator />} />
+          
+          {/* Supervisor */}
+          <Route path="/supervisor" element={<Navigate to="/supervisor/dashboard" replace />} />
+          <Route path="/supervisor/dashboard" element={<SupervisorDashboard />} />
+          
+          {/* Inventory Supervisor */}
+          <Route path="/inventory_supervisor" element={<Navigate to="/inventory_supervisor/dashboard" replace />} />
+          <Route path="/inventory_supervisor/dashboard" element={<InventorySupervisor />} />
+          <Route path="/inventory_supervisor/inventory-management" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />
+          <Route path="/inventory_supervisor/inventory-management/inventory-master" element={<InventoryMaster />} />
+          <Route path="/inventory_supervisor/inventory-management/overview-data" element={<OverviewData />} />
           
           {/* Operator Routes */}
           <Route path="/operator" element={<Navigate to="/operator/dashboard" replace />} />

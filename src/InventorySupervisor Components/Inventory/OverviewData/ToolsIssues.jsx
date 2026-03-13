@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Tag, Space, message, Modal, Input, Row, Col, Card, DatePicker, Select } from 'antd';
-import config from '../../Config/config';
+import { API_BASE_URL } from "../../../Config/auth";
 
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
@@ -10,7 +10,7 @@ const ToolsIssues = () => {
   const [filteredIssues, setFilteredIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all'); // all | pending | approved | rejected
-  const [adminId, setAdminId] = useState(null);
+  const [inventorySupervisorId, setInventorySupervisorId] = useState(null);
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [actionType, setActionType] = useState(null); // 'approve' or 'reject'
@@ -24,26 +24,27 @@ const ToolsIssues = () => {
   const [dateRange, setDateRange] = useState([null, null]);
   const [searchText, setSearchText] = useState('');
 
-  const getCurrentAdminInfo = () => {
+  const getCurrentUserInfo = () => {
     try {
       const stored = localStorage.getItem('user');
-      if (!stored) return { id: null, name: null };
+      if (!stored) return { id: null, name: null, role: null };
       const u = JSON.parse(stored);
       const id = u?.id != null ? parseInt(u.id) : null;
       const name = u?.user_name || u?.username || null;
-      return { id, name };
+      const role = u?.role || null;
+      return { id, name, role };
     } catch (e) {
       console.error('Failed to parse user from localStorage', e);
-      return { id: null, name: null };
+      return { id: null, name: null, role: null };
     }
   };
 
   const fetchIssues = async (status = statusFilter) => {
     setLoading(true);
     try {
-      let url = `${config.API_BASE_URL}/tool-issues/`;
+      let url = `${API_BASE_URL}/tool-issues/`;
       if (status !== 'all') {
-        url = `${config.API_BASE_URL}/tool-issues/by-status/${status}`;
+        url = `${API_BASE_URL}/tool-issues/by-status/${status}`;
       }
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -62,10 +63,10 @@ const ToolsIssues = () => {
 
   useEffect(() => {
     fetchIssues();
-    // Auto-set admin ID from localStorage if available
-    const { id: currentAdminId } = getCurrentAdminInfo();
-    if (currentAdminId) {
-      setAdminId(currentAdminId);
+    // Auto-set inventory supervisor ID from localStorage if available
+    const { id: currentUserId, role } = getCurrentUserInfo();
+    if (currentUserId && role === 'inventory_supervisor') {
+      setInventorySupervisorId(currentUserId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
@@ -116,8 +117,8 @@ const ToolsIssues = () => {
   };
 
   const handleConfirmAction = async () => {
-    if (!adminId) {
-      message.warning('Please set Admin ID to approve/reject');
+    if (!inventorySupervisorId) {
+      message.warning('Please set Inventory Supervisor ID to approve/reject');
       return;
     }
 
@@ -128,12 +129,12 @@ const ToolsIssues = () => {
 
     try {
       const payload = {
-        admin_id: adminId,
+        inventory_supervisor_id: inventorySupervisorId,
         status: actionType === 'approve' ? 'approved' : 'rejected',
         remarks: remarks.trim()
       };
 
-      const url = `${config.API_BASE_URL}/tool-issues/${selectedIssue.id}/status`;
+      const url = `${API_BASE_URL}/tool-issues/${selectedIssue.id}/status`;
       const resp = await fetch(url, { 
         method: 'PUT',
         headers: {
@@ -273,8 +274,8 @@ const ToolsIssues = () => {
     },
     {
       title: 'Approved By',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 140,
       className: 'table-header-styled',
       render: (text) => text || '-',
@@ -299,30 +300,44 @@ const ToolsIssues = () => {
       fixed: 'right',
       align: 'center',
       className: 'table-header-styled',
-      render: (_, record) => (
-        <Space size="small">
-          <Button
-            type="primary"
-            size="small"
-            onClick={() => showConfirmModal(record, 'approve')}
-            disabled={record.status !== 'pending'}
-            title={record.status !== 'pending' ? `Cannot approve: issue is ${record.status}` : 'Approve this issue'}
-          >
-            Approve
-          </Button>
-          <Button
-            danger
-            size="small"
-            onClick={() => showConfirmModal(record, 'reject')}
-            disabled={record.status !== 'pending'}
-            title={record.status !== 'pending' ? `Cannot reject: issue is ${record.status}` : 'Reject this issue'}
-          >
-            Reject
-          </Button>
-        </Space>
-      ),
+      render: (_, record) => {
+        const { role } = getCurrentUserInfo();
+        // Only show actions for inventory_supervisor
+        if (role !== 'inventory_supervisor') {
+          return '-';
+        }
+        
+        return (
+          <Space size="small">
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => showConfirmModal(record, 'approve')}
+              disabled={record.status !== 'pending'}
+              title={record.status !== 'pending' ? `Cannot approve: issue is ${record.status}` : 'Approve this issue'}
+            >
+              Approve
+            </Button>
+            <Button
+              danger
+              size="small"
+              onClick={() => showConfirmModal(record, 'reject')}
+              disabled={record.status !== 'pending'}
+              title={record.status !== 'pending' ? `Cannot reject: issue is ${record.status}` : 'Reject this issue'}
+            >
+              Reject
+            </Button>
+          </Space>
+        );
+      },
     },
-  ];
+  ].filter(col => {
+    if (col.key === 'actions') {
+      const { role } = getCurrentUserInfo();
+      return role === 'inventory_supervisor';
+    }
+    return true;
+  });
 
   return (
     <div>

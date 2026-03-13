@@ -468,9 +468,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       },
     },
     {
-      title: 'Supervisor',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      title: 'Approved By',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 150,
       ellipsis: true,
       render: (text) => text || <span style={{ color: '#999', fontStyle: 'italic' }}>Pending</span>,

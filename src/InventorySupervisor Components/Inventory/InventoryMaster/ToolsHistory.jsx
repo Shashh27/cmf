@@ -4,7 +4,7 @@ import { HistoryOutlined,ToolOutlined,CheckCircleOutlined,MonitorOutlined,Downlo
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
 import moment from 'moment';
 import { pdf } from '@react-pdf/renderer';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../../Config/auth.js';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -38,7 +38,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
   const fetchToolHistory = async (toolData) => {
     setHistoryLoading(true);
     try {
-      const response = await fetch(`${config.API_BASE_URL}/transaction-history/by-tool/${toolData.id}`);
+      const response = await fetch(`${API_BASE_URL}/transaction-history/by-tool/${toolData.id}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -242,7 +242,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
         requested_by: it.operator_name || '-',
         requested_qty: 0,
         issue_qty: it.tool_issue_qty || 0,
-        approved_by: it.admin_name || '-',
+        approved_by: it.inventory_supervisor_name || '-',
         remarks: it.remarks || ''
       });
     });
@@ -371,7 +371,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
         requested_by: req.operator_name || '-',
         requested_qty: req.requested_qty || 0,
         requested_date: req.requested_date || null,
-        approved_by: req.approved_by || '',
+        approved_by: req.inventory_supervisor_name || '',
         approved_date: req.approved_date || null,
         returned_qty: returnedQty,
         status,

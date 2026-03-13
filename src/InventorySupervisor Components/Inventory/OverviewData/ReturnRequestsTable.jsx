@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Input, Select, Row, Col } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
-import { API_BASE_URL } from '../../Config/auth.js';
+import { API_BASE_URL } from '../../../Config/auth.js';
 
 const ReturnRequestsTable = () => {
   const [returnRequests, setReturnRequests] = useState([]);
@@ -26,17 +26,18 @@ const ReturnRequestsTable = () => {
     applyFilters();
   }, [returnRequests, dateRange, typeFilter, searchText]);
 
-  const getCurrentAdminInfo = () => {
+  const getCurrentUserInfo = () => {
     try {
       const stored = localStorage.getItem('user');
-      if (!stored) return { id: null, name: null };
+      if (!stored) return { id: null, name: null, role: null };
       const u = JSON.parse(stored);
       const id = u?.id != null ? parseInt(u.id) : null;
       const name = u?.user_name || u?.username || null;
-      return { id, name };
+      const role = u?.role || null;
+      return { id, name, role };
     } catch (e) {
       console.error('Failed to parse user from localStorage', e);
-      return { id: null, name: null };
+      return { id: null, name: null, role: null };
     }
   };
 
@@ -48,10 +49,10 @@ const ReturnRequestsTable = () => {
       }
       const data = await response.json();
       
-      // Debug: Log the fetched data to check admin_name values
+      // Debug: Log the fetched data to check inventory_supervisor_name values
       console.log('=== FETCHED RETURN REQUESTS ===');
       data.forEach((req, index) => {
-        console.log(`Request ${index + 1}: ID=${req.id}, Status=${req.status}, Admin_Name=${req.admin_name}`);
+        console.log(`Request ${index + 1}: ID=${req.id}, Status=${req.status}, Inventory_Supervisor_Name=${req.inventory_supervisor_name}`);
       });
       console.log('===============================');
       
@@ -74,15 +75,22 @@ const ReturnRequestsTable = () => {
         console.log('Record ID:', record.id);
         console.log('Record Tool Name:', record.inventory_request_details?.tool_name);
         console.log('Current Status:', record.status);
-        const { id: adminId } = getCurrentAdminInfo();
-        if (!adminId) {
+        const { id: userId, role } = getCurrentUserInfo();
+        if (!userId) {
           message.error('Unable to determine current user. Please log in again.');
           return;
         }
-        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`);
+
+        // Only inventory_supervisor can change status
+        if (role !== 'inventory_supervisor') {
+          message.error('Only inventory supervisors can change status');
+          return;
+        }
+
+        console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=pending&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=pending&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -101,7 +109,7 @@ const ReturnRequestsTable = () => {
                 ? { 
                     ...req, 
                     status: 'pending', 
-                    admin_name: null, // Clear admin_name when marking as pending
+                    inventory_supervisor_name: null, // Clear inventory_supervisor_name when marking as pending
                     updated_at: new Date().toISOString()
                   }
                 : req
@@ -129,15 +137,22 @@ const ReturnRequestsTable = () => {
         console.log('Record ID:', record.id);
         console.log('Record Tool Name:', record.inventory_request_details?.tool_name);
         console.log('Current Status:', record.status);
-        const { id: adminId, name: adminName } = getCurrentAdminInfo();
-        if (!adminId) {
+        const { id: userId, name: userName, role } = getCurrentUserInfo();
+        if (!userId) {
           message.error('Unable to determine current user. Please log in again.');
           return;
         }
-        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`);
+
+        // Only inventory_supervisor can change status
+        if (role !== 'inventory_supervisor') {
+          message.error('Only inventory supervisors can change status');
+          return;
+        }
+
+        console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=collected&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?inventory_supervisor_id=${userId}&status=collected&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -149,21 +164,21 @@ const ReturnRequestsTable = () => {
           const result = await response.json();
           console.log('API Response:', result);
           
-          // Update the local state immediately with admin_name and persist it
+          // Update the local state immediately with inventory_supervisor_name and persist it
           setReturnRequests(prevRequests => 
             prevRequests.map(req => 
               req.id === record.id 
                 ? { 
                     ...req, 
                     status: 'collected', 
-                    admin_name: adminName || result.admin_name,
+                    inventory_supervisor_name: userName || result.inventory_supervisor_name,
                     updated_at: new Date().toISOString()
                   }
                 : req
             )
           );
           
-          message.success(`Return request marked as collected by ${adminName || result.admin_name || 'admin'}`);
+          message.success(`Return request marked as collected by ${userName || result.inventory_supervisor_name || 'inventory supervisor'}`);
         } catch (error) {
           console.error('Failed to update status to collected:', error);
           message.error('Failed to update status to collected: ' + error.message);
@@ -328,8 +343,8 @@ const ReturnRequestsTable = () => {
     },
     {
       title: 'Collected By',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 140,
       className: 'table-header-styled',
       render: (text) => text || '-',
@@ -342,6 +357,12 @@ const ReturnRequestsTable = () => {
       align: 'center',
       className: 'table-header-styled',
       render: (_, record, index) => {
+        const { role } = getCurrentUserInfo();
+        // Only show actions for inventory_supervisor
+        if (role !== 'inventory_supervisor') {
+          return '-';
+        }
+
         console.log(`=== TABLE ROW RENDER ===`);
         console.log(`Row Index: ${index}`);
         console.log(`Record ID: ${record.id}`);
@@ -353,28 +374,25 @@ const ReturnRequestsTable = () => {
         return (
           <Space size="small">
             <Button
-              type="default"
-              size="small"
-              onClick={() => handlePending(record)}
-              disabled={true} // Always disabled - pending is the initial state only
-              title="Status can only change from pending to collected (one-way)"
-            >
-              Pending
-            </Button>
-            <Button
               type="primary"
               size="small"
               onClick={() => handleCollected(record)}
               disabled={record.status !== 'pending'}
-              title={record.status !== 'pending' ? `Cannot mark as collected: request is ${record.status}` : 'Mark this return as collected'}
+              title={record.status !== 'pending' ? `Already collected: request is ${record.status}` : 'Mark this return as collected'}
             >
-              Collected
+              {record.status === 'pending' ? 'Collect' : 'Collected'}
             </Button>
           </Space>
         );
       },
     },
-  ];
+  ].filter(col => {
+    if (col.key === 'action') {
+      const { role } = getCurrentUserInfo();
+      return role === 'inventory_supervisor';
+    }
+    return true;
+  });
 
   return (
     <div>

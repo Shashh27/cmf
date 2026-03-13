@@ -136,7 +136,7 @@ const ToolReturn = () => {
       key: 'collected_by',
       width: 150,
       ellipsis: true,
-      render: (text, record) => text || record.admin_name || record.supervisor_name || '-',
+      render: (text, record) => text || record.inventory_supervisor_name || record.admin_name || '-',
     },
     {
       title: 'Details',

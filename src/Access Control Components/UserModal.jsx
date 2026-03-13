@@ -4,7 +4,7 @@ import { API_BASE_URL } from '../Config/auth.js';
 
 const { Option } = Select;
 
-const UserModal = ({ open, onCancel, onSuccess, editingUser }) => {
+const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] }) => {
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -47,8 +47,10 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser }) => {
         const errorData = await response.json().catch(() => ({}));
         const errorMsg = errorData.message || errorData.detail || errorData.error || '';
         
-        if (errorMsg.toLowerCase().includes('exist')) {
+        if (errorMsg.toLowerCase().includes('gmail') && errorMsg.toLowerCase().includes('exist')) {
            message.error('User with this email already exists');
+        } else if (errorMsg.toLowerCase().includes('username') && errorMsg.toLowerCase().includes('exist')) {
+           message.error('Username already exists');
         } else {
            message.error(errorMsg || (editingUser ? 'Failed to update user' : 'Failed to register user'));
         }
@@ -74,21 +76,50 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser }) => {
         <Form.Item
           name="username"
           label="Username"
-          rules={[{ required: true, message: 'Please enter username' }]}
+          rules={[
+            { required: true, message: 'Please enter username' },
+            {
+              validator: (_, value) => {
+                if (!value) return Promise.resolve();
+                const isDuplicate = existingUsers.some(
+                  (u) => 
+                    u.username?.toLowerCase() === value.toLowerCase() && 
+                    u.id !== editingUser?.id
+                );
+                return isDuplicate 
+                  ? Promise.reject(new Error('Username already exists')) 
+                  : Promise.resolve();
+              }
+            }
+          ]}
         >
           <Input placeholder="Enter username" />
         </Form.Item>
 
         <Form.Item
           name="gmail"
-          label="Gmail"
+          label="E-mail"
           rules={[
-            { required: true, message: 'Please enter gmail' },
+            { required: true, message: 'Please enter email' },
             { type: 'email', message: 'Please enter a valid email' },
-            { pattern: /^[a-zA-Z0-9._%+-]+@gmail\.com$/, message: 'Email must be a @gmail.com address' }
+            { 
+              validator: (_, value) => {
+                if (!value) return Promise.resolve();
+                if (/^[A-Z]/.test(value)) return Promise.reject(new Error('please enter valid email'));
+                if (!value.includes('@')) return Promise.reject(new Error('Email must contain @'));
+                const isDuplicate = existingUsers.some(
+                  (u) => 
+                    u.gmail?.toLowerCase() === value.toLowerCase() && 
+                    u.id !== editingUser?.id
+                );
+                return isDuplicate 
+                  ? Promise.reject(new Error('Email already exists')) 
+                  : Promise.resolve();
+              }
+            }
           ]}
         >
-          <Input placeholder="Enter gmail" />
+          <Input placeholder="Enter email" />
         </Form.Item>
 
         <Form.Item
@@ -99,6 +130,9 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser }) => {
           <Select placeholder="Select role">
             <Option value="admin">Admin</Option>
             <Option value="project_coordinator">Project Coordinator</Option>
+            <Option value="manufacturing_coordinator">Manufacturing Coordinator</Option>
+            <Option value="supervisor">Supervisor</Option>
+            <Option value="inventory_supervisor">Inventory Supervisor</Option>
             <Option value="operator">Operator</Option>
           </Select>
         </Form.Item>
