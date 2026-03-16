@@ -62,7 +62,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   const [issueQty, setIssueQty] = useState(1);
   const [issueCategory, setIssueCategory] = useState(undefined);
   const [issueDescription, setIssueDescription] = useState('');
-  const [issueFile, setIssueFile] = useState(null);
+  const [issueFiles, setIssueFiles] = useState([]); // Changed from issueFile to issueFiles array
   const [issueCustomCategory, setIssueCustomCategory] = useState('');
   const [issuesByReq, setIssuesByReq] = useState({});
   // Issue quantity exceeded popup (issue qty > remaining)
@@ -329,7 +329,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     setIssueQty(Math.min(1, outstanding) || 1);
     setIssueCategory(undefined);
     setIssueDescription('');
-    setIssueFile(null);
+    setIssueFiles([]); // Reset to empty array
     setIsIssueModalVisible(true);
   };
 
@@ -373,7 +373,13 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       }
       if (categoryToSend) formData.append('issue_category', categoryToSend);
       if (issueDescription) formData.append('description', issueDescription);
-      if (issueFile) formData.append('document', issueFile);
+      
+      // Append all selected files
+      if (issueFiles && issueFiles.length > 0) {
+        issueFiles.forEach(file => {
+          formData.append('document', file);
+        });
+      }
       
       const resp = await fetch(`${API_BASE_URL}/tool-issues/`, {
         method: 'POST',
@@ -692,10 +698,11 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
               onChange={(e) => setIssueDescription(e.target.value)}
             />
           </Form.Item>
-          <Form.Item label="Attach Document (optional)">
+          <Form.Item label="Attach Documents (optional)">
             <input
               type="file"
-              onChange={(e) => setIssueFile(e.target.files?.[0] || null)}
+              multiple
+              onChange={(e) => setIssueFiles(Array.from(e.target.files || []))}
             />
           </Form.Item>
         </Form>

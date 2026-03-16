@@ -196,20 +196,9 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       },
     ];
   } else if (prefix === '/supervisor') {
-    items = [
-      {
-        key: `${prefix}/dashboard`,
-        label: <Link to={`${prefix}/dashboard`} onClick={() => setMobileDrawerOpen(false)}>Dashboard</Link>,
-        icon: <DashboardOutlined />,
-      },
-    ];
+    items = [];
   } else if (prefix === '/inventory_supervisor') {
     items = [
-      {
-        key: `${prefix}/dashboard`,
-        label: <Link to={`${prefix}/dashboard`} onClick={() => setMobileDrawerOpen(false)}>Dashboard</Link>,
-        icon: <DashboardOutlined />,
-      },
       {
         key: 'inventory-management',
         label: 'Inventory Management',

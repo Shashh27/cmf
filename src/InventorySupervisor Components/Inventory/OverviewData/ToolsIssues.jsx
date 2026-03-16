@@ -16,7 +16,7 @@ const ToolsIssues = () => {
   const [actionType, setActionType] = useState(null); // 'approve' or 'reject'
   const [remarks, setRemarks] = useState('');
   const [documentModalVisible, setDocumentModalVisible] = useState(false);
-  const [selectedDocumentUrl, setSelectedDocumentUrl] = useState('');
+  const [selectedDocuments, setSelectedDocuments] = useState([]); // Changed to array
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -172,8 +172,9 @@ const ToolsIssues = () => {
   };
 
   const handleViewDocument = (record) => {
-    if (record.document_url) {
-      setSelectedDocumentUrl(record.document_url);
+    if (record.documents && record.documents.length > 0) {
+      const urls = record.documents.map(doc => doc.document_url);
+      setSelectedDocuments(urls);
       setDocumentModalVisible(true);
     } else {
       message.info('No document uploaded for this issue');
@@ -265,10 +266,10 @@ const ToolsIssues = () => {
           type="default"
           size="small"
           onClick={() => handleViewDocument(record)}
-          disabled={!record.document_url}
-          title={record.document_url ? "View uploaded document" : "No document uploaded"}
+          disabled={!record.documents || record.documents.length === 0}
+          title={record.documents && record.documents.length > 0 ? "View uploaded documents" : "No documents uploaded"}
         >
-          {record.document_url ? 'Preview' : 'Not uploaded'}
+          {record.documents && record.documents.length > 0 ? 'Preview' : 'Not uploaded'}
         </Button>
       ),
     },
@@ -480,50 +481,64 @@ const ToolsIssues = () => {
         open={documentModalVisible}
         onCancel={() => {
           setDocumentModalVisible(false);
-          setSelectedDocumentUrl('');
+          setSelectedDocuments([]);
         }}
         footer={[
           <Button key="close" onClick={() => setDocumentModalVisible(false)}>
             Close
-          </Button>,
-          <Button 
-            key="download" 
-            type="primary" 
-            onClick={() => {
-              const link = document.createElement('a');
-              link.href = selectedDocumentUrl;
-              link.download = '';
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-            }}
-          >
-            Download
           </Button>
         ]}
         width={800}
         style={{ top: 20 }}
       >
-        {selectedDocumentUrl && (
-          <div style={{ textAlign: 'center', minHeight: '500px' }}>
-            {selectedDocumentUrl.toLowerCase().includes('.pdf') ? (
-              <iframe
-                src={selectedDocumentUrl}
-                style={{ width: '100%', height: '500px', border: 'none' }}
-                title="Document Preview"
-              />
-            ) : selectedDocumentUrl.toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/) ? (
-              <img
-                src={selectedDocumentUrl}
-                alt="Document Preview"
-                style={{ maxWidth: '100%', maxHeight: '500px' }}
-              />
-            ) : (
-              <div style={{ padding: '50px' }}>
-                <p>Document type cannot be previewed.</p>
-                <p>Please use the Download button to view the document.</p>
+        {selectedDocuments.length > 0 ? (
+          <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+            {selectedDocuments.map((url, index) => (
+              <div key={index} style={{ marginBottom: 24, borderBottom: index < selectedDocuments.length - 1 ? '1px solid #f0f0f0' : 'none', paddingBottom: 16 }}>
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 600 }}>Document {index + 1}</span>
+                  <Button 
+                    type="link" 
+                    size="small"
+                    onClick={() => {
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.target = "_blank";
+                      link.download = '';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                  >
+                    Download / Open
+                  </Button>
+                </div>
+                <div style={{ textAlign: 'center', minHeight: '300px', background: '#f9f9f9', padding: 8, borderRadius: 4 }}>
+                  {url.toLowerCase().includes('.pdf') ? (
+                    <iframe
+                      src={url}
+                      style={{ width: '100%', height: '400px', border: 'none' }}
+                      title={`Document Preview ${index + 1}`}
+                    />
+                  ) : url.toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/) ? (
+                    <img
+                      src={url}
+                      alt={`Document Preview ${index + 1}`}
+                      style={{ maxWidth: '100%', maxHeight: '400px' }}
+                    />
+                  ) : (
+                    <div style={{ padding: '40px' }}>
+                      <p>Document type cannot be previewed.</p>
+                      <p>Please use the Download button to view the document.</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            ))}
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <p>No documents to display.</p>
           </div>
         )}
       </Modal>
