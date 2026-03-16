@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Card, Typography, Divider, Tooltip } from 'antd';
 import { PlusOutlined, EyeOutlined, DeleteOutlined,EditOutlined,CheckCircleOutlined,ClockCircleOutlined } from '@ant-design/icons';
-import { API_BASE_URL } from '../Config/auth.js';
+import { API_BASE_URL } from '../Config/auth';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;

@@ -33,6 +33,9 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     if (path.startsWith('/admin')) return '/admin';
     if (path.startsWith('/project_coordinator')) return '/project_coordinator';
     if (path.startsWith('/operator')) return '/operator';
+    if (path.startsWith('/manufacturing_coordinator')) return '/manufacturing_coordinator';
+    if (path.startsWith('/supervisor')) return '/supervisor';
+    if (path.startsWith('/inventory_supervisor')) return '/inventory_supervisor';
     return ''; // Default fallback
   };
 
@@ -65,16 +68,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  // Update openKeys when route changes - add new keys without removing existing ones
-  useEffect(() => {
-    setOpenKeys(prevKeys => {
-      const newKeys = getOpenKeys();
-      // Combine existing keys with new keys, removing duplicates
-      const combinedKeys = [...new Set([...prevKeys, ...newKeys])];
-      return combinedKeys;
-    });
-  }, [location.pathname]);
 
   // Define all menu items with dynamic paths
   const allItems = [
@@ -195,6 +188,28 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/pdm`,
         label: <Link to={`${prefix}/pdm`} onClick={() => setMobileDrawerOpen(false)}>PDM</Link>,
         icon: <DeploymentUnitOutlined />,
+      },
+    ];
+  } else if (prefix === '/manufacturing_coordinator') {
+    items = [
+      {
+        key: `${prefix}/dashboard`,
+        label: <Link to={`${prefix}/dashboard`} onClick={() => setMobileDrawerOpen(false)}>Dashboard</Link>,
+        icon: <DashboardOutlined />,
+      },
+    ];
+  } else if (prefix === '/supervisor') {
+    items = [];
+  } else if (prefix === '/inventory_supervisor') {
+    items = [
+      {
+        key: 'inventory-management',
+        label: 'Inventory Management',
+        icon: <DatabaseOutlined />,
+        children: [
+          { key: `${prefix}/inventory-management/inventory-master`, label: <Link to={`${prefix}/inventory-management/inventory-master`} onClick={() => setMobileDrawerOpen(false)}>Inventory Master</Link> },
+          { key: `${prefix}/inventory-management/overview-data`, label: <Link to={`${prefix}/inventory-management/overview-data`} onClick={() => setMobileDrawerOpen(false)}>Overview Data</Link> },
+        ],
       },
     ];
   } else {

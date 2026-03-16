@@ -383,6 +383,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         document_type: "Other",
         document_type_other: "",
         document_version: "v1.0",
+        document_version: "v1.0",
       },
     ]);
   };

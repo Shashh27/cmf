@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Tabs, message, Card, Typography } from 'antd';
 import { DatabaseOutlined } from '@ant-design/icons';
-import { ToolsList, InstrumentsList, ToolForm } from '../Inventory Components/InventoryMaster';
+import { ToolsList, InstrumentsList, ToolForm } from '../InventorySupervisor Components/Inventory/InventoryMaster';
 import { API_BASE_URL } from '../Config/auth.js';
 
 const { TabPane } = Tabs;
@@ -73,32 +73,26 @@ const Inventory = () => {
   };
 
   return (
-    <div style={{ padding: '16px' }}>
-      {/* Header Card */}
-      <Card 
-        bordered={false} 
-        style={{ 
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
-          marginBottom: '16px'
-        }}
-        bodyStyle={{ padding: '16px 24px' }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <DatabaseOutlined style={{ fontSize: '28px', color: '#1890ff' }} />
-          <div>
-            <Title level={3} style={{ margin: 0, fontSize: '22px', fontWeight: 600, color: '#1a1a1a' }}>
-              Inventory Master
-            </Title>
-            <Text type="secondary" style={{ fontSize: '14px', marginTop: '2px', display: 'block' }}>
-              Manage and track all tools, instruments, and inventory items in your facility
-            </Text>
-          </div>
-        </div>
-      </Card>
-      
-      <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-        <Tabs defaultActiveKey="tools" destroyInactiveTabPane={false}>
+    <div style={{ padding: '10px' }}>
+      <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+        <style>{`
+          .ant-tabs-nav { 
+            margin: 0 0 10px 0 !important; 
+          }
+          .ant-tabs-tab {
+            padding: 6px 10px !important;
+            margin: 0 !important;
+          }
+          .ant-tabs-ink-bar {
+            height: 2px !important;
+          }
+        `}</style>
+        <Tabs 
+          defaultActiveKey="tools" 
+          destroyInactiveTabPane={false}
+          tabBarStyle={{ margin: 0 }}
+          style={{ marginTop: 0 }}
+        >
           <TabPane tab="Tools" key="tools">
             <ToolsList
               key={toolsListRefresh}

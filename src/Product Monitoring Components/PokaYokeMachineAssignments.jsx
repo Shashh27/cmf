@@ -181,11 +181,11 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   };
 
   return (
-    <div>
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <div style={{ padding: '4px' }}>
+      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <Title level={4} style={{ margin: 0 }}>Machine Checklist Assignments</Title>
-          <Text type="secondary" style={{ fontSize: '14px' }}>
+          <Title level={4} style={{ margin: 0, fontSize: '22px', fontWeight: 600 }}>Machine Checklist Assignments</Title>
+          <Text type="secondary" style={{ fontSize: '14px', color: '#64748b' }}>
             Assign checklists to machines for operator completion
           </Text>
         </div>
@@ -228,11 +228,11 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         }}
         bodyStyle={{ padding: '24px' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
           <div style={{ minWidth: '140px' }}>
             <Text strong style={{ fontSize: '14px' }}>Select Machine:</Text>
           </div>
-          <div style={{ flex: '0 0 450px' }}>
+          <div style={{ flex: '1 1 400px', minWidth: '300px' }}>
             <Select
               placeholder="Select a machine to see its assigned checklists"
               loading={machinesLoading}
@@ -243,10 +243,6 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
               }}
               value={selectedMachine}
               onChange={setSelectedMachine}
-              showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
             >
               {machines.map(machine => (
                 <Option key={machine.id} value={machine.id}>
@@ -367,9 +363,12 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                 borderRadius: '6px'
               }}
               showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
+              filterOption={(input, option) => {
+                const label = Array.isArray(option?.children) 
+                  ? option.children.join('') 
+                  : (option?.children || '');
+                return label.toString().toLowerCase().includes(input.toLowerCase());
+              }}
             >
               {checklists.map(checklist => (
                 <Option key={checklist.id} value={checklist.id}>

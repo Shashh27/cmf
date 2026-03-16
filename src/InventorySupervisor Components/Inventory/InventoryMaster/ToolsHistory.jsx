@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import {Modal,Card,Row,Col,List,Tag,DatePicker,Select,Button,message } from 'antd';
 import { HistoryOutlined,ToolOutlined,CheckCircleOutlined,MonitorOutlined,DownloadOutlined,CloseOutlined } from '@ant-design/icons';
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
+import moment from 'moment';
 import { pdf } from '@react-pdf/renderer';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../../Config/auth.js';
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -37,7 +38,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
   const fetchToolHistory = async (toolData) => {
     setHistoryLoading(true);
     try {
-      const response = await fetch(`${config.API_BASE_URL}/transaction-history/by-tool/${toolData.id}`);
+      const response = await fetch(`${API_BASE_URL}/transaction-history/by-tool/${toolData.id}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -241,7 +242,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
         requested_by: it.operator_name || '-',
         requested_qty: 0,
         issue_qty: it.tool_issue_qty || 0,
-        approved_by: it.admin_name || '-',
+        approved_by: it.inventory_supervisor_name || '-',
         remarks: it.remarks || ''
       });
     });
@@ -266,7 +267,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
   // Filter transactions based on filters
   const filteredTransactions = getFilteredTransactions();
 
-  // Filter grouped requests from backend based on view filter + project/part filters
+  // Filter grouped requests from backend based on view filter + project/part/date filters
   const filteredGroupedRequests = groupedRequests.filter(item => {
     // Project filter
     if (historyProjectFilter && item.project_name !== historyProjectFilter) {
@@ -275,6 +276,18 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
     // Part filter
     if (historyPartFilter && item.part_name !== historyPartFilter) {
       return false;
+    }
+    // Date filter
+    if (Array.isArray(historyDateRange) && historyDateRange.length === 2) {
+      const [start, end] = historyDateRange;
+      if (start && end) {
+        const itemTime = item.requested_date ? new Date(item.requested_date).getTime() : null;
+        const startTime = start.startOf('day').valueOf();
+        const endTime = end.endOf('day').valueOf();
+        if (!itemTime || itemTime < startTime || itemTime > endTime) {
+          return false;
+        }
+      }
     }
     // View filter
     if (historyView === 'requested') return item.status?.toLowerCase() === 'approved';
@@ -358,7 +371,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
         requested_by: req.operator_name || '-',
         requested_qty: req.requested_qty || 0,
         requested_date: req.requested_date || null,
-        approved_by: req.approved_by || '',
+        approved_by: req.inventory_supervisor_name || '',
         approved_date: req.approved_date || null,
         returned_qty: returnedQty,
         status,
@@ -383,7 +396,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
     const formatDate = (d) => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
     const Doc = () => (
       <Document>
-        <Page size="A4" style={styles.page}>
+        <Page size="A4" orientation="landscape" style={styles.page}>
           <Text style={styles.title}>{toolName} History</Text>
           <Text style={styles.summary}>Total Qty: {toolTotalQty} | Available: {toolAvailableQty} | In Use Now: {toolInUseNow} | Issues: {totalApprovedIssues}</Text>
           {historyProjectFilter ? <Text style={styles.filter}>Project: {historyProjectFilter}</Text> : null}
@@ -401,8 +414,8 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
               <View style={[styles.cellBox, styles.wDate]}><Text style={styles.cellHeaderText}>Appr Date</Text></View>
               <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellHeaderText}>Ret Qty</Text></View>
               <View style={[styles.cellBox, styles.wStatus]}><Text style={styles.cellHeaderText}>Status</Text></View>
-              <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellHeaderText}>Issues Raised</Text></View>
-              <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellHeaderText}>Issues Approved</Text></View>
+              <View style={[styles.cellBox, styles.wIssues]}><Text style={styles.cellHeaderText}>Issues Raised</Text></View>
+              <View style={[styles.cellBox, styles.wIssues]}><Text style={styles.cellHeaderText}>Issues Approved</Text></View>
               <View style={[styles.cellBox, styles.wRemarks]}><Text style={styles.cellHeaderText}>Remarks</Text></View>
             </View>
             {rows.map((row, idx) => (
@@ -417,8 +430,8 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                 <View style={[styles.cellBox, styles.wDate]}><Text style={styles.cellText}>{formatDate(row.approved_date)}</Text></View>
                 <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellText}>{String(row.returned_qty)}</Text></View>
                 <View style={[styles.cellBox, styles.wStatus]}><Text style={styles.cellText}>{row.status || '-'}</Text></View>
-                <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellText}>{String(row.issues_raised_qty)}</Text></View>
-                <View style={[styles.cellBox, styles.wQty]}><Text style={styles.cellText}>{String(row.issues_approved_qty)}</Text></View>
+                <View style={[styles.cellBox, styles.wIssues]}><Text style={styles.cellText}>{String(row.issues_raised_qty)}</Text></View>
+                <View style={[styles.cellBox, styles.wIssues]}><Text style={styles.cellText}>{String(row.issues_approved_qty)}</Text></View>
                 <View style={[styles.cellBox, styles.wRemarks]}><Text style={styles.cellText}>{row.remarks || '-'}</Text></View>
               </View>
             ))}
@@ -439,24 +452,25 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
   };
 
   const styles = StyleSheet.create({
-    page: { padding: 30, fontSize: 10, fontFamily: 'Helvetica' },
+    page: { padding: 30, fontSize: 9, fontFamily: 'Helvetica' },
     title: { fontSize: 20, marginBottom: 10, fontWeight: 'bold' },
     summary: { fontSize: 12, marginBottom: 8, color: '#333' },
     filter: { fontSize: 10, marginBottom: 4, color: '#666' },
-    table: { marginTop: 6, borderWidth: 1, borderColor: '#cccccc' },
-    tableRow: { flexDirection: 'row' },
-    tableHeader: { backgroundColor: '#f0f0f0' },
-    cellBox: { paddingVertical: 4, paddingHorizontal: 4, borderRightWidth: 0.5, borderBottomWidth: 0.5, borderColor: '#dddddd', justifyContent: 'center' },
-    cellHeaderText: { fontWeight: 'bold' },
-    cellText: { },
-    wSL: { width: 24, textAlign: 'right' },
-    wProject: { width: 78 },
-    wPart: { width: 70 },
-    wBy: { width: 86 },
-    wQty: { width: 48, textAlign: 'right' },
-    wDate: { width: 94 },
-    wStatus: { width: 68 },
-    wRemarks: { width: 150, flexGrow: 1 },
+    table: { marginTop: 10, borderWidth: 1, borderColor: '#000', display: 'table', width: 'auto' },
+    tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#000' },
+    tableHeader: { backgroundColor: '#f0f0f0', borderBottomWidth: 2, borderBottomColor: '#000' },
+    cellBox: { padding: 5, borderRightWidth: 1, borderRightColor: '#000', justifyContent: 'center' },
+    cellHeaderText: { fontWeight: 'bold', fontSize: 10 },
+    cellText: { fontSize: 9 },
+    wSL: { width: '5%', textAlign: 'right' },
+    wProject: { width: '10%' },
+    wPart: { width: '10%' },
+    wBy: { width: '12%' },
+    wQty: { width: '6%', textAlign: 'right' },
+    wDate: { width: '12%' },
+    wStatus: { width: '10%' },
+    wIssues: { width: '8%', textAlign: 'right' },
+    wRemarks: { width: '15%', flexGrow: 1, borderRightWidth: 0 },
   });
 
   return (
@@ -604,6 +618,8 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
               <RangePicker
                 onChange={(range) => setHistoryDateRange(range || [])}
                 style={{ minWidth: 200, flex: 1 }}
+                disabledDate={(current) => current && current > moment().endOf('day')}
+                inputReadOnly
               />
               <Select
                 allowClear
@@ -656,18 +672,18 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
         renderItem={(request) => (
           <List.Item style={{ padding: 0, marginBottom: 16 }}>
             <Card
-              hoverable
-              style={{
-                width: '100%',
-                borderRadius: 12,
-                border: '1px solid #e5e7eb',
-                overflow: 'hidden',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
-              }}
+                hoverable
+                style={{
+                  width: '100%',
+                  borderRadius: 12,
+                  border: '2px solid #ffe58f',
+                  overflow: 'hidden',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
+                }}
               styles={{ body: { padding: 0 } }}
             >
               <div style={{ 
-                background: '#fffdf2',
+                background: '#fffbe6',
                 padding: '16px 20px',
                 borderBottom: '1px solid #ffe58f'
               }}>
@@ -1042,7 +1058,7 @@ const ToolsHistory = ({ tool, visible, onClose }) => {
                   </span>
                 </div>
                 <span style={{ background: '#fffbe6', border: '1px solid #ffe58f', color: '#d48806', padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 700 }}>
-                  Balance: {Math.max(0, (request.requested_qty || 0) - (request.total_returned_qty || 0) - (request.total_issue_qty || 0))}
+                  Balance: {request.in_use_qty || 0}
                 </span>
               </div>
             </Card>

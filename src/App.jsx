@@ -16,9 +16,10 @@ import QualityManagement from "./Quality Management Components/QualityManagement
 import InventoryMaster from "./Pages/Inventory";
 import OverviewData from "./Pages/OverviewData";
 import DocumentManagement from "./Pages/Document";
-import Notification from "./Notification Components/Notification";
+import Notification from "./Pages/Notification";
 import AccessControl from "./Pages/AccessControl";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
 
 function App() {
   return (
@@ -76,6 +77,19 @@ function App() {
           <Route path="/project_coordinator/oms/product/:productId" element={<ProjectCoordinatorDashboard />} />
           <Route path="/project_coordinator/pdm" element={<ProjectCoordinatorDashboard />} />
          
+          {/* Manufacturing Coordinator */}
+          <Route path="/manufacturing_coordinator" element={<Navigate to="/manufacturing_coordinator/dashboard" replace />} />
+          <Route path="/manufacturing_coordinator/dashboard" element={<ManufacturingCoordinator />} />
+          
+          {/* Supervisor */}
+          <Route path="/supervisor" element={<Navigate to="/login" replace />} />
+          
+          {/* Inventory Supervisor */}
+          <Route path="/inventory_supervisor" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />
+          <Route path="/inventory_supervisor/dashboard" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />
+          <Route path="/inventory_supervisor/inventory-management" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />
+          <Route path="/inventory_supervisor/inventory-management/inventory-master" element={<InventoryMaster />} />
+          <Route path="/inventory_supervisor/inventory-management/overview-data" element={<OverviewData />} />
           
           {/* Operator Routes */}
           <Route path="/operator" element={<Navigate to="/operator/dashboard" replace />} />

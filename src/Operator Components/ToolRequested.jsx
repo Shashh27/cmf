@@ -62,7 +62,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   const [issueQty, setIssueQty] = useState(1);
   const [issueCategory, setIssueCategory] = useState(undefined);
   const [issueDescription, setIssueDescription] = useState('');
-  const [issueFile, setIssueFile] = useState(null);
+  const [issueFiles, setIssueFiles] = useState([]); // Changed from issueFile to issueFiles array
   const [issueCustomCategory, setIssueCustomCategory] = useState('');
   const [issuesByReq, setIssuesByReq] = useState({});
   // Issue quantity exceeded popup (issue qty > remaining)
@@ -78,10 +78,12 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     return Math.max(0, (req.quantity || 0) - returned - issues);
   };
 
-  const isConsumableType = (req) => {
-    if (!req) return false;
-    // Check if the request has tool type information
-    return req.type === 'CONSUMABLES' || req.tool_type === 'CONSUMABLES';
+  const isConsumableType = (record) => {
+    // Check if the tool is consumable based on tool type or category
+    // You may need to adjust this logic based on your data structure
+    return record.tool_type?.toLowerCase()?.includes('consumable') || 
+           record.category?.toLowerCase()?.includes('consumable') ||
+           record.is_consumable === true;
   };
 
   useEffect(() => {
@@ -125,12 +127,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     return rr.status === 'collected' ? sum + (rr.returned_qty || 0) : sum;
   }, 0);
   const totalToBeReturned = requests.reduce((sum, r) => {
-    const isConsum = isConsumableType(r);
-    if (r.status === 'approved' && !isConsum) {
-      const remaining = computeRemaining(r);
-      return sum + (remaining > 0 ? remaining : 0);
-    }
-    return sum;
+    if (r.status !== 'approved') return sum;
+    const remaining = computeRemaining(r);
+    return sum + remaining;
   }, 0);
   const yetToBeCollected = returnRequests.reduce((sum, r) => {
     if (r.status === 'pending' || r.status === 'not_collected') {
@@ -330,7 +329,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     setIssueQty(Math.min(1, outstanding) || 1);
     setIssueCategory(undefined);
     setIssueDescription('');
-    setIssueFile(null);
+    setIssueFiles([]); // Reset to empty array
     setIsIssueModalVisible(true);
   };
 
@@ -374,7 +373,13 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       }
       if (categoryToSend) formData.append('issue_category', categoryToSend);
       if (issueDescription) formData.append('description', issueDescription);
-      if (issueFile) formData.append('document', issueFile);
+      
+      // Append all selected files
+      if (issueFiles && issueFiles.length > 0) {
+        issueFiles.forEach(file => {
+          formData.append('document', file);
+        });
+      }
       
       const resp = await fetch(`${API_BASE_URL}/tool-issues/`, {
         method: 'POST',
@@ -469,9 +474,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       },
     },
     {
-      title: 'Supervisor',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      title: 'Approved By',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 150,
       ellipsis: true,
       render: (text) => text || <span style={{ color: '#999', fontStyle: 'italic' }}>Pending</span>,
@@ -693,10 +698,11 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
               onChange={(e) => setIssueDescription(e.target.value)}
             />
           </Form.Item>
-          <Form.Item label="Attach Document (optional)">
+          <Form.Item label="Attach Documents (optional)">
             <input
               type="file"
-              onChange={(e) => setIssueFile(e.target.files?.[0] || null)}
+              multiple
+              onChange={(e) => setIssueFiles(Array.from(e.target.files || []))}
             />
           </Form.Item>
         </Form>

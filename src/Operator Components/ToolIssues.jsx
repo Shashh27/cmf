@@ -7,7 +7,7 @@ const ToolIssues = () => {
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [previewVisible, setPreviewVisible] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewUrls, setPreviewUrls] = useState([]); // Changed to array
  
   const getOperatorId = () => {
     try {
@@ -104,9 +104,13 @@ const ToolIssues = () => {
       title: 'Document',
       key: 'document',
       width: 130,
-      render: (_, record) => record.document_url ? (
-        <Button size="small" onClick={() => { setPreviewUrl(record.document_url); setPreviewVisible(true); }}>
-          Preview
+      render: (_, record) => record.documents && record.documents.length > 0 ? (
+        <Button size="small" onClick={() => { 
+          const urls = record.documents.map(doc => doc.document_url);
+          setPreviewUrls(urls); 
+          setPreviewVisible(true); 
+        }}>
+          Preview ({record.documents.length})
         </Button>
       ) : '—'
     },
@@ -124,8 +128,8 @@ const ToolIssues = () => {
     },
     {
       title: 'Approved By',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 140,
       render: (text) => text || '-',
     },
@@ -153,25 +157,34 @@ const ToolIssues = () => {
       <Modal
         title="Document Preview"
         open={previewVisible}
-        onCancel={() => { setPreviewVisible(false); setPreviewUrl(''); }}
+        onCancel={() => { setPreviewVisible(false); setPreviewUrls([]); }}
         footer={[
-          <Button key="close" onClick={() => { setPreviewVisible(false); setPreviewUrl(''); }}>Close</Button>
+          <Button key="close" onClick={() => { setPreviewVisible(false); setPreviewUrls([]); }}>Close</Button>
         ]}
         width={800}
         style={{ top: 20 }}
       >
-        {previewUrl ? (
-          previewUrl.toLowerCase().includes('.pdf') ? (
-            <iframe src={previewUrl} style={{ width: '100%', height: 500, border: 'none' }} title="Preview" />
-          ) : previewUrl.toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/) ? (
-            <img src={previewUrl} alt="Preview" style={{ maxWidth: '100%', maxHeight: 500 }} />
-          ) : (
-            <div style={{ padding: 50 }}>
-              <p>Document type cannot be previewed. Use the link below to open.</p>
-              <a href={previewUrl} target="_blank" rel="noreferrer">Open in new tab</a>
-            </div>
-          )
-        ) : null}
+        <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+          {previewUrls.length > 0 ? (
+            previewUrls.map((url, idx) => (
+              <div key={idx} style={{ marginBottom: 20, borderBottom: idx < previewUrls.length - 1 ? '1px solid #eee' : 'none', paddingBottom: 15 }}>
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+                  <strong>Document {idx + 1}</strong>
+                  <a href={url} target="_blank" rel="noreferrer">Open in new tab</a>
+                </div>
+                {url.toLowerCase().includes('.pdf') ? (
+                  <iframe src={url} style={{ width: '100%', height: 400, border: 'none' }} title={`Preview ${idx}`} />
+                ) : url.toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/) ? (
+                  <img src={url} alt={`Preview ${idx}`} style={{ maxWidth: '100%', maxHeight: 400, display: 'block', margin: '0 auto' }} />
+                ) : (
+                  <div style={{ padding: 20, textAlign: 'center', background: '#f5f5f5' }}>
+                    <p>Document type cannot be previewed.</p>
+                  </div>
+                )}
+              </div>
+            ))
+          ) : <p>No documents to preview.</p>}
+        </div>
       </Modal>
     </div>
   );

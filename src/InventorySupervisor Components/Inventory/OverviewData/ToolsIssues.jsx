@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Tag, Space, message, Modal, Input, Row, Col, Card, DatePicker, Select } from 'antd';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../../Config/auth.js';
 
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
@@ -10,13 +10,13 @@ const ToolsIssues = () => {
   const [filteredIssues, setFilteredIssues] = useState([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all'); // all | pending | approved | rejected
-  const [adminId, setAdminId] = useState(null);
+  const [inventorySupervisorId, setInventorySupervisorId] = useState(null);
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [actionType, setActionType] = useState(null); // 'approve' or 'reject'
   const [remarks, setRemarks] = useState('');
   const [documentModalVisible, setDocumentModalVisible] = useState(false);
-  const [selectedDocumentUrl, setSelectedDocumentUrl] = useState('');
+  const [selectedDocuments, setSelectedDocuments] = useState([]); // Changed to array
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -24,26 +24,27 @@ const ToolsIssues = () => {
   const [dateRange, setDateRange] = useState([null, null]);
   const [searchText, setSearchText] = useState('');
 
-  const getCurrentAdminInfo = () => {
+  const getCurrentUserInfo = () => {
     try {
       const stored = localStorage.getItem('user');
-      if (!stored) return { id: null, name: null };
+      if (!stored) return { id: null, name: null, role: null };
       const u = JSON.parse(stored);
       const id = u?.id != null ? parseInt(u.id) : null;
       const name = u?.user_name || u?.username || null;
-      return { id, name };
+      const role = u?.role || null;
+      return { id, name, role };
     } catch (e) {
       console.error('Failed to parse user from localStorage', e);
-      return { id: null, name: null };
+      return { id: null, name: null, role: null };
     }
   };
 
   const fetchIssues = async (status = statusFilter) => {
     setLoading(true);
     try {
-      let url = `${config.API_BASE_URL}/tool-issues/`;
+      let url = `${API_BASE_URL}/tool-issues/`;
       if (status !== 'all') {
-        url = `${config.API_BASE_URL}/tool-issues/by-status/${status}`;
+        url = `${API_BASE_URL}/tool-issues/by-status/${status}`;
       }
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -62,10 +63,10 @@ const ToolsIssues = () => {
 
   useEffect(() => {
     fetchIssues();
-    // Auto-set admin ID from localStorage if available
-    const { id: currentAdminId } = getCurrentAdminInfo();
-    if (currentAdminId) {
-      setAdminId(currentAdminId);
+    // Auto-set inventory supervisor ID from localStorage if available
+    const { id: currentUserId, role } = getCurrentUserInfo();
+    if (currentUserId && role === 'inventory_supervisor') {
+      setInventorySupervisorId(currentUserId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
@@ -88,10 +89,12 @@ const ToolsIssues = () => {
     }
     if (searchText) {
       const s = searchText.toLowerCase();
-      data = data.filter(r =>
-        (r.tool_name || '').toLowerCase().includes(s) ||
-        (r.sale_order_number || '').toLowerCase().includes(s)
-      );
+      data = data.filter(r => {
+        return Object.values(r).some(val => {
+          if (val === null || val === undefined || typeof val === 'object') return false;
+          return String(val).toLowerCase().includes(s);
+        });
+      });
     }
     setFilteredIssues(data);
     setPagination(prev => ({ ...prev, current: 1 }));
@@ -114,8 +117,8 @@ const ToolsIssues = () => {
   };
 
   const handleConfirmAction = async () => {
-    if (!adminId) {
-      message.warning('Please set Admin ID to approve/reject');
+    if (!inventorySupervisorId) {
+      message.warning('Please set Inventory Supervisor ID to approve/reject');
       return;
     }
 
@@ -126,12 +129,12 @@ const ToolsIssues = () => {
 
     try {
       const payload = {
-        admin_id: adminId,
+        inventory_supervisor_id: inventorySupervisorId,
         status: actionType === 'approve' ? 'approved' : 'rejected',
         remarks: remarks.trim()
       };
 
-      const url = `${config.API_BASE_URL}/tool-issues/${selectedIssue.id}/status`;
+      const url = `${API_BASE_URL}/tool-issues/${selectedIssue.id}/status`;
       const resp = await fetch(url, { 
         method: 'PUT',
         headers: {
@@ -169,8 +172,9 @@ const ToolsIssues = () => {
   };
 
   const handleViewDocument = (record) => {
-    if (record.document_url) {
-      setSelectedDocumentUrl(record.document_url);
+    if (record.documents && record.documents.length > 0) {
+      const urls = record.documents.map(doc => doc.document_url);
+      setSelectedDocuments(urls);
       setDocumentModalVisible(true);
     } else {
       message.info('No document uploaded for this issue');
@@ -262,17 +266,17 @@ const ToolsIssues = () => {
           type="default"
           size="small"
           onClick={() => handleViewDocument(record)}
-          disabled={!record.document_url}
-          title={record.document_url ? "View uploaded document" : "No document uploaded"}
+          disabled={!record.documents || record.documents.length === 0}
+          title={record.documents && record.documents.length > 0 ? "View uploaded documents" : "No documents uploaded"}
         >
-          {record.document_url ? 'Preview' : 'Not uploaded'}
+          {record.documents && record.documents.length > 0 ? 'Preview' : 'Not uploaded'}
         </Button>
       ),
     },
     {
       title: 'Approved By',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 140,
       className: 'table-header-styled',
       render: (text) => text || '-',
@@ -297,30 +301,44 @@ const ToolsIssues = () => {
       fixed: 'right',
       align: 'center',
       className: 'table-header-styled',
-      render: (_, record) => (
-        <Space size="small">
-          <Button
-            type="primary"
-            size="small"
-            onClick={() => showConfirmModal(record, 'approve')}
-            disabled={record.status !== 'pending'}
-            title={record.status !== 'pending' ? `Cannot approve: issue is ${record.status}` : 'Approve this issue'}
-          >
-            Approve
-          </Button>
-          <Button
-            danger
-            size="small"
-            onClick={() => showConfirmModal(record, 'reject')}
-            disabled={record.status !== 'pending'}
-            title={record.status !== 'pending' ? `Cannot reject: issue is ${record.status}` : 'Reject this issue'}
-          >
-            Reject
-          </Button>
-        </Space>
-      ),
+      render: (_, record) => {
+        const { role } = getCurrentUserInfo();
+        // Only show actions for inventory_supervisor
+        if (role !== 'inventory_supervisor') {
+          return '-';
+        }
+        
+        return (
+          <Space size="small">
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => showConfirmModal(record, 'approve')}
+              disabled={record.status !== 'pending'}
+              title={record.status !== 'pending' ? `Cannot approve: issue is ${record.status}` : 'Approve this issue'}
+            >
+              Approve
+            </Button>
+            <Button
+              danger
+              size="small"
+              onClick={() => showConfirmModal(record, 'reject')}
+              disabled={record.status !== 'pending'}
+              title={record.status !== 'pending' ? `Cannot reject: issue is ${record.status}` : 'Reject this issue'}
+            >
+              Reject
+            </Button>
+          </Space>
+        );
+      },
     },
-  ];
+  ].filter(col => {
+    if (col.key === 'actions') {
+      const { role } = getCurrentUserInfo();
+      return role === 'inventory_supervisor';
+    }
+    return true;
+  });
 
   return (
     <div>
@@ -334,6 +352,7 @@ const ToolsIssues = () => {
                 value={dateRange}
                 onChange={(vals) => setDateRange(vals)}
                 allowClear
+                inputReadOnly
               />
             </div>
           </Col>
@@ -357,8 +376,9 @@ const ToolsIssues = () => {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 4 }}>Search</span>
               <Input.Search
-                placeholder="Search by project number or tool name"
+                placeholder="Search issues by any field..."
                 allowClear
+                maxLength={20}
                 onSearch={(v) => setSearchText(v || '')}
                 onChange={(e) => setSearchText(e.target.value)}
               />
@@ -461,50 +481,64 @@ const ToolsIssues = () => {
         open={documentModalVisible}
         onCancel={() => {
           setDocumentModalVisible(false);
-          setSelectedDocumentUrl('');
+          setSelectedDocuments([]);
         }}
         footer={[
           <Button key="close" onClick={() => setDocumentModalVisible(false)}>
             Close
-          </Button>,
-          <Button 
-            key="download" 
-            type="primary" 
-            onClick={() => {
-              const link = document.createElement('a');
-              link.href = selectedDocumentUrl;
-              link.download = '';
-              document.body.appendChild(link);
-              link.click();
-              document.body.removeChild(link);
-            }}
-          >
-            Download
           </Button>
         ]}
         width={800}
         style={{ top: 20 }}
       >
-        {selectedDocumentUrl && (
-          <div style={{ textAlign: 'center', minHeight: '500px' }}>
-            {selectedDocumentUrl.toLowerCase().includes('.pdf') ? (
-              <iframe
-                src={selectedDocumentUrl}
-                style={{ width: '100%', height: '500px', border: 'none' }}
-                title="Document Preview"
-              />
-            ) : selectedDocumentUrl.toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/) ? (
-              <img
-                src={selectedDocumentUrl}
-                alt="Document Preview"
-                style={{ maxWidth: '100%', maxHeight: '500px' }}
-              />
-            ) : (
-              <div style={{ padding: '50px' }}>
-                <p>Document type cannot be previewed.</p>
-                <p>Please use the Download button to view the document.</p>
+        {selectedDocuments.length > 0 ? (
+          <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+            {selectedDocuments.map((url, index) => (
+              <div key={index} style={{ marginBottom: 24, borderBottom: index < selectedDocuments.length - 1 ? '1px solid #f0f0f0' : 'none', paddingBottom: 16 }}>
+                <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 600 }}>Document {index + 1}</span>
+                  <Button 
+                    type="link" 
+                    size="small"
+                    onClick={() => {
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.target = "_blank";
+                      link.download = '';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                  >
+                    Download / Open
+                  </Button>
+                </div>
+                <div style={{ textAlign: 'center', minHeight: '300px', background: '#f9f9f9', padding: 8, borderRadius: 4 }}>
+                  {url.toLowerCase().includes('.pdf') ? (
+                    <iframe
+                      src={url}
+                      style={{ width: '100%', height: '400px', border: 'none' }}
+                      title={`Document Preview ${index + 1}`}
+                    />
+                  ) : url.toLowerCase().match(/\.(jpg|jpeg|png|gif|bmp|webp)$/) ? (
+                    <img
+                      src={url}
+                      alt={`Document Preview ${index + 1}`}
+                      style={{ maxWidth: '100%', maxHeight: '400px' }}
+                    />
+                  ) : (
+                    <div style={{ padding: '40px' }}>
+                      <p>Document type cannot be previewed.</p>
+                      <p>Please use the Download button to view the document.</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+            ))}
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <p>No documents to display.</p>
           </div>
         )}
       </Modal>

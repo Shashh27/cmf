@@ -124,7 +124,7 @@ const AccessControl = () => {
       key: 'username',
     },
     {
-      title: 'Gmail',
+      title: 'E-mail',
       dataIndex: 'gmail',
       key: 'gmail',
     },
@@ -174,7 +174,7 @@ const AccessControl = () => {
         const isVisible = visiblePasswords[record.id];
         const displayText = isVisible
           ? (password || 'Not Returned by API')
-          : (password ? '•'.repeat(password.length) : 'Not Returned by API');
+          : (password ? '••••••••' : 'Not Returned by API');
         return (
           <Space>
             <span>{displayText}</span>
@@ -223,16 +223,16 @@ const AccessControl = () => {
       `}</style>
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex items-center justify-between">
-          <div>
-            <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-              <div ref={lockRef} style={{ width:36, height:36 }} />
-              <Title level={2} style={{ margin: 0, fontSize: '24px' }} className="text-gray-800">
+          <div style={{ display:'grid', gridTemplateColumns:'36px auto', alignItems:'center', columnGap:12 }}>
+            <div ref={lockRef} style={{ width:36, height:36 }} />
+            <div style={{ display:'flex', flexDirection:'column', justifyContent:'center' }}>
+              <Title level={2} style={{ margin:0, lineHeight:'28px', fontSize:'24px' }} className="text-gray-800">
                 Access Control Management
               </Title>
+              <Typography.Text style={{ marginTop:4 }} className="text-gray-500">
+                Manage users, roles, and access permissions
+              </Typography.Text>
             </div>
-            <Typography.Text className="text-gray-500 mt-1 block">
-              Manage users, roles, and access permissions
-            </Typography.Text>
           </div>
           <Button 
             type="primary" 
@@ -288,6 +288,7 @@ const AccessControl = () => {
           fetchUsers();
         }}
         editingUser={editingUser}
+        existingUsers={users}
       />
     </div>
   );

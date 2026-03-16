@@ -151,7 +151,7 @@ const InstrumentsList = ({ onEdit, onDelete, onCreateNew }) => {
   return (
     <div style={{ maxWidth: '100%' }}>
       {/* KPI Cards */}
-      <Row gutter={16} style={{ marginBottom: '24px' }}>
+      <Row gutter={16} style={{ marginTop: 10, marginBottom: 12 }}>
         <Col xs={24} sm={12} md={8}>
           <Card 
             style={{ 
@@ -163,7 +163,7 @@ const InstrumentsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: activeFilter === 'all' ? '#f0f7ff' : '#fff'
             }}
             hoverable
-            bodyStyle={{ padding: '20px 24px' }}
+            bodyStyle={{ padding: '16px 20px' }}
             onClick={() => setActiveFilter('all')}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -197,7 +197,7 @@ const InstrumentsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: activeFilter === 'active' ? '#f6ffed' : '#fff'
             }}
             hoverable
-            bodyStyle={{ padding: '20px 24px' }}
+            bodyStyle={{ padding: '16px 20px' }}
             onClick={() => setActiveFilter('active')}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -231,7 +231,7 @@ const InstrumentsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: activeFilter === 'pending' ? '#fffbe6' : '#fff'
             }}
             hoverable
-            bodyStyle={{ padding: '20px 24px' }}
+            bodyStyle={{ padding: '16px 20px' }}
             onClick={() => setActiveFilter('pending')}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
