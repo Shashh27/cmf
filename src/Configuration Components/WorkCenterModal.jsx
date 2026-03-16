@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, Checkbox, Button, message } from "antd";
 
@@ -31,26 +32,25 @@ const WorkCenterModal = ({ workCenter, isOpen, onClose, onSave }) => {
         ? `${API_BASE_URL}/workcenters/${workCenter.id}`
         : `${API_BASE_URL}/workcenters/`;
       
-      const method = workCenter ? "PUT" : "POST";
+      const method = workCenter ? "put" : "post";
       
-      const response = await fetch(url, {
+      await axios({
+        url,
         method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(values),
+        data: values,
       });
 
-      if (response.ok) {
-        onSave();
-      } else {
-        const errorData = await response.json();
-        console.error("Failed to save work center:", errorData);
-        message.error("Failed to save work center. Please try again.");
-      }
+      onSave();
     } catch (error) {
       console.error("Error saving work center:", error);
-      message.error("Error saving work center. Please try again.");
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        "Failed to save work center. Please try again.";
+      message.error(detail);
     } finally {
       setLoading(false);
     }
@@ -63,7 +63,20 @@ const WorkCenterModal = ({ workCenter, isOpen, onClose, onSave }) => {
       onCancel={onClose}
       footer={null}
       destroyOnHidden
+      width="95%"
+      style={{ maxWidth: 500 }}
+      centered
     >
+      <style>{`
+        @media (max-width: 640px) {
+          .ant-modal-body {
+            padding: 16px;
+          }
+          .ant-form-item {
+            margin-bottom: 12px;
+          }
+        }
+      `}</style>
       <Form
         form={form}
         layout="vertical"
@@ -71,6 +84,7 @@ const WorkCenterModal = ({ workCenter, isOpen, onClose, onSave }) => {
         initialValues={{
           is_schedulable: false
         }}
+        style={{ padding: '4px' }}
       >
         <Form.Item
           name="code"

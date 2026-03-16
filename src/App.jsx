@@ -4,7 +4,7 @@ import Layout from "./components/Layout";
 import Login from "./Pages/Login";
 import OMS from "./Pages/OMS";
 import PartsPriority from "./OMS Components/PartsPriority";
-import RawMaterials from "./OMS Components/RawMaterials";
+import RawMaterials from "./Pages/RawMaterials";
 import PDM from "./Pages/PDM";
 import Configuration from "./Pages/Configuration";
 import Dashboard from "./Pages/Dashboard";

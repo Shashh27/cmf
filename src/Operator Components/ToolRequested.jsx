@@ -78,10 +78,15 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     return Math.max(0, (req.quantity || 0) - returned - issues);
   };
 
+  const isConsumableType = (req) => {
+    if (!req) return false;
+    // Check if the request has tool type information
+    return req.type === 'CONSUMABLES' || req.tool_type === 'CONSUMABLES';
+  };
+
   useEffect(() => {
     fetchRequests();
     fetchReturnRequests();
-    fetchToolsList();
     fetchToolIssues();
   }, []);
 

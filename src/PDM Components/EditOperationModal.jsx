@@ -1,221 +1,97 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Form, Input, Button, Tabs, Upload, message, Popconfirm, Spin, Empty, Tag, Table, Row, Col, TimePicker, Select, Tooltip, Flex, Badge, DatePicker } from 'antd';
-import { UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined, InboxOutlined,ExclamationCircleOutlined,ToolOutlined,PlusOutlined,SyncOutlined,DownloadOutlined,EyeOutlined } from '@ant-design/icons';
+import {
+  Modal, Form, Input, Button, Tabs, Upload, message, Popconfirm,
+  Spin, Empty, Tag, Row, Col, TimePicker, Select, Tooltip, Flex,
+  Badge, DatePicker
+} from 'antd';
+import {
+  UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined,
+  ExclamationCircleOutlined, ToolOutlined, PlusOutlined, SyncOutlined,
+  DownloadOutlined, EyeOutlined
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
+import axios from "axios";
 import { API_BASE_URL } from '../Config/auth';
+import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils';
 
 const { TextArea } = Input;
 const { Dragger } = Upload;
 
-const EditOperationModal = ({ 
-  open, 
-  onCancel, 
-  operation, 
-  partId = null,
-  partName = null,
-  onUpdate, 
-  defaultTab = 'details',
-  showAddToolForm = true 
+// Reusable From/To date pair for Out-Source operations
+const OutSourceDates = ({ form, fromDateWatch, namePrefix }) => {
+  const n = (f) => namePrefix ? [namePrefix, f] : f;
+  return (
+    <Row gutter={[12, 0]}>
+      <Col xs={24} sm={12}>
+        <Form.Item name={n('from_date')} label="From Date" rules={[{ required: true, message: 'Required for Out-Source' }]}>
+          <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} inputReadOnly />
+        </Form.Item>
+      </Col>
+      <Col xs={24} sm={12}>
+        <Form.Item name={n('to_date')} label="To Date" rules={[
+          { required: true, message: 'Required for Out-Source' },
+          { validator: (_, value) => {
+            const fd = form.getFieldValue(n('from_date'));
+            if (!value) return Promise.resolve();
+            if (!fd) return Promise.reject(new Error('Select From Date first'));
+            return dayjs(value).isAfter(dayjs(fd), 'day') ? Promise.resolve() : Promise.reject(new Error('To Date must be after From Date'));
+          }}
+        ]}>
+          <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} inputReadOnly disabled={!fromDateWatch}
+            disabledDate={(c) => { const fd = form.getFieldValue(n('from_date')); return !fd || (c && !c.isAfter(dayjs(fd), 'day')); }} />
+        </Form.Item>
+      </Col>
+    </Row>
+  );
+};
+
+const EditOperationModal = ({
+  open, onCancel, operation,
+  partId = null, partName = null,
+  onUpdate, defaultTab = 'details', showAddToolForm = true
 }) => {
   const isCreateMode = !operation && partId;
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
-  const [documents, setDocuments] = useState([]);
-  const [loadingDocs, setLoadingDocs] = useState(false);
-  const [activeTab, setActiveTab] = useState(defaultTab);
-  const [parentId, setParentId] = useState(null);
-  const [selectedDocForVersion, setSelectedDocForVersion] = useState(null);
-  const [uploadVersion, setUploadVersion] = useState('1.0');
-  const [uploadType, setUploadType] = useState('Balloon');
-  const [uploadTypeOther, setUploadTypeOther] = useState('');
+  const [loading, setLoading]                   = useState(false);
+  const [documents, setDocuments]               = useState([]);
+  const [loadingDocs, setLoadingDocs]           = useState(false);
+  const [activeTab, setActiveTab]               = useState(defaultTab);
+  const [parentId, setParentId]                 = useState(null);
+  const [parentDocName, setParentDocName]       = useState('');
+  const [uploadVersion, setUploadVersion]       = useState('v1.0');
+  const [uploadType, setUploadType]             = useState('Balloon');
+  const [uploadTypeOther, setUploadTypeOther]   = useState('');
   const [selectedFileList, setSelectedFileList] = useState([]);
-  const [workCenters, setWorkCenters] = useState([]);
-  const [allMachines, setAllMachines] = useState([]);
-  const [toolsList, setToolsList] = useState([]);
-  const [existingTools, setExistingTools] = useState([]);
-  const [loadingTools, setLoadingTools] = useState(false);
-  const [previewVisible, setPreviewVisible] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState('');
-  const [previewTitle, setPreviewTitle] = useState('');
-  const [previewType, setPreviewType] = useState('');
-  const [partTypes, setPartTypes] = useState([]);
-  const [partTypesLoading, setPartTypesLoading] = useState(false);
+  const [workCenters, setWorkCenters]           = useState([]);
+  const [allMachines, setAllMachines]           = useState([]);
+  const [toolsList, setToolsList]               = useState([]);
+  const [existingTools, setExistingTools]       = useState([]);
+  const [loadingTools, setLoadingTools]         = useState(false);
+  const [preview, setPreview]                   = useState(null); // { url, title, type }
+  const [viewingDoc, setViewingDoc]             = useState(null); // { url, title, type, id, name }
+  const [partTypes, setPartTypes]               = useState([]);
+  const [partTypesLoading, setPartTypesLoading]     = useState(false);
   const [workCentersLoading, setWorkCentersLoading] = useState(false);
-  const [machinesLoading, setMachinesLoading] = useState(false);
+  const [machinesLoading, setMachinesLoading]       = useState(false);
 
-  useEffect(() => {
-    if (open) {
-      setActiveTab(defaultTab);
-    }
-  }, [open, defaultTab]);
+  const fromDateWatch = Form.useWatch('from_date', form);
+  const partTypeWatch = Form.useWatch('part_type_id', form);
 
-  useEffect(() => {
-    if (open && showAddToolForm) {
-      fetchTools();
-    }
-  }, [open, showAddToolForm]);
+  // ── fetch helpers ──────────────────────────────────────────────────────────
+  const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
+  const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
+  const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,    setAllMachines, setMachinesLoading,    allMachines.length > 0);
+  const fetchTools       = () => fetchInto(`${API_BASE_URL}/tools-list/`,  setToolsList,   null,                  false);
 
-  useEffect(() => {
-    if (open && isCreateMode) {
-      form.resetFields();
-      form.setFieldsValue({ part_type_id: 1 });
-    }
-  }, [open, isCreateMode, form]);
-
-  useEffect(() => {
-    if (open && operation) {
-      form.setFieldsValue({
-        operation_number: operation.operation_number,
-        operation_name: operation.operation_name,
-        part_type_id: operation.part_type_id ?? 1,
-        from_date: operation.from_date ? dayjs(operation.from_date) : null,
-        to_date: operation.to_date ? dayjs(operation.to_date) : null,
-        setup_time: operation.setup_time ? dayjs(operation.setup_time, 'HH:mm:ss') : null,
-        cycle_time: operation.cycle_time ? dayjs(operation.cycle_time, 'HH:mm:ss') : null,
-        workcenter_id: operation.workcenter_id,
-        machine_id: operation.machine_id,
-        work_instructions: operation.work_instructions,
-        notes: operation.notes
-      });
-      
-      // Only fetch documents if we are NOT in "Add Tool" mode
-      if (!showAddToolForm) {
-        fetchDocuments();
-      } else {
-        fetchExistingTools();
-      }
-    }
-  }, [open, operation?.id, form, showAddToolForm]);
-
-  const fetchTools = async () => {
+  const getCurrentUserId = () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/tools-list/`);
-      if (response.ok) {
-        const data = await response.json();
-        setToolsList(data);
-      }
-    } catch (error) {
-      console.error("Error fetching tools:", error);
-    }
-  };
-
-  const fetchExistingTools = async () => {
-    if (!operation) return;
-    setLoadingTools(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/tools/operation/${operation.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setExistingTools(data);
-      }
-    } catch (error) {
-      console.error("Error fetching existing tools:", error);
-    } finally {
-      setLoadingTools(false);
-    }
-  };
-
-  const handleAddTools = async (values) => {
-    setLoadingTools(true);
-    const { tool_ids } = values;
-    let successCount = 0;
-
-    for (const toolId of tool_ids) {
-      if (existingTools.some(t => t.tool_id === toolId)) continue;
-
-      try {
-        const response = await fetch(`${API_BASE_URL}/tools/`, {
-          method: 'POST',
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tool_id: toolId,
-            part_id: operation.part_id,
-            operation_id: operation.id
-          }),
-        });
-        if (response.ok) successCount++;
-      } catch (error) {
-        console.error(`Error assigning tool ${toolId}:`, error);
-      }
-    }
-
-    setLoadingTools(false);
-    if (successCount > 0) {
-      message.success(`Successfully added ${successCount} tools`);
-      form.setFieldValue('tool_ids', []); // Clear only the select field
-      fetchExistingTools();
-      if (onUpdate) onUpdate(); // Refresh parent to show updated tool count
-    } else {
-      message.info("No new tools added");
-    }
-  };
-
-  const handleRemoveTool = async (toolWithPartId) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/tools/${toolWithPartId}`, {
-        method: 'DELETE'
-      });
-      if (response.ok) {
-        message.success("Tool removed");
-        fetchExistingTools();
-        if (onUpdate) onUpdate();
-      } else {
-        message.error("Failed to remove tool");
-      }
-    } catch (error) {
-      console.error("Error removing tool:", error);
-    }
-  };
-
-  const availableTools = toolsList.filter(
-    tool => !existingTools.some(et => et.tool_id === tool.id)
-  );
-
-  const fetchWorkCenters = async () => {
-    if (workCenters.length > 0) return;
-    setWorkCentersLoading(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/workcenters/`);
-      if (response.ok) {
-        const data = await response.json();
-        setWorkCenters(data);
-      }
-    } catch (error) {
-      console.error("Error fetching work centers:", error);
-    } finally {
-      setWorkCentersLoading(false);
-    }
-  };
-
-  const fetchPartTypes = async () => {
-    if (partTypes.length > 0) return;
-    setPartTypesLoading(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/part-types/`);
-      if (response.ok) {
-        const data = await response.json();
-        setPartTypes(data);
-      }
-    } catch (error) {
-      console.error("Error fetching part types:", error);
-    } finally {
-      setPartTypesLoading(false);
-    }
-  };
-
-  const fetchMachines = async () => {
-    if (allMachines.length > 0) return;
-    setMachinesLoading(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/machines/`);
-      if (response.ok) {
-        const data = await response.json();
-        setAllMachines(data);
-      }
-    } catch (error) {
-      console.error("Error fetching machines:", error);
-    } finally {
-      setMachinesLoading(false);
+      const stored = localStorage.getItem('user');
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u?.id == null) return null;
+      return u.id;
+    } catch {
+      return null;
     }
   };
 
@@ -223,120 +99,87 @@ const EditOperationModal = ({
     if (!operation) return;
     setLoadingDocs(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/operation-documents/operation/${operation.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setDocuments(data);
-      }
-    } catch (error) {
-      console.error("Error fetching documents:", error);
+      // Do not filter by user_id: admin, project coordinator, and manufacturing coordinator all see the same operation documents
+      const r = await axios.get(`${API_BASE_URL}/operation-documents/operation/${operation.id}`);
+      setDocuments(r.data);
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoadingDocs(false);
     }
   };
 
-  const handleUpdateDetails = async (values) => {
-    setLoading(true);
+  const fetchExistingTools = async () => {
+    if (!operation) return;
+    setLoadingTools(true);
     try {
-      const now = dayjs();
-      const payload = {
-        ...values,
-        setup_time: values.setup_time ? values.setup_time.format('HH:mm:ss') : null,
-        cycle_time: values.cycle_time ? values.cycle_time.format('HH:mm:ss') : null,
-        from_date: values.from_date
-          ? dayjs(values.from_date).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString()
-          : null,
-        to_date: values.to_date
-          ? dayjs(values.to_date).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString()
-          : null,
-      };
-
-      if (isCreateMode) {
-        const createPayload = { ...payload, part_id: partId };
-        const response = await fetch(`${API_BASE_URL}/operations/`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(createPayload),
-        });
-        if (response.ok) {
-          const newOp = await response.json();
-          message.success("Operation created successfully");
-          if (onUpdate) onUpdate(newOp);
-          onCancel();
-        } else {
-          message.error("Failed to create operation");
-        }
-      } else {
-        const response = await fetch(`${API_BASE_URL}/operations/${operation.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (response.ok) {
-          const updatedOp = await response.json();
-          message.success("Operation details updated successfully");
-          if (onUpdate) onUpdate(updatedOp);
-          onCancel();
-        } else {
-          message.error("Failed to update operation");
-        }
-      }
-    } catch (error) {
-      console.error(isCreateMode ? "Error creating operation:" : "Error updating operation:", error);
-      message.error(isCreateMode ? "Error creating operation" : "Error updating operation");
+      const r = await axios.get(`${API_BASE_URL}/tools/operation/${operation.id}`);
+      setExistingTools(r.data);
+    } catch (e) {
+      console.error(e);
     } finally {
-      setLoading(false);
+      setLoadingTools(false);
     }
   };
 
+  // ── effects ────────────────────────────────────────────────────────────────
+  useEffect(() => { if (open) setActiveTab(defaultTab); }, [open, defaultTab]);
+  useEffect(() => { if (open) { fetchWorkCenters(); fetchMachines(); fetchPartTypes(); } }, [open]);
+  useEffect(() => { if (open && showAddToolForm) fetchTools(); }, [open, showAddToolForm]);
+  useEffect(() => { if (open && isCreateMode) { form.resetFields(); form.setFieldsValue({ part_type_id: 1 }); } }, [open, isCreateMode]);
+
+  useEffect(() => {
+    if (!fromDateWatch) { if (form.getFieldValue('to_date')) form.setFieldsValue({ to_date: null }); return; }
+    const to = form.getFieldValue('to_date');
+    if (to && !dayjs(to).isAfter(dayjs(fromDateWatch), 'day')) form.setFieldsValue({ to_date: null });
+  }, [fromDateWatch]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (partTypeWatch === 2) form.setFieldsValue({ setup_time: null, cycle_time: null, workcenter_id: null, machine_id: null, work_instructions: null, notes: null });
+  }, [partTypeWatch, open]);
+
+  useEffect(() => {
+    if (!open || !operation) return;
+    form.setFieldsValue({
+      operation_number:  operation.operation_number,
+      operation_name:    operation.operation_name,
+      part_type_id:      operation.part_type_id ?? 1,
+      from_date:         operation.from_date  ? dayjs(operation.from_date) : null,
+      to_date:           operation.to_date    ? dayjs(operation.to_date) : null,
+      setup_time:        operation.setup_time ? dayjs(operation.setup_time, 'HH:mm:ss') : null,
+      cycle_time:        operation.cycle_time ? dayjs(operation.cycle_time, 'HH:mm:ss') : null,
+      workcenter_id:     operation.workcenter_id,
+      machine_id:        operation.machine_id,
+      work_instructions: operation.work_instructions,
+      notes:             operation.notes,
+    });
+    if (!showAddToolForm) fetchDocuments(); else fetchExistingTools();
+  }, [open, operation?.id, showAddToolForm]);
+
+  // ── handlers ───────────────────────────────────────────────────────────────
+  const resetUpload = () => { setParentId(null); setParentDocName(''); setUploadVersion('v1.0'); setUploadType('Balloon'); setUploadTypeOther(''); setSelectedFileList([]); setViewingDoc(null); };
+
   const handleUpload = async () => {
-    if (selectedFileList.length === 0) {
-      message.warning("Please select a file first");
-      return;
-    }
-
-    const file = selectedFileList[0];
-    let effectiveType = uploadType;
-    if (uploadType === 'Other') {
-      if (!uploadTypeOther.trim()) {
-        message.warning("Please enter document type");
-        return;
-      }
-      effectiveType = uploadTypeOther.trim();
-    }
-    const formData = new FormData();
-    formData.append('operation_id', operation.id);
-    formData.append('files', file);
-    formData.append('document_type', effectiveType);
-    formData.append('document_version', uploadVersion);
-    
-    if (parentId) {
-      formData.append('parent_id', parentId);
-    }
-
+    if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
+    if (uploadType === 'Other' && !uploadTypeOther.trim()) { message.warning('Please enter document type'); return; }
+    const fd = new FormData();
+    fd.append('operation_id', operation.id);
+    fd.append('files', selectedFileList[0]);
+    fd.append('document_type', uploadType === 'Other' ? uploadTypeOther.trim() : uploadType);
+    fd.append('document_version', uploadVersion);
+    if (parentId) fd.append('parent_id', parentId);
+    const uid = getCurrentUserId();
+    if (uid != null) fd.append('user_id', String(uid));
     setLoadingDocs(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/operation-documents/upload/`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (response.ok) {
-        message.success(`${file.name} uploaded successfully`);
-        // Reset versioning states
-        setParentId(null);
-        setSelectedDocForVersion(null);
-        setUploadVersion('1.0');
-        setUploadType('Balloon');
-        setUploadTypeOther('');
-        setSelectedFileList([]); // Clear file list
-        fetchDocuments(); // Refresh list
-      } else {
-        message.error(`${file.name} upload failed`);
-      }
-    } catch (error) {
-      console.error("Error uploading file:", error);
-      message.error("Upload error");
+      await axios.post(`${API_BASE_URL}/operation-documents/upload/`, fd);
+      message.success(`${selectedFileList[0].name} uploaded successfully`);
+      resetUpload();
+      fetchDocuments();
+    } catch (e) {
+      console.error(e);
+      message.error('Upload error');
     } finally {
       setLoadingDocs(false);
     }
@@ -344,751 +187,436 @@ const EditOperationModal = ({
 
   const handleDeleteDocument = async (docId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/operation-documents/${docId}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        message.success("Document deleted successfully");
-        fetchDocuments(); // Refresh list
-      } else {
-        message.error("Failed to delete document");
-      }
-    } catch (error) {
-      console.error("Error deleting document:", error);
-      message.error("Error deleting document");
+      await axios.delete(`${API_BASE_URL}/operation-documents/${docId}`);
+      message.success('Document deleted successfully');
+      fetchDocuments();
+    } catch (e) {
+      console.error(e);
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
+        'Failed to delete';
+      message.error(detail);
     }
   };
 
   const handlePreview = (doc) => {
+    const ext = doc.document_name.split('.').pop().toLowerCase();
     const url = `${API_BASE_URL}/operation-documents/${doc.id}/preview`;
-    setPreviewUrl(url);
-    setPreviewTitle(doc.document_name);
+    let type = 'other';
+    if (['jpg','jpeg','png','gif','svg'].includes(ext)) type = 'image';
+    else if (ext === 'pdf') type = 'pdf';
     
-    const extension = doc.document_name.split('.').pop().toLowerCase();
-    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(extension)) {
-      setPreviewType('image');
-    } else if (extension === 'pdf') {
-      setPreviewType('pdf');
-    } else {
-      setPreviewType('other');
-      // For other types, we might just want to download it instead of previewing
-      window.open(`${API_BASE_URL}/operation-documents/${doc.id}/download`, '_blank');
-      return;
-    }
-    setPreviewVisible(true);
+    // Instead of opening a new modal, we show it in the right panel
+    setViewingDoc({ url, title: doc.document_name, type, id: doc.id, name: doc.document_name });
+    setParentId(null); // Switch off "Update Version" mode if it was on
   };
 
+  const handleDownloadFile = (doc) => {
+    const url = `${API_BASE_URL}/operation-documents/${doc.id}/download`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.style.display = 'none';
+    a.setAttribute('download', doc.document_name);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    message.success(`Downloading ${doc.document_name}`);
+  };
+
+  const handleAddTools = async ({ tool_ids }) => {
+    setLoadingTools(true);
+    let count = 0;
+    const uid = getCurrentUserId();
+    for (const toolId of tool_ids) {
+      if (existingTools.some(t => t.tool_id === toolId)) continue;
+      try {
+        await axios.post(
+          `${API_BASE_URL}/tools/`,
+          {
+            tool_id: toolId,
+            part_id: operation.part_id,
+            operation_id: operation.id,
+            user_id: uid,
+          },
+          {
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+        count++;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    setLoadingTools(false);
+    if (count > 0) { message.success(`Successfully added ${count} tools`); form.setFieldValue('tool_ids', []); fetchExistingTools(); if (onUpdate) onUpdate(); }
+    else message.info('No new tools added');
+  };
+
+  const handleRemoveTool = async (id) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/tools/${id}`);
+      message.success('Tool removed');
+      fetchExistingTools();
+      if (onUpdate) onUpdate();
+    } catch (e) {
+      console.error(e);
+      message.error('Failed to remove tool');
+    }
+  };
+
+  const handleUpdateDetails = async (values) => {
+    setLoading(true);
+    try {
+      const now = dayjs();
+      const { operation_number, setup_time, cycle_time, from_date, to_date, workcenter_id, machine_id, ...rest } = values;
+      const out = rest.part_type_id === 2;
+      const ts  = (d) => d ? dayjs(d).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString() : null;
+      const payload = {
+        ...rest,
+        setup_time:        out ? null : (setup_time?.format('HH:mm:ss') ?? null),
+        cycle_time:        out ? null : (cycle_time?.format('HH:mm:ss') ?? null),
+        from_date:         ts(from_date),
+        to_date:           ts(to_date),
+        workcenter_id:     out ? null : (workcenter_id ?? null),
+        machine_id:        out ? null : (machine_id ?? null),
+        work_instructions: out ? null : (rest.work_instructions ?? null),
+        notes:             out ? null : (rest.notes ?? null),
+      };
+      const url    = isCreateMode ? `${API_BASE_URL}/operations/` : `${API_BASE_URL}/operations/${operation.id}`;
+      const body   = isCreateMode ? { ...payload, part_id: partId } : payload;
+      const method = isCreateMode ? 'post' : 'put';
+      const r = await axios({
+        url,
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        data: body,
+      });
+      message.success(isCreateMode ? 'Operation created' : 'Operation updated');
+      if (onUpdate) onUpdate(r.data);
+      onCancel();
+    } catch (e) {
+      console.error(e);
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
+        'Error saving operation';
+      message.error(detail);
+    }
+    finally { setLoading(false); }
+  };
+
+  // ── derived ────────────────────────────────────────────────────────────────
+  const availableTools  = toolsList.filter(t => !existingTools.some(et => et.tool_id === t.id));
+  const partTypeOptions = partTypes.length ? partTypes.map(pt => ({ label: pt.type_name, value: pt.id })) : [{ label: 'IN-House', value: 1 }, { label: 'Out-Source', value: 2 }];
+  const parseV          = (v) => parseFloat(String(v).replace(/^v/i, ''));
+  const fmtV            = (v) => String(v).startsWith('v') ? String(v) : `v${v}`;
+
+  // ── documents tab ──────────────────────────────────────────────────────────
+  const DocActions = ({ doc, rootId, latestV }) => (
+    <div className="flex gap-1 shrink-0">
+      <Tooltip title="View"><Button type="text" size="small" icon={<EyeOutlined className="text-blue-500" />} onClick={() => handlePreview(doc)} /></Tooltip>
+      <Tooltip title="Upload New Version">
+        <Button type="text" size="small" icon={<SyncOutlined className="text-orange-500" />}
+          onClick={() => { setViewingDoc(null); setParentId(rootId); setParentDocName(doc.document_name); setUploadVersion('v' + (latestV + 1).toFixed(1)); setUploadType(doc.document_type); }} />
+      </Tooltip>
+      <Tooltip title="Download">
+        <Button type="text" size="small" icon={<DownloadOutlined className="text-green-600" />} onClick={() => handleDownloadFile(doc)} />
+      </Tooltip>
+      <Popconfirm title="Delete?" onConfirm={() => handleDeleteDocument(doc.id)} okText="Yes" cancelText="No" icon={<ExclamationCircleOutlined className="text-red-500" />}>
+        <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+      </Popconfirm>
+    </div>
+  );
+
   const documentsTab = (() => {
-    // Group documents by root parent
-    const groupedDocs = documents.reduce((acc, doc) => {
-      const rootId = doc.parent_id || doc.id;
-      if (!acc[rootId]) acc[rootId] = [];
-      acc[rootId].push(doc);
-      return acc;
-    }, {});
-
-    // Get only the root documents (where parent_id is null)
-    const rootDocs = documents.filter(doc => !doc.parent_id);
-
+    const rootDocs = documents.filter(d => !d.parent_id);
     return (
-      <div className="flex flex-col h-full">
-        <Row gutter={[16, 16]}>
-          {/* Left Column: Document History */}
-          <Col xs={24} lg={14}>
-            <div className="flex justify-between items-center mb-4">
-              <h4 className="text-sm font-semibold text-gray-800 m-0">Document History</h4>
-              <Badge 
-                count={documents.length} 
-                overflowCount={99} 
-                style={{ backgroundColor: '#1890ff' }}
-              >
-                <Tag color="blue" className="m-0 px-3 py-0.5 rounded-full border-0">
-                  Total Documents
-                </Tag>
-              </Badge>
-            </div>
-            
-            <div className="max-h-[60vh] overflow-y-auto pr-2">
-              {loadingDocs ? (
-                <div className="flex justify-center p-8"><Spin /></div>
-              ) : rootDocs.length > 0 ? (
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={14}>
+          <div className="flex justify-between items-center mb-4">
+            <h4 className="text-sm font-semibold text-gray-800 m-0">Document History</h4>
+            <Badge count={documents.length} overflowCount={99} style={{ backgroundColor: '#1890ff' }}>
+              <Tag color="blue" className="m-0 px-3 py-0.5 rounded-full border-0">Total Documents</Tag>
+            </Badge>
+          </div>
+          <div className="max-h-[60vh] overflow-y-auto pr-1">
+            {loadingDocs ? <div className="flex justify-center p-8"><Spin /></div>
+              : rootDocs.length > 0 ? (
                 <Flex vertical gap="middle">
-                    {rootDocs.map(item => {
-                    const group = documents.filter(doc => doc.parent_id === item.id || doc.id === item.id);
-                    const sortedGroup = [...group].sort((a, b) => parseFloat(b.document_version) - parseFloat(a.document_version));
-                    const latestVersion = parseFloat(sortedGroup[0]?.document_version || '1.0');
-                    
-                    const versions = group.filter(doc => doc.id !== item.id).sort((a, b) => parseFloat(b.document_version) - parseFloat(a.document_version));
-                    const hasVersions = versions.length > 0;
-
+                  {rootDocs.map(item => {
+                    const group    = documents.filter(d => d.parent_id === item.id || d.id === item.id);
+                    const latestV  = Math.max(...group.map(d => parseV(d.document_version)));
+                    const versions = group.filter(d => d.id !== item.id).sort((a, b) => parseV(b.document_version) - parseV(a.document_version));
                     return (
                       <div key={item.id} className="flex flex-col gap-2">
-                        {/* Root Document */}
-                        <div 
-                          className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm hover:shadow transition-shadow flex items-start justify-between gap-4 border-l-4 border-l-blue-500"
-                        >
+                        <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm hover:shadow transition-shadow flex items-start justify-between gap-4 border-l-4 border-l-blue-500">
                           <div className="flex gap-3 flex-1 min-w-0">
-                            <div className="bg-blue-50 p-2 rounded text-blue-500 h-fit mt-1">
-                              <FileTextOutlined />
-                            </div>
+                            <div className="bg-blue-50 p-2 rounded text-blue-500 h-fit mt-1"><FileTextOutlined /></div>
                             <div className="flex-1 overflow-hidden">
-                              <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                <a 
-                                  href={`${API_BASE_URL}/operation-documents/${item.id}/download`} 
-                                  className="text-gray-800 hover:text-blue-600 font-semibold truncate"
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                >
-                                  {item.document_name}
-                                </a>
-                              </div>
-                              <div className="flex gap-2 text-xs items-center">
-                                <Tag color="blue" variant="filled" className="m-0 text-[10px] font-bold">
-                                  {item.document_type}
-                                </Tag>
-                                <Tag color="blue" className="m-0 text-[10px] font-bold border-blue-200">
-                                  v{item.document_version}
-                                </Tag>
+                              <a href={`${API_BASE_URL}/operation-documents/${item.id}/download`} className="text-gray-800 hover:text-blue-600 font-semibold truncate block mb-1" target="_blank" rel="noopener noreferrer">{item.document_name}</a>
+                              <div className="flex gap-2 items-center">
+                                <Tag color="blue" variant="filled" className="m-0 text-[10px] font-bold">{item.document_type}</Tag>
+                                <Tag color="blue" className="m-0 text-[10px] font-bold">{fmtV(item.document_version)}</Tag>
                               </div>
                             </div>
                           </div>
-                          <div className="flex gap-1 shrink-0">
-                            <Tooltip title="Preview">
-                              <Button 
-                                type="text" 
-                                icon={<EyeOutlined className="text-blue-500" />} 
-                                size="small"
-                                onClick={() => handlePreview(item)}
-                              />
-                            </Tooltip>
-                            <Tooltip title="Upload New Version">
-                              <Button 
-                                type="text" 
-                                icon={<SyncOutlined className="text-orange-500" />} 
-                                size="small"
-                                onClick={() => {
-                                  const rootId = item.id; // item is the root
-                                  setParentId(rootId);
-                                  setSelectedDocForVersion(item);
-                                  setUploadVersion((latestVersion + 1.0).toFixed(1));
-                                  setUploadType(item.document_type);
-                                }}
-                              />
-                            </Tooltip>
-                            <Tooltip title="Download">
-                              <Button 
-                                type="text" 
-                                icon={<DownloadOutlined className="text-green-600" />} 
-                                size="small"
-                                href={`${API_BASE_URL}/operation-documents/${item.id}/download`}
-                                target="_blank"
-                              />
-                            </Tooltip>
-                            <Popconfirm
-                              title="Delete Document"
-                              description="Are you sure you want to delete this file?"
-                              onConfirm={() => handleDeleteDocument(item.id)}
-                              okText="Yes"
-                              cancelText="No"
-                              icon={<ExclamationCircleOutlined className="text-red-500" />}
-                            >
-                              <Button 
-                                type="text" 
-                                danger 
-                                icon={<DeleteOutlined />} 
-                                size="small"
-                              />
-                            </Popconfirm>
-                          </div>
+                          <DocActions doc={item} rootId={item.id} latestV={latestV} />
                         </div>
-
-                        {/* Version Sub-items */}
-                        {hasVersions && versions.map(ver => (
-                            <div 
-                              key={ver.id}
-                              className="bg-gray-50 p-2 ml-6 rounded-lg border border-gray-100 flex items-start justify-between gap-4 border-l-4 border-l-orange-400"
-                            >
-                              <div className="flex gap-2 flex-1 min-w-0 items-center">
-                                <FileTextOutlined className="text-orange-400 text-xs" />
-                                <a 
-                                  href={`${API_BASE_URL}/operation-documents/${ver.id}/download`} 
-                                  className="text-gray-700 hover:text-blue-600 text-sm truncate font-medium"
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
-                                >
-                                  {ver.document_name}
-                                </a>
-                                <Tag color="orange" className="m-0 text-[10px] font-bold border-orange-200">
-                                  v{ver.document_version}
-                                </Tag>
-                              </div>
-                              <div className="flex gap-1 shrink-0">
-                                <Tooltip title="Preview">
-                                  <Button 
-                                    type="text" 
-                                    icon={<EyeOutlined className="text-blue-500 text-xs" />} 
-                                    size="small"
-                                    onClick={() => handlePreview(ver)}
-                                  />
-                                </Tooltip>
-                                <Tooltip title="Upload New Version">
-                                  <Button 
-                                    type="text" 
-                                    icon={<SyncOutlined className="text-orange-500 text-xs" />} 
-                                    size="small"
-                                    onClick={() => {
-                                      const rootId = item.id; // always use root ID as parent_id
-                                      setParentId(rootId);
-                                      setSelectedDocForVersion(ver);
-                                      setUploadVersion((latestVersion + 1.0).toFixed(1));
-                                      setUploadType(ver.document_type);
-                                    }}
-                                  />
-                                </Tooltip>
-                                <Tooltip title="Download">
-                                  <Button 
-                                    type="text" 
-                                    icon={<DownloadOutlined className="text-green-600 text-xs" />} 
-                                    size="small"
-                                    href={`${API_BASE_URL}/operation-documents/${ver.id}/download`}
-                                    target="_blank"
-                                  />
-                                </Tooltip>
-                                <Popconfirm
-                                  title="Delete Version"
-                                  onConfirm={() => handleDeleteDocument(ver.id)}
-                                >
-                                  <Button type="text" danger icon={<DeleteOutlined className="text-xs" />} size="small" />
-                                </Popconfirm>
-                              </div>
+                        {versions.map(ver => (
+                          <div key={ver.id} className="bg-gray-50 p-2 ml-6 rounded-lg border border-gray-100 flex items-start justify-between gap-4 border-l-4 border-l-orange-400">
+                            <div className="flex gap-2 flex-1 min-w-0 items-center">
+                              <FileTextOutlined className="text-orange-400 text-xs shrink-0" />
+                              <a href={`${API_BASE_URL}/operation-documents/${ver.id}/download`} className="text-gray-700 hover:text-blue-600 text-sm truncate font-medium" target="_blank" rel="noopener noreferrer">{ver.document_name}</a>
+                              <Tag color="orange" className="m-0 text-[10px] font-bold shrink-0">{fmtV(ver.document_version)}</Tag>
                             </div>
-                          ))
-                        }
+                            <DocActions doc={ver} rootId={item.id} latestV={latestV} />
+                          </div>
+                        ))}
                       </div>
                     );
                   })}
                 </Flex>
-              ) : (
-                <Empty 
-                  description="No documents found" 
-                  style={{ padding: '40px 0', backgroundColor: '#f9fafb', borderRadius: 12 }} 
-                />
-              )}
-            </div>
-          </Col>
-
-          {/* Right Column: Upload Area */}
-          <Col xs={24} lg={10}>
-            <div className="bg-gray-50 p-3 sm:p-5 rounded-xl border border-gray-200">
-              <div className="flex justify-between items-center mb-4">
-                <h4 className="text-sm font-semibold text-gray-800 m-0 flex items-center gap-2">
-                  <UploadOutlined /> {parentId ? 'Update Version' : 'New Upload'}
-                </h4>
-                {parentId && (
-                  <Button 
-                    type="link" 
-                    danger 
-                    size="small" 
-                    className="p-0 h-auto"
-                    onClick={() => {
-                      setParentId(null);
-                      setSelectedDocForVersion(null);
-                      setUploadVersion('1.0');
-                      setUploadType('Balloon');
-                      setUploadTypeOther('');
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                )}
-              </div>
-
-              {parentId && (
-                <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg">
-                  <div className="text-[10px] text-blue-500 font-bold uppercase mb-1">Updating File:</div>
-                  <div className="text-sm font-semibold text-gray-800 truncate">
-                    {selectedDocForVersion?.document_name}
-                  </div>
+              ) : <Empty description="No documents found" style={{ padding: '40px 0', backgroundColor: '#f9fafb', borderRadius: 12 }} />
+            }
+          </div>
+        </Col>
+        <Col xs={24} lg={10}>
+          <div className="bg-gray-50 p-3 sm:p-5 rounded-xl border border-gray-200 h-full flex flex-col min-h-[400px]">
+            {viewingDoc ? (
+              <div className="flex flex-col h-full">
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="text-sm font-semibold text-gray-800 m-0 flex items-center gap-2">
+                    <EyeOutlined className="text-blue-500" />
+                    Preview: {viewingDoc.name}
+                  </h4>
+                  <Button type="link" size="small" className="p-0 h-auto" onClick={() => setViewingDoc(null)}>Back to Upload</Button>
                 </div>
-              )}
-
-              <div className="mb-4">
-                <Dragger
-                  fileList={selectedFileList}
-                  beforeUpload={(file) => {
-                    setSelectedFileList([file]);
-                    return false; // Prevent automatic upload
-                  }}
-                  onRemove={() => setSelectedFileList([])}
-                  showUploadList={true}
-                  multiple={false}
-                  className="bg-white border-dashed border-2 hover:border-blue-400 transition-colors rounded-xl overflow-hidden"
-                >
-                  <p className="ant-upload-drag-icon mb-2">
-                    <UploadOutlined className="text-blue-500 text-3xl" />
-                  </p>
-                  <p className="ant-upload-text text-sm font-medium">Click or drag file</p>
-                  <p className="ant-upload-hint text-[11px] text-gray-400 px-4">
-                    PDF, DOC, XLS, CSV, TXT
-                  </p>
-                </Dragger>
-              </div>
-
-              <Row gutter={[8, 8]} className="mb-4">
-                <Col xs={24} sm={14}>
-                  <div className="text-[11px] font-semibold text-gray-500 mb-1 ml-1 uppercase">Document Type</div>
-                  <Select 
-                    value={uploadType} 
-                    onChange={setUploadType} 
-                    className="w-full"
-                    placeholder="Type"
-                  >
-                    <Select.Option value="Balloon">Balloon</Select.Option>
-                    <Select.Option value="Image">Image</Select.Option>
-                    <Select.Option value="CNC">CNC</Select.Option>
-                    <Select.Option value="Other">Other</Select.Option>
-                  </Select>
-                  {uploadType === 'Other' && (
-                    <Input
-                      className="mt-2"
-                      placeholder="Enter custom document type"
-                      value={uploadTypeOther}
-                      onChange={(e) => setUploadTypeOther(e.target.value)}
-                      autoComplete="off"
-                    />
+                <div className="flex-1 bg-white rounded-lg border border-gray-200 overflow-hidden relative min-h-[300px]">
+                  {viewingDoc.type === 'image' ? (
+                    <div className="flex items-center justify-center h-full p-4 overflow-auto">
+                      <img src={viewingDoc.url} alt={viewingDoc.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+                    </div>
+                  ) : viewingDoc.type === 'pdf' ? (
+                    <iframe src={`${viewingDoc.url}#toolbar=0`} title={viewingDoc.title} width="100%" height="100%" style={{ border: 'none' }} />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                      <FileTextOutlined className="text-5xl text-gray-300 mb-4" />
+                      <p className="text-gray-500 mb-4">Preview not available for this file type</p>
+                      <Button icon={<DownloadOutlined />} onClick={() => handleDownloadFile(viewingDoc)}>Download to View</Button>
+                    </div>
                   )}
-                </Col>
-                <Col xs={24} sm={10}>
-                  <div className="text-[11px] font-semibold text-gray-500 mb-1 ml-1 uppercase">Version</div>
-                  <Input 
-                    value={uploadVersion} 
-                    onChange={(e) => setUploadVersion(e.target.value)} 
-                    placeholder="1.0"
-                    disabled={!parentId}
-                    className="font-bold text-center"
-                    style={{ backgroundColor: !parentId ? '#f0f2f5' : '#fff' }}
-                  />
-                </Col>
-              </Row>
-
-              <Button 
-                      type="primary" 
-                      block 
-                      size="large"
-                      icon={<UploadOutlined />}
-                      className="h-11 rounded-lg font-semibold shadow-md shadow-blue-100 no-hover-btn"
-                      onClick={handleUpload}
-                      loading={loadingDocs}
-                      disabled={selectedFileList.length === 0}
-                    >
-                      {parentId ? "Upload New Version" : "Upload Document"}
-                    </Button>
-            </div>
-          </Col>
-        </Row>
-      </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="text-sm font-semibold text-gray-800 m-0 flex items-center gap-2"><UploadOutlined />{parentId ? 'Update Version' : 'New Upload'}</h4>
+                  {parentId && <Button type="link" danger size="small" className="p-0 h-auto" onClick={resetUpload}>Cancel</Button>}
+                </div>
+                {parentId && (
+                  <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                    <div className="text-[10px] text-blue-500 font-bold uppercase mb-1">Updating File:</div>
+                    <div className="text-sm font-semibold text-gray-800 truncate">{parentDocName}</div>
+                  </div>
+                )}
+                <div className="mb-4">
+                  <Dragger fileList={selectedFileList} beforeUpload={(f) => { setSelectedFileList([f]); return false; }} onRemove={() => setSelectedFileList([])} multiple={false} className="bg-white border-dashed border-2 hover:border-blue-400 transition-colors rounded-xl overflow-hidden">
+                    <p className="ant-upload-drag-icon mb-2"><UploadOutlined className="text-blue-500 text-3xl" /></p>
+                    <p className="ant-upload-text text-sm font-medium">Click or drag file</p>
+                    <p className="ant-upload-hint text-[11px] text-gray-400 px-4">PDF, DOC, XLS, CSV, TXT</p>
+                  </Dragger>
+                </div>
+                <Row gutter={[8, 8]} className="mb-4">
+                  <Col xs={24} sm={14}>
+                    <div className="text-[11px] font-semibold text-gray-500 mb-1 uppercase">Document Type</div>
+                    <Select value={uploadType} onChange={setUploadType} className="w-full">
+                      {['Balloon','Image','CNC','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
+                    </Select>
+                    {uploadType === 'Other' && <Input className="mt-2" placeholder="Custom type" value={uploadTypeOther} onChange={e => setUploadTypeOther(e.target.value)} autoComplete="off" />}
+                  </Col>
+                  <Col xs={24} sm={10}>
+                    <div className="text-[11px] font-semibold text-gray-500 mb-1 uppercase">Version</div>
+                    <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} placeholder="v1.0" disabled={!parentId} className="font-bold text-center" style={{ backgroundColor: !parentId ? '#f0f2f5' : '#fff' }} />
+                  </Col>
+                </Row>
+                <Button type="primary" block size="large" icon={<UploadOutlined />} className="h-11 rounded-lg font-semibold no-hover-btn" onClick={handleUpload} loading={loadingDocs} disabled={!selectedFileList.length}>
+                  {parentId ? 'Upload New Version' : 'Upload Document'}
+                </Button>
+              </>
+            )}
+          </div>
+        </Col>
+      </Row>
     );
   })();
 
+  // ── tools tab ──────────────────────────────────────────────────────────────
   const toolsTab = (
     <div className="flex flex-col h-full">
-      <div className="mb-4">
-        <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-          <ToolOutlined className="text-blue-500" />
-          Assigned Tools ({existingTools.length}):
-        </h4>
-        {loadingTools ? (
-          <div className="flex justify-center p-4"><Spin /></div>
-        ) : existingTools.length > 0 ? (
-            <Flex vertical className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-              {existingTools.map((item, index) => {
-               const toolDetails = toolsList.find(t => t.id === item.tool_id);
-               return (
-                 <div 
-                   key={item.id}
-                   className={`flex items-center justify-between p-3 ${index !== existingTools.length - 1 ? 'border-b border-gray-100' : ''} hover:bg-gray-50 transition-colors`}
-                 >
-                   <div className="flex-1">
-                    <div className="font-medium text-sm text-gray-800">{toolDetails?.item_description || `Tool ID: ${item.tool_id}`}</div>
+      <h4 className="text-sm font-medium mb-2 flex items-center gap-2"><ToolOutlined className="text-blue-500" />Assigned Tools ({existingTools.length}):</h4>
+      {loadingTools ? <div className="flex justify-center p-4"><Spin /></div>
+        : existingTools.length > 0 ? (
+          <Flex vertical className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
+            {existingTools.map((item, i) => {
+              const td = toolsList.find(t => t.id === item.tool_id);
+              return (
+                <div key={item.id} className={`flex items-center justify-between p-3 ${i < existingTools.length - 1 ? 'border-b border-gray-100' : ''} hover:bg-gray-50`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm text-gray-800 truncate">{td?.item_description || `Tool ID: ${item.tool_id}`}</div>
                     <div className="flex gap-2 text-xs mt-1">
-                      <Tag className="m-0 text-[10px]">{toolDetails?.identification_code}</Tag>
-                      {toolDetails?.range && <span className="text-gray-400">{toolDetails.range}</span>}
+                      <Tag className="m-0 text-[10px]">{td?.identification_code}</Tag>
+                      {td?.range && <span className="text-gray-400">{td.range}</span>}
                     </div>
-                   </div>
-                   {showAddToolForm && (
-                     <Popconfirm
-                       title="Remove Tool"
-                       description="Are you sure you want to remove this tool?"
-                       onConfirm={() => handleRemoveTool(item.id)}
-                       okText="Yes"
-                       cancelText="No"
-                     >
-                       <Button type="text" danger size="small" icon={<DeleteOutlined />} />
-                     </Popconfirm>
-                   )}
-                 </div>
-               );
+                  </div>
+                  {showAddToolForm && (
+                    <Popconfirm title="Remove Tool" description="Are you sure?" onConfirm={() => handleRemoveTool(item.id)} okText="Yes" cancelText="No">
+                      <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  )}
+                </div>
+              );
             })}
           </Flex>
-        ) : (
-           <Empty description="No tools assigned" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-         )}
-       </div>
- 
-       {showAddToolForm && (
-         <div className="mt-4 pt-4 border-t">
-           <Form
-             form={form}
-             layout="vertical"
-             onFinish={handleAddTools}
-           >
-             <Form.Item
-               name="tool_ids"
-               label={<span className="text-sm font-medium">Add New Tools</span>}
-               rules={[{ required: true, message: 'Please select tools' }]}
-             >
-               <Select
-                 mode="multiple"
-                 placeholder="Select Tools to Add"
-                 optionFilterProp="children"
-                 loading={toolsList.length === 0}
-                 filterOption={(input, option) => {
-                   const tool = toolsList.find(t => t.id === option.value);
-                   return tool && `${tool.item_description} ${tool.identification_code} ${tool.range || ''}`.toLowerCase().includes(input.toLowerCase());
-                 }}
-               >
-                 {availableTools.map(tool => (
-                   <Select.Option key={tool.id} value={tool.id}>
-                     {tool.item_description} ({tool.identification_code}) {tool.range ? `- ${tool.range}` : ''}
-                   </Select.Option>
-                 ))}
-               </Select>
-             </Form.Item>
-   
-             <div className="flex justify-end">
-               <Button 
-                 type="primary" 
-                 htmlType="submit" 
-                 loading={loadingTools}
-                 icon={<PlusOutlined />}
-                 className="no-hover-btn"
-               >
-                 Add Selected Tools
-               </Button>
-             </div>
-           </Form>
-         </div>
-       )}
-     </div>
-   );
+        ) : <Empty description="No tools assigned" image={Empty.PRESENTED_IMAGE_SIMPLE} className="mb-4" />
+      }
+      {showAddToolForm && (
+        <div className="pt-4 border-t">
+          <Form form={form} layout="vertical" onFinish={handleAddTools}>
+            <Form.Item name="tool_ids" label={<span className="text-sm font-medium">Add New Tools</span>} rules={[{ required: true, message: 'Please select tools' }]}>
+              <Select mode="multiple" placeholder="Select Tools to Add" loading={!toolsList.length}
+                filterOption={(input, option) => { const t = toolsList.find(t => t.id === option.value); return t && `${t.item_description} ${t.identification_code} ${t.range || ''}`.toLowerCase().includes(input.toLowerCase()); }}
+              >
+                {availableTools.map(t => <Select.Option key={t.id} value={t.id}>{t.item_description} ({t.identification_code}){t.range ? ` - ${t.range}` : ''}</Select.Option>)}
+              </Select>
+            </Form.Item>
+            <div className="flex justify-end">
+              <Button type="primary" htmlType="submit" loading={loadingTools} icon={<PlusOutlined />} className="no-hover-btn">Add Selected Tools</Button>
+            </div>
+          </Form>
+        </div>
+      )}
+    </div>
+  );
 
-  const tabItems = [
-    {
-      key: 'details',
-      label: 'Details',
-      children: (
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleUpdateDetails}
-          className="mt-2"
-          autoComplete="off"
-        >
-          <Row gutter={[12, 0]}>
-              <Col xs={24} sm={8} md={4} lg={4}>
-                  <Form.Item
-                  name="operation_number"
-                  label="Op Number"
-                  rules={[{ required: true, message: 'Req' }]}
-                  >
-                  <Input autoComplete="off" />
-                  </Form.Item>
-              </Col>
-              <Col xs={24} sm={16} md={12} lg={12}>
-                  <Form.Item
-                  name="operation_name"
-                  label="Operation Name"
-                  rules={[{ required: true, message: 'Please enter operation name' }]}
-                  >
-                  <Input prefix={<FileTextOutlined className="text-gray-400" />} autoComplete="off" />
-                  </Form.Item>
-              </Col>
-              <Col xs={24} sm={24} md={8} lg={8}>
-                  <Form.Item name="part_type_id" label="Part Type" rules={[{ required: true }]}>
-                    <Select
-                      placeholder="Select type"
-                      loading={partTypesLoading}
-                      onOpenChange={(open) => { if (open) fetchPartTypes(); }}
-                      options={partTypes.map(pt => ({ label: pt.type_name, value: pt.id }))}
-                    />
-                  </Form.Item>
-              </Col>
-          </Row>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(prev, curr) => prev.part_type_id !== curr.part_type_id}
-          >
-            {({ getFieldValue }) => {
-              const isOutSource = getFieldValue('part_type_id') === 2;
-              return (
-                <>
-                  {isOutSource && (
-                    <Row gutter={[12, 0]}>
-                      <Col xs={24} sm={12} md={12}>
-                        <Form.Item
-                          name="from_date"
-                          label="From Date"
-                          rules={[{ required: true, message: 'Required for Out-Source' }]}
-                        >
-                          <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} />
-                        </Form.Item>
-                      </Col>
-                      <Col xs={24} sm={12} md={12}>
-                        <Form.Item
-                          name="to_date"
-                          label="To Date"
-                          rules={[{ required: true, message: 'Required for Out-Source' }]}
-                        >
-                          <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                  )}
-                </>
-              );
-            }}
+  // ── details tab ────────────────────────────────────────────────────────────
+  const detailsTab = (
+    <Form form={form} layout="vertical" onFinish={handleUpdateDetails} className="mt-2" autoComplete="off">
+      <Row gutter={[12, 0]}>
+        {!isCreateMode && (
+          <Col xs={24} sm={8} md={4}>
+            <Form.Item name="operation_number" label="Op Number" rules={[{ required: true }]}>
+              <Input disabled autoComplete="off" />
+            </Form.Item>
+          </Col>
+        )}
+        <Col xs={24} sm={16} md={12}>
+          <Form.Item name="operation_name" label="Operation Name" rules={[{ required: true, message: 'Please enter operation name' }]} getValueFromEvent={e => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}>
+            <Input prefix={<FileTextOutlined className="text-gray-400" />} autoComplete="off" maxLength={30} />
           </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(prev, curr) => prev.part_type_id !== curr.part_type_id}
-          >
-            {({ getFieldValue }) => {
-              const isInHouse = getFieldValue('part_type_id') === 1 || !getFieldValue('part_type_id');
-              if (!isInHouse) return null;
-              return (
-                <>
-          <Row gutter={[12, 0]}>
-              <Col xs={12} sm={12} md={6} lg={6}>
-                  <Form.Item
-                  name="setup_time"
-                  label="Setup Time"
-                  >
-                  <TimePicker style={{ width: '100%' }} format="HH:mm:ss" />
+        </Col>
+        <Col xs={24} sm={24} md={8}>
+          <Form.Item name="part_type_id" label="Operation Type" rules={[{ required: true }]}>
+            <Select placeholder="Select type" loading={partTypesLoading} onOpenChange={o => { if (o) fetchPartTypes(); }} options={partTypeOptions} />
+          </Form.Item>
+        </Col>
+      </Row>
+      <Form.Item noStyle shouldUpdate={(p, c) => p.part_type_id !== c.part_type_id}>
+        {({ getFieldValue }) => getFieldValue('part_type_id') === 2
+          ? <OutSourceDates form={form} fromDateWatch={fromDateWatch} />
+          : (
+            <>
+              <Row gutter={[12, 0]}>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="setup_time" label="Setup Time" rules={timePickerRules('Setup Time')}>
+                    <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
                   </Form.Item>
-              </Col>
-              <Col xs={12} sm={12} md={6} lg={6}>
-                  <Form.Item
-                  name="cycle_time"
-                  label="Cycle Time"
-                  >
-                  <TimePicker style={{ width: '100%' }} format="HH:mm:ss" />
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="cycle_time" label="Cycle Time" rules={timePickerRules('Cycle Time')}>
+                    <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
                   </Form.Item>
-              </Col>
-              <Col xs={24} sm={12} md={6} lg={6}>
-                  <Form.Item
-                  name="workcenter_id"
-                  label="Workcenter"
-                  >
-                  <Select 
-                      placeholder="Select WC"
-                      loading={workCentersLoading}
-                      onOpenChange={(open) => { if (open) fetchWorkCenters(); }}
-                      onChange={() => {
-                          // Clear machine selection when workcenter changes
-                          form.setFieldValue('machine_id', undefined);
-                      }}
-                  >
-                      {workCenters.map(wc => (
-                      <Select.Option key={wc.id} value={wc.id}>
-                          {wc.work_center_name}
-                      </Select.Option>
-                      ))}
-                  </Select>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item name="workcenter_id" label="Workcenter">
+                    <Select placeholder="Select WC" allowClear loading={workCentersLoading} onOpenChange={o => { if (o) fetchWorkCenters(); }} onChange={() => form.setFieldValue('machine_id', undefined)}>
+                      {workCenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
+                    </Select>
                   </Form.Item>
-              </Col>
-              <Col xs={24} sm={12} md={6} lg={6}>
-                  <Form.Item
-                  noStyle
-                  shouldUpdate={(prevValues, currentValues) => prevValues.workcenter_id !== currentValues.workcenter_id}
-                  >
-                  {({ getFieldValue }) => {
-                      const workcenterId = getFieldValue('workcenter_id');
-                      const filteredMachines = allMachines.filter(m => m.work_center_id === workcenterId);
-                      
-                      return (
-                      <Form.Item
-                          name="machine_id"
-                          label="Machine"
-                      >
-                          <Select 
-                          placeholder={workcenterId ? "Select Machine" : "Select WC First"}
-                          disabled={!workcenterId}
-                          loading={machinesLoading}
-                          onOpenChange={(open) => { if (open) fetchMachines(); }}
-                          allowClear
-                          >
-                          {filteredMachines.map(m => (
-                              <Select.Option key={m.id} value={m.id}>
-                              {[m.make, m.model].filter(Boolean).join(' - ')} ({m.type})
-                              </Select.Option>
+                </Col>
+                <Col xs={24} sm={12} lg={6}>
+                  <Form.Item noStyle shouldUpdate={(p, c) => p.workcenter_id !== c.workcenter_id}>
+                    {({ getFieldValue }) => (
+                      <Form.Item name="machine_id" label="Machine">
+                        <Select placeholder={getFieldValue('workcenter_id') ? 'Select Machine' : 'Select WC First'} disabled={!getFieldValue('workcenter_id')} allowClear loading={machinesLoading} onOpenChange={o => { if (o) fetchMachines(); }}>
+                          {allMachines.filter(m => m.work_center_id === getFieldValue('workcenter_id')).map(m => (
+                            <Select.Option key={m.id} value={m.id}>{[m.make, m.model].filter(Boolean).join(' - ')} ({m.type})</Select.Option>
                           ))}
-                          </Select>
+                        </Select>
                       </Form.Item>
-                      );
-                  }}
+                    )}
                   </Form.Item>
-              </Col>
-          </Row>
+                </Col>
+              </Row>
+              <Form.Item name="work_instructions" label="Work Instructions" className="mb-2">
+                <TextArea rows={3} placeholder="Enter detailed work instructions..." />
+              </Form.Item>
+              <Form.Item name="notes" label="Notes" className="mb-2">
+                <TextArea rows={2} placeholder="Additional notes..." />
+              </Form.Item>
+            </>
+          )
+        }
+      </Form.Item>
+    </Form>
+  );
 
-          <Form.Item
-            name="work_instructions"
-            label="Work Instructions"
-            className="mb-2"
-          >
-            <TextArea rows={3} placeholder="Enter detailed work instructions..." />
-          </Form.Item>
-
-          <Form.Item
-            name="notes"
-            label="Notes"
-            className="mb-2"
-          >
-            <TextArea rows={2} placeholder="Additional notes..." />
-          </Form.Item>
-                </>
-              );
-            }}
-          </Form.Item>
-        </Form>
-      )
-    },
-    {
-      key: 'documents',
-      label: `Documents (${documents.length})`,
-      children: documentsTab
-    },
-    {
-      key: 'tools',
-      label: `Tools (${existingTools.length})`,
-      children: toolsTab
-    }
+  const allTabs = [
+    { key: 'details',   label: 'Details',                         children: detailsTab },
+    { key: 'documents', label: `Documents (${documents.length})`,  children: documentsTab },
+    { key: 'tools',     label: `Tools (${existingTools.length})`,  children: toolsTab },
   ];
-
-  const filteredTabItems = isCreateMode
-    ? tabItems.filter(item => item.key === 'details')
-    : showAddToolForm 
-      ? tabItems.filter(item => item.key === 'tools') 
-      : tabItems.filter(item => item.key !== 'tools');
+  const filteredTabs = isCreateMode ? allTabs.filter(t => t.key === 'details')
+    : showAddToolForm ? allTabs.filter(t => t.key === 'tools') : allTabs.filter(t => t.key !== 'tools');
 
   return (
     <Modal
       title={
         <div className="flex items-center gap-2">
           <ToolOutlined className="text-blue-600" />
-          <span>
-            {isCreateMode ? 'Add Operation' : showAddToolForm ? 'Assign Tools' : 'Edit Operation'}
-          </span>
-          {isCreateMode && partName && (
-            <span className="text-xs font-normal text-gray-500">(for {partName})</span>
-          )}
+          <span>{isCreateMode ? 'Add Operation' : showAddToolForm ? 'Assign Tools' : 'Edit Operation'}</span>
+          {isCreateMode && partName && <span className="text-xs font-normal text-gray-500">(for {partName})</span>}
         </div>
       }
-      open={open}
-      onCancel={onCancel}
+      open={open} onCancel={onCancel}
       footer={activeTab === 'details' ? [
         <Button key="cancel" onClick={onCancel}>Cancel</Button>,
-        <Button 
-          key="submit" 
-          type="primary" 
-          loading={loading} 
-          icon={<SaveOutlined />} 
-          className="no-hover-btn"
-          onClick={() => form.submit()}
-        >
+        <Button key="submit" type="primary" loading={loading} icon={<SaveOutlined />} className="no-hover-btn" onClick={() => form.submit()}>
           {isCreateMode ? 'Create Operation' : 'Save Changes'}
         </Button>
       ] : null}
-      width="95%"
-      style={{ maxWidth: activeTab === 'details' ? 850 : 1000, top: 10 }}
-      styles={{ 
-        body: { 
-          maxHeight: 'calc(100vh - 120px)', 
-          overflowY: 'auto', 
-          overflowX: 'hidden', 
-          padding: '8px 16px' 
-        } 
-      }}
-      centered
-      maskClosable={false}
-      destroyOnHidden
+      width="95%" style={{ maxWidth: activeTab === 'details' ? 850 : 1000, top: 10 }}
+      styles={{ body: { maxHeight: 'calc(100vh - 120px)', overflowY: 'auto', overflowX: 'hidden', padding: '8px 16px' } }}
+      centered maskClosable={false} destroyOnHidden
     >
-      <style>
-        {`
-          .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
-            background-color: #2563eb !important;
-            color: white !important;
-            opacity: 1 !important;
-            border: none !important;
-            box-shadow: none !important;
-          }
-        `}
-      </style>
+      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{background-color:#2563eb!important;color:#fff!important;border:none!important;box-shadow:none!important;}`}</style>
       <div className="mt-2">
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={filteredTabItems}
-        />
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={filteredTabs} />
       </div>
-
-      {/* Document Preview Modal */}
-      <Modal
-        title={previewTitle}
-        open={previewVisible}
-        onCancel={() => {
-          setPreviewVisible(false);
-          setPreviewUrl('');
-        }}
-        footer={[
-          <Button key="download" icon={<DownloadOutlined />} onClick={() => window.open(previewUrl, '_blank')}>
-            Download
-          </Button>,
-          <Button key="close" type="primary" onClick={() => setPreviewVisible(false)}>
-            Close
-          </Button>
-        ]}
-        width="95%"
-        style={{ maxWidth: 1000, top: 20 }}
-        styles={{ body: { height: '75vh', padding: 0 } }}
-      >
-        {previewType === 'image' ? (
-          <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
-            <img 
-              src={previewUrl} 
-              alt={previewTitle} 
-              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} 
-            />
-          </div>
-        ) : previewType === 'pdf' ? (
-          <iframe
-            src={`${previewUrl}#toolbar=0`}
-            title={previewTitle}
-            width="100%"
-            height="100%"
-            style={{ border: 'none' }}
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full">
-            <Empty description="Preview not available for this file type" />
-            <Button type="primary" icon={<DownloadOutlined />} onClick={() => window.open(previewUrl, '_blank')}>
-              Download to View
-            </Button>
-          </div>
-        )}
-      </Modal>
+      {preview && (
+        <Modal title={preview.title} open onCancel={() => setPreview(null)}
+          footer={[
+            <Button key="dl" icon={<DownloadOutlined />} onClick={() => window.open(preview.url, '_blank')}>Download</Button>,
+            <Button key="cl" type="primary" onClick={() => setPreview(null)}>Close</Button>
+          ]}
+          width="95%" style={{ maxWidth: 1000, top: 20 }} styles={{ body: { height: '75vh', padding: 0 } }}
+        >
+          {preview.type === 'image'
+            ? <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto"><img src={preview.url} alt={preview.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /></div>
+            : <iframe src={`${preview.url}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
+          }
+        </Modal>
+      )}
     </Modal>
   );
 };

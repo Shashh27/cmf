@@ -69,7 +69,7 @@ const InventoryRequestsTable = () => {
             return;
           }
 
-          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=approved`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=approved`, {
             method: 'PUT'
           });
           
@@ -118,7 +118,7 @@ const InventoryRequestsTable = () => {
             return;
           }
 
-          const response = await fetch(`${config.API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=rejected`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-requests/${record.id}/status?admin_id=${adminId}&status=rejected`, {
             method: 'PUT'
           });
           

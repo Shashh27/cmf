@@ -126,7 +126,7 @@ const PartWisePriorityPdfDocument = ({ data }) => {
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE
+            CMF DIGITIZATION 
           </Text>
           <Text style={styles.subtitle}>
             Part Wise Priority Report
@@ -212,7 +212,7 @@ const OrderWisePriorityPdfDocument = ({ data }) => {
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE
+            CMF DIGITIZATION 
           </Text>
           <Text style={styles.subtitle}>
             Order Wise Priority Report
@@ -300,7 +300,7 @@ export const PartWisePriorityPdfDownload = ({
 
     // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE"],
+      ["CMF DIGITIZATION "],
       ["Part Wise Priority Report"],
       [],
       [`Total Parts: ${data.length}`],
@@ -470,7 +470,7 @@ export const OrderWisePriorityPdfDownload = ({
 
     // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE"],
+      ["CMF DIGITIZATION "],
       ["Order Wise Priority Report"],
       [],
       [`Total Orders: ${data.length}`],

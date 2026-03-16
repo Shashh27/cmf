@@ -27,6 +27,30 @@ const Sidebar = ({ collapsed, onCollapse }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   
+  // Get the role prefix from the path
+  const getRolePrefix = () => {
+    const path = location.pathname;
+    if (path.startsWith('/admin')) return '/admin';
+    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
+    if (path.startsWith('/operator')) return '/operator';
+    return ''; // Default fallback
+  };
+
+  const prefix = getRolePrefix();
+
+  // Determine open keys based on path
+  const getOpenKeys = () => {
+    const path = location.pathname;
+    const keys = [];
+    if (path.includes('/oms')) keys.push('oms');
+    if (path.includes('/pps')) keys.push('pps');
+    if (path.includes('/product-monitoring')) keys.push('product-monitoring');
+    if (path.includes('/inventory-management')) keys.push('inventory-management');
+    return keys;
+  };
+
+  const [openKeys, setOpenKeys] = useState(getOpenKeys());
+  
   // Detect mobile screen
   useEffect(() => {
     const handleResize = () => {
@@ -42,26 +66,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Get the role prefix from the path
-  const getRolePrefix = () => {
-    const path = location.pathname;
-    if (path.startsWith('/admin')) return '/admin';
-    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
-    if (path.startsWith('/operator')) return '/operator';
-    return ''; // Default fallback
-  };
-
-  const prefix = getRolePrefix();
-
-  // Determine open keys based on path
-  const getOpenKeys = () => {
-    const path = location.pathname;
-    if (path.includes('/oms')) return ['oms'];
-    if (path.includes('/pps')) return ['pps'];
-    if (path.includes('/product-monitoring')) return ['product-monitoring'];
-    if (path.includes('/inventory-management')) return ['inventory-management'];
-    return [];
-  };
+  // Update openKeys when route changes - add new keys without removing existing ones
+  useEffect(() => {
+    setOpenKeys(prevKeys => {
+      const newKeys = getOpenKeys();
+      // Combine existing keys with new keys, removing duplicates
+      const combinedKeys = [...new Set([...prevKeys, ...newKeys])];
+      return combinedKeys;
+    });
+  }, [location.pathname]);
 
   // Define all menu items with dynamic paths
   const allItems = [
@@ -196,7 +209,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       <Menu
         mode="inline"
         defaultSelectedKeys={[selectedKey]}
-        defaultOpenKeys={getOpenKeys()}
+        openKeys={openKeys}
+        onOpenChange={setOpenKeys}
         selectedKeys={[selectedKey]}
         style={{ borderRight: 0 }}
         items={items}

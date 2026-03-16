@@ -302,7 +302,7 @@ const OperatorDocumentContent = ({ selectedNode }) => {
               [record.familyId]: value
             }));
           }}
-          dropdownMatchSelectWidth={false}
+          popupMatchSelectWidth={false}
           bordered
           style={{ 
             width: 180, 

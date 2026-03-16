@@ -255,7 +255,7 @@ const InventoryAnalytics = () => {
                       fontSize: '36px',
                       fontWeight: '700',
                       lineHeight: 1.2,
-                      fontFamily: 'system-ui, -apple-system, sans-serif'
+                      fontFamily: "'Inter', system-ui, -apple-system, sans-serif"
                     }}
                   />
                 </div>

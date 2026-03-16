@@ -128,7 +128,7 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE
+            CMF DIGITIZATION 
           </Text>
           <Text style={styles.subtitle}>
             Raw Materials Inventory Report
@@ -285,7 +285,7 @@ const PartsWithRawMaterialsStatusPdfDocument = ({ linkedMaterials }) => {
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE
+            CMF DIGITIZATION 
           </Text>
           <Text style={styles.subtitle}>
             Parts with Raw Materials Status Report
@@ -383,7 +383,7 @@ export const RawMaterialsInventoryPdfDownload = ({
 
     // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE"],
+      ["CMF DIGITIZATION"],
       ["Raw Materials Inventory Report"],
       [],
       [`Total Materials: ${rawMaterials.length}`],
@@ -612,7 +612,7 @@ export const PartsWithRawMaterialsStatusPdfDownload = ({
 
     // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE"],
+      ["CMF DIGITIZATION"],
       ["Parts with Raw Materials Status Report"],
       [],
       [`Total Records: ${groupedData.length}`],

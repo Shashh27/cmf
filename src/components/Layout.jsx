@@ -3,6 +3,7 @@ import { Layout } from "antd";
 import { useLocation } from "react-router-dom";
 import Sidebar from "./ui/sidebar";
 import Navbar from "./ui/Navbar";
+import Footer from "./ui/Footer";
 
 const { Content } = Layout;
 
@@ -33,10 +34,10 @@ const AppLayout = ({ children }) => {
             }
           }
         `}</style>
-        <Navbar />
+        <Navbar collapsed={collapsed} />
         <Content 
           style={{ 
-            margin: 'clamp(60px, 15vw, 80px) clamp(12px, 3vw, 24px) clamp(12px, 3vw, 24px)', 
+            margin: 'clamp(50px, 10vw, 60px) clamp(12px, 3vw, 24px) clamp(30px, 5vw, 40px)', 
             overflowY: 'auto', 
             backgroundColor: 'transparent', 
             padding: 0 
@@ -44,6 +45,7 @@ const AppLayout = ({ children }) => {
         >
           {children}
         </Content>
+        <Footer collapsed={collapsed} />
       </Layout>
     </Layout>
   );

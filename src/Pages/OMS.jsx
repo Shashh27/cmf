@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
 import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
   SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
-import ProductBOMView from "../OMS Components/ProductBOMView";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
@@ -17,7 +17,6 @@ const { RangePicker } = DatePicker;
 
 const OMS = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { productId } = useParams();
   const [messageApi, contextHolder] = message.useMessage();
   const [orders, setOrders] = useState([]);
@@ -33,23 +32,30 @@ const OMS = () => {
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
-  const getRolePrefix = () => {
-    const path = location.pathname;
-    if (path.startsWith('/admin')) return '/admin';
-    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
-    if (path.startsWith('/operator')) return '/operator';
-    return ''; 
+  const getCurrentAdminId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const user = JSON.parse(stored);
+      if (user?.id == null) return null;
+      return user.id;
+    } catch {
+      return null;
+    }
   };
-  const prefix = getRolePrefix();
 
   useEffect(() => {
-    if (hasFetchedData.current || productId) return;
+    if (hasFetchedData.current) return;
     
     const fetchData = async () => {
       hasFetchedData.current = true;
       setLoading(true);
       try {
-        await fetchOrders();
+        await Promise.all([
+          fetchOrders(),
+          fetchCustomers(),
+          fetchProducts()
+        ]);
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -58,15 +64,12 @@ const OMS = () => {
     };
 
     fetchData();
-  }, [productId]);
+  }, []);
 
   const fetchCustomers = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/customers/`);
-      if (response.ok) {
-        const data = await response.json();
-        setCustomers(data);
-      }
+      const response = await axios.get(`${API_BASE_URL}/customers/`);
+      setCustomers(response.data);
     } catch (error) {
       console.error("Error fetching customers:", error);
     }
@@ -74,23 +77,8 @@ const OMS = () => {
 
   const fetchProducts = async () => {
     try {
-      let url = `${API_BASE_URL}/products/`;
-      if (prefix === '/project_coordinator') {
-        try {
-          const stored = localStorage.getItem('user');
-          const u = stored ? JSON.parse(stored) : null;
-          if (u?.id) {
-            url = `${API_BASE_URL}/products/?user_id=${u.id}`;
-          }
-        } catch (e) {
-          console.error('Failed to parse user from localStorage', e);
-        }
-      }
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setProducts(data);
-      }
+      const response = await axios.get(`${API_BASE_URL}/products/`);
+      setProducts(response.data);
     } catch (error) {
       console.error("Error fetching products:", error);
     }
@@ -98,25 +86,12 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      let url = `${API_BASE_URL}/orders/`;
-      if (prefix === '/project_coordinator') {
-        try {
-          const stored = localStorage.getItem('user');
-          const u = stored ? JSON.parse(stored) : null;
-          if (u?.id) {
-            url = `${API_BASE_URL}/orders/?user_id=${u.id}`;
-          }
-        } catch (e) {
-          console.error('Failed to parse user from localStorage', e);
-        }
-      }
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setOrders(Array.isArray(data) ? data : []);
-      } else {
-        setOrders([]);
-      }
+      const adminId = getCurrentAdminId();
+      const response = await axios.get(`${API_BASE_URL}/orders/`, {
+        params: adminId != null ? { admin_id: adminId } : undefined,
+      });
+      const data = response.data;
+      setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error fetching orders:", error);
       setOrders([]);
@@ -125,8 +100,15 @@ const OMS = () => {
 
   const getCustomerName = (customerId, record) => {
     const customer = customers.find((c) => c.id === customerId);
-    if (customer) return customer.company_name;
-    return record?.customer_name ?? customerId;
+    if (customer) {
+      if (customer.branch) {
+        return `${customer.company_name} (${customer.branch})`;
+      }
+      return customer.company_name;
+    }
+    const baseName = record?.company_name ?? record?.customer_name ?? customerId;
+    const branch = record?.branch;
+    return branch ? `${baseName} (${branch})` : baseName;
   };
 
   const getProductName = (productId, record) => {
@@ -163,11 +145,12 @@ const OMS = () => {
   };
 
   const handleOrderCreated = (order) => {
+    const isUpdate = !!editingOrder;
     fetchOrders();
     setOrderModalOpen(false);
     setEditingOrder(null);
     if (order) {
-      messageApi.success(`Order "${order.sale_order_number}" created successfully!`);
+      messageApi.success(`Order "${order.sale_order_number}" ${isUpdate ? 'updated' : 'created'} successfully!`);
     }
   };
 
@@ -181,22 +164,21 @@ const OMS = () => {
       centered: true,
       onOk: async () => {
         try {
-          const response = await fetch(`${API_BASE_URL}/orders/${order.id}`, { method: "DELETE" });
-          if (response.ok) {
-            const result = await response.json();
-            fetchOrders();
-            if (result.product_also_deleted) {
-              messageApi.success(`Order "${order.sale_order_number}" and its associated product deleted successfully!`);
-            } else {
-              messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
-            }
+          const response = await axios.delete(`${API_BASE_URL}/orders/${order.id}`);
+          const result = response.data || {};
+          fetchOrders();
+          if (result.product_also_deleted) {
+            messageApi.success(`Order "${order.sale_order_number}" and its associated product deleted successfully!`);
           } else {
-            const data = await response.json();
-            messageApi.error(data.detail || "Failed to delete order");
+            messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
           }
         } catch (error) {
           console.error("Error deleting order:", error);
-          messageApi.error("Failed to delete order");
+          const detail =
+            error?.response?.data?.detail ||
+            error?.response?.data?.message ||
+            "Failed to delete order";
+          messageApi.error(detail);
         }
       },
     });
@@ -209,23 +191,34 @@ const OMS = () => {
     }
   };
 
-  const handleViewBOM = (productId) => {
-    navigate(`${prefix}/oms/product/${productId}`);
-  };
-
-  const handleBackToOrders = () => {
-    navigate(`${prefix}/oms`);
-  };
-
   const handleSearch = (value) => {
-    setSearchText(value);
+    const filteredValue = (value || '').replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20);
+    setSearchText(filteredValue);
   };
 
   const handleDateRangeChange = (dates) => {
     setDateRange(dates);
   };
 
+  const orderDatesSet = useMemo(() => {
+    const dates = new Set();
+    orders.forEach(order => {
+      if (order.order_date) dates.add(dayjs(order.order_date).format('YYYY-MM-DD'));
+      if (order.due_date) dates.add(dayjs(order.due_date).format('YYYY-MM-DD'));
+    });
+    return dates;
+  }, [orders]);
+
+  const disabledDate = (current) => {
+    if (!current) return false;
+    // Check if the current date is in our set of order dates
+    return !orderDatesSet.has(current.format('YYYY-MM-DD'));
+  };
+
   const filteredOrders = orders.filter((order, index) => {
+    // 0. Product ID Filter (from URL)
+    if (productId && order.product_id?.toString() !== productId) return false;
+
     // 1. Date Range Filter
     if (dateRange && dateRange[0] && dateRange[1]) {
       const start = dateRange[0].startOf('day');
@@ -253,13 +246,10 @@ const OMS = () => {
     // Project Number
     const saleOrderNumber = String(order.sale_order_number || "").toLowerCase();
     
-    // Project Name
-    const projectName = String(order.project_name || "").toLowerCase();
-    
     // Customer
     const customerName = String(getCustomerName(order.customer_id, order) || "").toLowerCase();
     
-    // Product
+    // Project Name (from product)
     const productName = String(getProductName(order.product_id, order) || "").toLowerCase();
     
     // Qty
@@ -277,7 +267,6 @@ const OMS = () => {
     
     return (
       slNo.includes(searchLower) ||
-      projectName.includes(searchLower) ||
       saleOrderNumber.includes(searchLower) ||
       customerName.includes(searchLower) ||
       productName.includes(searchLower) ||
@@ -288,15 +277,6 @@ const OMS = () => {
       userName.includes(searchLower)
     );
   });
-
-  if (productId) {
-    return (
-      <ProductBOMView 
-        productId={productId}
-        onBackToOrders={handleBackToOrders}
-      />
-    );
-  }
 
   if (loading) {
     return (
@@ -315,19 +295,16 @@ const OMS = () => {
       dataIndex: "serial",
       key: "serial",
       width: 80,
-      render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
+      render: (_, __, index) => {
+        const { current, pageSize } = ordersPagination;
+        return <span className="text-gray-500 font-mono">{(current - 1) * pageSize + index + 1}</span>;
+      },
     },
     {
       title: <span className="font-semibold text-gray-700">Project Number</span>,
       dataIndex: "sale_order_number",
       key: "sale_order_number",
       render: (text) => <span className="font-medium text-gray-800">{text}</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Project Name</span>,
-      dataIndex: "project_name",
-      key: "project_name",
-      render: (text) => <span className="text-gray-600">{text}</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Customer</span>,
@@ -341,19 +318,14 @@ const OMS = () => {
       ),
     },
     {
-      title: <span className="font-semibold text-gray-700">Product</span>,
+      title: <span className="font-semibold text-gray-700">Project Name</span>,
       dataIndex: "product_id",
       key: "product_id",
       render: (productId, record) => (
-        <Button 
-          type="link" 
-          onClick={() => handleViewBOM(productId)}
-          style={{ padding: 0 }}
-          icon={<AppstoreOutlined />}
-          className="flex items-center gap-1"
-        >
-          {getProductName(productId, record)}
-        </Button>
+        <Space className="text-gray-700">
+          <AppstoreOutlined className="text-blue-500" />
+          <span>{getProductName(productId, record)}</span>
+        </Space>
       ),
     },
     {
@@ -403,6 +375,19 @@ const OMS = () => {
       ),
     },
     {
+      title: <span className="font-semibold text-gray-700">Mfg Coordinator</span>,
+      dataIndex: "manufacturing_coordinator_name",
+      key: "manufacturing_coordinator_name",
+      render: (text, record) => (
+        <Space>
+          <UserOutlined className="text-gray-400" />
+          <span className="text-gray-700">
+            {text || record.manufacturing_coordinator_id || "-"}
+          </span>
+        </Space>
+      ),
+    },
+    {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: "actions",
       width: 150,
@@ -443,13 +428,13 @@ const OMS = () => {
     },
   ];
 
-  // KPI stats (Project Coordinator)
-  const totalOrders = orders.length;
-  const inProgressCount = orders.filter(o => o.status === 'Pending').length;
-  const scheduledCount = orders.filter(o => o.status === 'Ongoing').length;
-  const completedCount = orders.filter(o => o.status === 'Completed').length;
+  // KPI stats
+  const totalOrders = filteredOrders.length;
+  const inProgressCount = filteredOrders.filter(o => o.status === 'Pending').length;
+  const scheduledCount = filteredOrders.filter(o => o.status === 'Ongoing').length;
+  const completedCount = filteredOrders.filter(o => o.status === 'Completed').length;
 
-  const ordersForPdf = orders.map(order => ({
+  const ordersForPdf = filteredOrders.map(order => ({
     ...order,
     customer_name: getCustomerName(order.customer_id, order),
     product_name: getProductName(order.product_id, order),
@@ -505,9 +490,8 @@ const OMS = () => {
 
       {contextHolder}
 
-      {/* KPI Cards - only for Project Coordinator */}
-      {prefix === '/project_coordinator' && (
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-4 lg:mb-6">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-4 lg:mb-6">
           <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
@@ -545,7 +529,6 @@ const OMS = () => {
             </div>
           </div>
         </div>
-      )}
 
       {/* Header */}
       <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
@@ -567,15 +550,19 @@ const OMS = () => {
             <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
               <RangePicker
                 onChange={handleDateRangeChange}
+                disabledDate={disabledDate}
                 className="w-full sm:w-64"
                 format="DD/MM/YYYY"
                 placeholder={["Start Date", "End Date"]}
+                inputReadOnly
               />
               <Input.Search
                 placeholder="Search by any field..."
                 allowClear
                 onSearch={handleSearch}
                 onChange={(e) => handleSearch(e.target.value)}
+                value={searchText}
+                maxLength={20}
                 className="w-full sm:w-64 lg:w-80"
                 size="middle"
               />

@@ -6,7 +6,8 @@ import { DataSet } from "vis-data";
 import "vis-timeline/styles/vis-timeline-graph2d.css";
 import moment from 'moment';
 import dayjs from 'dayjs';
-import { API_BASE_URL } from '../Config/auth.js';
+import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
+import { API_BASE_URL } from "../Config/auth";
 
 const { Content } = Layout;
 const { Option } = Select;

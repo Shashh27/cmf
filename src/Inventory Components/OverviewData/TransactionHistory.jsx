@@ -35,7 +35,7 @@ const TransactionHistory = () => {
   const fetchAllTransactions = async () => {
     try {
       console.log('Fetching all transactions...');
-      const response = await fetch(`${API_BASE_URL}/transaction-history/all`);
+      const response = await fetch(`${config.API_BASE_URL}/transaction-history/all`);
       console.log('Response status:', response.status);
       
       if (!response.ok) {

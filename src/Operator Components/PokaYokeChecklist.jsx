@@ -178,7 +178,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       if (activeStep !== 2) return;
       setOrdersLoading(true);
       try {
-        const res = await fetch(`${config.API_BASE_URL}/orders/`, {
+        const res = await fetch(`${API_BASE_URL}/orders/`, {
           headers: { accept: 'application/json' },
         });
         const data = await res.json();

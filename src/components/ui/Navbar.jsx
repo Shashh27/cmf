@@ -7,7 +7,7 @@ const { Header } = Layout;
 const { Title, Text } = Typography;
 const { useBreakpoint } = Grid;
 
-const Navbar = () => {
+const Navbar = ({ collapsed }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const screens = useBreakpoint();
@@ -87,24 +87,19 @@ const Navbar = () => {
         position: 'fixed', 
         top: 0, 
         zIndex: 1000, 
-        width: '100%', 
         background: '#fff', 
         padding: '0 clamp(12px, 3vw, 24px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         borderBottom: '1px solid #f0f0f0',
-        left: 0
+        transition: 'all 0.2s',
+        left: screens.md ? (collapsed ? 80 : 224) : 0,
+        width: screens.md ? `calc(100% - ${(collapsed ? 80 : 224)}px)` : '100%',
       }}
       className="responsive-navbar"
     >
       <style>{`
-        @media (min-width: 768px) {
-          .responsive-navbar {
-            width: calc(100% - 224px) !important;
-            left: 224px !important;
-          }
-        }
         @media (max-width: 768px) {
           .responsive-navbar {
             padding-left: 64px !important;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Space, message, Tag, Modal, Popconfirm, DatePicker, Input, Select, Row, Col } from 'antd';
 import { EditOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
-import { API_BASE_URL } from '../../Config/auth.js';
+import { API_BASE_URL } from '../../Config/auth';
 
 const ReturnRequestsTable = () => {
   const [returnRequests, setReturnRequests] = useState([]);
@@ -79,10 +79,10 @@ const ReturnRequestsTable = () => {
           message.error('Unable to determine current user. Please log in again.');
           return;
         }
-        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`);
+        console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=pending&table_id=${record.id}`, {
             method: 'PUT'
           });
           
@@ -134,10 +134,10 @@ const ReturnRequestsTable = () => {
           message.error('Unable to determine current user. Please log in again.');
           return;
         }
-        console.log('API URL:', `${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`);
+        console.log('API URL:', `${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`);
         
         try {
-          const response = await fetch(`${config.API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`, {
+          const response = await fetch(`${API_BASE_URL}/inventory-return-requests/${record.id}/status?admin_id=${adminId}&status=collected&table_id=${record.id}`, {
             method: 'PUT'
           });
           

@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, Row, Col, Select, Table, Tag, Typography, Space, Spin, message, Tabs, Button, Modal, Input, DatePicker } from "antd";
 import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined } from "@ant-design/icons";
+import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import { API_BASE_URL } from "../Config/auth";
-import config from "../Config/config";
 import dayjs from "dayjs";
 
 const ProcessPlanning = () => {
@@ -59,7 +59,7 @@ const ProcessPlanning = () => {
   const fetchOrderSummary = async (orderId) => {
     if (!orderId) return;
     try {
-      const res = await fetch(`${config.API_BASE_URL}/scheduling/order-summary/${orderId}`);
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/order-summary/${orderId}`);
       if (res.ok) {
         const data = await res.json();
         setOrderSummary(data);
@@ -74,7 +74,7 @@ const ProcessPlanning = () => {
   const fetchActiveParts = async (orderId) => {
     if (!orderId) return;
     try {
-      const res = await fetch(`${config.API_BASE_URL}/scheduling/active-parts/${orderId}`);
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/active-parts/${orderId}`);
       const data = await res.json();
       const ids = (data.active_parts || [])
         .filter(p => p.status === "active")
@@ -244,7 +244,7 @@ const ProcessPlanning = () => {
 
     try {
       const res = await fetch(
-        `${config.API_BASE_URL}/scheduling/set-order-status/${selectedOrderId}?status=${next}`,
+        `${SCHEDULING_API_BASE_URL}/scheduling/set-order-status/${selectedOrderId}?status=${next}`,
         { method: "POST" }
       );
 
@@ -293,7 +293,7 @@ const ProcessPlanning = () => {
     try {
       await Promise.all(
         selectedInIds.map(pid =>
-          fetch(`${config.API_BASE_URL}/scheduling/update-part-status/${selectedOrderId}/${pid}?status=${status}`, { method: "PUT" })
+          fetch(`${SCHEDULING_API_BASE_URL}/scheduling/update-part-status/${selectedOrderId}/${pid}?status=${status}`, { method: "PUT" })
         )
       );
 

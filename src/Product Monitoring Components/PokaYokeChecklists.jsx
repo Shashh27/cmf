@@ -57,7 +57,7 @@ const PokaYokeChecklists = () => {
           is_required: !!item.is_required,
         }));
 
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/`, {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -83,7 +83,7 @@ const PokaYokeChecklists = () => {
 
   const handleDeleteChecklist = async (id) => {
     try {
-      const response = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${id}/`, {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${id}/`, {
         method: 'DELETE',
       });
 
@@ -121,7 +121,7 @@ const PokaYokeChecklists = () => {
       
       // Fetch updated checklist to refresh preview
       try {
-        const checklistResponse = await fetch(`${config.API_BASE_URL}/pokayoke-checklists/${selectedChecklist.id}`);
+        const checklistResponse = await fetch(`${API_BASE_URL}/pokayoke-checklists/${selectedChecklist.id}`);
         if (checklistResponse.ok) {
           const updatedChecklist = await checklistResponse.json();
           setSelectedChecklist(updatedChecklist);
