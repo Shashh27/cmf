@@ -1,25 +1,16 @@
 import React, { useState, useEffect, useRef } from "react";
 import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined } from "@ant-design/icons";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Input, Button, message, Modal, Tooltip, Empty, Spin, Tag, Typography } from "antd";
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
-import { useLocation } from "react-router-dom";
 import ProductBOMPdfDownload from "../DownloadReports/ProductBOMPdfDownload";
 
-const BillOfMaterials = ({ onItemSelected }) => {
+const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
   
-  const location = useLocation();
-  const getRolePrefix = () => {
-    const path = location.pathname;
-    if (path.startsWith('/admin')) return '/admin';
-    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
-    if (path.startsWith('/operator')) return '/operator';
-    return '';
-  };
-  const prefix = getRolePrefix();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
@@ -90,21 +81,8 @@ const BillOfMaterials = ({ onItemSelected }) => {
 
   const fetchProducts = async () => {
     try {
-      // Filter by logged-in user's id for Project Coordinator
-      let url = `${API_BASE_URL}/products/`;
-      if (prefix === '/project_coordinator') {
-        try {
-          const stored = localStorage.getItem('user');
-          const u = stored ? JSON.parse(stored) : null;
-          if (u?.id) {
-            url = `${API_BASE_URL}/products/?user_id=${u.id}`;
-          }
-        } catch (e) {
-          console.error('Failed to parse user from localStorage', e);
-        }
-      }
-      const response = await fetch(url);
-      if (response.ok) setProducts(await response.json());
+      const response = await axios.get(`${API_BASE_URL}/products/`);
+      setProducts(response.data);
     } catch (error) {
       console.error('Error fetching products:', error);
       message.error('Failed to fetch products');
@@ -146,6 +124,7 @@ const BillOfMaterials = ({ onItemSelected }) => {
           workcenter_id: op.workcenter_id || null,
           machine_name: op.machine_name || "",
           machine_id: op.machine_id || null,
+          part_type_name: op.part_type_name || "IN-House",
           work_instructions: op.work_instructions || "",
           notes: op.notes || "",
         });
@@ -200,16 +179,22 @@ const BillOfMaterials = ({ onItemSelected }) => {
     if (!forceRefresh && hierarchicalData[productId]) return hierarchicalData[productId];
     
     try {
-      const response = await fetch(`${API_BASE_URL}/products/${productId}/hierarchical`);
-      if (response.ok) {
-        const data = await response.json();
+      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical`);
+      if (response.status >= 200 && response.status < 300) {
+        const data = response.data;
         const bomExport = flattenBOMForExport(data);
+
+        // Transformed view for this component (used to render tree quickly)
         const transformedData = {
           ...data,
           parts: (data.direct_parts || [])
             .slice()
             .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
-            .map(item => item.part),
+            .map(item => ({
+              ...item.part,
+              extracted_data: item.extracted_data || [],
+              documents: item.documents || []
+            })),
           assemblies: (data.assemblies || [])
             .slice()
             .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
@@ -218,12 +203,24 @@ const BillOfMaterials = ({ onItemSelected }) => {
               parts: (assembly.parts || [])
                 .slice()
                 .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
-                .map(part => part.part),
+                .map(part => ({
+                  ...part.part,
+                  extracted_data: part.extracted_data || [],
+                  documents: part.documents || []
+                })),
               child_assemblies: transformSubassemblies(assembly.subassemblies || [])
             })),
           bomExport,
         };
+
         setHierarchicalData(prev => ({ ...prev, [productId]: transformedData }));
+
+        // For external consumers (like ProductSummary) that need full PartDetails
+        // including operations, pass the original hierarchy 'data'.
+        if (onHierarchyLoaded) {
+          onHierarchyLoaded(productId, data);
+        }
+
         return transformedData;
       }
     } catch (error) {
@@ -241,7 +238,11 @@ const BillOfMaterials = ({ onItemSelected }) => {
         parts: (sub.parts || [])
           .slice()
           .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
-          .map(part => part.part),
+          .map(part => ({
+            ...part.part,
+            extracted_data: part.extracted_data || [],
+            documents: part.documents || []
+          })),
         child_assemblies: transformSubassemblies(sub.subassemblies || [])
       }));
   };
@@ -345,36 +346,31 @@ const BillOfMaterials = ({ onItemSelected }) => {
       cancelText: 'No',
       onOk: async () => {
         try {
-          const response = await fetch(`${API_BASE_URL}${endpoints[type]}`, { method: 'DELETE' });
-          if (response.ok) {
-            message.success(`${type.charAt(0).toUpperCase() + type.slice(1)} "${names[type]}" deleted successfully.`);
-            if (type === 'product') {
-              await fetchProducts();
-              setHierarchicalData(prev => {
-                const newData = { ...prev };
-                delete newData[item.id];
-                return newData;
-              });
-            } else if (item.product_id) {
-              await fetchProductHierarchy(item.product_id, true);
-              setExpandedItems(prev => ({
-                ...prev,
-                [getExpandKey('product', item.product_id)]: true,
-                ...(item.assembly_id && type === 'part' && { [getExpandKey('assembly', item.assembly_id)]: true })
-              }));
-            }
-          } else {
-            // Try to get detailed error message from backend
-            try {
-              const errorData = await response.json();
-              message.error(errorData.detail || `Failed to delete ${type} "${names[type]}".`);
-            } catch (e) {
-              message.error(`Failed to delete ${type} "${names[type]}".`);
-            }
+          await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
+          message.success(`${type.charAt(0).toUpperCase() + type.slice(1)} "${names[type]}" deleted successfully.`);
+          if (type === 'product') {
+            await fetchProducts();
+            setHierarchicalData(prev => {
+              const newData = { ...prev };
+              delete newData[item.id];
+              return newData;
+            });
+          } else if (item.product_id) {
+            await fetchProductHierarchy(item.product_id, true);
+            setExpandedItems(prev => ({
+              ...prev,
+              [getExpandKey('product', item.product_id)]: true,
+              ...(item.assembly_id && type === 'part' && { [getExpandKey('assembly', item.assembly_id)]: true })
+            }));
           }
         } catch (error) {
           console.error(`Error deleting ${type}:`, error);
-          message.error(`Error deleting ${type} "${names[type]}".`);
+          const detail =
+            error?.response?.data?.detail ||
+            error?.response?.data?.message ||
+            error?.message ||
+            `Error deleting ${type} "${names[type]}".`;
+          message.error(detail);
         }
       }
     });
@@ -659,8 +655,18 @@ const BillOfMaterials = ({ onItemSelected }) => {
               <span className="sm:hidden">New</span>
             </Button>
           </div>
-          <Input prefix={<SearchOutlined className="text-slate-400" />} placeholder="Search products..." value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)} className="rounded-md text-sm border-slate-200" allowClear />
+          <Input 
+            prefix={<SearchOutlined className="text-slate-400" />} 
+            placeholder="Search products..." 
+            value={searchTerm}
+            onChange={(e) => {
+              const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
+              setSearchTerm(filteredValue);
+            }} 
+            maxLength={30}
+            className="rounded-md text-sm border-slate-200" 
+            allowClear 
+          />
         </div>
         <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">
           {filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (

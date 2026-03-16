@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
 import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
   SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
-import ProductBOMView from "../OMS Components/ProductBOMView";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
@@ -17,7 +17,6 @@ const { RangePicker } = DatePicker;
 
 const OMS = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { productId } = useParams();
   const [messageApi, contextHolder] = message.useMessage();
   const [orders, setOrders] = useState([]);
@@ -33,23 +32,18 @@ const OMS = () => {
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
 
-  const getRolePrefix = () => {
-    const path = location.pathname;
-    if (path.startsWith('/admin')) return '/admin';
-    if (path.startsWith('/project_coordinator')) return '/project_coordinator';
-    if (path.startsWith('/operator')) return '/operator';
-    return ''; 
-  };
-  const prefix = getRolePrefix();
-
   useEffect(() => {
-    if (hasFetchedData.current || productId) return;
+    if (hasFetchedData.current) return;
     
     const fetchData = async () => {
       hasFetchedData.current = true;
       setLoading(true);
       try {
-        await fetchOrders();
+        await Promise.all([
+          fetchOrders(),
+          fetchCustomers(),
+          fetchProducts()
+        ]);
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -58,15 +52,12 @@ const OMS = () => {
     };
 
     fetchData();
-  }, [productId]);
+  }, []);
 
   const fetchCustomers = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/customers/`);
-      if (response.ok) {
-        const data = await response.json();
-        setCustomers(data);
-      }
+      const response = await axios.get(`${API_BASE_URL}/customers/`);
+      setCustomers(response.data);
     } catch (error) {
       console.error("Error fetching customers:", error);
     }
@@ -74,23 +65,8 @@ const OMS = () => {
 
   const fetchProducts = async () => {
     try {
-      let url = `${API_BASE_URL}/products/`;
-      if (prefix === '/project_coordinator') {
-        try {
-          const stored = localStorage.getItem('user');
-          const u = stored ? JSON.parse(stored) : null;
-          if (u?.id) {
-            url = `${API_BASE_URL}/products/?user_id=${u.id}`;
-          }
-        } catch (e) {
-          console.error('Failed to parse user from localStorage', e);
-        }
-      }
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setProducts(data);
-      }
+      const response = await axios.get(`${API_BASE_URL}/products/`);
+      setProducts(response.data);
     } catch (error) {
       console.error("Error fetching products:", error);
     }
@@ -98,25 +74,9 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      let url = `${API_BASE_URL}/orders/`;
-      if (prefix === '/project_coordinator') {
-        try {
-          const stored = localStorage.getItem('user');
-          const u = stored ? JSON.parse(stored) : null;
-          if (u?.id) {
-            url = `${API_BASE_URL}/orders/?user_id=${u.id}`;
-          }
-        } catch (e) {
-          console.error('Failed to parse user from localStorage', e);
-        }
-      }
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        setOrders(Array.isArray(data) ? data : []);
-      } else {
-        setOrders([]);
-      }
+      const response = await axios.get(`${API_BASE_URL}/orders/`);
+      const data = response.data;
+      setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error fetching orders:", error);
       setOrders([]);
@@ -125,8 +85,15 @@ const OMS = () => {
 
   const getCustomerName = (customerId, record) => {
     const customer = customers.find((c) => c.id === customerId);
-    if (customer) return customer.company_name;
-    return record?.customer_name ?? customerId;
+    if (customer) {
+      if (customer.branch) {
+        return `${customer.company_name} (${customer.branch})`;
+      }
+      return customer.company_name;
+    }
+    const baseName = record?.company_name ?? record?.customer_name ?? customerId;
+    const branch = record?.branch;
+    return branch ? `${baseName} (${branch})` : baseName;
   };
 
   const getProductName = (productId, record) => {
@@ -163,11 +130,12 @@ const OMS = () => {
   };
 
   const handleOrderCreated = (order) => {
+    const isUpdate = !!editingOrder;
     fetchOrders();
     setOrderModalOpen(false);
     setEditingOrder(null);
     if (order) {
-      messageApi.success(`Order "${order.sale_order_number}" created successfully!`);
+      messageApi.success(`Order "${order.sale_order_number}" ${isUpdate ? 'updated' : 'created'} successfully!`);
     }
   };
 
@@ -181,22 +149,21 @@ const OMS = () => {
       centered: true,
       onOk: async () => {
         try {
-          const response = await fetch(`${API_BASE_URL}/orders/${order.id}`, { method: "DELETE" });
-          if (response.ok) {
-            const result = await response.json();
-            fetchOrders();
-            if (result.product_also_deleted) {
-              messageApi.success(`Order "${order.sale_order_number}" and its associated product deleted successfully!`);
-            } else {
-              messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
-            }
+          const response = await axios.delete(`${API_BASE_URL}/orders/${order.id}`);
+          const result = response.data || {};
+          fetchOrders();
+          if (result.product_also_deleted) {
+            messageApi.success(`Order "${order.sale_order_number}" and its associated product deleted successfully!`);
           } else {
-            const data = await response.json();
-            messageApi.error(data.detail || "Failed to delete order");
+            messageApi.success(`Order "${order.sale_order_number}" deleted successfully!`);
           }
         } catch (error) {
           console.error("Error deleting order:", error);
-          messageApi.error("Failed to delete order");
+          const detail =
+            error?.response?.data?.detail ||
+            error?.response?.data?.message ||
+            "Failed to delete order";
+          messageApi.error(detail);
         }
       },
     });
@@ -209,16 +176,9 @@ const OMS = () => {
     }
   };
 
-  const handleViewBOM = (productId) => {
-    navigate(`${prefix}/oms/product/${productId}`);
-  };
-
-  const handleBackToOrders = () => {
-    navigate(`${prefix}/oms`);
-  };
-
   const handleSearch = (value) => {
-    setSearchText(value);
+    const filteredValue = (value || '').replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20);
+    setSearchText(filteredValue);
   };
 
   const handleDateRangeChange = (dates) => {
@@ -226,6 +186,9 @@ const OMS = () => {
   };
 
   const filteredOrders = orders.filter((order, index) => {
+    // 0. Product ID Filter (from URL)
+    if (productId && order.product_id?.toString() !== productId) return false;
+
     // 1. Date Range Filter
     if (dateRange && dateRange[0] && dateRange[1]) {
       const start = dateRange[0].startOf('day');
@@ -289,15 +252,6 @@ const OMS = () => {
     );
   });
 
-  if (productId) {
-    return (
-      <ProductBOMView 
-        productId={productId}
-        onBackToOrders={handleBackToOrders}
-      />
-    );
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -315,7 +269,10 @@ const OMS = () => {
       dataIndex: "serial",
       key: "serial",
       width: 80,
-      render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
+      render: (_, __, index) => {
+        const { current, pageSize } = ordersPagination;
+        return <span className="text-gray-500 font-mono">{(current - 1) * pageSize + index + 1}</span>;
+      },
     },
     {
       title: <span className="font-semibold text-gray-700">Project Number</span>,
@@ -345,15 +302,10 @@ const OMS = () => {
       dataIndex: "product_id",
       key: "product_id",
       render: (productId, record) => (
-        <Button 
-          type="link" 
-          onClick={() => handleViewBOM(productId)}
-          style={{ padding: 0 }}
-          icon={<AppstoreOutlined />}
-          className="flex items-center gap-1"
-        >
-          {getProductName(productId, record)}
-        </Button>
+        <Space className="text-gray-700">
+          <AppstoreOutlined className="text-blue-500" />
+          <span>{getProductName(productId, record)}</span>
+        </Space>
       ),
     },
     {
@@ -443,13 +395,13 @@ const OMS = () => {
     },
   ];
 
-  // KPI stats (Project Coordinator)
-  const totalOrders = orders.length;
-  const inProgressCount = orders.filter(o => o.status === 'Pending').length;
-  const scheduledCount = orders.filter(o => o.status === 'Ongoing').length;
-  const completedCount = orders.filter(o => o.status === 'Completed').length;
+  // KPI stats
+  const totalOrders = filteredOrders.length;
+  const inProgressCount = filteredOrders.filter(o => o.status === 'Pending').length;
+  const scheduledCount = filteredOrders.filter(o => o.status === 'Ongoing').length;
+  const completedCount = filteredOrders.filter(o => o.status === 'Completed').length;
 
-  const ordersForPdf = orders.map(order => ({
+  const ordersForPdf = filteredOrders.map(order => ({
     ...order,
     customer_name: getCustomerName(order.customer_id, order),
     product_name: getProductName(order.product_id, order),
@@ -505,9 +457,8 @@ const OMS = () => {
 
       {contextHolder}
 
-      {/* KPI Cards - only for Project Coordinator */}
-      {prefix === '/project_coordinator' && (
-        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-4 lg:mb-6">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-4 lg:mb-6">
           <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between">
               <div>
@@ -545,7 +496,6 @@ const OMS = () => {
             </div>
           </div>
         </div>
-      )}
 
       {/* Header */}
       <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
@@ -570,12 +520,15 @@ const OMS = () => {
                 className="w-full sm:w-64"
                 format="DD/MM/YYYY"
                 placeholder={["Start Date", "End Date"]}
+                inputReadOnly
               />
               <Input.Search
                 placeholder="Search by any field..."
                 allowClear
                 onSearch={handleSearch}
                 onChange={(e) => handleSearch(e.target.value)}
+                value={searchText}
+                maxLength={20}
                 className="w-full sm:w-64 lg:w-80"
                 size="middle"
               />

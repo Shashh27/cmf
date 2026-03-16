@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Card, Row, Col, Select, Table, Tag, Typography, Space, Spin, message, Tabs, Button, Modal, Input, DatePicker } from "antd";
+import { Card, Row, Col, Select, Table, Tag, Typography, Space, Spin, message, Tabs, Button, Modal, Input, DatePicker, Tooltip } from "antd";
 import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined } from "@ant-design/icons";
 import { API_BASE_URL } from "../Config/auth";
 import config from "../Config/config";
@@ -410,19 +410,23 @@ const ProcessPlanning = () => {
         const st = outEditing[r.id];
         if (st?.editing) {
           return (
-            <Button
-              type="link"
-              icon={<SaveOutlined />}
-              onClick={() => handleSaveOutSource(r)}
-            />
+            <Tooltip title="Save">
+              <Button
+                type="link"
+                icon={<SaveOutlined />}
+                onClick={() => handleSaveOutSource(r)}
+              />
+            </Tooltip>
           );
         }
         return (
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => startEditOutSource(r)}
-          />
+          <Tooltip title="Edit">
+            <Button
+              type="link"
+              icon={<EditOutlined />}
+              onClick={() => startEditOutSource(r)}
+            />
+          </Tooltip>
         );
       }
     }

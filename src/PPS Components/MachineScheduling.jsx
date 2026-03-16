@@ -324,8 +324,8 @@ const MachineScheduling = () => {
 
         const groups = new DataSet(groupsArr);
         const groupCount = groupsArr.length;
-        const rowHeight = 40;
-        const timelineHeightPx = Math.max(560, groupCount * rowHeight);
+        const rowHeight = 34; // Reduced from 40 for more compact view
+        const timelineHeightPx = Math.max(300, groupCount * rowHeight + 45); // Added 45 for timeline header and reduced min-height from 560
 
         // 5. Dynamic styles
         if (styleElementRef.current) styleElementRef.current.remove();
@@ -355,7 +355,7 @@ const MachineScheduling = () => {
           zoomable:    true,
           zoomKey:     '',
           orientation: 'top',
-          height:           `${timelineHeightPx}px`,
+          height:      `${timelineHeightPx}px`,
           margin: {
             item:  { horizontal:10, vertical: 4 },
             axis:  5,
@@ -567,7 +567,7 @@ const MachineScheduling = () => {
                   <div
                     ref={timelineContainerRef}
                     style={{
-                      minHeight: 560,
+                      minHeight: 300,
                       background: '#fff',
                     }}
                   />

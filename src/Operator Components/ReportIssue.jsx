@@ -62,7 +62,13 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       setPartId(null);
       return;
     }
-    fetch(`${API_BASE_URL}/orders/${orderId}/part-priorities`, { headers: { accept: 'application/json' } })
+    const orderObj = orders.find(o => o.id === orderId);
+    const saleOrderNumber = orderObj?.sale_order_number || orderObj?.order_no || orderObj?.id;
+    if (!saleOrderNumber) {
+      setParts([]);
+      return;
+    }
+    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, { headers: { accept: 'application/json' } })
       .then(async (r) => {
         if (r.ok) {
           const data = await r.json();
@@ -89,7 +95,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
         }
       })
       .catch(() => setParts([]));
-  }, [orderId]);
+  }, [orderId, orders]);
   const resetAll = () => {
     setActiveTab('oee');
     setOeeCategory('Availability');
@@ -238,7 +244,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
           key="oee"
           tab={
             <span>
-              <WarningOutlined style={{ color: '#1677ff', marginRight: 6 }} />
+              <WarningOutlined style={{ marginRight: 6 }} />
               OEE Issue
             </span>
           }
