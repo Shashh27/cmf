@@ -31,17 +31,25 @@ from routers import (
     tool_issues_router,
     out_source_parts_status_router,
     maintenance_router,
+    maintenance_router,
 )
 
 # Import Pokayoke checklists router
 from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
 
-# Import document routers
-from document_routers import (
-    common_documents_router,
-    general_documents_router,
-    machine_documents_router
-)
+# Import general documents router
+from document_routers.general_documents import router as general_documents_router
+
+# Import machine documents router
+from document_routers.machine_documents import router as machine_documents_router
+
+# Import common documents router
+from document_routers.common_documents import router as common_documents_router
+from notification_routers.order_notifications import router as order_notifications_router
+from notification_routers.machine_notifications import router as machine_notifications_router
+from notification_routers.tool_issues_notification import router as tool_issues_notifications_router
+from notification_routers.component_issues_notification import router as component_issues_notifications_router
+from notification_routers.machine_calibration_notification import router as machine_calibration_notifications_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -75,6 +83,12 @@ async def startup_event():
 
     # Create database tables
     try:
+        # Ensure notifications schema exists
+        try:
+            from sqlalchemy import text
+            engine.execute(text("CREATE SCHEMA IF NOT EXISTS notifications"))
+        except Exception:
+            pass
         Base.metadata.create_all(bind=engine)
         print("SUCCESS: Database tables created/verified")
     except Exception as e:
@@ -130,11 +144,15 @@ app.include_router(inventory_requests_router, prefix="/api/v1")
 app.include_router(inventory_return_requests_router, prefix="/api/v1")
 app.include_router(transaction_history_router, prefix="/api/v1")
 app.include_router(pokayoke_checklists_router, prefix="/api/v1")
+app.include_router(order_notifications_router, prefix="/api/v1")
+app.include_router(machine_notifications_router, prefix="/api/v1")
+app.include_router(tool_issues_notifications_router, prefix="/api/v1")
+app.include_router(component_issues_notifications_router, prefix="/api/v1")
+app.include_router(machine_calibration_notifications_router, prefix="/api/v1")
 app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
 app.include_router(tool_issues_router, prefix="/api/v1")
 app.include_router(out_source_parts_status_router, prefix="/api/v1")
 app.include_router(maintenance_router, prefix="/api/v1")
-
 
 
 @app.get("/")

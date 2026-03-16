@@ -8,7 +8,7 @@ import os
 import io
 
 from DB.database import get_db
-from DB.models.inventory import ToolIssue as ToolIssueModel, ToolsList as ToolsListModel, InventoryRequest as InventoryRequestModel
+from DB.models.inventory import ToolIssue as ToolIssueModel, ToolsList as ToolsListModel, InventoryRequest as InventoryRequestModel, ToolIssueDocument as ToolIssueDocumentModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Order
 from DB.schemas.inventory import (
@@ -18,6 +18,7 @@ from DB.schemas.inventory import (
     ToolIssueWithDetails as ToolIssueWithDetailsSchema
 )
 from DB.minio_client import get_minio_client
+from DB.models.notifications import ToolIssuesNotification as ToolIssuesNotificationModel
 
 router = APIRouter(
     prefix="/tool-issues",
@@ -29,9 +30,9 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 # Pydantic model for status update request
 class ToolIssueStatusUpdate(BaseModel):
-    admin_id: int
+    inventory_supervisor_id: int
     status: str  # 'approved' or 'rejected'
-    remarks: str  # Mandatory remarks from admin
+    remarks: str  # Mandatory remarks from inventory supervisor
 
 
 # =======================
@@ -55,9 +56,12 @@ class ToolIssueStatusUpdate(BaseModel):
                             "issue_category":  {"type": "string"},
                             "description":     {"type": "string"},
                             "document": {
-                                "type": "string",
-                                "format": "binary",
-                                "description": "Upload a document file (PDF, image, etc.)"
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "format": "binary"
+                                },
+                                "description": "Upload one or more document files (PDF, image, etc.)"
                             }
                         }
                     }
@@ -71,7 +75,7 @@ async def create_tool_issue(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Create a new tool issue (raised by operator) with optional document upload"""
+    """Create a new tool issue (raised by operator) with multiple document uploads"""
     form = await request.form()
 
     # Extract and validate required fields
@@ -88,7 +92,7 @@ async def create_tool_issue(
 
     issue_category = form.get("issue_category") or None
     description = form.get("description") or None
-    document = form.get("document")  # Will be UploadFile if a file was sent, else a string or None
+    documents = form.getlist("document")  # Returns list of UploadFile
 
     # Validate tool exists
     tool = db.query(ToolsListModel).filter(ToolsListModel.id == tool_id).first()
@@ -138,28 +142,36 @@ async def create_tool_issue(
             detail=f"tool_issue_qty must be > 0 and <= outstanding ({outstanding})"
         )
 
-    # Handle document upload
+    # Handle multiple document uploads
     # Stored in MinIO bucket 'cmf' at path: toolissues/tool_{tool_id}/{timestamp}_{uuid}{ext}
-    document_url = None
-    if document and hasattr(document, "filename") and document.filename:
-        try:
-            minio_client = get_minio_client()
-            file_extension = os.path.splitext(document.filename)[1]
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            unique_filename = f"{timestamp}_{uuid.uuid4()}{file_extension}"
-            object_name = f"toolissues/tool_{tool_id}/{unique_filename}"
+    document_urls = []
+    if documents:
+        minio_client = get_minio_client()
+        for doc in documents:
+            if hasattr(doc, "filename") and doc.filename:
+                try:
+                    file_extension = os.path.splitext(doc.filename)[1]
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    unique_filename = f"{timestamp}_{uuid.uuid4()}{file_extension}"
+                    object_name = f"toolissues/tool_{tool_id}/{unique_filename}"
 
-            file_content = await document.read()
-            document_url = minio_client.upload_file(
-                file_data=io.BytesIO(file_content),
-                object_name=object_name,
-                content_type=document.content_type or "application/octet-stream"
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to upload document: {str(e)}"
-            )
+                    file_content = await doc.read()
+                    url = minio_client.upload_file(
+                        file_data=io.BytesIO(file_content),
+                        object_name=object_name,
+                        content_type=doc.content_type or "application/octet-stream"
+                    )
+                    document_urls.append(url)
+                except Exception as e:
+                    # In case of error uploading one file, log it but continue?
+                    # Or fail the whole request? Let's fail the whole request to be safe.
+                    raise HTTPException(
+                        status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to upload document {doc.filename}: {str(e)}"
+                    )
+
+    # Combined URLs are no longer stored in the ToolIssue model,
+    # they are now stored in the tool_issue_documents table.
 
     db_issue = ToolIssueModel(
         tool_id=tool_id,
@@ -167,15 +179,34 @@ async def create_tool_issue(
         tool_issue_qty=tool_issue_qty,
         operator_id=operator_id,
         status="pending",
-        admin_id=None,
+        inventory_supervisor_id=None,
         created_at=datetime.now(IST).replace(tzinfo=None),
         issue_category=issue_category,
-        description=description,
-        document_url=document_url
+        description=description
     )
     db.add(db_issue)
     db.commit()
     db.refresh(db_issue)
+
+    # Now save documents to the tool_issue_documents table
+    if document_urls:
+        for url in document_urls:
+            doc_entry = ToolIssueDocumentModel(
+                tool_issue_id=db_issue.id,
+                document_url=url
+            )
+            db.add(doc_entry)
+        db.commit()
+        db.refresh(db_issue) # Refresh to load the documents relationship
+    
+    # Create notification for this tool issue (supervisor will ack)
+    try:
+        notif = ToolIssuesNotificationModel(tool_issues_id=db_issue.id, is_ack=False)
+        db.add(notif)
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Do not fail the tool issue creation if notification insert fails
     
     # Fetch sale_order_number for the response
     sale_order_number = None
@@ -196,17 +227,24 @@ async def create_tool_issue(
         request_id=db_issue.request_id,
         tool_issue_qty=db_issue.tool_issue_qty,
         operator_id=db_issue.operator_id,
-        admin_id=db_issue.admin_id,
+        inventory_supervisor_id=db_issue.inventory_supervisor_id,
         status=db_issue.status,
         created_at=db_issue.created_at,
         updated_at=db_issue.updated_at,
         issue_category=db_issue.issue_category,
         description=db_issue.description,
         remarks=db_issue.remarks,
-        document_url=db_issue.document_url,
+        documents=[
+            {
+                "id": doc.id,
+                "tool_issue_id": doc.tool_issue_id,
+                "document_url": doc.document_url,
+                "created_at": doc.created_at
+            } for doc in db_issue.documents
+        ],
         tool_name=tool.item_description if tool else None,
         operator_name=operator.user_name if operator else None,
-        admin_name=None,  # No admin assigned yet on creation
+        inventory_supervisor_name=None,  # No inventory supervisor assigned yet on creation
         sale_order_number=sale_order_number
     )
 
@@ -218,7 +256,7 @@ def get_all_tool_issues(db: Session = Depends(get_db)):
     for issue in issues:
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
-        admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+        inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
         
         # Fetch sale_order_number
         sale_order_number = None
@@ -235,17 +273,24 @@ def get_all_tool_issues(db: Session = Depends(get_db)):
             request_id=issue.request_id,
             tool_issue_qty=issue.tool_issue_qty,
             operator_id=issue.operator_id,
-            admin_id=issue.admin_id,
+            inventory_supervisor_id=issue.inventory_supervisor_id,
             status=issue.status,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             issue_category=issue.issue_category,
             description=issue.description,
             remarks=issue.remarks,
-            document_url=issue.document_url,
+            documents=[
+                {
+                    "id": doc.id,
+                    "tool_issue_id": doc.tool_issue_id,
+                    "document_url": doc.document_url,
+                    "created_at": doc.created_at
+                } for doc in issue.documents
+            ],
             tool_name=tool.item_description if tool else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None,
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
             sale_order_number=sale_order_number
         ))
     return results
@@ -259,7 +304,7 @@ def get_tool_issue(issue_id: int, db: Session = Depends(get_db)):
 
     tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
     operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
-    admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+    inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
     
     # Fetch sale_order_number
     sale_order_number = None
@@ -276,17 +321,24 @@ def get_tool_issue(issue_id: int, db: Session = Depends(get_db)):
         request_id=issue.request_id,
         tool_issue_qty=issue.tool_issue_qty,
         operator_id=issue.operator_id,
-        admin_id=issue.admin_id,
+        inventory_supervisor_id=issue.inventory_supervisor_id,
         status=issue.status,
         created_at=issue.created_at,
         updated_at=issue.updated_at,
         issue_category=issue.issue_category,
         description=issue.description,
         remarks=issue.remarks,
-        document_url=issue.document_url,
+        documents=[
+            {
+                "id": doc.id,
+                "tool_issue_id": doc.tool_issue_id,
+                "document_url": doc.document_url,
+                "created_at": doc.created_at
+            } for doc in issue.documents
+        ],
         tool_name=tool.item_description if tool else None,
         operator_name=operator.user_name if operator else None,
-        admin_name=admin.user_name if admin else None,
+        inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
         sale_order_number=sale_order_number
     )
 
@@ -309,9 +361,12 @@ def get_tool_issue(issue_id: int, db: Session = Depends(get_db)):
                             "description":    {"type": "string"},
                             "remarks":        {"type": "string"},
                             "document": {
-                                "type": "string",
-                                "format": "binary",
-                                "description": "Upload a replacement document file"
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "format": "binary"
+                                },
+                                "description": "Upload one or more document files (PDF, image, etc.)"
                             }
                         }
                     }
@@ -326,7 +381,7 @@ async def update_tool_issue(
     request: Request,
     db: Session = Depends(get_db)
 ):
-    """Update a tool issue fields and/or replace its document"""
+    """Update a tool issue fields and/or add more documents"""
     issue = db.query(ToolIssueModel).filter(ToolIssueModel.id == issue_id).first()
     if not issue:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Tool issue with id {issue_id} not found")
@@ -347,7 +402,7 @@ async def update_tool_issue(
     issue_category = form.get("issue_category") or None
     description    = form.get("description")    or None
     remarks        = form.get("remarks")        or None
-    document       = form.get("document")
+    documents      = form.getlist("document")
 
     # FK validations
     if tool_id is not None:
@@ -380,28 +435,35 @@ async def update_tool_issue(
     if remarks is not None:
         issue.remarks = remarks
 
-    # Handle replacement document upload
-    # Stored in MinIO bucket 'cmf' at path: toolissues/tool_{tool_id}/{timestamp}_{uuid}{ext}
-    if document and hasattr(document, "filename") and document.filename:
+    # Handle document uploads
+    if documents:
         try:
             minio_client = get_minio_client()
             current_tool_id = tool_id if tool_id is not None else issue.tool_id
-            file_extension  = os.path.splitext(document.filename)[1]
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            unique_filename = f"{timestamp}_{uuid.uuid4()}{file_extension}"
-            object_name     = f"toolissues/tool_{current_tool_id}/{unique_filename}"
+            for doc in documents:
+                if hasattr(doc, "filename") and doc.filename:
+                    file_extension  = os.path.splitext(doc.filename)[1]
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    unique_filename = f"{timestamp}_{uuid.uuid4()}{file_extension}"
+                    object_name     = f"toolissues/tool_{current_tool_id}/{unique_filename}"
 
-            file_content = await document.read()
-            document_url = minio_client.upload_file(
-                file_data=io.BytesIO(file_content),
-                object_name=object_name,
-                content_type=document.content_type or "application/octet-stream"
-            )
-            issue.document_url = document_url
+                    file_content = await doc.read()
+                    url = minio_client.upload_file(
+                        file_data=io.BytesIO(file_content),
+                        object_name=object_name,
+                        content_type=doc.content_type or "application/octet-stream"
+                    )
+                    
+                    # Create document entry
+                    doc_entry = ToolIssueDocumentModel(
+                        tool_issue_id=issue.id,
+                        document_url=url
+                    )
+                    db.add(doc_entry)
         except Exception as e:
             raise HTTPException(
                 status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to upload document: {str(e)}"
+                detail=f"Failed to upload documents: {str(e)}"
             )
 
     issue.updated_at = datetime.now(IST).replace(tzinfo=None)
@@ -428,9 +490,9 @@ def update_tool_issue_status(
     if not issue:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Tool issue with id {issue_id} not found")
 
-    admin = db.query(AccessUserModel).filter(AccessUserModel.id == status_update.admin_id).first()
-    if not admin:
-        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Admin with id {status_update.admin_id} not found")
+    inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == status_update.inventory_supervisor_id).first()
+    if not inventory_supervisor:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Inventory Supervisor with id {status_update.inventory_supervisor_id} not found")
 
     tool = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
     if not tool:
@@ -450,7 +512,7 @@ def update_tool_issue_status(
         # The available quantity is calculated dynamically in transaction_history endpoint
         # tool.quantity remains unchanged - it represents the physical available stock
 
-    issue.admin_id   = status_update.admin_id
+    issue.inventory_supervisor_id   = status_update.inventory_supervisor_id
     issue.status     = status_update.status
     issue.remarks    = status_update.remarks  # Save the mandatory remarks
     issue.updated_at = datetime.now(IST).replace(tzinfo=None)
@@ -466,15 +528,24 @@ def delete_tool_issue(issue_id: int, db: Session = Depends(get_db)):
     if not issue:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Tool issue with id {issue_id} not found")
 
+    # Cleanup MinIO files before deleting from DB
+    minio_client = get_minio_client()
+    for doc in issue.documents:
+        try:
+            # Extract object name from URL
+            # URL format: http://endpoint/bucket/object_name
+            url_parts = doc.document_url.split(f"/{minio_client.bucket_name}/")
+            if len(url_parts) > 1:
+                object_name = url_parts[1]
+                minio_client.delete_file(object_name)
+        except Exception as e:
+            print(f"Failed to delete file from MinIO: {e}")
+
     if issue.status == 'approved':
         tool = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         if tool:
             # Decrease issues_qty
             tool.issues_qty = max(0, (tool.issues_qty or 0) - issue.tool_issue_qty)
-            
-            # Note: We do NOT modify tool.quantity here
-            # The available quantity is calculated dynamically in transaction_history endpoint
-            
             db.commit()
 
     db.delete(issue)
@@ -489,7 +560,7 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
     for issue in issues:
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
-        admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+        inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
         # Fetch sale_order_number for operator-specific listing
         sale_order_number = None
         if issue.request_id:
@@ -504,17 +575,24 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
             request_id=issue.request_id,
             tool_issue_qty=issue.tool_issue_qty,
             operator_id=issue.operator_id,
-            admin_id=issue.admin_id,
+            inventory_supervisor_id=issue.inventory_supervisor_id,
             status=issue.status,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             issue_category=issue.issue_category,
             description=issue.description,
             remarks=issue.remarks,
-            document_url=issue.document_url,
+            documents=[
+                {
+                    "id": doc.id,
+                    "tool_issue_id": doc.tool_issue_id,
+                    "document_url": doc.document_url,
+                    "created_at": doc.created_at
+                } for doc in issue.documents
+            ],
             tool_name=tool.item_description if tool else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None,
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
             sale_order_number=sale_order_number
         ))
     return results
@@ -527,23 +605,30 @@ def get_tool_issues_by_status(status: str, db: Session = Depends(get_db)):
     for issue in issues:
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
-        admin    = db.query(AccessUserModel).filter(AccessUserModel.id == issue.admin_id).first()
+        inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
         results.append(ToolIssueWithDetailsSchema(
             id=issue.id,
             tool_id=issue.tool_id,
             request_id=issue.request_id,
             tool_issue_qty=issue.tool_issue_qty,
             operator_id=issue.operator_id,
-            admin_id=issue.admin_id,
+            inventory_supervisor_id=issue.inventory_supervisor_id,
             status=issue.status,
             created_at=issue.created_at,
             updated_at=issue.updated_at,
             issue_category=issue.issue_category,
             description=issue.description,
             remarks=issue.remarks,
-            document_url=issue.document_url,
+            documents=[
+                {
+                    "id": doc.id,
+                    "tool_issue_id": doc.tool_issue_id,
+                    "document_url": doc.document_url,
+                    "created_at": doc.created_at
+                } for doc in issue.documents
+            ],
             tool_name=tool.item_description if tool else None,
             operator_name=operator.user_name if operator else None,
-            admin_name=admin.user_name if admin else None
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None
         ))
     return results

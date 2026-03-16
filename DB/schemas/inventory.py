@@ -154,7 +154,7 @@ class InventoryRequestWithDetails(InventoryRequest):
     tool_name: Optional[str] = None
     tool_type: Optional[str] = None
     operator_name: Optional[str] = None
-    admin_name: Optional[str] = None
+    inventory_supervisor_name: Optional[str] = None
     project_name: Optional[str] = None
     part_name: Optional[str] = None
 
@@ -171,7 +171,7 @@ class InventoryReturnRequestBase(BaseModel):
     total_requested_qty: int
     returned_qty: int = 0
     remarks: Optional[str] = None
-    admin_id: Optional[int] = None  # Only set by admin during status update
+    inventory_supervisor_id: Optional[int] = None  # Set when status is updated to collected
     status: Optional[str] = "pending"
 
 
@@ -203,7 +203,7 @@ class InventoryReturnRequest(InventoryReturnRequestBase):
 
 class InventoryReturnRequestWithDetails(InventoryReturnRequest):
     operator_name: Optional[str] = None
-    admin_name: Optional[str] = None
+    inventory_supervisor_name: Optional[str] = None
     inventory_request_details: Optional[InventoryRequestWithDetails] = None
 
     class Config:
@@ -264,7 +264,7 @@ class ToolIssueUpdate(BaseModel):
 
 class ToolIssue(ToolIssueBase):
     id: int
-    admin_id: Optional[int] = None
+    inventory_supervisor_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -275,7 +275,7 @@ class ToolIssue(ToolIssueBase):
 class ToolIssueWithDetails(ToolIssue):
     tool_name: Optional[str] = None
     operator_name: Optional[str] = None
-    admin_name: Optional[str] = None
+    inventory_supervisor_name: Optional[str] = None
     sale_order_number: Optional[str] = None
 
     class Config:

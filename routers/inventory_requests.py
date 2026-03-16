@@ -72,10 +72,10 @@ def create_inventory_request(
             detail=f"Part with id {request_data.part_id} not found"
         )
     
-    # Force status to be "pending" and admin_id to be None on creation
+    # Force status to be "pending" and inventory_supervisor_id to be None on creation
     create_data = request_data.dict()
     create_data['status'] = 'pending'
-    create_data['admin_id'] = None  # Admin ID will be set during approval
+    create_data['inventory_supervisor_id'] = None  # Inventory Supervisor ID will be set during approval
     if 'created_at' not in create_data or not create_data.get('created_at'):
         create_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
     
@@ -96,7 +96,7 @@ def get_all_inventory_requests(db: Session = Depends(get_db)):
         # Get related details
         tool = db.query(ToolsList).filter(ToolsList.id == req.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == req.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == req.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == req.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == req.project_id).first()
         part = db.query(Part).filter(Part.id == req.part_id).first()
         
@@ -108,14 +108,14 @@ def get_all_inventory_requests(db: Session = Depends(get_db)):
             "part_id": req.part_id,
             "quantity": req.quantity,
             "purpose_of_use": req.purpose_of_use,
-            "admin_id": req.admin_id,
+            "inventory_supervisor_id": req.inventory_supervisor_id,
             "status": req.status,
             "created_at": req.created_at,
             "updated_at": req.updated_at,
             "tool_name": tool.item_description if tool else None,
             "tool_type": tool.type if tool else None,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
             "part_name": part.part_name if part else None
         }
@@ -137,7 +137,7 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
     # Get related details
     tool = db.query(ToolsList).filter(ToolsList.id == request.tool_id).first()
     operator = db.query(AccessUser).filter(AccessUser.id == request.operator_id).first()
-    admin = db.query(AccessUser).filter(AccessUser.id == request.admin_id).first()
+    inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == request.inventory_supervisor_id).first()
     project = db.query(Order).filter(Order.id == request.project_id).first()
     part = db.query(Part).filter(Part.id == request.part_id).first()
     
@@ -149,14 +149,14 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
         "part_id": request.part_id,
         "quantity": request.quantity,
         "purpose_of_use": request.purpose_of_use,
-        "admin_id": request.admin_id,
+        "inventory_supervisor_id": request.inventory_supervisor_id,
         "status": request.status,
         "created_at": request.created_at,
         "updated_at": request.updated_at,
         "tool_name": tool.item_description if tool else None,
         "tool_type": tool.type if tool else None,
         "operator_name": operator.user_name if operator else None,
-        "admin_name": admin.user_name if admin else None,
+        "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
         "project_name": project.sale_order_number if project else None,
         "part_name": part.part_name if part else None
     }
@@ -181,9 +181,9 @@ def update_inventory_request(
     
     update_data = request_update.dict(exclude_unset=True)
     
-    # Remove admin_id and status from update_data - these should only be updated via status endpoint
-    if 'admin_id' in update_data:
-        del update_data['admin_id']
+    # Remove inventory_supervisor_id and status from update_data - these should only be updated via status endpoint
+    if 'inventory_supervisor_id' in update_data:
+        del update_data['inventory_supervisor_id']
     
     if 'status' in update_data:
         del update_data['status']
@@ -258,11 +258,11 @@ def update_inventory_request(
 @router.put("/{request_id}/status")
 def update_inventory_request_status(
     request_id: int, 
-    admin_id: int,  # This will come from authentication/session
+    inventory_supervisor_id: int,  # This will come from authentication/session
     status: str,    # "approved" or "rejected"
     db: Session = Depends(get_db)
 ):
-    """Update inventory request status (admin approval/rejection)"""
+    """Update inventory request status (inventory supervisor approval/rejection)"""
     # Validate status
     if status not in ['approved', 'rejected']:
         raise HTTPException(
@@ -278,12 +278,12 @@ def update_inventory_request_status(
             detail=f"Inventory request with id {request_id} not found"
         )
     
-    # Verify admin exists
-    admin = db.query(AccessUser).filter(AccessUser.id == admin_id).first()
-    if not admin:
+    # Verify inventory supervisor exists
+    inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_supervisor_id).first()
+    if not inventory_supervisor:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
-            detail=f"Admin with id {admin_id} not found"
+            detail=f"Inventory Supervisor with id {inventory_supervisor_id} not found"
         )
     
     tool = db.query(ToolsList).filter(ToolsList.id == db_inventory_request.tool_id).first()
@@ -320,8 +320,8 @@ def update_inventory_request_status(
             )
         # No change to inventory quantity for rejected requests
     
-    # Update the request with admin_id, status, and updated_at
-    db_inventory_request.admin_id = admin_id
+    # Update the request with inventory_supervisor_id, status, and updated_at
+    db_inventory_request.inventory_supervisor_id = inventory_supervisor_id
     db_inventory_request.status = status
     db_inventory_request.updated_at = datetime.now(IST).replace(tzinfo=None)
     
@@ -364,7 +364,7 @@ def get_inventory_requests_by_operator(operator_id: int, db: Session = Depends(g
         # Get related details
         tool = db.query(ToolsList).filter(ToolsList.id == req.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == req.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == req.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == req.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == req.project_id).first()
         part = db.query(Part).filter(Part.id == req.part_id).first()
         
@@ -376,14 +376,14 @@ def get_inventory_requests_by_operator(operator_id: int, db: Session = Depends(g
             "part_id": req.part_id,
             "quantity": req.quantity,
             "purpose_of_use": req.purpose_of_use,
-            "admin_id": req.admin_id,
+            "inventory_supervisor_id": req.inventory_supervisor_id,
             "status": req.status,
             "created_at": req.created_at,
             "updated_at": req.updated_at,
             "tool_name": tool.item_description if tool else None,
             "tool_type": tool.type if tool else None,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
             "part_name": part.part_name if part else None
         }
@@ -402,7 +402,7 @@ def get_inventory_requests_by_status(status: str, db: Session = Depends(get_db))
         # Get related details
         tool = db.query(ToolsList).filter(ToolsList.id == req.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == req.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == req.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == req.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == req.project_id).first()
         part = db.query(Part).filter(Part.id == req.part_id).first()
         
@@ -414,14 +414,14 @@ def get_inventory_requests_by_status(status: str, db: Session = Depends(get_db))
             "part_id": req.part_id,
             "quantity": req.quantity,
             "purpose_of_use": req.purpose_of_use,
-            "admin_id": req.admin_id,
+            "inventory_supervisor_id": req.inventory_supervisor_id,
             "status": req.status,
             "created_at": req.created_at,
             "updated_at": req.updated_at,
             "tool_name": tool.item_description if tool else None,
             "tool_type": tool.type if tool else None,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
             "part_name": part.part_name if part else None
         }

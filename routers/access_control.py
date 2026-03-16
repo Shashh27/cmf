@@ -14,11 +14,20 @@ router = APIRouter(
 @router.post("/", response_model=AccessUserResponse, status_code=status.HTTP_201_CREATED)
 def create_access_user(user: AccessUserCreate, db: Session = Depends(get_db)):
     """Create a new access user"""
-    db_user = db.query(AccessUserModel).filter(AccessUserModel.gmail == user.gmail).first()
-    if db_user:
+    # Check if user with this gmail already exists
+    db_user_email = db.query(AccessUserModel).filter(AccessUserModel.gmail == user.gmail).first()
+    if db_user_email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"User with gmail {user.gmail} already exists"
+        )
+
+    # Check if user with this username already exists
+    db_user_name = db.query(AccessUserModel).filter(AccessUserModel.user_name == user.user_name).first()
+    if db_user_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"User with username {user.user_name} already exists"
         )
 
     db_user = AccessUserModel(**user.model_dump())
@@ -60,6 +69,14 @@ def update_access_user(user_id: int, user: AccessUserUpdate, db: Session = Depen
              raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"User with gmail {user.gmail} already exists"
+            )
+
+    if user.user_name:
+         existing_user_name = db.query(AccessUserModel).filter(AccessUserModel.user_name == user.user_name).first()
+         if existing_user_name and existing_user_name.id != user_id:
+             raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"User with username {user.user_name} already exists"
             )
 
     update_data = user.model_dump(exclude_unset=True)
