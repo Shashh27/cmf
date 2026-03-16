@@ -26,7 +26,7 @@ from DB.models.oms import (
     Operation,                    # id, operation_number, setup_time (TIME), cycle_time (TIME),
                                   # workcenter_id (plain Integer – no FK), part_id
     OrderPartPriority,            # id, order_id, part_id, product_id, priority
-    OrderPartsRawMaterialLinked,  # id, order_id, part_id, raw_material_id  +  .raw_material rel.
+    # OrderPartsRawMaterialLinked,  # id, order_id, part_id, raw_material_id  +  .raw_material rel.
 )
 
 # ── Configuration models ──────────────────────────────────────────────────
@@ -505,27 +505,16 @@ class SchedulerEngine:
                 ordered_ids = [p.id for p in sorted(part_map.values(), key=lambda x: x.id)]
 
             # ── Raw-material gate ────────────────────────────────────── #
-            rm_links = (
-                self.db.query(OrderPartsRawMaterialLinked)
-                .filter(
-                    and_(
-                        OrderPartsRawMaterialLinked.order_id == order_id,
-                        OrderPartsRawMaterialLinked.part_id.in_(list(part_map.keys())),
-                    )
-                )
-                .all()
-            )
             rm_status_map: Dict[int, str] = {}
-            for link in rm_links:
-                # material_status lives on the link row itself (order_parts_raw_material_linked.material_status)
-                # Normalise to title-case so 'available' == 'Available' == 'AVAILABLE'
-                raw_stat = (link.material_status or '').strip().title()  # e.g. 'available' → 'Available'
-                if link.part_id not in rm_status_map:
-                    rm_status_map[link.part_id] = raw_stat or 'Available'
+            for pid, part in part_map.items():
+                if part.raw_material_id is None:
+                    rm_status_map[pid] = 'No Raw Material'   # not assigned → block
                 else:
-                    # If ANY linked material is not Available, mark the part as not ready
-                    if raw_stat != 'Available':
-                        rm_status_map[link.part_id] = raw_stat
+                    rm = part.raw_material
+                    if rm is None:
+                        rm_status_map[pid] = 'No Raw Material'
+                    else:
+                        rm_status_map[pid] = (rm.status or '').strip().title()
 
             # ── Build result list ────────────────────────────────────── #
             result = []
@@ -540,6 +529,7 @@ class SchedulerEngine:
                     'sale_order_number':    order['sale_order_number'],
                     'quantity':             order['quantity'],
                     'raw_material_ok':      rm_stat == 'Available',
+                    'raw_material_status':  rm_stat,
                     # Used in C2.1 to apply/break the cascade per part
                     'part_activation_time': part_activation_map[pid],
                 })
@@ -756,13 +746,18 @@ class SchedulerEngine:
 
                     # Raw-material gate
                     if not part_data['raw_material_ok']:
+                        rm_stat_val = part_data.get('raw_material_status', '')
+                        if rm_stat_val == 'No Raw Material':
+                            reason = 'no raw material assigned'
+                        else:
+                            reason = f"raw material status '{rm_stat_val}' — not Available"
                         skipped_parts.append(
                             f"Part {part_data['part_number']} "
                             f"(order {order['sale_order_number']}): "
-                            "raw material not Available — part skipped."
+                            f"{reason} — part skipped."
                         )
                         continue                      # do NOT advance current_time
-
+ 
                     # C2.2: operations for this part
                     operations = ops_by_part.get(part_data['part_id'], [])
                     if not operations:

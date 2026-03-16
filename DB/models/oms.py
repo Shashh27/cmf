@@ -13,6 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from ..database import Base
+from .scheduling import PartScheduleStatus
 
 
 # =======================
@@ -162,6 +163,9 @@ class OrderPartPriority(Base):
     order = relationship("Order", back_populates="part_priorities")
     product = relationship("Product")
     part = relationship("Part")
+    status = Column(String, ForeignKey("scheduling.part_schedule_status.status"), nullable=False, default="active")
+
+    # part_priorities = relationship("OrderPartPriority", back_populates="order")
 
 
 # =======================

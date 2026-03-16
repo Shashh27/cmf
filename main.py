@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from DB.database import engine, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME, MINIO_SECURE
 from DB.models import Base, scheduling
+from DB.models import oms
 from DB.minio_client import init_minio_client
 from routers.machine_scheduling import router as machine_scheduling_router
 # Import all routers

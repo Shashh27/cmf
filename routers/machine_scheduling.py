@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from sqlalchemy import func
 
 # from sqlalchemy import cast, Integer  
 
@@ -15,7 +16,7 @@ from DB.models.oms import Order
 from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration
 from DB.models.oms import Order, Part, Product
 from DB.models.configuration import Machine, WorkCenter
-from DB.models.oms import Operation, Part, Order, PartType
+from DB.models.oms import Operation, Part, Order, PartType, OrderPartPriority
 
 from DB.schemas.machine_scheduling import PartStatusUpdate, UpdatePartStatusResponse, OrderScheduleStatusResponse
 
@@ -81,6 +82,133 @@ def overlap_with_shift(downtime_start: datetime, downtime_end: datetime, shift_s
 # SET ORDER STATUS
 # =========================================================
 
+
+# =========================================================
+# PRIORITY HELPER FUNCTIONS (internal use)
+# =========================================================
+
+def _assign_order_priority(sale_order_id: int, product_id: int, parts: list, db: Session):
+    """Assign global priorities to IN-House parts of an order on activation.
+    Only creates missing rows — never overwrites existing.
+    Appends after global max priority.
+    """
+    existing_priority_part_ids = {
+        row.part_id for row in db.query(OrderPartPriority).filter(
+            OrderPartPriority.order_id == sale_order_id
+        ).all()
+    }
+    new_parts = sorted(
+        [p for p in parts if p.id not in existing_priority_part_ids],
+        key=lambda p: p.id
+    )
+    if not new_parts:
+        return
+    max_row = db.query(OrderPartPriority).filter(
+        OrderPartPriority.priority > 0
+    ).order_by(OrderPartPriority.priority.desc()).first()
+    max_priority = max_row.priority if max_row else 0
+    for i, p in enumerate(new_parts, start=1):
+        db.add(OrderPartPriority(
+            order_id=sale_order_id,
+            product_id=product_id,
+            part_id=p.id,
+            priority=max_priority + i,
+            status="active",
+        ))
+
+
+def _remove_order_priority(sale_order_id: int, db: Session):
+    """
+    Remove order priority and adjust priorities for remaining orders.
+    Handles both scenarios:
+    1. If first order is removed: shift all remaining orders down to start from priority 1
+    2. If intermediate order is removed: shift higher priority orders down to fill the gap
+    """
+    # Get all priority records for this order, ordered by priority
+    order_priorities = db.query(OrderPartPriority).filter(
+        OrderPartPriority.order_id == sale_order_id
+    ).order_by(OrderPartPriority.priority).all()
+    
+    if not order_priorities:
+        return
+    
+    # Get the minimum and maximum priorities for this order
+    min_priority = order_priorities[0].priority
+    max_priority = order_priorities[-1].priority
+    parts_count = len(order_priorities)
+    
+    # Delete all priority records for this order
+    db.query(OrderPartPriority).filter(
+        OrderPartPriority.order_id == sale_order_id
+    ).delete(synchronize_session=False)
+    
+    # If this was the first order (min_priority == 1), shift ALL remaining orders down
+    # Otherwise, shift only higher priority orders down
+    if min_priority == 1:
+        # First order removed: shift all remaining orders down by parts_count
+        db.query(OrderPartPriority).update(
+            {OrderPartPriority.priority: OrderPartPriority.priority - parts_count},
+            synchronize_session=False
+        )
+    else:
+        # Intermediate order removed: shift only higher priority orders down
+        db.query(OrderPartPriority).filter(
+            OrderPartPriority.priority > max_priority
+        ).update(
+            {OrderPartPriority.priority: OrderPartPriority.priority - parts_count},
+            synchronize_session=False
+        )
+    
+    db.commit()
+
+
+# =========================================================
+# ASSIGN ORDER PRIORITY ENDPOINT
+# =========================================================
+@router.post("/assign-order-priority/{sale_order_id}")
+def assign_order_priority(
+    sale_order_id: int,
+    db: Session = Depends(get_db)
+):
+    """Assign global priorities to IN-House parts of an active order.
+    Safe to call multiple times — only adds missing rows.
+    """
+    order = db.query(Order).filter(Order.id == sale_order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if not order.product:
+        raise HTTPException(400, "Order has no product")
+    parts = [p for p in order.product.parts if p.type_id == 1]
+    if not parts:
+        raise HTTPException(400, "No IN-House parts found")
+    _assign_order_priority(sale_order_id, order.product_id, parts, db)
+    db.commit()
+    return {"message": f"Priorities assigned for order {sale_order_id}"}
+
+
+# =========================================================
+# REMOVE ORDER PRIORITY ENDPOINT
+# =========================================================
+@router.delete("/remove-order-priority/{sale_order_id}")
+def remove_order_priority(
+    sale_order_id: int,
+    db: Session = Depends(get_db)
+):
+    """Delete priority rows for an order and shift all higher priorities down."""
+    order = db.query(Order).filter(Order.id == sale_order_id).first()
+    if not order:
+        raise HTTPException(404, "Order not found")
+    _remove_order_priority(sale_order_id, db)
+    db.commit()
+    return {"message": f"Priorities removed for order {sale_order_id}"}
+
+
+
+
+# =========================================================
+# SET ORDER STATUS
+# =========================================================
+
 @router.post("/set-order-status/{sale_order_id}")
 def set_order_status(
     sale_order_id: int,
@@ -137,8 +265,48 @@ def set_order_status(
             record.status = status
             record.updated_at = now
             record.start_date = now if status == "active" else None
-    
+
+
+    # -----------------------------
+    # OrderPartPriority: adjust on inactive, create on active
+    # -----------------------------
+    if status == "inactive":
+        # When an order is deactivated, remove its priorities and
+        # shift remaining orders' priorities to close the gap
+        _remove_order_priority(sale_order_id, db)
+
+
+    # -----------------------------
+    # Assign OrderPartPriority on activation
+    # Only creates missing rows — never overwrites existing priorities
+    # Default order: Part.id ASC (order of creation)
+    # -----------------------------
+    if status == "active":
+        existing_priority_part_ids = {
+            row.part_id for row in db.query(OrderPartPriority).filter(
+                OrderPartPriority.order_id == sale_order_id
+            ).all()
+        }
+        new_parts = sorted(
+            [p for p in parts if p.id not in existing_priority_part_ids],
+            key=lambda p: p.id
+        )
+        # Always use global max priority so new order appends after all existing orders
+        max_row = db.query(OrderPartPriority).filter(
+            OrderPartPriority.priority > 0
+        ).order_by(OrderPartPriority.priority.desc()).first()
+        max_priority = max_row.priority if max_row else 0
+        for i, p in enumerate(new_parts, start=1):
+            db.add(OrderPartPriority(
+                order_id=sale_order_id,
+                product_id=order.product_id,
+                part_id=p.id,
+                priority=max_priority + i,
+                status="active",
+            ))
+
     db.flush()
+    
     
     active_count = db.query(PartScheduleStatus).filter(
         PartScheduleStatus.sale_order_id == sale_order_id,
@@ -453,6 +621,53 @@ def update_part_status(
 
     db.flush()
 
+    # ----------------------------
+    # Assign OrderPartPriority if activating an IN-House part
+    # Only creates a row if one doesn't exist for this part+order
+    # ----------------------------
+    if status == "active" and part_type_name == "IN-House":
+        existing = db.query(OrderPartPriority).filter(
+            OrderPartPriority.order_id == sale_order_id,
+            OrderPartPriority.part_id == part_id
+        ).first()
+        if not existing:
+            max_row = db.query(OrderPartPriority).order_by(
+                OrderPartPriority.priority.desc()
+            ).first()  # global max across all orders
+            next_priority = (max_row.priority + 1) if max_row else 1
+            db.add(OrderPartPriority(
+                order_id=sale_order_id,
+                product_id=order.product_id,
+                part_id=part_id,
+                priority=next_priority,
+                status="active",
+            ))
+            db.flush()
+
+
+    # ----------------------------
+    # Sync status on OrderPartPriority row
+    # If deactivating: set priority=0, shift all higher priorities down by 1
+    # If activating:   status already set in the block above
+    # ----------------------------
+    priority_row = db.query(OrderPartPriority).filter(
+        OrderPartPriority.order_id == sale_order_id,
+        OrderPartPriority.part_id == part_id
+    ).first()
+    if priority_row:
+        if status == "inactive":
+            old_priority = priority_row.priority
+            priority_row.status = "inactive"
+            priority_row.priority = 0
+            # Shift all rows with priority > old_priority down by 1
+            db.query(OrderPartPriority).filter(
+                OrderPartPriority.priority > old_priority
+            ).update(
+                {OrderPartPriority.priority: OrderPartPriority.priority - 1},
+                synchronize_session=False
+            )
+        else:
+            priority_row.status = "active"
 
     # ----------------------------
     # SYNC OrderScheduleStatus
