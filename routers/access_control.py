@@ -28,9 +28,9 @@ def create_access_user(user: AccessUserCreate, db: Session = Depends(get_db)):
     return db_user
 
 @router.get("/", response_model=List[AccessUserResponse])
-def get_access_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Get all access users with pagination"""
-    users = db.query(AccessUserModel).offset(skip).limit(limit).all()
+def get_access_users(db: Session = Depends(get_db)):
+    """Get all access users (no limits)"""
+    users = db.query(AccessUserModel).all()
     return users
 
 @router.get("/{user_id}", response_model=AccessUserResponse)

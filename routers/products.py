@@ -15,6 +15,7 @@ from DB.models.oms import (
     Order as OrderModel,
     OperationDocument as OperationDocumentModel,
     OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
+    DocumentExtractedData as DocumentExtractedDataModel,
 )
 from DB.models.configuration import (
     WorkCenter as WorkCenterModel,
@@ -24,14 +25,16 @@ from DB.models.configuration import (
 from DB.models.inventory import RawMaterial as RawMaterialModel, InventoryRequest, InventoryReturnRequest
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.oms import (
-    Product, 
-    ProductCreate, 
-    ProductUpdate, 
-    ProductHierarchicalData, 
-    PartDetails, 
-    AssemblyDetails, 
+    Product,
+    ProductCreate,
+    ProductUpdate,
+    ProductHierarchicalData,
+    PartDetails,
+    AssemblyDetails,
     Part as PartSchema,
-    Operation as OperationSchema
+    Operation as OperationSchema,
+    Document as DocumentSchema,
+    DocumentExtractedData as DocumentExtractedDataSchema,
 )
 from DB.minio_client import get_minio_client
 
@@ -41,9 +44,22 @@ router = APIRouter(
 )
 
 
+# Roles allowed to create products (manufacturing_coordinator cannot)
+PRODUCT_CREATOR_ROLES = ("admin", "project_coordinator")
+
+
 @router.post("/", response_model=Product, status_code=status.HTTP_201_CREATED)
 def create_product(product: ProductCreate, db: Session = Depends(get_db)):
-    """Create a new product"""
+    """Create a new product. Only admin or project_coordinator can create; manufacturing_coordinator cannot."""
+    creator = db.query(AccessUserModel).filter(AccessUserModel.id == product.user_id).first()
+    if not creator:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if (creator.role or "").strip().lower() not in PRODUCT_CREATOR_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin or project coordinator can create products. Manufacturing coordinator cannot.",
+        )
+
     db_product = db.query(ProductModel).filter(ProductModel.product_number == product.product_number).first()
     if db_product:
         raise HTTPException(
@@ -221,21 +237,28 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
                 synchronize_session=False
             )
 
-        # Delete part documents and their MinIO files
+        # Delete part documents, their extracted data, and MinIO files
         part_docs = db.query(DocumentModel).filter(DocumentModel.part_id.in_(part_ids)).all()
-        for part_doc in part_docs:
-            # Delete from MinIO
-            try:
-                object_name = part_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
-                minio_client.delete_file(object_name)
-            except Exception as e:
-                print(f"Error deleting part document from MinIO: {e}")
-            
-            # Delete from database
-            db.delete(part_doc)
+        if part_docs:
+            doc_ids = [d.id for d in part_docs]
+            # First delete extracted data that references these documents to avoid FK violations
+            db.query(DocumentExtractedDataModel).filter(
+                DocumentExtractedDataModel.document_id.in_(doc_ids)
+            ).delete(synchronize_session=False)
+
+            for part_doc in part_docs:
+                # Delete from MinIO
+                try:
+                    object_name = part_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
+                    minio_client.delete_file(object_name)
+                except Exception as e:
+                    print(f"Error deleting part document from MinIO: {e}")
+                
+                # Delete from database
+                db.delete(part_doc)
         
-        # Flush to ensure part documents are deleted before parts
-        db.flush()
+            # Flush to ensure part documents are deleted before parts
+            db.flush()
 
         # Delete remaining tools with parts (tools not associated with operations)
         db.query(ToolWithPartModel).filter(ToolWithPartModel.part_id.in_(part_ids)).delete(
@@ -247,17 +270,30 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
             OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
         ).delete(synchronize_session=False)
         
-        # Delete inventory requests related to these parts (before deleting parts)
+        # Delete inventory requests related to these parts (before deleting parts).
+        # Use raw SQL instead of ORM to avoid mismatches with any optional columns.
         if part_ids:
-            part_inventory_requests = db.query(InventoryRequest).filter(
-                InventoryRequest.part_id.in_(part_ids)
-            ).all()
-            for inv_req in part_inventory_requests:
-                # Delete related return requests first
-                db.query(InventoryReturnRequest).filter(
-                    InventoryReturnRequest.requested_id == inv_req.id
-                ).delete()
-                db.delete(inv_req)
+            for pid in part_ids:
+                # First delete return requests that reference these inventory requests
+                db.execute(
+                    text(
+                        """
+                        DELETE FROM inventory.inventory_return_requests
+                        WHERE requested_id IN (
+                          SELECT id FROM inventory.inventory_requests
+                          WHERE part_id = :pid
+                        )
+                        """
+                    ),
+                    {"pid": pid},
+                )
+                # Then delete the inventory requests themselves
+                db.execute(
+                    text(
+                        "DELETE FROM inventory.inventory_requests WHERE part_id = :pid"
+                    ),
+                    {"pid": pid},
+                )
             db.flush()
 
         # Delete parts
@@ -351,7 +387,8 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
 
     # Get all assemblies for this product
     all_assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).all()
-    
+    assembly_ids = [asm.id for asm in all_assemblies]
+
     # Get all parts for this product
     all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).all()
 
@@ -376,11 +413,13 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     
     # Get all related data for parts
     part_ids = list(part_map.keys())
-    operations_by_part = {}
-    operation_documents_by_operation = {}
-    documents_by_part = {}
-    tools_by_part = {}
-    tools_by_operation = {}
+    operations_by_part: dict[int, list[OperationModel]] = {}
+    operation_documents_by_operation: dict[int, list[OperationDocumentModel]] = {}
+    documents_by_part: dict[int, list[DocumentModel]] = {}
+    tools_by_part: dict[int, list[ToolWithPartModel]] = {}
+    tools_by_operation: dict[int, list[ToolWithPartModel]] = {}
+    extracted_by_part: dict[int, list[DocumentExtractedDataModel]] = {}
+    documents_by_assembly: dict[int, list[DocumentModel]] = {}
     
     if part_ids:
         # Get operations (FIFO by id)
@@ -400,13 +439,24 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
                     operation_documents_by_operation[doc.operation_id] = []
                 operation_documents_by_operation[doc.operation_id].append(doc)
         
-        # Get documents
+        # Get documents for parts
         documents = db.query(DocumentModel).filter(DocumentModel.part_id.in_(part_ids)).all()
         for doc in documents:
             if doc.part_id not in documents_by_part:
                 documents_by_part[doc.part_id] = []
             documents_by_part[doc.part_id].append(doc)
         
+        # Get extracted data for parts
+        extracted_rows = (
+            db.query(DocumentExtractedDataModel)
+            .filter(DocumentExtractedDataModel.part_id.in_(part_ids))
+            .all()
+        )
+        for row in extracted_rows:
+            if row.part_id not in extracted_by_part:
+                extracted_by_part[row.part_id] = []
+            extracted_by_part[row.part_id].append(row)
+
         # Get tools with details
         tools = db.query(ToolWithPartModel).options(joinedload(ToolWithPartModel.tool)).filter(ToolWithPartModel.part_id.in_(part_ids)).all()
         for tool in tools:
@@ -419,7 +469,14 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
                 if tool.operation_id not in tools_by_operation:
                     tools_by_operation[tool.operation_id] = []
                 tools_by_operation[tool.operation_id].append(tool)
-    
+    # Get documents for assemblies (if any)
+    if assembly_ids:
+        asm_docs = db.query(DocumentModel).filter(DocumentModel.assembly_id.in_(assembly_ids)).all()
+        for doc in asm_docs:
+            if doc.assembly_id not in documents_by_assembly:
+                documents_by_assembly[doc.assembly_id] = []
+            documents_by_assembly[doc.assembly_id].append(doc)
+
     def create_part_details(part: PartModel) -> PartDetails:
         """Create PartDetails with all related data"""
         part_operations_models = operations_by_part.get(part.id, [])
@@ -468,11 +525,16 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
         
         part_with_type = PartSchema(**part_dict)
         
+        # Map DB models to schemas
+        documents_schema = [DocumentSchema.model_validate(d) for d in documents_by_part.get(part.id, [])]
+        extracted_schema = [DocumentExtractedDataSchema.model_validate(e) for e in extracted_by_part.get(part.id, [])]
+
         return PartDetails(
             part=part_with_type,
             operations=part_operations,
-            documents=documents_by_part.get(part.id, []),
-            tools=tools_by_part.get(part.id, [])
+            documents=documents_schema,
+            tools=tools_by_part.get(part.id, []),
+            extracted_data=extracted_schema,
         )
     
     def build_assembly_hierarchy(assembly_id: int) -> AssemblyDetails:
@@ -493,10 +555,14 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             if child.parent_id == assembly_id
         ]
         
+        # Map assembly documents to schema models
+        asm_docs_schema = [DocumentSchema.model_validate(d) for d in documents_by_assembly.get(assembly_id, [])]
+
         return AssemblyDetails(
             assembly=assembly,
             parts=direct_parts,
-            subassemblies=child_assemblies
+            subassemblies=child_assemblies,
+            documents=asm_docs_schema,
         )
     
     # Build root level assemblies (those with no parent)

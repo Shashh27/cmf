@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from urllib.parse import urlparse
+from datetime import time
 import os
 import io
 import csv
@@ -126,6 +127,68 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
     data = operation.model_dump()
     part_type_id = data.get("part_type_id") or 1
     data["part_type_id"] = part_type_id
+
+    # Validate required times only for non Out-Source operations
+    setup_time_val = data.get("setup_time")
+    cycle_time_val = data.get("cycle_time")
+    zero_time = time(0, 0, 0)
+    if part_type_id != 2:
+        if (
+            not setup_time_val
+            or not cycle_time_val
+            or setup_time_val == zero_time
+            or cycle_time_val == zero_time
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="setup_time and cycle_time are mandatory and cannot be 00:00:00 for non Out-Source operations",
+            )
+
+    # Ensure part_id is present
+    part_id = data.get("part_id")
+    if not part_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="part_id is required for operations",
+        )
+
+    # Handle operation_number: ensure uniqueness per part and auto-generate when missing
+    op_number_raw = data.get("operation_number")
+    op_number = op_number_raw.strip() if isinstance(op_number_raw, str) else None
+
+    if op_number:
+        existing = (
+            db.query(OperationModel)
+            .filter(
+                OperationModel.part_id == part_id,
+                OperationModel.operation_number == op_number,
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Operation number '{op_number}' already exists for this part",
+            )
+        data["operation_number"] = op_number
+    else:
+        # Auto-generate next operation_number in steps of 10 (10,20,30,...)
+        existing_ops = (
+            db.query(OperationModel)
+            .filter(OperationModel.part_id == part_id)
+            .all()
+        )
+        max_num = 0
+        for op in existing_ops:
+            try:
+                n = int(str(op.operation_number).strip())
+            except (TypeError, ValueError):
+                continue
+            if n > max_num:
+                max_num = n
+        next_num = max_num + 10 if max_num > 0 else 10
+        data["operation_number"] = str(next_num)
+
     # Out-Source (part_type_id=2) requires from_date and to_date
     if part_type_id == 2:
         if not data.get("from_date") or not data.get("to_date"):
@@ -137,16 +200,29 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
     db.add(db_operation)
     db.commit()
     db.refresh(db_operation)
-    # Attach part_type_name for response
+    # Reload with user and attach part_type_name for response
+    db_operation = (
+        db.query(OperationModel)
+        .options(joinedload(OperationModel.user))
+        .filter(OperationModel.id == db_operation.id)
+        .first()
+    )
     pt = db.query(PartTypeModel).filter(PartTypeModel.id == db_operation.part_type_id).first()
     db_operation.part_type_name = pt.type_name if pt else None
     return db_operation
 
 
 @router.get("/", response_model=List[Operation])
-def get_operations(db: Session = Depends(get_db)):
-    """Get all operations"""
-    operations = db.query(OperationModel).order_by(OperationModel.id.asc()).all()
+def get_operations(user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all operations with user_name. Filter by user_id for module-specific views."""
+    query = (
+        db.query(OperationModel)
+        .options(joinedload(OperationModel.user))
+        .order_by(OperationModel.id.asc())
+    )
+    if user_id is not None:
+        query = query.filter(OperationModel.user_id == user_id)
+    operations = query.all()
 
     work_center_ids = {op.workcenter_id for op in operations if op.workcenter_id is not None}
     machine_ids = {op.machine_id for op in operations if op.machine_id is not None}
@@ -174,8 +250,13 @@ def get_operations(db: Session = Depends(get_db)):
 
 @router.get("/{operation_id}", response_model=Operation)
 def get_operation(operation_id: int, db: Session = Depends(get_db)):
-    """Get a specific operation by ID"""
-    operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
+    """Get a specific operation by ID with user_name."""
+    operation = (
+        db.query(OperationModel)
+        .options(joinedload(OperationModel.user))
+        .filter(OperationModel.id == operation_id)
+        .first()
+    )
     if not operation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -203,9 +284,17 @@ def get_operation(operation_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/part/{part_id}", response_model=List[Operation])
-def get_operations_by_part(part_id: int, db: Session = Depends(get_db)):
-    """Get all operations for a specific part (FIFO by id)"""
-    operations = db.query(OperationModel).filter(OperationModel.part_id == part_id).order_by(OperationModel.id.asc()).all()
+def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all operations for a specific part (FIFO by id) with user_name. Filter by user_id for module-specific views."""
+    query = (
+        db.query(OperationModel)
+        .options(joinedload(OperationModel.user))
+        .filter(OperationModel.part_id == part_id)
+        .order_by(OperationModel.id.asc())
+    )
+    if user_id is not None:
+        query = query.filter(OperationModel.user_id == user_id)
+    operations = query.all()
 
     work_center_ids = {op.workcenter_id for op in operations if op.workcenter_id is not None}
     machine_ids = {op.machine_id for op in operations if op.machine_id is not None}
@@ -242,6 +331,32 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
         )
 
     update_data = operation.model_dump(exclude_unset=True)
+
+    # If operation_number is being changed, enforce uniqueness per part
+    if "operation_number" in update_data:
+        new_op_num_raw = update_data.get("operation_number")
+        new_op_num = new_op_num_raw.strip() if isinstance(new_op_num_raw, str) else None
+        if not new_op_num:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="operation_number cannot be empty",
+            )
+        existing = (
+            db.query(OperationModel)
+            .filter(
+                OperationModel.part_id == db_operation.part_id,
+                OperationModel.operation_number == new_op_num,
+                OperationModel.id != operation_id,
+            )
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Operation number '{new_op_num}' already exists for this part",
+            )
+        update_data["operation_number"] = new_op_num
+
     part_type_id = update_data.get("part_type_id") if "part_type_id" in update_data else db_operation.part_type_id
     if part_type_id == 2:
         from_date = update_data.get("from_date") if "from_date" in update_data else db_operation.from_date
@@ -251,11 +366,33 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Outsource operations require from_date and to_date",
             )
+
+    # Enforce mandatory non-zero setup and cycle time on update for non Out-Source
+    zero_time = time(0, 0, 0)
+    new_setup = update_data.get("setup_time") if "setup_time" in update_data else db_operation.setup_time
+    new_cycle = update_data.get("cycle_time") if "cycle_time" in update_data else db_operation.cycle_time
+    if part_type_id != 2:
+        if (
+            not new_setup
+            or not new_cycle
+            or new_setup == zero_time
+            or new_cycle == zero_time
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="setup_time and cycle_time are mandatory and cannot be 00:00:00 for non Out-Source operations",
+            )
     for field, value in update_data.items():
         setattr(db_operation, field, value)
 
     db.commit()
     db.refresh(db_operation)
+    db_operation = (
+        db.query(OperationModel)
+        .options(joinedload(OperationModel.user))
+        .filter(OperationModel.id == operation_id)
+        .first()
+    )
     pt = db.query(PartTypeModel).filter(PartTypeModel.id == db_operation.part_type_id).first()
     db_operation.part_type_name = pt.type_name if pt else None
     return db_operation

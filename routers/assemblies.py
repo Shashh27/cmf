@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 
 from DB.database import get_db
@@ -24,24 +24,43 @@ router = APIRouter(
 
 @router.post("/", response_model=Assembly, status_code=status.HTTP_201_CREATED)
 def create_assembly(assembly: AssemblyCreate, db: Session = Depends(get_db)):
-    """Create a new assembly"""
+    """Create a new assembly (user_id = project_coordinator, admin, or manufacturing_coordinator)."""
     db_assembly = AssemblyModel(**assembly.model_dump())
     db.add(db_assembly)
     db.commit()
     db.refresh(db_assembly)
+    # Reload with user for user_name in response
+    db_assembly = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.id == db_assembly.id)
+        .first()
+    )
     return db_assembly
 
 
 @router.get("/", response_model=List[Assembly])
-def get_assemblies(db: Session = Depends(get_db)):
-    """Get all assemblies"""
-    return db.query(AssemblyModel).order_by(AssemblyModel.id.asc()).all()
+def get_assemblies(user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all assemblies with user_name. Filter by user_id for module-specific views."""
+    query = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .order_by(AssemblyModel.id.asc())
+    )
+    if user_id is not None:
+        query = query.filter(AssemblyModel.user_id == user_id)
+    return query.all()
 
 
 @router.get("/{assembly_id}", response_model=Assembly)
 def get_assembly(assembly_id: int, db: Session = Depends(get_db)):
-    """Get a specific assembly by ID"""
-    assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
+    """Get a specific assembly by ID with user_name."""
+    assembly = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.id == assembly_id)
+        .first()
+    )
     if not assembly:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -51,17 +70,29 @@ def get_assembly(assembly_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/product/{product_id}", response_model=List[Assembly])
-def get_assemblies_by_product(product_id: int, db: Session = Depends(get_db)):
-    """Get all assemblies for a specific product"""
-    assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).all()
-    return assemblies
+def get_assemblies_by_product(product_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all assemblies for a specific product with user_name. Filter by user_id for module-specific views."""
+    query = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.product_id == product_id)
+    )
+    if user_id is not None:
+        query = query.filter(AssemblyModel.user_id == user_id)
+    return query.all()
 
 
 @router.get("/parent/{parent_id}", response_model=List[Assembly])
-def get_child_assemblies(parent_id: int, db: Session = Depends(get_db)):
-    """Get all child assemblies for a parent assembly"""
-    assemblies = db.query(AssemblyModel).filter(AssemblyModel.parent_id == parent_id).all()
-    return assemblies
+def get_child_assemblies(parent_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all child assemblies for a parent assembly with user_name. Filter by user_id for module-specific views."""
+    query = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.parent_id == parent_id)
+    )
+    if user_id is not None:
+        query = query.filter(AssemblyModel.user_id == user_id)
+    return query.all()
 
 
 @router.put("/{assembly_id}", response_model=Assembly)
@@ -80,6 +111,12 @@ def update_assembly(assembly_id: int, assembly: AssemblyUpdate, db: Session = De
 
     db.commit()
     db.refresh(db_assembly)
+    db_assembly = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.id == assembly_id)
+        .first()
+    )
     return db_assembly
 
 

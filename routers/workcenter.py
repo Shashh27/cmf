@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from sqlalchemy.exc import IntegrityError
 
 from DB.database import get_db
 from DB.models.configuration import WorkCenter as WorkCenterModel
@@ -78,6 +79,28 @@ def delete_work_center(work_center_id: int, db: Session = Depends(get_db)):
             detail=f"Work center with id {work_center_id} not found"
         )
 
-    db.delete(db_work_center)
-    db.commit()
+    # Block delete if any machines belong to this work center (machines.work_center_id is NOT NULL)
+    from DB.models.configuration import Machine as MachineModel
+    machine_count = db.query(MachineModel).filter(MachineModel.work_center_id == work_center_id).count()
+    if machine_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f'Cannot delete work center "{db_work_center.work_center_name}" (code: {db_work_center.code}). '
+                f"It has {machine_count} machine(s) assigned. Move or delete those machines first, then delete the work center."
+            ),
+        )
+
+    try:
+        db.delete(db_work_center)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f'Cannot delete work center "{db_work_center.work_center_name}". '
+                "It is still referenced by other records. Remove those references first and try again."
+            ),
+        )
     return None

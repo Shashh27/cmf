@@ -17,6 +17,7 @@ class RawMaterialBase(BaseModel):
     quantity: Optional[int] = None
     stock_dimensions: Optional[str] = None
     status: Optional[str] = None
+    user_id: Optional[int] = None
 
     @field_validator('mass', 'density', 'volume', mode='before')
     @classmethod
@@ -43,6 +44,7 @@ class RawMaterialUpdate(BaseModel):
     quantity: Optional[int] = None
     stock_dimensions: Optional[str] = None
     status: Optional[str] = None
+    user_id: Optional[int] = None
 
     @field_validator('mass', 'density', 'volume', mode='before')
     @classmethod

@@ -1,7 +1,11 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List, Text
+from typing import Optional, List, Text, TYPE_CHECKING
 from datetime import datetime, time
 from typing_extensions import Self
+from .access_control import AccessUserResponse
+
+if TYPE_CHECKING:
+    from .oms import Part as PartSchema, Order as OrderSchema
 
 
 # =======================
@@ -12,6 +16,7 @@ class WorkCenterBase(BaseModel):
     work_center_name: str
     description: Optional[str] = None
     is_schedulable: bool = True
+    user_id: Optional[int] = None
 
 
 class WorkCenterCreate(WorkCenterBase):
@@ -23,6 +28,7 @@ class WorkCenterUpdate(BaseModel):
     work_center_name: Optional[str] = None
     description: Optional[str] = None
     is_schedulable: Optional[bool] = None
+    user_id: Optional[int] = None
 
 
 class WorkCenter(WorkCenterBase):
@@ -47,6 +53,7 @@ class MachineBase(BaseModel):
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     password: str
+    user_id: Optional[int] = None
 
 
 class MachineCreate(MachineBase):
@@ -65,6 +72,7 @@ class MachineUpdate(BaseModel):
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     password: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class Machine(MachineBase):
@@ -107,6 +115,7 @@ class CustomerBase(BaseModel):
     email: str
     contact_number: str
     contact_person: str
+    user_id: Optional[int] = None
 
 
 class CustomerCreate(CustomerBase):
@@ -120,6 +129,7 @@ class CustomerUpdate(BaseModel):
     email: Optional[str] = None
     contact_number: Optional[str] = None
     contact_person: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class Customer(CustomerBase):
@@ -179,12 +189,12 @@ class PokayokeMachineAssignment(PokayokeMachineAssignmentBase):
 
 
 # Create schemas
-class PokayokeChecklistCreate(PokayokeChecklistBase):
-    pass
-
-
 class PokayokeChecklistItemCreate(PokayokeChecklistItemBase):
     pass
+
+
+class PokayokeChecklistCreate(PokayokeChecklistBase):
+    items: List[PokayokeChecklistItemCreate] = []
 
 
 class PokayokeMachineAssignmentCreate(PokayokeMachineAssignmentBase):
@@ -214,6 +224,10 @@ class PokayokeMachineAssignmentUpdate(BaseModel):
 class PokayokeChecklistWithItems(PokayokeChecklist):
     items: List[PokayokeChecklistItem] = []
     machine_assignments: List[PokayokeMachineAssignment] = []
+
+
+class PokayokeMachineAssignmentWithChecklist(PokayokeMachineAssignment):
+    checklist: PokayokeChecklistWithItems
 
 
 # =======================
@@ -256,6 +270,10 @@ class PokayokeItemResponse(PokayokeItemResponseBase):
         from_attributes = True
 
 
+class PokayokeItemResponseWithItem(PokayokeItemResponse):
+    item: PokayokeChecklistItem
+
+
 # Create schemas
 class PokayokeCompletedLogCreate(PokayokeCompletedLogBase):
     pass
@@ -286,4 +304,13 @@ class PokayokeItemResponseUpdate(BaseModel):
 
 # Response with nested data
 class PokayokeCompletedLogWithResponses(PokayokeCompletedLog):
-    item_responses: List[PokayokeItemResponse] = []
+    item_responses: List[PokayokeItemResponseWithItem] = []
+    checklist: Optional[PokayokeChecklist] = None
+    machine: Optional[Machine] = None
+    part: Optional["PartSchema"] = None
+    operator: Optional[AccessUserResponse] = None
+    order: Optional["OrderSchema"] = None
+
+
+from .oms import Part as PartSchema, Order as OrderSchema
+PokayokeCompletedLogWithResponses.model_rebuild()

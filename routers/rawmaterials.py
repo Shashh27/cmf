@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from sqlalchemy.exc import IntegrityError
 
 from DB.database import get_db
 from DB.models.inventory import RawMaterial as RawMaterialModel
-from DB.models.oms import OrderPartsRawMaterialLinked
+from DB.models.oms import OrderPartsRawMaterialLinked, Order as OrderModel, Part as PartModel
 from DB.schemas.inventory import RawMaterial, RawMaterialCreate, RawMaterialUpdate
 
 router = APIRouter(
@@ -80,20 +81,93 @@ def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
             detail=f"Raw material with id {raw_material_id} not found"
         )
     
-    # Check if raw material is used in order_parts_raw_material_linked table
-    related_linkages = db.query(OrderPartsRawMaterialLinked).filter(OrderPartsRawMaterialLinked.raw_material_id == raw_material_id).all()
+    # 1) Block delete if raw material is linked to orders/parts in the linkage table
+    related_linkages = (
+        db.query(OrderPartsRawMaterialLinked)
+        .filter(OrderPartsRawMaterialLinked.raw_material_id == raw_material_id)
+        .all()
+    )
     if related_linkages:
-        # Get order numbers for related linkages
-        order_ids = [linkage.order_id for linkage in related_linkages]
-        from DB.models import Order
-        orders = db.query(Order).filter(Order.id.in_(order_ids)).all()
-        order_numbers = [order.sale_order_number for order in orders]
-        
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"This rawmaterial cannot be deleted because it is linked to existing orders: {', '.join(order_numbers)}. Please remove or update the related orders first."
+        order_ids = sorted({l.order_id for l in related_linkages if l.order_id is not None})
+        part_ids = sorted({l.part_id for l in related_linkages if l.part_id is not None})
+
+        orders = (
+            db.query(OrderModel).filter(OrderModel.id.in_(order_ids)).all()
+            if order_ids
+            else []
+        )
+        parts = (
+            db.query(PartModel).filter(PartModel.id.in_(part_ids)).all()
+            if part_ids
+            else []
         )
 
-    db.delete(db_raw_material)
-    db.commit()
+        order_no_by_id = {o.id: o.sale_order_number for o in orders}
+        part_no_by_id = {p.id: p.part_number for p in parts}
+
+        missing_order_ids = [oid for oid in order_ids if oid not in order_no_by_id]
+        missing_part_ids = [pid for pid in part_ids if pid not in part_no_by_id]
+
+        order_labels = []
+        for oid in order_ids[:10]:
+            order_labels.append(order_no_by_id.get(oid) or f"order_id={oid}")
+        if len(order_ids) > 10:
+            order_labels.append(f"+{len(order_ids) - 10} more")
+
+        part_labels = []
+        for pid in part_ids[:10]:
+            part_labels.append(part_no_by_id.get(pid) or f"part_id={pid}")
+        if len(part_ids) > 10:
+            part_labels.append(f"+{len(part_ids) - 10} more")
+
+        extra = []
+        if missing_order_ids:
+            extra.append(f"Missing orders: {', '.join(map(str, missing_order_ids[:10]))}{' ...' if len(missing_order_ids) > 10 else ''}")
+        if missing_part_ids:
+            extra.append(f"Missing parts: {', '.join(map(str, missing_part_ids[:10]))}{' ...' if len(missing_part_ids) > 10 else ''}")
+
+        extra_text = f" ({' | '.join(extra)})" if extra else ""
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f'Cannot delete raw material "{db_raw_material.material_name}". '
+                f"It is still linked in order_parts_raw_material_linked ({len(related_linkages)} row(s)). "
+                f"Orders: {', '.join(order_labels) or '-'}; Parts: {', '.join(part_labels) or '-'}."
+                f"{extra_text}"
+            ),
+        )
+
+    # 2) Block delete if any Part rows directly reference this raw material
+    referencing_parts = (
+        db.query(PartModel)
+        .filter(PartModel.raw_material_id == raw_material_id)
+        .order_by(PartModel.id.asc())
+        .all()
+    )
+    if referencing_parts:
+        part_numbers = [p.part_number for p in referencing_parts if p.part_number]
+        part_names = [p.part_name for p in referencing_parts if p.part_name]
+        # Keep message short, but informative
+        pn = ", ".join(part_numbers[:10]) + (f", +{len(part_numbers) - 10} more" if len(part_numbers) > 10 else "")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f'Cannot delete raw material "{db_raw_material.material_name}". '
+                f"It is still selected on {len(referencing_parts)} part(s) (parts.raw_material_id). "
+                f"Part numbers: {pn or '-'}."
+            ),
+        )
+
+    try:
+        db.delete(db_raw_material)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f'Cannot delete raw material "{db_raw_material.material_name}". '
+                "It is still referenced by other records. Remove the links/usages first and try again."
+            ),
+        )
     return None

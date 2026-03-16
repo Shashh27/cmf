@@ -10,7 +10,8 @@ from .oms import (
     Order,
     OrderDocument,
     OperationDocument,
-    OrderPartsRawMaterialLinked
+    OrderPartsRawMaterialLinked,
+    OutSourcePartStatus
 )
 from .configuration import (
     WorkCenter,
@@ -21,6 +22,11 @@ from .access_control import AccessUser
 from .inventory import (
     RawMaterial,
     ToolsList
+)
+from .maintenance import (
+    OEEIssue,
+    MachineBreakdown,
+    ComponentIssue
 )
 
 __all__ = [
@@ -35,11 +41,15 @@ __all__ = [
     "OrderDocument",
     "OperationDocument",
     "OrderPartsRawMaterialLinked",
+    "OutSourcePartStatus",
     "WorkCenter",
     "Machine",
     "Customer",
     "AccessUser",
     "RawMaterial",
     "ToolsList",
+    "OEEIssue",
+    "MachineBreakdown",
+    "ComponentIssue",
     "Base"
 ]

@@ -106,9 +106,10 @@ async def upload_operation_documents(
     document_type: str = Form("Technical"),
     document_version: str = Form("1.0"),
     parent_id: Optional[int] = Form(None),
+    user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Upload multiple documents for an operation"""
+    """Upload multiple documents for an operation (user_id = uploader: project_coordinator, admin, or manufacturing_coordinator)."""
     # Check if operation exists
     operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not operation:
@@ -159,14 +160,15 @@ async def upload_operation_documents(
                 }
             )
             
-            # Create database record
+            # Create database record (user_id = uploader)
             db_document = OperationDocumentModel(
                 document_name=file.filename,
                 document_url=document_url,
                 document_type=effective_doc_type,
                 document_version=document_version,
                 operation_id=operation_id,
-                parent_id=parent_id
+                parent_id=parent_id,
+                user_id=user_id
             )
             
             db.add(db_document)
@@ -187,14 +189,16 @@ async def upload_operation_documents(
 
 
 @router.get("/", response_model=List[OperationDocumentWithDetails])
-def get_operation_documents(db: Session = Depends(get_db)):
-    """Get all operation documents with operation details (single JOIN query)."""
-    documents = (
+def get_operation_documents(user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all operation documents with operation details. Filter by user_id (uploader) for module-specific views."""
+    query = (
         db.query(OperationDocumentModel)
         .options(joinedload(OperationDocumentModel.operation))
         .order_by(OperationDocumentModel.id.asc())
-        .all()
     )
+    if user_id is not None:
+        query = query.filter(OperationDocumentModel.user_id == user_id)
+    documents = query.all()
     return [_op_doc_to_dict(d) for d in documents]
 
 
@@ -325,17 +329,18 @@ def preview_operation_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/operation/{operation_id}", response_model=List[OperationDocumentWithDetails])
-def get_documents_by_operation(operation_id: int, db: Session = Depends(get_db)):
-    """Get all documents for a specific operation"""
-    # Check if operation exists
+def get_documents_by_operation(operation_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all documents for a specific operation. Filter by user_id (uploader) for module-specific views."""
     operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not operation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation with id {operation_id} not found"
         )
-    
-    documents = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id).all()
+    query = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id)
+    if user_id is not None:
+        query = query.filter(OperationDocumentModel.user_id == user_id)
+    documents = query.all()
     result = []
     for document in documents:
         # Create document dict with operation details

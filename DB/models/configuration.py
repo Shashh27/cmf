@@ -12,6 +12,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from ..database import Base
+from .access_control import AccessUser
+from .oms import Order
 
 
 # =======================
@@ -26,8 +28,10 @@ class WorkCenter(Base):
     work_center_name = Column(String, nullable=False)
     description = Column(String)
     is_schedulable = Column(Boolean, default=True)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
     machines = relationship("Machine", back_populates="work_center")
+    user = relationship("AccessUser")
 
 
 # =======================
@@ -49,8 +53,10 @@ class Machine(Base):
     calibration_date = Column(TIMESTAMP)
     calibration_due_date = Column(TIMESTAMP)
     password = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
     work_center = relationship("WorkCenter", back_populates="machines")
+    user = relationship("AccessUser")
 
 
 # =======================
@@ -69,8 +75,10 @@ class Customer(Base):
     contact_person = Column(String, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
     orders = relationship("Order", back_populates="customer")
+    user = relationship("AccessUser")
 
 
 # =======================
@@ -140,6 +148,8 @@ class PokayokeCompletedLog(Base):
     checklist = relationship("PokayokeChecklist")
     machine = relationship("Machine")
     part = relationship("DB.models.oms.Part")
+    operator = relationship("AccessUser")
+    order = relationship("Order")
     item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
 
 

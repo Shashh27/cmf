@@ -1,0 +1,75 @@
+Metadata-Version: 2.1
+Name: pytest-beartype
+Version: 0.2.0
+Summary: Pytest plugin to run your tests with beartype checking enabled.
+Author-email: Tushar Sadhwani <tushar.sadhwani000@gmail.com>
+License: MIT
+Project-URL: Source, https://github.com/tusharsadhwani/pytest-beartype
+Classifier: Framework :: Pytest
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Typing :: Typed
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: beartype>=0.19.0
+Requires-Dist: pytest
+Provides-Extra: dev
+Requires-Dist: black; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: tox; extra == "dev"
+
+# pytest-beartype
+
+Pytest plugin to run your tests with beartype checking enabled.
+
+## Installation
+
+```bash
+pip install pytest_beartype
+```
+
+## Usage
+
+```bash
+pytest --beartype-packages='your_package_name,other_package_name'
+```
+
+This will ensure that any type annotations in those packages are checked at
+runtime, while your tests are running.
+
+## Local Development / Testing
+
+- Create and activate a virtual environment
+- Run `pip install -r requirements-dev.txt` to do an editable install
+- Run `pytest` to run tests
+
+## Type Checking
+
+Run `mypy .`
+
+## Create and upload a package to PyPI
+
+Make sure to bump the version in `setup.cfg`.
+
+Then run the following commands:
+
+```bash
+rm -rf build dist
+python setup.py sdist bdist_wheel
+```
+
+Then upload it to PyPI using [twine](https://twine.readthedocs.io/en/latest/#installation):
+
+```bash
+twine upload dist/*
+```
