@@ -131,10 +131,26 @@ class ToolIssue(Base):
     issue_category = Column(String, nullable=True)  # "wear and tear", "Calibration Drift", "other"
     description = Column(Text, nullable=True)  # Entered by operator
     remarks = Column(Text, nullable=True)  # Entered by supervisor
-    document_url = Column(String, nullable=True)  # URL to uploaded document in MinIO
 
     # Relationships
     tool = relationship("ToolsList")
     request = relationship("InventoryRequest")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
     inventory_supervisor = relationship("AccessUser", foreign_keys=[inventory_supervisor_id])
+    documents = relationship("ToolIssueDocument", back_populates="tool_issue", cascade="all, delete-orphan")
+
+
+# =======================
+# Tool Issue Documents
+# =======================
+class ToolIssueDocument(Base):
+    __tablename__ = "tool_issue_documents"
+    __table_args__ = {'schema': 'inventory'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    tool_issue_id = Column(Integer, ForeignKey("inventory.tool_issues.id"), nullable=False)
+    document_url = Column(String, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+    # Relationships
+    tool_issue = relationship("ToolIssue", back_populates="documents")

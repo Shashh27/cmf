@@ -378,7 +378,14 @@ def get_all_transactions(db: Session = Depends(get_db)):
             issue_category=issue.issue_category,
             description=issue.description,
             remarks=issue.remarks,
-            document_url=issue.document_url,
+            documents=[
+                {
+                    "id": doc.id,
+                    "tool_issue_id": doc.tool_issue_id,
+                    "document_url": doc.document_url,
+                    "created_at": doc.created_at
+                } for doc in issue.documents
+            ],
             tool_name=tool_detail.item_description if tool_detail else None,
             operator_name=operator.user_name if operator else None,
             inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
@@ -544,7 +551,14 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
             issue_category=issue.issue_category,
             description=issue.description,
             remarks=issue.remarks,
-            document_url=issue.document_url,
+            documents=[
+                {
+                    "id": doc.id,
+                    "tool_issue_id": doc.tool_issue_id,
+                    "document_url": doc.document_url,
+                    "created_at": doc.created_at
+                } for doc in issue.documents
+            ],
             tool_name=tool_detail.item_description if tool_detail else None,
             operator_name=operator.user_name if operator else None,
             inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
@@ -606,12 +620,12 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
                 qty=ret.returned_qty or 0,
                 status=ret.status or '-',
                 remarks=ret.remarks,
-                supervisor_name=ret.supervisor_name
+                inventory_supervisor_name=ret.inventory_supervisor_name
             ) for ret in returns_data],
             issues=[IssueInfo(
                 date=str(issue.created_at) if issue.created_at else None,
                 qty=issue.tool_issue_qty or 0,
-                approved_by=issue.supervisor_name,
+                approved_by=issue.inventory_supervisor_name,
                 remarks=issue.remarks
             ) for issue in related_issues],
             total_returned_qty=total_returned_qty_req,

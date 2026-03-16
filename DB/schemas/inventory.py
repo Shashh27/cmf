@@ -235,7 +235,6 @@ class ToolIssueBase(BaseModel):
     issue_category: Optional[str] = None  # "wear and tear", "Calibration Drift", "other"
     description: Optional[str] = None  # Entered by operator
     remarks: Optional[str] = None  # Entered by supervisor
-    document_url: Optional[str] = None  # URL to uploaded document in MinIO
 
 
 class ToolIssueCreate(BaseModel):
@@ -245,7 +244,6 @@ class ToolIssueCreate(BaseModel):
     operator_id: int
     issue_category: Optional[str] = None  # "wear and tear", "Calibration Drift", "other"
     description: Optional[str] = None  # Entered by operator
-    # status remains pending on create
 
 
 class ToolIssueUpdate(BaseModel):
@@ -256,8 +254,16 @@ class ToolIssueUpdate(BaseModel):
     issue_category: Optional[str] = None
     description: Optional[str] = None
     remarks: Optional[str] = None
-    document_url: Optional[str] = None
-    # status and supervisor are managed via dedicated endpoint
+
+
+class ToolIssueDocument(BaseModel):
+    id: int
+    tool_issue_id: int
+    document_url: str
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class ToolIssue(ToolIssueBase):
@@ -265,6 +271,7 @@ class ToolIssue(ToolIssueBase):
     inventory_supervisor_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    documents: List[ToolIssueDocument] = []
 
     class Config:
         from_attributes = True
