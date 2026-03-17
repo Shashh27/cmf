@@ -25,7 +25,7 @@ class Product(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     product_name = Column(String, nullable=False)
-    product_number = Column(String, unique=True, nullable=False)
+    # product_number = Column(String, unique=True, nullable=False)
     product_version = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

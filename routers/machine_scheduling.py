@@ -9,7 +9,7 @@ from sqlalchemy import func
 # from sqlalchemy import cast, Integer  
 
 
-from sqlalchemy import exists
+from sqlalchemy import exists, text
 from DB.database import get_db
 
 from DB.models.oms import Order
@@ -115,6 +115,26 @@ def _assign_order_priority(sale_order_id: int, product_id: int, parts: list, db:
             priority=max_priority + i,
             status="active",
         ))
+
+
+def _compact_order_part_priorities_by_part_order(db: Session) -> None:
+    """
+    Renumber all active OrderPartPriority rows to 1, 2, 3, ... in Part No order.
+    Preserves cross-order sequence (current priority), then sorts by Part.part_number
+    so UI order (002, 003, 004, 005) matches priority order.
+    """
+    active_rows = (
+        db.query(OrderPartPriority)
+        .join(Part, Part.id == OrderPartPriority.part_id)
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .order_by(OrderPartPriority.priority.asc(), Part.part_number.asc())
+        .all()
+    )
+    for i, row in enumerate(active_rows, start=1):
+        row.priority = i
 
 
 def _remove_order_priority(sale_order_id: int, db: Session):
@@ -313,10 +333,12 @@ def set_order_status(
         PartScheduleStatus.status == "active"
     ).count()
 
-    active_inhouse_count = db.query(PartScheduleStatus).join(Part, Part.id == PartScheduleStatus.part_id).filter(
+    active_inhouse_count = db.query(PartScheduleStatus).join(
+        Part, Part.id == PartScheduleStatus.part_id
+    ).join(PartType, PartType.id == Part.type_id).filter(
         PartScheduleStatus.sale_order_id == sale_order_id,
         PartScheduleStatus.status == "active",
-        Part.type_id == 1
+        PartType.type_name == "IN-House"
     ).count()
 
     order_status = "active" if active_count > 0 else "inactive"
@@ -623,7 +645,10 @@ def update_part_status(
 
     # ----------------------------
     # Assign OrderPartPriority if activating an IN-House part
-    # Only creates a row if one doesn't exist for this part+order
+    # EDGE CASE: Inactive order with many IN-House parts — user activates only
+    # a few specific parts (not whole order). Each activated part gets a new
+    # priority row; next priority = global max + 1, or 1 if no other active parts.
+    # Only creates a row if one doesn't exist for this part+order.
     # ----------------------------
     if status == "active" and part_type_name == "IN-House":
         existing = db.query(OrderPartPriority).filter(
@@ -631,18 +656,33 @@ def update_part_status(
             OrderPartPriority.part_id == part_id
         ).first()
         if not existing:
-            max_row = db.query(OrderPartPriority).order_by(
-                OrderPartPriority.priority.desc()
-            ).first()  # global max across all orders
-            next_priority = (max_row.priority + 1) if max_row else 1
-            db.add(OrderPartPriority(
-                order_id=sale_order_id,
-                product_id=order.product_id,
-                part_id=part_id,
-                priority=next_priority,
-                status="active",
-            ))
-            db.flush()
+            # Serialize priority assignment so bulk activation (multiple parts at once)
+            # gets distinct priorities 1, 2, 3... instead of all getting the same number.
+            _ADVISORY_LOCK_ORDER_PART_PRIORITY = 0x4F5050  # "OPP" in hex
+            db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ADVISORY_LOCK_ORDER_PART_PRIORITY})
+            # Re-check after acquiring lock (another request may have added this part).
+            existing = db.query(OrderPartPriority).filter(
+                OrderPartPriority.order_id == sale_order_id,
+                OrderPartPriority.part_id == part_id
+            ).first()
+            if not existing:
+                max_row = db.query(OrderPartPriority).filter(
+                    OrderPartPriority.priority > 0,
+                    OrderPartPriority.status == "active"
+                ).order_by(
+                    OrderPartPriority.priority.desc()
+                ).first()
+                next_priority = (max_row.priority + 1) if max_row else 1
+                db.add(OrderPartPriority(
+                    order_id=sale_order_id,
+                    product_id=order.product_id,
+                    part_id=part_id,
+                    priority=next_priority,
+                    status="active",
+                ))
+                db.flush()
+                # Renumber so priority order matches Part No order (002, 003, 004, 005 -> 1, 2, 3, 4)
+                _compact_order_part_priorities_by_part_order(db)
 
 
     # ----------------------------
@@ -656,16 +696,28 @@ def update_part_status(
     ).first()
     if priority_row:
         if status == "inactive":
-            old_priority = priority_row.priority
-            priority_row.status = "inactive"
-            priority_row.priority = 0
-            # Shift all rows with priority > old_priority down by 1
-            db.query(OrderPartPriority).filter(
-                OrderPartPriority.priority > old_priority
-            ).update(
-                {OrderPartPriority.priority: OrderPartPriority.priority - 1},
-                synchronize_session=False
-            )
+            # Serialize with same lock as activation so bulk deactivate gets correct 1,2,3...
+            _ADVISORY_LOCK_ORDER_PART_PRIORITY = 0x4F5050  # "OPP" in hex
+            db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ADVISORY_LOCK_ORDER_PART_PRIORITY})
+            # Re-read after lock (may have been shifted by another request)
+            priority_row = db.query(OrderPartPriority).filter(
+                OrderPartPriority.order_id == sale_order_id,
+                OrderPartPriority.part_id == part_id
+            ).first()
+            if priority_row:
+                priority_row.status = "inactive"
+                if priority_row.priority > 0:
+                    old_priority = priority_row.priority
+                    priority_row.priority = 0
+                    # Shift all rows with priority > old_priority down by 1
+                    db.query(OrderPartPriority).filter(
+                        OrderPartPriority.priority > old_priority
+                    ).update(
+                        {OrderPartPriority.priority: OrderPartPriority.priority - 1},
+                        synchronize_session=False
+                    )
+                    # Compact: renumber active priorities to 1,2,3,... in Part No order (same as UI)
+                    _compact_order_part_priorities_by_part_order(db)
         else:
             priority_row.status = "active"
 
@@ -679,10 +731,10 @@ def update_part_status(
 
     active_inhouse_count = db.query(PartScheduleStatus).join(
         Part, Part.id == PartScheduleStatus.part_id
-    ).filter(
+    ).join(PartType, PartType.id == Part.type_id).filter(
         PartScheduleStatus.sale_order_id == sale_order_id,
         PartScheduleStatus.status == "active",
-        Part.type_id == 1
+        PartType.type_name == "IN-House"
     ).count()
 
     order_status = "active" if active_inhouse_count > 0 else "inactive"
@@ -803,10 +855,10 @@ def get_order_summary(sale_order_id: int, db: Session = Depends(get_db)):
         ).count()
         active_inhouse = db.query(PartScheduleStatus).join(
             Part, Part.id == PartScheduleStatus.part_id
-        ).filter(
+        ).join(PartType, PartType.id == Part.type_id).filter(
             PartScheduleStatus.sale_order_id == sale_order_id,
             PartScheduleStatus.status == "active",
-            Part.type_id == 1
+            PartType.type_name == "IN-House"
         ).count()
         return {
             "order_id":            sale_order_id,
