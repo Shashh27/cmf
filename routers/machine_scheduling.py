@@ -19,6 +19,7 @@ from DB.models.configuration import Machine, WorkCenter
 from DB.models.oms import Operation, Part, Order, PartType, OrderPartPriority
 
 from DB.schemas.machine_scheduling import PartStatusUpdate, UpdatePartStatusResponse, OrderScheduleStatusResponse
+from DB.schemas.oms import OrderPartPrioritySwap
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Tuple
@@ -792,6 +793,76 @@ def update_part_status(
         "status": status,
         "will_be_scheduled": status == "active" and part_type_name == "IN-House"
     }
+
+
+# =========================================================
+# SHIFT PART PRIORITIES (GLOBAL)
+# =========================================================
+@router.put("/part-priorities/swap")
+def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_db)):
+    """
+    Shift-part swap (stable reorder) between two priority records.
+
+    Frontend behaviour: when swapping A with B, move A into B's position and
+    shift all priorities in between by 1 so the global sequence stays valid.
+
+    Example:
+      A at 6, B at 1  => A becomes 1; items 1..5 shift to 2..6 (B ends at 6)
+    """
+    record1 = (
+        db.query(OrderPartPriority)
+        .filter(OrderPartPriority.id == swap.id1)
+        .with_for_update()
+        .first()
+    )
+    record2 = (
+        db.query(OrderPartPriority)
+        .filter(OrderPartPriority.id == swap.id2)
+        .with_for_update()
+        .first()
+    )
+
+    if not record1 or not record2:
+        raise HTTPException(status_code=404, detail="One or both priority records not found")
+
+    p1 = record1.priority
+    p2 = record2.priority
+
+    if p1 == p2:
+        return {"message": "No change needed"}
+
+    lo = min(p1, p2)
+    hi = max(p1, p2)
+
+    # Lock the impacted range to avoid concurrent reorder races.
+    db.query(OrderPartPriority).filter(
+        OrderPartPriority.priority >= lo,
+        OrderPartPriority.priority <= hi
+    ).with_for_update().all()
+
+    if p1 > p2:
+        # Move record1 up into p2; shift [p2, p1-1] downwards by +1
+        db.query(OrderPartPriority).filter(
+            OrderPartPriority.priority >= p2,
+            OrderPartPriority.priority < p1
+        ).update(
+            {OrderPartPriority.priority: OrderPartPriority.priority + 1},
+            synchronize_session=False
+        )
+        record1.priority = p2
+    else:
+        # Move record1 down into p2; shift [p1+1, p2] upwards by -1
+        db.query(OrderPartPriority).filter(
+            OrderPartPriority.priority > p1,
+            OrderPartPriority.priority <= p2
+        ).update(
+            {OrderPartPriority.priority: OrderPartPriority.priority - 1},
+            synchronize_session=False
+        )
+        record1.priority = p2
+
+    db.commit()
+    return {"message": "Priorities shifted successfully"}
 
 
 @router.get("/order-status/{sale_order_id}")

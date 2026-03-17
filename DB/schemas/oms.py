@@ -3,7 +3,6 @@ from typing import Optional, List, Text
 from datetime import datetime, time
 from typing_extensions import Self
 from .configuration import Customer
-from .inventory import ToolsList
 
 
 # =======================
@@ -314,7 +313,7 @@ class ToolWithPartUpdate(BaseModel):
 
 class ToolWithPart(ToolWithPartBase):
     id: int
-    tool: Optional[ToolsList] = None
+    tool: Optional[dict] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
