@@ -138,6 +138,24 @@ def _compact_order_part_priorities_by_part_order(db: Session) -> None:
         row.priority = i
 
 
+def _resequence_active_order_part_priorities(db: Session) -> None:
+    """
+    Resequence all active OrderPartPriority rows to 1..N globally (no gaps).
+    Use after deleting or deactivating a part so remaining parts get 1, 2, 3, ...
+    """
+    active_rows = (
+        db.query(OrderPartPriority)
+        .filter(
+            OrderPartPriority.status == "active",
+            OrderPartPriority.priority > 0,
+        )
+        .order_by(OrderPartPriority.priority.asc(), OrderPartPriority.id.asc())
+        .all()
+    )
+    for i, row in enumerate(active_rows, start=1):
+        row.priority = i
+
+
 def _remove_order_priority(sale_order_id: int, db: Session):
     """
     Remove order priority and adjust priorities for remaining orders.
@@ -697,28 +715,18 @@ def update_part_status(
     ).first()
     if priority_row:
         if status == "inactive":
-            # Serialize with same lock as activation so bulk deactivate gets correct 1,2,3...
+            # Part-level deactivation: delete this row and resequence remaining (1..N, no gaps).
             _ADVISORY_LOCK_ORDER_PART_PRIORITY = 0x4F5050  # "OPP" in hex
             db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ADVISORY_LOCK_ORDER_PART_PRIORITY})
-            # Re-read after lock (may have been shifted by another request)
             priority_row = db.query(OrderPartPriority).filter(
                 OrderPartPriority.order_id == sale_order_id,
                 OrderPartPriority.part_id == part_id
             ).first()
             if priority_row:
-                priority_row.status = "inactive"
-                if priority_row.priority > 0:
-                    old_priority = priority_row.priority
-                    priority_row.priority = 0
-                    # Shift all rows with priority > old_priority down by 1
-                    db.query(OrderPartPriority).filter(
-                        OrderPartPriority.priority > old_priority
-                    ).update(
-                        {OrderPartPriority.priority: OrderPartPriority.priority - 1},
-                        synchronize_session=False
-                    )
-                    # Compact: renumber active priorities to 1,2,3,... in Part No order (same as UI)
-                    _compact_order_part_priorities_by_part_order(db)
+                db.delete(priority_row)
+                db.flush()
+                # Resequence remaining active parts globally to 1, 2, 3, ...
+                _resequence_active_order_part_priorities(db)
         else:
             priority_row.status = "active"
 

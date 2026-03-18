@@ -82,13 +82,16 @@ class SchedulerEngine:
     """
     FIFO Machine Scheduling Engine for Active IN-HOUSE Parts.
 
-    Scheduling order
-    ----------------
-    Orders are processed strictly sequentially — Order M+1 starts only after
-    Order M's last part finishes.  Within an order, parts run in
-    OrderPartPriority sequence; within a part, operations are sequential.
+    Scheduling order (aligned with oms.order_part_priorities)
+    ---------------------------------------------------------
+    Parts are scheduled in global OrderPartPriority order: priority 1, then 2,
+    then 3, … across all orders. Only rows with status='active' and
+    priority > 0 are considered. Within a part, operations are sequential.
     Machine utilisation is tracked via self.machine_end_time so no two
     operations on the same machine ever overlap.
+
+    If no OrderPartPriority rows exist, the engine falls back to processing
+    order-by-order with parts per order in priority order.
     """
 
     # ------------------------------------------------------------------ #
@@ -259,8 +262,8 @@ class SchedulerEngine:
         self, operation: Operation, quantity: int
     ) -> float:
         """
-        Adjusted duration (hours):
-          = (setup_seconds + cycle_seconds × quantity) / 3600 / efficiency_factor
+        Duration (hours):
+          = (setup_seconds + cycle_seconds × quantity) / 3600
 
         Setup applied once per batch.
         Returns 0.0 when both setup_time and cycle_time are null/zero.
@@ -276,7 +279,7 @@ class SchedulerEngine:
         total_sec = _secs(operation.setup_time) + _secs(operation.cycle_time) * quantity
         if total_sec == 0:
             return 0.0
-        return (total_sec / 3600.0) / self.efficiency_factor
+        return (total_sec / 3600.0)
 
     # ------------------------------------------------------------------ #
     #  Single-operation scheduler                                          #
@@ -419,6 +422,47 @@ class SchedulerEngine:
 
         except Exception as e:
             print(f"[ERROR] _load_active_orders: {e}")
+            return []
+
+    def _load_scheduled_items_by_priority(
+        self,
+        active_orders: List[Dict],
+        order_parts_map: Dict[int, List[Dict]],
+    ) -> List[Tuple[Dict, Dict]]:
+        """
+        Build a single list of (order_dict, part_data) ordered by global
+        OrderPartPriority.priority ASC so the algorithm schedules parts
+        strictly by priority (1, 2, 3, … across all orders).
+
+        Only includes rows where OrderPartPriority.status == 'active' and
+        priority is set; part must appear in order_parts_map (active in
+        PartScheduleStatus for that order).
+        """
+        try:
+            order_by_id = {o['order_id']: o for o in active_orders}
+            opp_rows = (
+                self.db.query(OrderPartPriority)
+                .filter(
+                    OrderPartPriority.status == 'active',
+                    OrderPartPriority.priority.isnot(None),
+                    OrderPartPriority.priority > 0,
+                )
+                .order_by(OrderPartPriority.priority.asc(), OrderPartPriority.id.asc())
+                .all()
+            )
+            result: List[Tuple[Dict, Dict]] = []
+            for opp in opp_rows:
+                order_dict = order_by_id.get(opp.order_id)
+                if not order_dict:
+                    continue
+                parts = order_parts_map.get(opp.order_id, [])
+                part_data = next((p for p in parts if p['part_id'] == opp.part_id), None)
+                if part_data is None:
+                    continue
+                result.append((order_dict, part_data))
+            return result
+        except Exception as e:
+            print(f"[ERROR] _load_scheduled_items_by_priority: {e}")
             return []
 
     def _load_parts_for_order(self, order: Dict) -> List[Dict]:
@@ -676,6 +720,16 @@ class SchedulerEngine:
                 order_parts_map[order['order_id']] = parts
                 all_part_ids.extend(p['part_id'] for p in parts)
 
+            # ── Schedule order: by global OrderPartPriority (1, 2, 3, …) ── #
+            scheduled_items = self._load_scheduled_items_by_priority(
+                active_orders, order_parts_map
+            )
+            if not scheduled_items:
+                # Fallback: no priority rows — order by order, parts per order
+                for order in active_orders:
+                    for part_data in order_parts_map.get(order['order_id'], []):
+                        scheduled_items.append((order, part_data))
+
             # ── Phase A4: operations + machines ───────────────────────── #
             ops_by_part    = self._load_operations(all_part_ids)
             machines_by_wc = self._load_machines_by_workcenter()
@@ -693,12 +747,17 @@ class SchedulerEngine:
             clock_seed       = max(start_date or first_activation, first_activation)
             current_time     = self.adjust_to_shift(clock_seed)
 
-            # ── Phase C: main loop ─────────────────────────────────────── #
+            # ── Phase C: main loop (by global priority) ─────────────────── #
             orders_scheduled = 0
+            seen_orders: set = set()
 
-            for order in active_orders:
+            for order, part_data in scheduled_items:
                 order_id = order['order_id']
                 quantity = order['quantity']
+
+                # Count distinct orders for reporting
+                if order_id not in seen_orders:
+                    seen_orders.add(order_id)
 
                 # Edge case: zero quantity
                 if quantity == 0:
@@ -707,172 +766,161 @@ class SchedulerEngine:
                     )
                     continue
 
-                parts = order_parts_map.get(order_id, [])
-
-                # Edge case: no in-house parts
-                if not parts:
-                    skipped_orders.append(
-                        f"Order {order['sale_order_number']}: no in-house parts, skipped."
-                    )
-                    continue
-
                 # C1: enforce order activation time + shift
                 current_time = self.adjust_to_shift(
                     max(current_time, order['activation_time'])
                 )
 
-                # C2: iterate parts in execution order
-                for part_data in parts:
+                # C2: schedule this part (single part per iteration)
+                # ── C2.1: determine this part's start time ─────────── #
+                #
+                # MODIFICATION 2 — cascade-break for late-added parts:
+                #
+                # part_start = max(current_time, part_activation_time)
+                #
+                # • Original parts (activated WITH the order):
+                #     part_activation_time ≈ order.activated_at
+                #     → max() == current_time → cascade applies normally
+                #       (part starts right after the previous part ends)
+                #
+                # • Late-added parts (activated AFTER the order went live):
+                #     part_activation_time > order.activated_at
+                #     → if cascade end < activation_time, max() picks
+                #       activation_time → part cannot start before it was
+                #       even added to the system
+                part_start = self.adjust_to_shift(
+                    max(current_time, part_data['part_activation_time'])
+                )
 
-                    # ── C2.1: determine this part's start time ─────────── #
-                    #
-                    # MODIFICATION 2 — cascade-break for late-added parts:
-                    #
-                    # part_start = max(current_time, part_activation_time)
-                    #
-                    # • Original parts (activated WITH the order):
-                    #     part_activation_time ≈ order.activated_at
-                    #     → max() == current_time → cascade applies normally
-                    #       (part starts right after the previous part ends)
-                    #
-                    # • Late-added parts (activated AFTER the order went live):
-                    #     part_activation_time > order.activated_at
-                    #     → if cascade end < activation_time, max() picks
-                    #       activation_time → part cannot start before it was
-                    #       even added to the system
-                    part_start = self.adjust_to_shift(
-                        max(current_time, part_data['part_activation_time'])
+                # Raw-material gate
+                if not part_data['raw_material_ok']:
+                    rm_stat_val = part_data.get('raw_material_status', '')
+                    if rm_stat_val == 'No Raw Material':
+                        reason = 'no raw material assigned'
+                    else:
+                        reason = f"raw material status '{rm_stat_val}' — not Available"
+                    skipped_parts.append(
+                        f"Part {part_data['part_number']} "
+                        f"(order {order['sale_order_number']}): "
+                        f"{reason} — part skipped."
                     )
+                    continue                      # do NOT advance current_time
 
-                    # Raw-material gate
-                    if not part_data['raw_material_ok']:
-                        rm_stat_val = part_data.get('raw_material_status', '')
-                        if rm_stat_val == 'No Raw Material':
-                            reason = 'no raw material assigned'
-                        else:
-                            reason = f"raw material status '{rm_stat_val}' — not Available"
-                        skipped_parts.append(
-                            f"Part {part_data['part_number']} "
-                            f"(order {order['sale_order_number']}): "
-                            f"{reason} — part skipped."
+                # C2.2: operations for this part
+                operations = ops_by_part.get(part_data['part_id'], [])
+                if not operations:
+                    parts_without_operations.append({
+                        'part_id':           part_data['part_id'],
+                        'part_number':       part_data['part_number'],
+                        'part_name':         part_data['part_name'],
+                        'order_id':          order['order_id'],
+                        'sale_order_number': order['sale_order_number'],
+                        'reason':            'No operations defined for this part',
+                    })
+                    continue                      # do NOT advance current_time
+
+                # C2.3: schedule each operation sequentially
+                op_cursor = part_start
+
+                for operation in operations:
+
+                    # ── MODIFICATION 3 — Out-Source operation ──────── #
+                    #
+                    # Identified by Operation.part_type_id == 2
+                    # (oms.part_types: id=1 IN-House, id=2 Out-Source)
+                    #
+                    # Rules:
+                    #   • No machine is allocated (machine_id = NULL)
+                    #   • planned_start_time = end time of the previous
+                    #     IN-HOUSE operation (op_cursor)
+                    #   • planned_end_time   = planned_start_time + 7 days
+                    #     (maximum provision for vendor turnaround)
+                    #   • Status set to 'outsource_pending'
+                    #   • op_cursor advances by 7 days so the next
+                    #     IN-HOUSE operation waits for the vendor
+                    if operation.part_type_id == OUT_SOURCE_TYPE_ID:
+                        os_start = op_cursor
+                        os_end   = op_cursor + OUT_SOURCE_PROVISION
+                        all_items.append(
+                            PlannedScheduleItem(
+                                part_id             = part_data['part_id'],
+                                part_number         = part_data['part_number'],
+                                sale_order_id       = part_data['order_id'],
+                                sale_order_number   = part_data['sale_order_number'],
+                                operation_id        = operation.id,
+                                machine_id          = None,   # no machine for out-source
+                                planned_start_time  = os_start,
+                                planned_end_time    = os_end,
+                                total_quantity      = quantity,
+                                remaining_quantity  = 0,
+                                status              = 'outsource_pending',
+                                schedule_history_id = history_id,
+                            )
                         )
-                        continue                      # do NOT advance current_time
- 
-                    # C2.2: operations for this part
-                    operations = ops_by_part.get(part_data['part_id'], [])
-                    if not operations:
-                        parts_without_operations.append({
-                            'part_id':           part_data['part_id'],
-                            'part_number':       part_data['part_number'],
-                            'part_name':         part_data['part_name'],
-                            'order_id':          order['order_id'],
-                            'sale_order_number': order['sale_order_number'],
-                            'reason':            'No operations defined for this part',
-                        })
-                        continue                      # do NOT advance current_time
+                        op_cursor = os_end        # next op waits for vendor
+                        continue                  # skip machine-selection logic
 
-                    # C2.3: schedule each operation sequentially
-                    op_cursor = part_start
+                    # ── IN-HOUSE operation: machine selection ──────── #
+                    #
+                    # Tier 1: operation.machine_id pinned + schedulable
+                    # Tier 2: pinned but not in schedulable WC → WC fallback
+                    # Tier 3: no pin → earliest-free in work center (FIFO)
 
-                    for operation in operations:
+                    if operation.machine_id and operation.machine_id in all_machines:
+                        # Tier 1 – pinned machine
+                        pinned = all_machines[operation.machine_id]
+                        machine_free = self.machine_end_time.get(
+                            pinned.id, op_cursor
+                        )
+                        earliest = max(op_cursor, machine_free)
+                        avail    = self._machine_next_available(pinned, earliest)
 
-                        # ── MODIFICATION 3 — Out-Source operation ──────── #
-                        #
-                        # Identified by Operation.part_type_id == 2
-                        # (oms.part_types: id=1 IN-House, id=2 Out-Source)
-                        #
-                        # Rules:
-                        #   • No machine is allocated (machine_id = NULL)
-                        #   • planned_start_time = end time of the previous
-                        #     IN-HOUSE operation (op_cursor)
-                        #   • planned_end_time   = planned_start_time + 7 days
-                        #     (maximum provision for vendor turnaround)
-                        #   • Status set to 'outsource_pending'
-                        #   • op_cursor advances by 7 days so the next
-                        #     IN-HOUSE operation waits for the vendor
-                        if operation.part_type_id == OUT_SOURCE_TYPE_ID:
-                            os_start = op_cursor
-                            os_end   = op_cursor + OUT_SOURCE_PROVISION
-                            all_items.append(
-                                PlannedScheduleItem(
-                                    part_id             = part_data['part_id'],
-                                    part_number         = part_data['part_number'],
-                                    sale_order_id       = part_data['order_id'],
-                                    sale_order_number   = part_data['sale_order_number'],
-                                    operation_id        = operation.id,
-                                    machine_id          = None,   # no machine for out-source
-                                    planned_start_time  = os_start,
-                                    planned_end_time    = os_end,
-                                    total_quantity      = quantity,
-                                    remaining_quantity  = 0,
-                                    status              = 'outsource_pending',
-                                    schedule_history_id = history_id,
-                                )
-                            )
-                            op_cursor = os_end        # next op waits for vendor
-                            continue                  # skip machine-selection logic
-
-                        # ── IN-HOUSE operation: machine selection ──────── #
-                        #
-                        # Tier 1: operation.machine_id pinned + schedulable
-                        # Tier 2: pinned but not in schedulable WC → WC fallback
-                        # Tier 3: no pin → earliest-free in work center (FIFO)
-
-                        if operation.machine_id and operation.machine_id in all_machines:
-                            # Tier 1 – pinned machine
-                            pinned = all_machines[operation.machine_id]
-                            machine_free = self.machine_end_time.get(
-                                pinned.id, op_cursor
-                            )
-                            earliest = max(op_cursor, machine_free)
-                            avail    = self._machine_next_available(pinned, earliest)
-
-                            if avail is None:
-                                skipped_parts.append(
-                                    f"Part {part_data['part_number']}, "
-                                    f"Op {operation.operation_number}: "
-                                    f"pinned machine {operation.machine_id} is "
-                                    f"permanently OFF — skipped."
-                                )
-                                continue
-
-                            machine, cand_start = pinned, avail
-
-                        else:
-                            # Tier 2 / 3 – earliest-free within the work center
-                            machine, cand_start = self._pick_best_machine(
-                                operation.workcenter_id, machines_by_wc, op_cursor
-                            )
-
-                        if machine is None:
+                        if avail is None:
                             skipped_parts.append(
                                 f"Part {part_data['part_number']}, "
                                 f"Op {operation.operation_number}: "
-                                f"no schedulable machine in WC "
-                                f"{operation.workcenter_id} — skipped."
+                                f"pinned machine {operation.machine_id} is "
+                                f"permanently OFF — skipped."
                             )
-                            continue                  # op_cursor unchanged
+                            continue
 
-                        # Schedule with shift / machine-OFF splitting
-                        blocks, op_end = self._schedule_operation_blocks(
-                            operation           = operation,
-                            machine             = machine,
-                            quantity            = quantity,
-                            op_start            = cand_start,
-                            schedule_history_id = history_id,
-                            part_data           = part_data,
+                        machine, cand_start = pinned, avail
+
+                    else:
+                        # Tier 2 / 3 – earliest-free within the work center
+                        machine, cand_start = self._pick_best_machine(
+                            operation.workcenter_id, machines_by_wc, op_cursor
                         )
-                        all_items.extend(blocks)
 
-                        # Update machine clock and op cursor
-                        self.machine_end_time[machine.id] = op_end
-                        op_cursor = op_end
+                    if machine is None:
+                        skipped_parts.append(
+                            f"Part {part_data['part_number']}, "
+                            f"Op {operation.operation_number}: "
+                            f"no schedulable machine in WC "
+                            f"{operation.workcenter_id} — skipped."
+                        )
+                        continue                  # op_cursor unchanged
 
-                    # C2.4: part complete → advance global clock
-                    current_time = op_cursor
-                    parts_processed += 1
+                    # Schedule with shift / machine-OFF splitting
+                    blocks, op_end = self._schedule_operation_blocks(
+                        operation           = operation,
+                        machine             = machine,
+                        quantity            = quantity,
+                        op_start            = cand_start,
+                        schedule_history_id = history_id,
+                        part_data           = part_data,
+                    )
+                    all_items.extend(blocks)
 
-                orders_scheduled += 1
+                    # Update machine clock and op cursor
+                    self.machine_end_time[machine.id] = op_end
+                    op_cursor = op_end
+
+                # C2.4: part complete → advance global clock
+                current_time = op_cursor
+                parts_processed += 1
+
+            orders_scheduled = len(seen_orders)
 
             # ── Phase D: persist ──────────────────────────────────────── #
             if all_items:
