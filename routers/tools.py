@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from pydantic import BaseModel
 
 from DB.database import get_db
 from DB.models.oms import ToolWithPart as ToolWithPartModel
@@ -12,6 +13,20 @@ router = APIRouter(
 )
 
 
+class BulkToolLinkRequest(BaseModel):
+    part_id: int
+    operation_id: int | None = None
+    user_id: int | None = None
+    tool_ids: List[int]
+
+
+class BulkToolLinkItem(BaseModel):
+    tool_id: int
+    part_id: int
+    operation_id: int | None = None
+    user_id: int | None = None
+
+
 @router.post("/", response_model=ToolWithPart, status_code=status.HTTP_201_CREATED)
 def create_tool_with_part(tool: ToolWithPartCreate, db: Session = Depends(get_db)):
     """Create a new tool-part association"""
@@ -20,6 +35,61 @@ def create_tool_with_part(tool: ToolWithPartCreate, db: Session = Depends(get_db
     db.commit()
     db.refresh(db_tool)
     return db_tool
+
+
+@router.post("/bulk", response_model=List[ToolWithPart], status_code=status.HTTP_201_CREATED)
+def create_tools_with_part_bulk(payload: BulkToolLinkRequest, db: Session = Depends(get_db)):
+    """Create many tool-part associations in one request."""
+    tool_ids = payload.tool_ids or []
+    if not tool_ids:
+        return []
+
+    created: List[ToolWithPartModel] = []
+    try:
+        for tid in tool_ids:
+            db_tool = ToolWithPartModel(
+                tool_id=tid,
+                part_id=payload.part_id,
+                operation_id=payload.operation_id,
+                user_id=payload.user_id,
+            )
+            db.add(db_tool)
+            created.append(db_tool)
+
+        db.commit()
+        for r in created:
+            db.refresh(r)
+        return created
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to link tools: {str(e)}")
+
+
+@router.post("/bulk-links", response_model=List[ToolWithPart], status_code=status.HTTP_201_CREATED)
+def create_tools_with_part_bulk_links(payload: List[BulkToolLinkItem], db: Session = Depends(get_db)):
+    """Create many tool-part associations across multiple operations in one request."""
+    if not payload:
+        return []
+
+    created: List[ToolWithPartModel] = []
+    try:
+        for item in payload:
+            db_tool = ToolWithPartModel(
+                tool_id=item.tool_id,
+                part_id=item.part_id,
+                operation_id=item.operation_id,
+                user_id=item.user_id,
+            )
+            db.add(db_tool)
+            created.append(db_tool)
+
+        db.commit()
+        for r in created:
+            db.refresh(r)
+        return created
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to link tools: {str(e)}")
 
 
 @router.get("/", response_model=List[ToolWithPart])

@@ -2,13 +2,25 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, text
 
 from DB.database import get_db
-from DB.models.oms import Part as PartModel, PartType, Order, OrderPartPriority
+from DB.models.oms import (
+    Part as PartModel, 
+    PartType, 
+    Order, 
+    OrderPartPriority,
+    Operation as OperationModel,
+    Document as DocumentModel,
+    ToolWithPart as ToolWithPartModel,
+    OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
+    OperationDocument as OperationDocumentModel,
+    OutSourcePartStatus as OutSourcePartStatusModel,
+)
+from DB.models.configuration import PokayokeCompletedLog
 from DB.models.inventory import RawMaterial
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
-from sqlalchemy import func
 
 router = APIRouter(
     prefix="/parts",
@@ -31,6 +43,7 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, user_map: dict)
         "part_number": part.part_number,
         "type_id": part.type_id,
         "raw_material_id": part.raw_material_id,
+        "part_detail": part.part_detail,
         "assembly_id": part.assembly_id,
         "product_id": part.product_id,
         "user_id": part.user_id,
@@ -155,7 +168,7 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
 
 @router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_part(part_id: int, db: Session = Depends(get_db)):
-    """Delete a part"""
+    """Delete a part and all its related data (priorities, pokayoke logs, operations, documents, etc.)."""
     db_part = db.query(PartModel).filter(PartModel.id == part_id).first()
     if not db_part:
         raise HTTPException(
@@ -164,18 +177,85 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
         )
 
     try:
+        # 1. Delete pokayoke logs for this part
+        result = db.execute(
+            text(
+                "SELECT id FROM configuration.pokayoke_completed_logs "
+                "WHERE part_id = :pid"
+            ),
+            {"pid": part_id},
+        )
+        log_ids = [row[0] for row in result]
+        for log_id in log_ids:
+            log_obj = (
+                db.query(PokayokeCompletedLog)
+                .filter(PokayokeCompletedLog.id == log_id)
+                .first()
+            )
+            if log_obj:
+                db.delete(log_obj)
+        db.flush()
+
+        # Delete from scheduling.part_schedule_status to avoid FK violation
+        db.execute(
+            text("DELETE FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": part_id}
+        )
+
+        # 2. Delete order part priorities
+        db.query(OrderPartPriority).filter(OrderPartPriority.part_id == part_id).delete(
+            synchronize_session=False
+        )
+
+        # 3. Delete operations and their documents/tools
+        operations = db.query(OperationModel).filter(OperationModel.part_id == part_id).all()
+        operation_ids = [op.id for op in operations]
+        if operation_ids:
+            # Delete from scheduling.planned_schedule_items to avoid FK violation
+            db.execute(
+                text("DELETE FROM scheduling.planned_schedule_items WHERE operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
+            db.query(OperationDocumentModel).filter(
+                OperationDocumentModel.operation_id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+            
+            db.query(ToolWithPartModel).filter(
+                ToolWithPartModel.operation_id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+            
+            db.query(OperationModel).filter(OperationModel.id.in_(operation_ids)).delete(
+                synchronize_session=False
+            )
+
+        # 4. Delete part documents
+        db.query(DocumentModel).filter(DocumentModel.part_id == part_id).delete(
+            synchronize_session=False
+        )
+
+        # 5. Delete out source part status records
+        db.query(OutSourcePartStatusModel).filter(
+            OutSourcePartStatusModel.part_id == part_id
+        ).delete(synchronize_session=False)
+
+        # 6. Delete raw material links
+        db.query(OrderPartsRawMaterialLinkedModel).filter(
+            OrderPartsRawMaterialLinkedModel.part_id == part_id
+        ).delete(synchronize_session=False)
+
+        # 7. Delete tools with part (that are not associated with operations)
+        db.query(ToolWithPartModel).filter(ToolWithPartModel.part_id == part_id).delete(
+            synchronize_session=False
+        )
+
+        # Finally, delete the part itself
         db.delete(db_part)
         db.commit()
-    except IntegrityError as exc:
+    except Exception as e:
         db.rollback()
-        # Provide a clear, user‑friendly message instead of a raw 500.
-        # This commonly happens because of foreign key references from order_part_priorities.
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f'Cannot delete part "{db_part.part_name}" (number: {db_part.part_number}). '
-                "It is still referenced in other tables (for example order_part_priorities / planning data). "
-                "Remove or update those references first, then try deleting the part again."
-            ),
-        ) from exc
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting part: {str(e)}"
+        )
     return None

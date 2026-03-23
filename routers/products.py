@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from typing import List
 
 from DB.database import get_db
@@ -16,6 +16,8 @@ from DB.models.oms import (
     OperationDocument as OperationDocumentModel,
     OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
     DocumentExtractedData as DocumentExtractedDataModel,
+    OrderPartPriority as OrderPartPriorityModel,
+    OutSourcePartStatus as OutSourcePartStatusModel,
 )
 from DB.models.configuration import (
     WorkCenter as WorkCenterModel,
@@ -60,13 +62,6 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
             detail="Only admin or project coordinator can create products. Manufacturing coordinator cannot.",
         )
 
-    db_product = db.query(ProductModel).filter(ProductModel.product_number == product.product_number).first()
-    if db_product:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Product with number {product.product_number} already exists"
-        )
-
     db_product = ProductModel(**product.model_dump())
     db.add(db_product)
     db.commit()
@@ -75,7 +70,6 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
     return {
         "id": db_product.id,
         "product_name": db_product.product_name,
-        "product_number": db_product.product_number,
         "product_version": db_product.product_version,
         "user_id": db_product.user_id,
         "user_name": user.user_name if user else None,
@@ -86,16 +80,64 @@ def create_product(product: ProductCreate, db: Session = Depends(get_db)):
 
 @router.get("/", response_model=List[Product])
 def get_products(user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all products"""
-    query = db.query(ProductModel).options(joinedload(ProductModel.user)).order_by(ProductModel.id.asc())
-    if user_id is not None:
-        query = query.filter(ProductModel.user_id == user_id)
-    products = query.all()
+    """
+    Get products, with role-aware visibility when user_id is provided.
+
+    Rules:
+    - When user_id is omitted: return all products.
+    - When user_id is provided:
+      * If user is admin:
+          - Products they created (Product.user_id == admin.id), AND
+          - Products linked to orders where Order.admin_id == admin.id.
+      * If user is project_coordinator:
+          - Products they created, AND
+          - Products linked to orders where Order.project_coordinator_id == PC.id.
+      * If user is manufacturing_coordinator:
+          - Products linked to orders where Order.manufacturing_coordinator_id == MC.id.
+      * Any other role: currently no extra filtering rules; returns products they created only.
+    """
+    base_query = db.query(ProductModel).options(joinedload(ProductModel.user)).order_by(ProductModel.id.asc())
+
+    if user_id is None:
+        products = base_query.all()
+    else:
+        user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()
+        role = (user.role or "").strip().lower() if user and user.role else ""
+
+        product_ids_from_orders: list[int] = []
+
+        if role in {"admin", "project_coordinator", "manufacturing_coordinator"}:
+            order_query = db.query(OrderModel.product_id).filter(
+                OrderModel.product_id.isnot(None)
+            )
+            if role == "admin":
+                order_query = order_query.filter(OrderModel.admin_id == user_id)
+            elif role == "project_coordinator":
+                order_query = order_query.filter(OrderModel.project_coordinator_id == user_id)
+            elif role == "manufacturing_coordinator":
+                order_query = order_query.filter(OrderModel.manufacturing_coordinator_id == user_id)
+
+            product_ids_from_orders = [row[0] for row in order_query.distinct().all()]
+
+        # Build filters based on role
+        if role == "admin" or role == "project_coordinator":
+            conditions = [ProductModel.user_id == user_id]
+            if product_ids_from_orders:
+                conditions.append(ProductModel.id.in_(product_ids_from_orders))
+            products = base_query.filter(or_(*conditions)).all()
+        elif role == "manufacturing_coordinator":
+            if product_ids_from_orders:
+                products = base_query.filter(ProductModel.id.in_(product_ids_from_orders)).all()
+            else:
+                products = []
+        else:
+            # Fallback: only products explicitly created by this user
+            products = base_query.filter(ProductModel.user_id == user_id).all()
+
     return [
         {
             "id": p.id,
             "product_name": p.product_name,
-            "product_number": p.product_number,
             "product_version": p.product_version,
             "user_id": p.user_id,
             "user_name": (p.user.user_name if getattr(p, "user", None) else None),
@@ -123,7 +165,6 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
     return {
         "id": product.id,
         "product_name": product.product_name,
-        "product_number": product.product_number,
         "product_version": product.product_version,
         "user_id": product.user_id,
         "user_name": (product.user.user_name if getattr(product, "user", None) else None),
@@ -152,7 +193,6 @@ def update_product(product_id: int, product: ProductUpdate, db: Session = Depend
     return {
         "id": db_product.id,
         "product_name": db_product.product_name,
-        "product_number": db_product.product_number,
         "product_version": db_product.product_version,
         "user_id": db_product.user_id,
         "user_name": user.user_name if user else None,
@@ -199,6 +239,12 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
 
         db.flush()
 
+        # Delete from scheduling.part_schedule_status to avoid FK violation
+        db.execute(
+            text("DELETE FROM scheduling.part_schedule_status WHERE part_id IN :pids"),
+            {"pids": tuple(part_ids)}
+        )
+
         # Get all operations for these parts
         operations = db.query(OperationModel).filter(
             OperationModel.part_id.in_(part_ids)
@@ -227,6 +273,12 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
         
         # Delete tools associated with these operations (must be before deleting operations)
         if operation_ids:
+            # Delete from scheduling.planned_schedule_items to avoid FK violation
+            db.execute(
+                text("DELETE FROM scheduling.planned_schedule_items WHERE operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
             db.query(ToolWithPartModel).filter(
                 ToolWithPartModel.operation_id.in_(operation_ids)
             ).delete(synchronize_session=False)
@@ -264,6 +316,16 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
         db.query(ToolWithPartModel).filter(ToolWithPartModel.part_id.in_(part_ids)).delete(
             synchronize_session=False
         )
+
+        # Delete part priorities
+        db.query(OrderPartPriorityModel).filter(
+            OrderPartPriorityModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # Delete out source part status records
+        db.query(OutSourcePartStatusModel).filter(
+            OutSourcePartStatusModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
 
         # Delete raw material links
         db.query(OrderPartsRawMaterialLinkedModel).filter(
@@ -399,13 +461,21 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     all_machines = db.query(MachineModel).all()
     machine_map = {m.id: m.make for m in all_machines}
 
-    # Get all raw materials for mapping
+    # Get all raw materials for mapping (name + status from raw_materials table only)
     all_raw_materials = db.query(RawMaterialModel).all()
     raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
+    raw_material_status_map = {}
+    for rm in all_raw_materials:
+        s = (rm.status or "").strip().upper()
+        raw_material_status_map[rm.id] = "Available" if s == "AVAILABLE" else "Not Available"
 
     # Get all part types for mapping (avoids N+1 per part in create_part_details)
     all_part_types = db.query(PartTypeModel).all()
     part_type_map = {pt.id: pt.type_name for pt in all_part_types}
+
+    # User map for part.user_id -> user_name (hierarchy part payload)
+    all_users = db.query(AccessUserModel).all()
+    user_map = {u.id: u.user_name for u in all_users}
     
     # Create mappings for easy lookup
     assembly_map = {asm.id: asm for asm in all_assemblies}
@@ -497,10 +567,12 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
                 "workcenter_id": op.workcenter_id,
                 "machine_id": op.machine_id,
                 "part_id": op.part_id,
+                "user_id": op.user_id,
                 "work_instructions": op.work_instructions,
                 "notes": op.notes,
                 "work_center_name": work_center_map.get(op.workcenter_id),
                 "machine_name": machine_map.get(op.machine_id),
+                "user_name": user_map.get(op.user_id) if op.user_id else None,
                 "operation_documents": operation_documents_by_operation.get(op.id, []),
                 "tools": tools_by_operation.get(op.id, []),
                 "created_at": op.created_at,
@@ -508,6 +580,12 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             }
             part_operations.append(OperationSchema(**op_dict))
         
+        # Raw material status from raw_materials table only (not order-parts-raw-material-linked)
+        if part.raw_material_id is None:
+            raw_material_status = "N/A"
+        else:
+            raw_material_status = raw_material_status_map.get(part.raw_material_id, "Not Available")
+
         # Create a new Part model with the type_name included (uses pre-fetched map)
         part_dict = {
             'id': part.id,
@@ -515,10 +593,14 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'part_number': part.part_number,
             'type_id': part.type_id,
             'raw_material_id': part.raw_material_id,
+            'part_detail': part.part_detail,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
+            'user_id': part.user_id,
             'type_name': part_type_map.get(part.type_id),
             'raw_material_name': raw_material_map.get(part.raw_material_id),
+            'raw_material_status': raw_material_status,
+            'user_name': user_map.get(part.user_id) if part.user_id else None,
             'created_at': part.created_at,
             'updated_at': part.updated_at,
         }
@@ -579,8 +661,17 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
         if part.assembly_id is None
     ]
     
+    product_response = Product(
+        id=product.id,
+        product_name=product.product_name,
+        product_version=product.product_version,
+        user_id=product.user_id,
+        user_name=user_map.get(product.user_id) if product.user_id else None,
+        created_at=product.created_at,
+        updated_at=product.updated_at,
+    )
     return ProductHierarchicalData(
-        product=product,
+        product=product_response,
         assemblies=root_assemblies,
         direct_parts=direct_parts
     )

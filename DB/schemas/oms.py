@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 # =======================
 class ProductBase(BaseModel):
     product_name: str
-    product_number: str
     product_version: str
     user_id: int
 
@@ -24,7 +23,6 @@ class ProductCreate(ProductBase):
 
 class ProductUpdate(BaseModel):
     product_name: Optional[str] = None
-    product_number: Optional[str] = None
     product_version: Optional[str] = None
     user_id: Optional[int] = None
 
@@ -106,6 +104,7 @@ class PartBase(BaseModel):
     part_number: str
     type_id: int
     raw_material_id: Optional[int] = None
+    part_detail: Optional[str] = None  # For out-source: WITH_RAW_MATERIAL | WITHOUT_RAW_MATERIAL
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
@@ -120,6 +119,7 @@ class PartUpdate(BaseModel):
     part_number: Optional[str] = None
     type_id: Optional[int] = None
     raw_material_id: Optional[int] = None
+    part_detail: Optional[str] = None
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
@@ -129,6 +129,7 @@ class Part(PartBase):
     id: int
     type_name: Optional[str] = None
     raw_material_name: Optional[str] = None
+    raw_material_status: Optional[str] = None  # From raw_materials.status: Available / Not Available / N/A
     priority: Optional[int] = None
     user_name: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -585,7 +586,6 @@ class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
     mass: Optional[float] = None
     sale_order_number: Optional[str] = None
     product_name: Optional[str] = None
-    product_number: Optional[str] = None
     material_status: Optional[str] = None
     linkage_group_id: Optional[str] = None
     updated_at: Optional[datetime] = None
@@ -632,7 +632,6 @@ class OrderPartPriority(OrderPartPriorityBase):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
-    product_number: Optional[str] = None
     part_type_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -646,7 +645,6 @@ class OrderWisePriority(BaseModel):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
-    product_number: Optional[str] = None
     min_priority: int
     max_priority: int
     part_count: int

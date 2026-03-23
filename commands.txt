@@ -1,3 +1,6 @@
 uvicorn main:app --reload --host 172.18.7.91 --port 8000
 
+
+docker build -t vinny520/cmf-3dviewer:v1 .
+
 docker run -p 3000:3000 vinny520/cmf-3dviewer:v1

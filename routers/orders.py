@@ -390,9 +390,17 @@ def update_order_part_priorities(order_id: int, priorities: List[OrderPartPriori
 @router.get("/part-priorities/all", response_model=List[OrderPartPrioritySchema])
 def get_all_part_priorities(
     admin_id: Optional[int] = Query(None, description="Filter part priorities by admin who owns the order"),
+    manufacturing_coordinator_id: Optional[int] = Query(
+        None, description="Filter part priorities by manufacturing coordinator who owns the order"
+    ),
     db: Session = Depends(get_db),
 ):
-    """Get all part priorities globally with details (optionally filtered by admin_id)."""
+    """Get all part priorities globally with details.
+
+    - If admin_id is provided, filter by Order.admin_id.
+    - If manufacturing_coordinator_id is provided, filter by Order.manufacturing_coordinator_id.
+    - If both are omitted, return priorities for all orders.
+    """
     query = (
         db.query(OrderPartPriority)
         .join(Part, OrderPartPriority.part_id == Part.id)
@@ -402,6 +410,8 @@ def get_all_part_priorities(
     )
     if admin_id is not None:
         query = query.filter(Order.admin_id == admin_id)
+    if manufacturing_coordinator_id is not None:
+        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
 
     priorities = query.order_by(OrderPartPriority.priority.asc()).all()
 
@@ -418,7 +428,6 @@ def get_all_part_priorities(
             "sale_order_number": p.order.sale_order_number if p.order else None,
             "project_name": None,
             "product_name": p.product.product_name if p.product else None,
-            "product_number": p.product.product_number if p.product else None,
             "part_type_name": p.part.type.type_name if p.part and p.part.type else None,
             "created_at": p.created_at,
             "updated_at": p.updated_at,
@@ -494,6 +503,9 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
 @router.get("/part-priorities/order-wise", response_model=List[OrderWisePriority])
 def get_order_wise_priorities(
     admin_id: Optional[int] = Query(None, description="Filter by admin_id owning the order"),
+    manufacturing_coordinator_id: Optional[int] = Query(
+        None, description="Filter by manufacturing_coordinator_id owning the order"
+    ),
     db: Session = Depends(get_db),
 ):
     groups_query = (
@@ -510,6 +522,8 @@ def get_order_wise_priorities(
     )
     if admin_id is not None:
         groups_query = groups_query.filter(Order.admin_id == admin_id)
+    if manufacturing_coordinator_id is not None:
+        groups_query = groups_query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
 
     groups_subquery = groups_query.group_by(OrderPartPriority.order_id).subquery()
 
@@ -519,7 +533,6 @@ def get_order_wise_priorities(
             Order.sale_order_number,
             literal(None).label("project_name"),
             Product.product_name,
-            Product.product_number,
             groups_subquery.c.min_priority,
             groups_subquery.c.max_priority,
             groups_subquery.c.part_count,
@@ -538,7 +551,6 @@ def get_order_wise_priorities(
                 "sale_order_number": row.sale_order_number,
                 "project_name": row.project_name,
                 "product_name": row.product_name,
-                "product_number": row.product_number,
                 "min_priority": row.min_priority,
                 "max_priority": row.max_priority,
                 "part_count": row.part_count,
@@ -550,19 +562,23 @@ def get_order_wise_priorities(
 class OrderWisePriorityUpdate(BaseModel):
     order_ids: List[int]
     admin_id: Optional[int] = None
+    manufacturing_coordinator_id: Optional[int] = None
 
 
 @router.put("/part-priorities/order-wise/reorder")
 def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session = Depends(get_db)):
     order_ids = update.order_ids
     admin_id = update.admin_id
+    manufacturing_coordinator_id = update.manufacturing_coordinator_id
     if not order_ids:
         return {"message": "No changes"}
 
-    # Limit existing IDs to those belonging to this admin, if provided
+    # Limit existing IDs to those belonging to this admin / manufacturing coordinator, if provided
     existing_query = db.query(OrderPartPriority.order_id).join(Order, OrderPartPriority.order_id == Order.id)
     if admin_id is not None:
         existing_query = existing_query.filter(Order.admin_id == admin_id)
+    if manufacturing_coordinator_id is not None:
+        existing_query = existing_query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
     existing_ids = {row[0] for row in existing_query.distinct().all()}
 
     if set(order_ids) != existing_ids:
@@ -706,8 +722,14 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     
     product_id = order.product_id
     sale_order_number = order.sale_order_number
-    minio_client = get_minio_client()
     other_orders_count = 0
+
+    # Try to get MinIO client; if not initialized, skip MinIO deletion but still clean DB.
+    try:
+        minio_client = get_minio_client()
+    except RuntimeError as e:
+        print(f"Warning: {e}. Skipping MinIO file deletions for order {order_id}.")
+        minio_client = None
 
     # Main deletion transaction: remove all related data and the order itself.
     # This block should either fully succeed or fully roll back.
@@ -741,11 +763,13 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
         # Delete order documents and their MinIO files
         order_docs = db.query(OrderDocument).filter(OrderDocument.order_id == order_id).all()
         for order_doc in order_docs:
-            try:
-                object_name = order_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
-                minio_client.delete_file(object_name)
-            except Exception as e:
-                print(f"Error deleting order document from MinIO: {e}")
+            # Best-effort MinIO delete when client is available
+            if minio_client:
+                try:
+                    object_name = order_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
+                    minio_client.delete_file(object_name)
+                except Exception as e:
+                    print(f"Error deleting order document from MinIO: {e}")
             db.delete(order_doc)
 
         # Delete order part priorities
@@ -841,9 +865,8 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
         db.delete(order)
         db.flush()
 
-        # If no other orders exist for this product, delete the product and all related data
-        if other_orders_count == 0:
-            delete_product_cascade(db, product_id)
+        # Always delete the product and all related data when an order is deleted (Scenario 3)
+        delete_product_cascade(db, product_id)
 
         db.commit()
 
@@ -872,7 +895,7 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
 
     return {
         "message": "Order deleted successfully",
-        "product_also_deleted": other_orders_count == 0,
+        "product_also_deleted": True,
     }
 
 # @router.get("/sale-order/{sale_order_number}/parts", response_model=List[PartResponse])

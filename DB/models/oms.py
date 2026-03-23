@@ -24,7 +24,6 @@ class Product(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     product_name = Column(String, nullable=False)
-    product_number = Column(String, unique=True, nullable=False)
     product_version = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -97,6 +96,7 @@ class Part(Base):
 
     type_id = Column(Integer, ForeignKey("oms.part_types.id"))
     raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"))
+    part_detail = Column(String, nullable=True)  # For out-source: WITH_RAW_MATERIAL | WITHOUT_RAW_MATERIAL
     assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
     product_id = Column(Integer, ForeignKey("oms.products.id"))
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
@@ -151,6 +151,7 @@ class Operation(Base):
     machine = relationship("DB.models.configuration.Machine")
     user = relationship("AccessUser")
     operation_documents = relationship("OperationDocument", back_populates="operation", cascade="all, delete-orphan")
+    tools = relationship("ToolWithPart", back_populates="operation", cascade="all, delete-orphan")
 
     @property
     def user_name(self):
@@ -202,7 +203,7 @@ class ToolWithPart(Base):
 
     part = relationship("Part", back_populates="tools")
     tool = relationship("DB.models.inventory.ToolsList")
-    operation = relationship("Operation")
+    operation = relationship("Operation", back_populates="tools")
     user = relationship("AccessUser")
 
 
