@@ -91,7 +91,7 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
       onCancel={onClose}
       width={800}
       footer={null}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form
         form={form}

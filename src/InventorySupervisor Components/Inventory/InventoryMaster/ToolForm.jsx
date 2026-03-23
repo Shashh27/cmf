@@ -12,6 +12,8 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
   useEffect(() => {
     if (visible) {
       if (editingTool) {
+        // If it's a new tool but we have context (item_description, category, sub_category)
+        // or if it's an existing tool being edited.
         form.setFieldsValue(editingTool);
       } else {
         form.resetFields();
@@ -24,16 +26,17 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
       const values = await form.validateFields();
       setLoading(true);
       
-      // When creating a new tool, set total_quantity = quantity
-      // When editing, if total_quantity is not provided, keep it as is
+      // Include category and sub_category in submission data
       const submissionData = {
         ...values,
-        total_quantity: editingTool ? 
+        category: editingTool?.category || values.category,
+        sub_category: editingTool?.sub_category || values.sub_category,
+        total_quantity: editingTool?.id ? 
           (values.total_quantity !== undefined ? values.total_quantity : editingTool.total_quantity) : 
-          values.quantity
+          values.total_quantity || values.quantity
       };
       
-      if (editingTool) {
+      if (editingTool?.id) {
         // Update existing tool
         const response = await fetch(`${API_BASE_URL}/tools-list/${editingTool.id}`, {
           method: 'PUT',
@@ -83,7 +86,7 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
 
   return (
     <Modal
-      title={editingTool ? 'Edit Tool' : 'Create New Tool'}
+      title={editingTool?.id ? 'Edit Tool' : 'Create New Tool'}
       open={visible}
       onCancel={onCancel}
       footer={[
@@ -91,17 +94,21 @@ const ToolForm = ({ visible, onCancel, onSubmit, editingTool }) => {
           Cancel
         </Button>,
         <Button key="submit" type="primary" loading={loading} onClick={handleSubmit}>
-          {editingTool ? 'Update' : 'Create'}
+          {editingTool?.id ? 'Update' : 'Create'}
         </Button>,
       ]}
       width={800}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form
         form={form}
         layout="vertical"
         name="toolForm"
       >
+        {/* Hidden fields for category and sub_category */}
+        <Form.Item name="category" hidden><Input /></Form.Item>
+        <Form.Item name="sub_category" hidden><Input /></Form.Item>
+
         <Row gutter={16}>
           <Col span={12}>
             <Form.Item

@@ -16,12 +16,13 @@ const AppLayout = ({ children }) => {
   }
 
   return (
-    <Layout hasSider style={{ minHeight: '100vh' }}>
+    <Layout hasSider style={{ height: '100vh', overflow: 'hidden' }}>
       <Sidebar collapsed={collapsed} onCollapse={setCollapsed} />
       <Layout 
         style={{ 
           marginLeft: collapsed ? 80 : 224,
-          minHeight: '100vh',
+          height: '100vh',
+          overflow: 'hidden',
           transition: 'all 0.2s'
         }}
         className="responsive-layout"
@@ -37,7 +38,7 @@ const AppLayout = ({ children }) => {
         <Content 
           style={{ 
             margin: 'clamp(60px, 15vw, 80px) clamp(12px, 3vw, 24px) clamp(12px, 3vw, 24px)', 
-            overflowY: 'auto', 
+            overflow: 'hidden', 
             backgroundColor: 'transparent', 
             padding: 0 
           }}

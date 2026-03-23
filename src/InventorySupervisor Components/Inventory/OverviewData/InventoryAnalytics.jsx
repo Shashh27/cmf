@@ -220,7 +220,7 @@ const InventoryAnalytics = () => {
                 transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                 borderRadius: '16px'
               }}
-              bodyStyle={{ padding: '24px', paddingBottom: '20px' }}
+              styles={{ body: { padding: '24px', paddingBottom: '20px' } }}
               onClick={() => setSelectedCard(selectedCard === card.id ? null : card.id)}
             >
               {/* Card Content */}
@@ -295,10 +295,10 @@ const InventoryAnalytics = () => {
               borderRadius: '12px',
               border: '1px solid #e5e7eb'
             }}
-            headStyle={{ 
+            styles={{ header: { 
               borderBottom: '2px solid #f3f4f6',
               background: 'linear-gradient(to right, #f9fafb, #ffffff)'
-            }}
+            } }}
           >
             {analyticsData.monthlyData.length > 0 ? (
               <div style={{ height: '300px' }}>
@@ -351,10 +351,10 @@ const InventoryAnalytics = () => {
               borderRadius: '12px',
               border: '1px solid #e5e7eb'
             }}
-            headStyle={{ 
+            styles={{ header: { 
               borderBottom: '2px solid #f3f4f6',
               background: 'linear-gradient(to right, #f9fafb, #ffffff)'
-            }}
+            } }}
           >
             {returnStatusData.length > 0 ? (
               <div style={{ height: '300px' }}>

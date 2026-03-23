@@ -6,6 +6,12 @@
   background: #f1f5f9; /* light slate, similar to screenshot */
 }
 
+/* Prevent scrollbars on body and html */
+html, body {
+  overflow: hidden !important;
+  height: 100vh !important;
+}
+
 .ant-btn-link.report-issue-link {
   display: inline-flex !important;
   align-items: center;

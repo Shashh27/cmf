@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { Tabs, message, Card, Typography } from 'antd';
 import { DatabaseOutlined } from '@ant-design/icons';
-import { ToolsList, InstrumentsList, ToolForm } from '../InventorySupervisor Components/Inventory/InventoryMaster';
+import { ToolsList, ToolForm } from '../InventorySupervisor Components/Inventory/InventoryMaster';
 import { API_BASE_URL } from '../Config/auth.js';
 
-const { TabPane } = Tabs;
 const { Title, Text } = Typography;
 
 const Inventory = () => {
@@ -17,6 +16,8 @@ const Inventory = () => {
   };
 
   const handleEditTool = (tool) => {
+    // Merge the tool data with any existing context if needed, 
+    // though the tool record already contains its category/sub_category.
     setEditingTool(tool);
     setToolFormVisible(true);
   };
@@ -40,8 +41,16 @@ const Inventory = () => {
     }
   };
 
-  const handleCreateTool = () => {
-    setEditingTool(null);
+  const handleCreateTool = (context) => {
+    if (context) {
+      setEditingTool({
+        item_description: context.item_description || '',
+        category: context.category || '',
+        sub_category: context.sub_category || '',
+      });
+    } else {
+      setEditingTool(null);
+    }
     setToolFormVisible(true);
   };
 
@@ -49,7 +58,6 @@ const Inventory = () => {
     setToolFormVisible(false);
     setEditingTool(null);
     refreshToolsList();
-    message.success('Tool operation completed successfully');
   };
 
   const handleToolFormCancel = () => {
@@ -57,61 +65,16 @@ const Inventory = () => {
     setEditingTool(null);
   };
 
-  const handleEditInstrument = (instrument) => {
-    message.info(`Edit instrument: ${instrument.instrument_name || 'Unknown'}`);
-    // TODO: Implement edit functionality
-  };
-
-  const handleDeleteInstrument = (instrument) => {
-    message.info(`Delete instrument: ${instrument.instrument_name || 'Unknown'}`);
-    // TODO: Implement delete functionality
-  };
-
-  const handleCreateInstrument = () => {
-    message.info('Create new instrument');
-    // TODO: Implement create new instrument functionality
-  };
-
   return (
-    <div style={{ padding: '10px' }}>
-      <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-        <style>{`
-          .ant-tabs-nav { 
-            margin: 0 0 10px 0 !important; 
-          }
-          .ant-tabs-tab {
-            padding: 6px 10px !important;
-            margin: 0 !important;
-          }
-          .ant-tabs-ink-bar {
-            height: 2px !important;
-          }
-        `}</style>
-        <Tabs 
-          defaultActiveKey="tools" 
-          destroyInactiveTabPane={false}
-          tabBarStyle={{ margin: 0 }}
-          style={{ marginTop: 0 }}
-        >
-          <TabPane tab="Tools" key="tools">
-            <ToolsList
-              key={toolsListRefresh}
-              onEdit={handleEditTool}
-              onDelete={handleDeleteTool}
-              onCreateNew={handleCreateTool}
-            />
-          </TabPane>
-          
-          <TabPane tab="Instruments" key="instruments">
-            <InstrumentsList
-              onEdit={handleEditInstrument}
-              onDelete={handleDeleteInstrument}
-              onCreateNew={handleCreateInstrument}
-            />
-          </TabPane>
-        </Tabs>
+    <div style={{ padding: '10px', height: 'calc(100vh - 40px)', overflow: 'hidden' }}>
+      <div style={{ background: '#fff', padding: '12px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', height: '100%', overflow: 'hidden' }}>
+        <ToolsList
+          key={toolsListRefresh}
+          onEdit={handleEditTool}
+          onDelete={handleDeleteTool}
+          onCreateNew={handleCreateTool}
+        />
       </div>
-
       <ToolForm
         visible={toolFormVisible}
         onCancel={handleToolFormCancel}

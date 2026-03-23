@@ -23,6 +23,16 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingDocument, setEditingDocument] = useState(null);
   const [newDocumentName, setNewDocumentName] = useState('');
+  const getUserId = () => {
+    try {
+      const s = localStorage.getItem('user');
+      if (!s) return null;
+      const u = JSON.parse(s);
+      return u && (u.id || u.user_id || u.userId) ? (u.id || u.user_id || u.userId) : null;
+    } catch {
+      return null;
+    }
+  };
   
   // Helper function to notify parent of document changes
   const notifyDocumentsChange = () => {
@@ -443,30 +453,35 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     }
 
     try {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
       let url = '';
       let body = {};
 
       if (editingDocument.doc_source_type === 'general-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${editingDocument.id}`;
-        body = { file_name: newDocumentName.trim() };
+        body = { file_name: newDocumentName.trim(), user_id: userId };
       } else if (editingDocument.doc_source_type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/${editingDocument.id}`;
-        body = { document_name: newDocumentName.trim() };
+        body = { document_name: newDocumentName.trim(), user_id: userId };
       } else if (editingDocument.doc_source_type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'machine-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${editingDocument.id}`;
-        body = { document_name: newDocumentName.trim() };
+        body = { document_name: newDocumentName.trim(), user_id: userId };
       } else if (editingDocument.doc_source_type === 'machine') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${editingDocument.id}`;
-        body = { document_name: newDocumentName.trim() };
+        body = { document_name: newDocumentName.trim(), user_id: userId };
       } else if (editingDocument.doc_source_type === 'common-folder' || editingDocument.doc_source_type === 'common-root') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/documents/${editingDocument.id}`;
-        body = { document_name: newDocumentName.trim() };
+        body = { document_name: newDocumentName.trim(), user_id: userId };
       } else if (editingDocument.doc_source_type === 'folder') {
         url = `${config.API_BASE_URL}/order-documents/${editingDocument.id}`;
-        body = { document_name: newDocumentName.trim() };
+        body = { document_name: newDocumentName.trim(), user_id: userId };
       }
 
       const response = await fetch(url, {
@@ -582,6 +597,11 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     formData.append('file', file, file.name);
 
     try {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
       setVersionUploading(true);
       let url = '';
       
@@ -591,20 +611,24 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         // Use the actual uploaded file name instead of parent document name
         formData.append('file_name', file.name);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
         formData.append('folder_id', (uploadingDocument.machine_folder_id || selectedNode.folderId).toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'machine') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'common-folder' || uploadingDocument.doc_source_type === 'common-root') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
         if (uploadingDocument.folder_id !== null && uploadingDocument.folder_id !== undefined) {
           formData.append('folder_id', uploadingDocument.folder_id.toString());
         }
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       } else if (uploadingDocument.doc_source_type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/`;
         formData.append('document_name', file.name); // Use the name of the new file
@@ -679,6 +703,11 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     formData.append('file', file, file.name);
 
     try {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
       setAddUploading(true);
       let url = '';
       
@@ -686,9 +715,11 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('file_name', file.name);
+        formData.append('user_id', userId.toString());
       } else if (selectedNode.type === 'common-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
+        formData.append('user_id', userId.toString());
         console.log('Uploading common document:', {
           url,
           folderId: selectedNode.folderId,
@@ -697,6 +728,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         });
       } else if (selectedNode.type === 'common-root') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
+        formData.append('user_id', userId.toString());
         console.log('Uploading common document to root:', {
           url,
           folderId: null,
@@ -706,6 +738,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       } else if (selectedNode.type === 'machine-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
+        formData.append('user_id', userId.toString());
         // For machine documents, parent_id is optional - if not provided, creates a new document (version 1.0)
         // We don't append parent_id here so it creates a new document instead of a version
         console.log('Uploading machine document:', {
@@ -717,6 +750,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       } else if (selectedNode.type === 'machine') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
+        formData.append('user_id', userId.toString());
         // For direct machine uploads, folder_id is null and machine_id is provided
         console.log('Uploading machine document directly to machine:', {
           url,
