@@ -1,16 +1,28 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Modal, Form, Input, Button, Typography, message } from "antd";
 
 const { Title } = Typography;
 
-const CustomerModal = ({ isOpen, onClose, onCustomerCreated, editingCustomer }) => {
+const CustomerModal = ({ isOpen, onClose, userId, onCustomerCreated, editingCustomer }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (editingCustomer) {
-      form.setFieldsValue(editingCustomer);
+      // Clean up contact_number for the form input
+      const formData = { ...editingCustomer };
+      if (formData.contact_number) {
+        let phone = formData.contact_number;
+        // If it starts with +91, remove it
+        if (phone.startsWith("+91")) {
+          phone = phone.slice(3);
+        }
+        // Remove any non-numeric characters and limit to 10 digits
+        formData.contact_number = phone.replace(/\D/g, "").slice(0, 10);
+      }
+      form.setFieldsValue(formData);
     }
   }, [editingCustomer, form]);
 
@@ -18,31 +30,38 @@ const CustomerModal = ({ isOpen, onClose, onCustomerCreated, editingCustomer }) 
     setLoading(true);
 
     try {
+      // Prepend +91 to the contact number before sending to backend
+      const payload = {
+        ...values,
+        contact_number: values.contact_number ? `+91${values.contact_number}` : values.contact_number
+      };
+
       const url = editingCustomer 
         ? `${API_BASE_URL}/customers/${editingCustomer.id}/`
         : `${API_BASE_URL}/customers/`;
       
-      const method = editingCustomer ? 'PUT' : 'POST';
+      const method = editingCustomer ? 'put' : 'post';
       
-      const response = await fetch(url, {
+      const response = await axios({
+        url,
         method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(values),
+        data: { ...payload, user_id: userId },
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        onCustomerCreated(result);
-        handleClose();
-        message.success(`Customer ${editingCustomer ? 'updated' : 'created'} successfully`);
-      } else {
-        message.error("Failed to save customer");
-      }
+      const result = response.data;
+      onCustomerCreated(result);
+      handleClose();
     } catch (error) {
       console.error("Error saving customer:", error);
-      message.error("Error saving customer");
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Failed to save customer";
+      message.error(detail);
     } finally {
       setLoading(false);
     }
@@ -117,9 +136,21 @@ const CustomerModal = ({ isOpen, onClose, onCustomerCreated, editingCustomer }) 
         <Form.Item
           name="contact_number"
           label="Contact Number"
-          rules={[{ required: true, message: 'Please enter contact number' }]}
+          rules={[
+            { required: true, message: 'Please enter contact number' },
+            { pattern: /^\d{10}$/, message: 'Please enter a valid 10-digit contact number' }
+          ]}
+          normalize={(value) => {
+            // Remove non-numeric characters and limit to 10 digits
+            return value.replace(/\D/g, '').slice(0, 10);
+          }}
         >
-          <Input placeholder="+1 (555) 123-4567" size="large" />
+          <Input 
+            addonBefore="+91" 
+            placeholder="Enter 10-digit number" 
+            size="large" 
+            maxLength={10}
+          />
         </Form.Item>
         
         <Form.Item

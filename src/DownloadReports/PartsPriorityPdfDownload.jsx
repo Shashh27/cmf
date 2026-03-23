@@ -57,8 +57,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e5e7eb",
     borderStyle: "solid",
-    width: 550,
-    alignSelf: "center",
+    width: "100%",
   },
   tableHeader: {
     flexDirection: "row",
@@ -98,22 +97,20 @@ const styles = StyleSheet.create({
 
 const partWiseColumnWidths = {
   slNo: 30,
-  projectNumber: 60,
-  projectName: 100,
-  productNumber: 80,
-  productName: 100,
-  partNumber: 80,
-  partName: 120,
-  priority: 50,
+  projectNumber: 80,
+  projectName: 140,
+  productName: 140,
+  partNumber: 100,
+  partName: 160,
+  priority: 45,
 };
 
 const orderWiseColumnWidths = {
   slNo: 30,
-  projectNumber: 70,
-  projectName: 110,
-  productNumber: 90,
-  productName: 130,
-  priorityRange: 80,
+  projectNumber: 90,
+  projectName: 160,
+  productName: 160,
+  priorityRange: 100,
   partCount: 60,
 };
 
@@ -126,7 +123,7 @@ const PartWisePriorityPdfDocument = ({ data }) => {
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE
+            CMF DIGITIZATION 
           </Text>
           <Text style={styles.subtitle}>
             Part Wise Priority Report
@@ -151,9 +148,6 @@ const PartWisePriorityPdfDocument = ({ data }) => {
             <Text style={[styles.headerCell, { width: partWiseColumnWidths.productName }]}>
               PRODUCT NAME
             </Text>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.productNumber }]}>
-              PRODUCT NO
-            </Text>
             <Text style={[styles.headerCell, { width: partWiseColumnWidths.partName }]}>
               PART NAME
             </Text>
@@ -171,16 +165,13 @@ const PartWisePriorityPdfDocument = ({ data }) => {
                 {index + 1}
               </Text>
               <Text style={[styles.cell, { width: partWiseColumnWidths.projectName }]}>
-                {row.project_name || "-"}
+                {row.product_name || row.project_name || "-"}
               </Text>
               <Text style={[styles.cell, { width: partWiseColumnWidths.projectNumber }]}>
                 {row.sale_order_number || "-"}
               </Text>
               <Text style={[styles.cell, { width: partWiseColumnWidths.productName }]}>
                 {row.product_name || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.productNumber }]}>
-                {row.product_number || "-"}
               </Text>
               <Text style={[styles.cell, { width: partWiseColumnWidths.partName }]}>
                 {row.part_name || "-"}
@@ -212,7 +203,7 @@ const OrderWisePriorityPdfDocument = ({ data }) => {
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE
+            CMF DIGITIZATION 
           </Text>
           <Text style={styles.subtitle}>
             Order Wise Priority Report
@@ -237,9 +228,6 @@ const OrderWisePriorityPdfDocument = ({ data }) => {
             <Text style={[styles.headerCell, { width: orderWiseColumnWidths.productName }]}>
               PRODUCT NAME
             </Text>
-            <Text style={[styles.headerCell, { width: orderWiseColumnWidths.productNumber }]}>
-              PRODUCT NO
-            </Text>
             <Text style={[styles.headerCell, { width: orderWiseColumnWidths.priorityRange }]}>
               PRIORITY RANGE
             </Text>
@@ -254,16 +242,13 @@ const OrderWisePriorityPdfDocument = ({ data }) => {
                 {index + 1}
               </Text>
               <Text style={[styles.cell, { width: orderWiseColumnWidths.projectName }]}>
-                {row.project_name || "-"}
+                {row.product_name || row.project_name || "-"}
               </Text>
               <Text style={[styles.cell, { width: orderWiseColumnWidths.projectNumber }]}>
                 {row.sale_order_number || "-"}
               </Text>
               <Text style={[styles.cell, { width: orderWiseColumnWidths.productName }]}>
                 {row.product_name || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: orderWiseColumnWidths.productNumber }]}>
-                {row.product_number || "-"}
               </Text>
               <Text style={[styles.cell, { width: orderWiseColumnWidths.priorityRange }]}>
                 {row.min_priority != null && row.max_priority != null
@@ -300,7 +285,7 @@ export const PartWisePriorityPdfDownload = ({
 
     // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE"],
+      ["CMF DIGITIZATION "],
       ["Part Wise Priority Report"],
       [],
       [`Total Parts: ${data.length}`],
@@ -314,7 +299,7 @@ export const PartWisePriorityPdfDownload = ({
       "PROJECT NAME",
       "PROJECT NO",
       "PRODUCT NAME",
-      "PRODUCT NO",
+      "PRODUCT NAME",
       "PART NAME",
       "PART NO",
       "PRIORITY"
@@ -352,10 +337,10 @@ export const PartWisePriorityPdfDownload = ({
     data.forEach((row, index) => {
       const rowData = [
         index + 1,                                    // Column A: SL NO
-        row.project_name || "-",                      // Column B: PROJECT NAME
+        row.product_name || row.project_name || "-",  // Column B: PROJECT NAME
         row.sale_order_number || "-",                 // Column C: PROJECT NO
         row.product_name || "-",                      // Column D: PRODUCT NAME
-        row.product_number || "-",                    // Column E: PRODUCT NO
+        row.product_name || "-",                      // Column E: PRODUCT NAME
         row.part_name || "-",                         // Column F: PART NAME
         row.part_number || "-",                       // Column G: PART NO
         row.priority != null ? row.priority : "-"     // Column H: PRIORITY
@@ -371,7 +356,6 @@ export const PartWisePriorityPdfDownload = ({
       { wch: 8 },   // SL NO
       { wch: 15 },  // PROJECT NO
       { wch: 20 },  // PROJECT NAME
-      { wch: 15 },  // PRODUCT NO
       { wch: 20 },  // PRODUCT NAME
       { wch: 15 },  // PART NO
       { wch: 25 },  // PART NAME
@@ -470,7 +454,7 @@ export const OrderWisePriorityPdfDownload = ({
 
     // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE"],
+      ["CMF DIGITIZATION "],
       ["Order Wise Priority Report"],
       [],
       [`Total Orders: ${data.length}`],
@@ -484,7 +468,7 @@ export const OrderWisePriorityPdfDownload = ({
       "PROJECT NAME",
       "PROJECT NO",
       "PRODUCT NAME",
-      "PRODUCT NO",
+      "PRODUCT NAME",
       "PRIORITY RANGE",
       "PARTS COUNT"
     ];
@@ -525,10 +509,10 @@ export const OrderWisePriorityPdfDownload = ({
       
       const rowData = [
         index + 1,                                    // Column A: SL NO
-        row.project_name || "-",                      // Column B: PROJECT NAME
+        row.product_name || row.project_name || "-",  // Column B: PROJECT NAME
         row.sale_order_number || "-",                 // Column C: PROJECT NO
         row.product_name || "-",                      // Column D: PRODUCT NAME
-        row.product_number || "-",                    // Column E: PRODUCT NO
+        row.product_name || "-",                      // Column E: PRODUCT NAME
         priorityRange,                                 // Column F: PRIORITY RANGE
         row.part_count != null ? row.part_count : "-" // Column G: PARTS COUNT
       ];
@@ -543,7 +527,6 @@ export const OrderWisePriorityPdfDownload = ({
       { wch: 8 },   // SL NO
       { wch: 15 },  // PROJECT NO
       { wch: 20 },  // PROJECT NAME
-      { wch: 15 },  // PRODUCT NO
       { wch: 20 },  // PRODUCT NAME
       { wch: 18 },  // PRIORITY RANGE
       { wch: 12 }   // PARTS COUNT

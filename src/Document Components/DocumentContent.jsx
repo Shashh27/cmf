@@ -300,7 +300,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
             }));
           }}
           className="version-select-custom"
-          dropdownMatchSelectWidth={false}
+          popupMatchSelectWidth={false}
           bordered={true}
           style={{ 
             width: '180px', 

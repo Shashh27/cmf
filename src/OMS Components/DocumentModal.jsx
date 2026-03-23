@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Empty, message, Upload, Tag, Divider, Popconfirm, Card, Badge, Tooltip } from "antd";
 import { FileTextOutlined, DownloadOutlined, DeleteOutlined, UploadOutlined } from "@ant-design/icons";
@@ -16,6 +17,72 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   const [parentId, setParentId] = useState(null);
   const [updatingDocName, setUpdatingDocName] = useState("");
 
+  // Version validation function
+  const validateVersionFormat = (value) => {
+    if (!value) return true; // Allow empty for optional validation
+    const versionPattern = /^v\d{1,2}\.\d{0,3}[a-zA-Z0-9]{0,3}$/;
+    return versionPattern.test(value);
+  };
+
+  const handleVersionChange = (e) => {
+    let value = e.target.value;
+    
+    // Always start with 'v' if not present
+    if (value && !value.startsWith('v')) {
+      value = 'v' + value;
+    }
+    
+    // Remove invalid characters but keep v, digits, dots, and alphanumeric
+    value = value.replace(/[^v0-9.a-zA-Z]/g, '');
+    
+    // Ensure only one 'v' at the beginning
+    if (value.startsWith('v')) {
+      value = 'v' + value.substring(1).replace(/v/g, '');
+    }
+    
+    // Ensure only one dot
+    const parts = value.split('.');
+    if (parts.length > 2) {
+      value = parts[0] + '.' + parts.slice(1).join('');
+    }
+    
+    // Limit to exactly 3 characters before decimal (including 'v'), and max 3 characters after decimal
+    const match = value.match(/^(v\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
+    if (match) {
+      let major = match[1] || 'v';
+      let afterDecimal = match[2] || '';
+
+      value = major;
+      // Always include decimal point
+      value += '.';
+      // Add after decimal content (max 3 characters)
+      if (afterDecimal) {
+        afterDecimal = afterDecimal.substring(0, 3);
+        value += afterDecimal;
+      }
+    } else {
+      // Fallback for initial 'v' or 'v12' (max 3 chars total)
+      const initialMatch = value.match(/^(v\d{0,2})/);
+      if (initialMatch) {
+        value = initialMatch[1] + '.';
+      }
+    }
+    
+    form.setFieldValue('document_version', value);
+  };
+
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const user = JSON.parse(stored);
+      if (user?.id == null) return null;
+      return user.id;
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     if (isOpen && orderId) {
       setSelectedOrderId(orderId.toString());
@@ -28,11 +95,8 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const fetchDocuments = async (orderId) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/order-documents/order/${orderId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setDocuments(data);
-      }
+      const response = await axios.get(`${API_BASE_URL}/order-documents/order/${orderId}`);
+      setDocuments(response.data);
     } catch (error) {
       console.error("Error fetching documents:", error);
     }
@@ -54,6 +118,18 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       return;
     }
 
+    // Validate version format
+    if (!validateVersionFormat(values.document_version)) {
+      message.error("Version format must be: vXXX.XXX (e.g., v1.0, v12.3a, v123.456)");
+      return;
+    }
+
+    const currentUserId = getCurrentUserId();
+    if (currentUserId == null) {
+      message.error("User is required. Please ensure you are logged in.");
+      return;
+    }
+
     setLoading(true);
     const uploadFormData = new FormData();
     uploadFormData.append("file", file);
@@ -63,36 +139,35 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       docType = values.document_type_other.trim();
     }
     uploadFormData.append("document_type", docType);
-    uploadFormData.append("document_version", parentId ? (values.document_version || "1.0") : "1.0"); // Enforce 1.0 for new uploads
+    uploadFormData.append("document_version", parentId ? (values.document_version || "v1.0") : "v1.0"); // Enforce v1.0 for new uploads
     if (parentId) {
       uploadFormData.append("parent_id", parentId);
     }
+    uploadFormData.append("user_id", String(currentUserId));
 
     try {
-      const response = await fetch(
+      const response = await axios.post(
         `${API_BASE_URL}/order-documents/upload/${selectedOrderId}`,
-        {
-          method: "POST",
-          body: uploadFormData,
-        }
+        uploadFormData
       );
 
-      if (response.ok) {
-        const result = await response.json();
-        onDocumentUploaded(result);
-        form.resetFields();
-        form.setFieldsValue({ document_version: "1.0" });
-        setParentId(null);
-        setUpdatingDocName("");
-        if (selectedOrderId) {
-          fetchDocuments(selectedOrderId);
-        }
-      } else {
-        message.error("Failed to upload document");
+      const result = response.data;
+      onDocumentUploaded(result);
+      form.resetFields();
+      form.setFieldsValue({ document_version: "v1.0" });
+      setParentId(null);
+      setUpdatingDocName("");
+      if (selectedOrderId) {
+        fetchDocuments(selectedOrderId);
       }
     } catch (error) {
       console.error("Error uploading document:", error);
-      message.error("Error uploading document");
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error uploading document";
+      message.error(detail);
     } finally {
       setLoading(false);
     }
@@ -105,12 +180,8 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
         message.error("No document URL available");
         return;
       }
-      const response = await fetch(doc.document_url);
-      if (!response.ok) {
-        message.error("Failed to fetch document for download");
-        return;
-      }
-      const blob = await response.blob();
+      const response = await axios.get(doc.document_url, { responseType: "blob" });
+      const blob = response.data;
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -136,25 +207,20 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   };
 
   const handleDelete = async (documentId) => {
-    if (!window.confirm("Are you sure you want to delete this document?")) {
-      return;
-    }
-
     try {
-      const response = await fetch(`${API_BASE_URL}/order-documents/${documentId}`, {
-        method: "DELETE",
-      });
-
-      if (response.ok) {
-        if (selectedOrderId) {
-          fetchDocuments(selectedOrderId);
-        }
-      } else {
-        message.error("Failed to delete document");
+      await axios.delete(`${API_BASE_URL}/order-documents/${documentId}`);
+      message.success("Document deleted successfully");
+      if (selectedOrderId) {
+        fetchDocuments(selectedOrderId);
       }
     } catch (error) {
       console.error("Error deleting document:", error);
-      message.error("Error deleting document");
+      let detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error deleting document";
+      message.error(detail);
     }
   };
 
@@ -170,13 +236,14 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
     
     let maxVersion = 1.0;
     versionGroup.forEach(d => {
-      const v = parseFloat(d.document_version);
+      // Correctly parse version string like "v2.0" by removing the 'v'
+      const v = parseFloat(String(d.document_version).replace(/^v/i, ''));
       if (!isNaN(v) && v > maxVersion) {
         maxVersion = v;
       }
     });
 
-    const nextVersion = (maxVersion + 1.0).toFixed(1);
+    const nextVersion = 'v' + (maxVersion + 1.0).toFixed(1);
 
     form.setFieldsValue({
       document_type: doc.document_type,
@@ -187,12 +254,23 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   };
 
   const groupDocuments = () => {
-    const roots = documents.filter(d => !d.parent_id);
-    const versions = documents.filter(d => d.parent_id);
-    
-    return roots.map(root => ({
+    // Version ordering inside each root:
+    // - FIFO  : smaller `id` (earlier inserted) first
+    // - LIFO  : larger `id` (latest inserted) first
+    // We sort by `id` because `document_version` is stored like "v1.0" which caused NaN sorting.
+    const VERSION_ORDER = "FIFO"; // oldest first
+    const rootSort = (a, b) => (VERSION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
+    const versionSort = (a, b) => (VERSION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
+
+    const roots = documents
+      .filter((d) => !d.parent_id)
+      .sort(rootSort);
+
+    return roots.map((root) => ({
       ...root,
-      versions: versions.filter(v => v.parent_id === root.id).sort((a, b) => parseFloat(b.document_version) - parseFloat(a.document_version))
+      versions: documents
+        .filter((v) => v.parent_id === root.id)
+        .sort(versionSort),
     }));
   };
 
@@ -215,12 +293,12 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <FileTextOutlined style={{ color: isVersion ? '#ffa940' : '#1890ff', fontSize: 16 }} />
             <Text strong style={{ fontSize: 14 }}>{doc.document_name}</Text>
-            {isVersion && <Tag color="orange" style={{ fontSize: '12px', fontWeight: 'bold' }}>VERSION</Tag>}
-            <Tag color="blue" style={{ fontSize: '13px', fontWeight: 'bold', border: '1px solid #91d5ff' }}>v{doc.document_version}</Tag>
+            <Tag color="blue" style={{ fontSize: '13px', fontWeight: 'bold', border: '1px solid #91d5ff' }}>
+              {doc.document_version?.startsWith('v') ? doc.document_version : `v${doc.document_version}`}
+            </Tag>
           </div>
           <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <Tag color="blue" variant="filled" style={{ fontSize: '11px' }}>{doc.document_type}</Tag>
-            {isVersion && <Text type="secondary" style={{ fontSize: '11px' }}>Root ID: {doc.parent_id}</Text>}
           </div>
         </div>
         <Space size={4} style={{ flexShrink: 0 }}>
@@ -263,7 +341,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const handleClose = () => {
     form.resetFields();
-    form.setFieldsValue({ document_version: "1.0" });
+    form.setFieldsValue({ document_version: "v1.0" });
     setDocuments([]);
     setParentId(null);
     setUpdatingDocName("");
@@ -308,7 +386,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
         form={form}
         layout="vertical"
         onFinish={handleUpload}
-        initialValues={{ document_version: '1.0' }}
+        initialValues={{ document_version: 'v1.0' }}
       >
         <Row gutter={[12, 12]}>
           <Col xs={24} lg={14}>
@@ -384,7 +462,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                       setParentId(null);
                       setUpdatingDocName("");
                       form.resetFields();
-                      form.setFieldsValue({ document_version: "1.0" });
+                      form.setFieldsValue({ document_version: "v1.0" });
                     }}
                   >
                     Cancel
@@ -458,10 +536,24 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={10}>
-                  <Form.Item name="document_version" label="Version" rules={[{ required: true }]} style={{ marginBottom: 16 }}>
+                  <Form.Item 
+                    name="document_version" 
+                    label="Version" 
+                    rules={[
+                      { required: true, message: 'Version is required' },
+                      { validator: (_, value) => {
+                        if (!validateVersionFormat(value)) {
+                          return Promise.reject('Version format must be: vXXX.XXX (e.g., v1.0, v12.3a, v123.456)');
+                        }
+                        return Promise.resolve();
+                      }}
+                    ]} 
+                    style={{ marginBottom: 16 }}
+                  >
                     <Input 
-                      placeholder="1.0" 
+                      placeholder="v1.0" 
                       disabled={!parentId} 
+                      onChange={handleVersionChange}
                       style={{ backgroundColor: !parentId ? '#f5f5f5' : '#fff', fontWeight: 'bold' }} 
                     />
                   </Form.Item>

@@ -61,6 +61,7 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
     borderStyle: "solid",
     marginBottom: 8,
+    width: "100%",
   },
   tableHeader: {
     flexDirection: "row",
@@ -100,48 +101,50 @@ const styles = StyleSheet.create({
 
 const assembliesColumnWidths = {
   slNo: 24,
-  number: 80,
-  name: 160,
-  parent: 160,
+  number: 75,
+  name: 150,
+  parent: 150,
 };
 
 const partsColumnWidths = {
   slNo: 24,
-  number: 80,
-  name: 160,
-  type: 60,
-  parentAssembly: 120,
+  number: 75,
+  name: 150,
+  type: 55,
+  parentAssembly: 110,
 };
 
 const operationsColumnWidths = {
   slNo: 20,
-  partNumber: 60,
-  partName: 100,
-  opNumber: 36,
-  opName: 110,
-  machine: 70,
-  setup: 55,
-  cycle: 55,
-  workcenter: 70,
+  partNumber: 50,
+  partName: 75,
+  opNumber: 25,
+  opName: 75,
+  type: 45,
+  machine: 60,
+  setup: 40,
+  cycle: 40,
+  workcenter: 60,
 };
 
 const opNotesColumnWidths = {
   slNo: 20,
-  partNumber: 60,
-  partName: 90,
-  opNumber: 36,
-  opName: 80,
-  instructions: 150,
-  notes: 150,
+  partNumber: 50,
+  partName: 75,
+  opNumber: 25,
+  opName: 75,
+  type: 45,
+  instructions: 100,
+  notes: 100,
 };
 
 const documentsColumnWidths = {
   slNo: 24,
-  partNumber: 70,
-  partName: 130,
-  type: 70,
-  document: 160,
-  version: 50,
+  partNumber: 65,
+  partName: 120,
+  type: 60,
+  document: 150,
+  version: 40,
 };
 
 const ProductBOMPdfDocument = ({ product, bomExport }) => {
@@ -163,9 +166,7 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
           </Text>
           <View style={styles.metaRow}>
             <Text style={styles.metaText}>
-              Product: {(product?.product_number || "") && (product?.product_name || "")
-                ? `${product.product_number} - ${product.product_name}`
-                : product?.product_name || product?.product_number || "-"}
+              Product: {product?.product_name || (product?.id != null ? `Product ${product.id}` : "-")}
             </Text>
             <Text style={styles.metaText}>Generated on: {generatedAt}</Text>
           </View>
@@ -283,6 +284,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                 <Text style={[styles.headerCell, { width: operationsColumnWidths.opName }]}>
                   Operation
                 </Text>
+                <Text style={[styles.headerCell, { width: operationsColumnWidths.type }]}>
+                  Type
+                </Text>
                 <Text style={[styles.headerCell, { width: operationsColumnWidths.machine }]}>
                   Machine
                 </Text>
@@ -312,6 +316,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                   </Text>
                   <Text style={[styles.cell, { width: operationsColumnWidths.opName }]}>
                     {op.operation_name || "-"}
+                  </Text>
+                  <Text style={[styles.cell, { width: operationsColumnWidths.type }]}>
+                    {op.part_type_name || "IN-House"}
                   </Text>
                   <Text style={[styles.cell, { width: operationsColumnWidths.machine }]}>
                     {op.machine_name || op.machine_id || "-"}
@@ -349,6 +356,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                 <Text style={[styles.headerCell, { width: opNotesColumnWidths.opName }]}>
                   Operation
                 </Text>
+                <Text style={[styles.headerCell, { width: opNotesColumnWidths.type }]}>
+                  Type
+                </Text>
                 <Text style={[styles.headerCell, { width: opNotesColumnWidths.instructions }]}>
                   Instructions
                 </Text>
@@ -372,6 +382,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                   </Text>
                   <Text style={[styles.cell, { width: opNotesColumnWidths.opName }]}>
                     {op.operation_name || "-"}
+                  </Text>
+                  <Text style={[styles.cell, { width: opNotesColumnWidths.type }]}>
+                    {op.part_type_name || "IN-House"}
                   </Text>
                   <Text style={[styles.cell, { width: opNotesColumnWidths.instructions }]}>
                     {op.work_instructions || "-"}
@@ -429,7 +442,7 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                     {doc.document_name || "-"}
                   </Text>
                   <Text style={[styles.cell, { width: documentsColumnWidths.version }]}>
-                    {doc.document_version || "1.0"}
+                    {doc.document_version ? (doc.document_version.startsWith('v') ? doc.document_version : `v${doc.document_version}`) : "v1.0"}
                   </Text>
                 </View>
               ))}
@@ -460,7 +473,7 @@ const ProductBOMPdfDownload = ({
 
   const safeFileName =
     fileName ||
-    `product-bom-${product?.product_number || product?.product_name || "report"}.pdf`;
+    `product-bom-${product?.product_name || product?.id || "report"}.pdf`;
 
   const hasContent =
     (bomExport.assemblies && bomExport.assemblies.length > 0) ||

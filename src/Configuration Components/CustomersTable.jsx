@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Button, message, Popconfirm, Space, Card, Tooltip } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
-import CustomerModal from "../OMS Components/CustomerModal";
+import CustomerModal from "./CustomerModal";
 
-const CustomersTable = () => {
+const CustomersTable = ({ userId }) => {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
@@ -16,14 +17,10 @@ const CustomersTable = () => {
 
   const fetchCustomers = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/customers/`);
-      if (response.ok) {
-        const data = await response.json();
-        setCustomers(data);
-      } else {
-        console.error("Failed to fetch customers:", response.statusText);
-        setCustomers([]);
-      }
+      const response = await axios.get(`${API_BASE_URL}/customers/`, {
+        params: userId != null ? { user_id: userId } : undefined,
+      });
+      setCustomers(response.data);
     } catch (error) {
       console.error("Error fetching customers:", error);
       setCustomers([]);
@@ -44,18 +41,19 @@ const CustomersTable = () => {
 
   const handleDeleteCustomer = async (id) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/customers/${id}/`, {
-        method: "DELETE",
+      await axios.delete(`${API_BASE_URL}/customers/${id}/`, {
+        params: userId != null ? { user_id: userId } : undefined,
       });
-      if (response.ok) {
-        message.success("Customer deleted successfully");
-        fetchCustomers();
-      } else {
-        message.error("Failed to delete customer");
-      }
+      message.success("Customer deleted successfully");
+      fetchCustomers();
     } catch (error) {
       console.error("Error deleting customer:", error);
-      message.error("Error deleting customer");
+      let detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error deleting customer";
+      message.error(detail);
     }
   };
 
@@ -157,27 +155,53 @@ const CustomersTable = () => {
 
   return (
     <Card
-      title="Customers"
+      title={<span className="text-lg font-bold">Customers</span>}
       extra={
         <Button
           type="primary"
           icon={<PlusOutlined />}
           onClick={handleCreateCustomer}
         >
-          New Customer
+          <span className="hidden sm:inline">New Customer</span>
+          <span className="sm:hidden">New</span>
         </Button>
       }
       variant="borderless"
-      className="shadow-sm"
+      className="shadow-sm overflow-hidden"
+      styles={{
+        header: { padding: '12px 16px' },
+        body: { padding: '0 12px 12px' }
+      }}
     >
+      <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff) !important;
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff !important;
+          white-space: nowrap;
+        }
+        @media (max-width: 640px) {
+          .ant-card-extra {
+            padding: 12px 0;
+          }
+        }
+      `}</style>
       <Table
         columns={columns}
         dataSource={customers}
         rowKey="id"
         loading={loading}
-        pagination={{ pageSize: 10 }}
+        pagination={{ 
+          pageSize: 10,
+          size: "small",
+          responsive: true,
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+          showSizeChanger: true,
+          showQuickJumper: true,
+        }}
         bordered
         size="middle"
+        scroll={{ x: 1200 }}
         className="modern-table"
       />
 
@@ -185,6 +209,7 @@ const CustomersTable = () => {
         <CustomerModal
           isOpen={customerModalOpen}
           onClose={() => setCustomerModalOpen(false)}
+          userId={userId}
           onCustomerCreated={editingCustomer ? handleCustomerUpdated : handleCustomerCreated}
           editingCustomer={editingCustomer}
         />

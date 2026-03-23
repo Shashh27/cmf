@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber } from "antd";
-import { FileTextOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
+import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import { message } from "antd";
 import dayjs from "dayjs";
 
@@ -10,9 +11,28 @@ const { Option } = Select;
 
 const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, products, fetchCustomers, fetchProducts }) => {
   const [form] = Form.useForm();
+  const [createProductForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [createProductModalOpen, setCreateProductModalOpen] = useState(false);
+  const [productSelectOpen, setProductSelectOpen] = useState(false);
+  const [createProductLoading, setCreateProductLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [projectCoordinators, setProjectCoordinators] = useState([]);
+  const [manufacturingCoordinators, setManufacturingCoordinators] = useState([]);
   const [decimalWarnings, setDecimalWarnings] = useState({});
+
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u?.id == null) return null;
+      return u.id;
+    } catch {
+      return null;
+    }
+  };
   const orderDateWatch = Form.useWatch('order_date', form);
 
   const limitDecimals = (value, fieldName, precision = 3) => {
@@ -118,23 +138,108 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   };
 
   const handleProductDropdown = (open) => {
+    setProductSelectOpen(open);
     if (open && products.length === 0) {
       fetchProducts?.();
+    }
+  };
+
+  const openCreateProductModal = () => {
+    setProductSelectOpen(false);
+    createProductForm.resetFields();
+    setCreateProductModalOpen(true);
+  };
+
+  const fetchUsersForRoles = async () => {
+    if (users.length > 0) return;
+    try {
+      const response = await axios.get(`${API_BASE_URL}/access-users/`);
+      const list = Array.isArray(response.data) ? response.data : [];
+      setUsers(list);
+      const pcs = list.filter(
+        (u) => (u.role || "").toLowerCase() === "project_coordinator"
+      );
+      const mcs = list.filter((u) => {
+        const r = (u.role || "").toLowerCase();
+        return r === "manufacturing_coordinator" || r === "mc";
+      });
+      setProjectCoordinators(pcs);
+      setManufacturingCoordinators(mcs);
+    } catch (error) {
+      console.error("Error fetching access users:", error);
+    }
+  };
+
+  const handleCreateProductSubmit = async () => {
+    try {
+      await createProductForm.validateFields();
+    } catch {
+      return;
+    }
+    const values = createProductForm.getFieldsValue();
+    let userId = form.getFieldValue("user_id");
+    if (!userId) {
+      try {
+        const stored = localStorage.getItem("user");
+        const userObj = stored ? JSON.parse(stored) : null;
+        if (userObj?.id != null) userId = String(userObj.id);
+      } catch {}
+    }
+    if (!userId) {
+      message.error("User is required. Please ensure you are logged in.");
+      return;
+    }
+    setCreateProductLoading(true);
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/products/`,
+        {
+          product_name: values.product_name?.trim() || "",
+          product_version: values.product_version?.trim() || "1.0",
+          user_id: parseInt(userId, 10),
+        },
+        {
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+      const newProduct = response.data;
+      await fetchProducts?.();
+      form.setFieldsValue({ product_id: newProduct.id.toString() });
+      setCreateProductModalOpen(false);
+      createProductForm.resetFields();
+      message.success(`Product "${newProduct.product_name || `Product ${newProduct.id}`}" created and selected.`);
+    } catch (error) {
+      console.error("Error creating product:", error);
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error creating product";
+      message.error(detail);
+    } finally {
+      setCreateProductLoading(false);
     }
   };
 
 
   useEffect(() => {
     if (isOpen) {
+      fetchUsersForRoles();
       if (editingOrder) {
+        // Ensure customer and product names are available even if the arrays are empty
+        const customerValue = editingOrder.customer_id?.toString() ?? "";
+        const productValue = editingOrder.product_id?.toString() ?? "";
+
         form.setFieldsValue({
           ...editingOrder,
-          customer_id: editingOrder.customer_id?.toString() ?? "",
-          product_id: editingOrder.product_id?.toString() ?? "",
+          customer_id: customerValue,
+          product_id: productValue,
           quantity: editingOrder.quantity?.toString() ?? "",
           due_date: editingOrder.due_date ? dayjs(editingOrder.due_date) : null,
           order_date: editingOrder.order_date ? dayjs(editingOrder.order_date) : null,
           user_id: editingOrder.user_id?.toString() ?? "",
+          project_coordinator_id: editingOrder.project_coordinator_id?.toString() ?? undefined,
+          manufacturing_coordinator_id: editingOrder.manufacturing_coordinator_id?.toString() ?? undefined,
         });
       } else {
         form.resetFields();
@@ -188,13 +293,35 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       const method = editingOrder ? 'PUT' : 'POST';
       
       const payload = {
-        ...values,
         sale_order_number: values.sale_order_number?.trim()?.toUpperCase(),
         quantity: parseInt(values.quantity),
         customer_id: parseInt(values.customer_id),
         product_id: parseInt(values.product_id),
+        status: values.status,
         user_id: values.user_id ? parseInt(values.user_id) : undefined,
+        // Send null explicitly when coordinator is cleared so backend sets it to NULL
+        project_coordinator_id:
+          values.project_coordinator_id === undefined || values.project_coordinator_id === ""
+            ? null
+            : parseInt(values.project_coordinator_id),
+        manufacturing_coordinator_id:
+          values.manufacturing_coordinator_id === undefined || values.manufacturing_coordinator_id === ""
+            ? null
+            : parseInt(values.manufacturing_coordinator_id),
       };
+
+      // Admin id is required by backend; use current logged-in user as admin.
+      try {
+        const stored = localStorage.getItem("user");
+        if (stored) {
+          const userObj = JSON.parse(stored);
+          if (userObj?.id != null) {
+            payload.admin_id = parseInt(userObj.id, 10);
+          }
+        }
+      } catch {
+        // ignore, backend will validate if missing
+      }
 
       // Dates: include null explicitly when cleared so updates can remove values
       if (values.order_date) {
@@ -216,16 +343,17 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         return;
       }
 
-      const response = await fetch(url, {
+      const response = await axios({
+        url,
         method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        data: payload,
       });
 
-      if (response.ok) {
-        const result = await response.json();
+      if (response.status >= 200 && response.status < 300) {
+        const result = response.data;
         
         // Upload documents if this is a new order and documents are provided
         if (!editingOrder && documents.length > 0) {
@@ -235,12 +363,17 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         onOrderCreated(result);
         handleClose();
       } else {
-        const errorData = await response.json();
+        const errorData = response.data || {};
         message.error(errorData.detail || "Failed to save order");
       }
     } catch (error) {
       console.error("Error saving order:", error);
-      message.error("Error saving order");
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error saving order";
+      message.error(detail);
     } finally {
       setLoading(false);
     }
@@ -277,31 +410,46 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   };
 
   const uploadDocumentsForOrder = async (orderId) => {
-    for (const doc of documents) {
-      if (doc.file) {
-        const uploadFormData = new FormData();
-        uploadFormData.append("file", doc.file);
-        uploadFormData.append("document_name", doc.document_name || doc.file?.name || "Document");
-        let docType = doc.document_type || "Document";
-        if (docType === "Other" && doc.document_type_other && doc.document_type_other.trim()) {
-          docType = doc.document_type_other.trim();
-        }
-        uploadFormData.append("document_type", docType);
-        uploadFormData.append("document_version", "v1.0"); // Hardcoded to v1.0 for new order creation
+    if (!documents || documents.length === 0) return;
+    const currentUserId = getCurrentUserId();
+    if (currentUserId == null) {
+      // Without a logged-in user, backend will reject uploads; skip quietly.
+      return;
+    }
 
-        try {
-          await fetch(`${API_BASE_URL}/order-documents/upload/${orderId}`, {
-            method: "POST",
-            body: uploadFormData,
-          });
-        } catch (error) {
-          console.error("Error uploading document:", error);
-        }
+    // Bulk upload: one request for all selected documents
+    const uploadFormData = new FormData();
+    uploadFormData.append("user_id", String(currentUserId));
+
+    for (const doc of documents) {
+      if (!doc.file) continue;
+
+      let docType = doc.document_type || "Document";
+      if (docType === "Other" && doc.document_type_other && doc.document_type_other.trim()) {
+        docType = doc.document_type_other.trim();
       }
+
+      uploadFormData.append("files", doc.file);
+      uploadFormData.append("document_name", doc.document_name || doc.file?.name || "Document");
+      uploadFormData.append("document_type", docType);
+      uploadFormData.append("document_version", "v1.0"); // Hardcoded to v1.0 for new order creation
+    }
+
+    // If user added rows but did not choose any file, skip the upload call
+    if (!uploadFormData.getAll("files")?.length) return;
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/order-documents/upload-bulk/${orderId}`,
+        uploadFormData
+      );
+    } catch (error) {
+      console.error("Error uploading documents:", error);
     }
   };
 
   return (
+    <>
     <Modal
       open={isOpen}
       onCancel={handleClose}
@@ -338,7 +486,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         className="mt-2"
         initialValues={{
           sale_order_number: "",
-          project_name: "",
           customer_id: "",
           product_id: "",
           quantity: "",
@@ -369,17 +516,51 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Project Number</span>}
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-4"
+                getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9]/g, '').slice(0, 30)}
               >
-                <Input placeholder="Enter #" className="rounded-md border-gray-300 h-10" autoComplete="off" />
+                <Input placeholder="Enter Project Number" className="rounded-md border-gray-300 h-10" autoComplete="off" maxLength={30} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={9}>
               <Form.Item
-                name="project_name"
+                name="product_id"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Project Name</span>}
+                rules={[{ required: true, message: 'Required' }]}
                 className="mb-4"
               >
-                <Input placeholder="Enter project name" className="rounded-md border-gray-300 h-10" autoComplete="off" />
+                <Select 
+                  placeholder="Select project" 
+                  className="h-10"
+                  open={productSelectOpen}
+                  onOpenChange={handleProductDropdown}
+                  popupRender={editingOrder ? undefined : (menu) => (
+                    <>
+                      {menu}
+                      <div className="p-2 border-t border-gray-200 bg-gray-50">
+                        <Button
+                          type="dashed"
+                          icon={<PlusOutlined />}
+                          block
+                          onClick={openCreateProductModal}
+                          className="text-blue-600 border-blue-200 hover:border-blue-400 hover:text-blue-700"
+                        >
+                          Create new project
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                >
+                  {products.map((product) => (
+                    <Option key={product.id} value={product.id.toString()}>
+                      {product.product_name || `Project ${product.id}`}
+                    </Option>
+                  ))}
+                  {editingOrder && editingOrder.product_id && !products.find(p => p.id === editingOrder.product_id) && (
+                    <Option key={editingOrder.product_id} value={editingOrder.product_id.toString()}>
+                      {editingOrder.product_name || `Project ${editingOrder.product_id}`}
+                    </Option>
+                  )}
+                </Select>
               </Form.Item>
             </Col>
             <Col xs={24} sm={24} md={9}>
@@ -393,15 +574,24 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                   placeholder="Select customer" 
                   className="h-10 custom-select-v2"
                   onOpenChange={handleCustomerDropdown}
+                  showSearch
+                  optionFilterProp="children"
                 >
-                  {customers.map((customer) => (
-                    <Option key={customer.id} value={customer.id.toString()}>
-                      {customer.company_name}
-                    </Option>
-                  ))}
-                  {editingOrder && customers.length === 0 && (
-                    <Option key={editingOrder.customer_id} value={editingOrder.customer_id?.toString()}>
-                      {editingOrder.customer_name || `Customer ${editingOrder.customer_id}`}
+                  {customers.map((customer) => {
+                    const label = customer.branch
+                      ? `${customer.company_name} (${customer.branch})`
+                      : customer.company_name;
+                    return (
+                      <Option key={customer.id} value={customer.id.toString()}>
+                        {label}
+                      </Option>
+                    );
+                  })}
+                  {editingOrder && editingOrder.customer_id && !customers.find(c => c.id === editingOrder.customer_id) && (
+                    <Option key={editingOrder.customer_id} value={editingOrder.customer_id.toString()}>
+                      {editingOrder.customer_branch
+                        ? `${editingOrder.company_name || editingOrder.customer_name || `Customer ${editingOrder.customer_id}`} (${editingOrder.customer_branch})`
+                        : (editingOrder.company_name || editingOrder.customer_name || `Customer ${editingOrder.customer_id}`)}
                     </Option>
                   )}
                 </Select>
@@ -410,28 +600,45 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           </Row>
 
           <Row gutter={[12, 0]}>
-            <Col xs={24} sm={12} md={6}>
+            <Col xs={24} sm={12} md={4}>
               <Form.Item
-                name="product_id"
-                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Product</span>}
-                rules={[{ required: true, message: 'Required' }]}
+                name="project_coordinator_id"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Project Coordinator</span>}
                 className="mb-0"
               >
-                <Select 
-                  placeholder="Select product" 
+                <Select
+                  placeholder="Select"
                   className="h-10"
-                  onOpenChange={handleProductDropdown}
+                  allowClear
+                  showSearch
+                  optionFilterProp="children"
                 >
-                  {products.map((product) => (
-                    <Option key={product.id} value={product.id.toString()}>
-                      {product.product_name || product.product_number || `Product ${product.id}`}
+                  {projectCoordinators.map((u) => (
+                    <Option key={u.id} value={u.id.toString()}>
+                      {u.user_name || `User ${u.id}`}
                     </Option>
                   ))}
-                  {editingOrder && products.length === 0 && (
-                    <Option key={editingOrder.product_id} value={editingOrder.product_id?.toString()}>
-                      {editingOrder.product_name || `Product ${editingOrder.product_id}`}
+                </Select>
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={4}>
+              <Form.Item
+                name="manufacturing_coordinator_id"
+                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Mfg Coordinator</span>}
+                className="mb-0"
+              >
+                <Select
+                  placeholder="Select"
+                  className="h-10"
+                  allowClear
+                  showSearch
+                  optionFilterProp="children"
+                >
+                  {manufacturingCoordinators.map((u) => (
+                    <Option key={u.id} value={u.id.toString()}>
+                      {u.user_name || `User ${u.id}`}
                     </Option>
-                  )}
+                  ))}
                 </Select>
               </Form.Item>
             </Col>
@@ -456,7 +663,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 />
               </Form.Item>
             </Col>
-            <Col xs={12} sm={9} md={5}>
+            <Col xs={12} sm={9} md={4}>
               <Form.Item
                 name="order_date"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Order Date</span>}
@@ -470,7 +677,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 />
               </Form.Item>
             </Col>
-            <Col xs={12} sm={9} md={5}>
+            <Col xs={12} sm={9} md={4}>
               <Form.Item
                 name="due_date"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Due Date</span>}
@@ -682,6 +889,52 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         </div>
       </Form>
     </Modal>
+
+    {/* Create new product (from order flow) */}
+    <Modal
+      title="Create new project"
+      open={createProductModalOpen}
+      onCancel={() => setCreateProductModalOpen(false)}
+      footer={[
+        <Button key="cancel" onClick={() => setCreateProductModalOpen(false)}>Cancel</Button>,
+        <Button key="submit" type="primary" loading={createProductLoading} onClick={handleCreateProductSubmit}>
+          Create & select
+        </Button>,
+      ]}
+      destroyOnHidden
+      width="90%"
+      style={{ maxWidth: 400 }}
+    >
+      <Form form={createProductForm} layout="vertical" className="mt-2">
+        <Form.Item
+          name="product_name"
+          label="Project name"
+          rules={[{ required: true, message: "Required" }]}
+        >
+          <Input placeholder="e.g. Widget A" />
+        </Form.Item>
+        <Form.Item
+          name="product_version"
+          label={<span className="text-xs sm:text-sm font-bold text-gray-600 uppercase tracking-wider">Product Version</span>}
+          initialValue="1.0"
+          rules={[{ required: true, message: "Required" }]}
+        >
+          <Input 
+            placeholder="1.0" 
+            autoComplete="off" 
+            size="large" 
+            readOnly 
+            disabled 
+            style={{
+              backgroundColor: '#f5f5f5',
+              color: '#6b7280',
+              borderColor: '#e5e7eb'
+            }}
+          />
+        </Form.Item>
+      </Form>
+    </Modal>
+    </>
   );
 };
 

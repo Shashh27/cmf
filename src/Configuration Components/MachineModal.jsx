@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, DatePicker, Button, message, InputNumber } from "antd";
 import dayjs from "dayjs";
 
-const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
+const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -14,12 +15,13 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
         type: machine.type || "",
         make: machine.make || "",
         model: machine.model || "",
-        year_of_installation: machine.year_of_installation || "",
+        year_of_installation: machine.year_of_installation ? dayjs().year(machine.year_of_installation) : null,
         cnc_controller: machine.cnc_controller || "",
         cnc_controller_service: machine.cnc_controller_service || "",
         remarks: machine.remarks || "",
         calibration_date: machine.calibration_date ? dayjs(machine.calibration_date) : null,
         calibration_due_date: machine.calibration_due_date ? dayjs(machine.calibration_due_date) : null,
+        password: machine.password || "",
       });
     } else {
       form.resetFields();
@@ -36,7 +38,7 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
       type: values.type,
       make: values.make,
       model: values.model,
-      year_of_installation: values.year_of_installation ? parseInt(values.year_of_installation) : null,
+      year_of_installation: values.year_of_installation ? values.year_of_installation.year() : null,
       cnc_controller: values.cnc_controller || null,
       cnc_controller_service: values.cnc_controller_service || null,
       remarks: values.remarks || null,
@@ -54,31 +56,25 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
       const url = machine 
         ? `${API_BASE_URL}/machines/${machine.id}`
         : `${API_BASE_URL}/machines/`;
-      const method = machine ? "PUT" : "POST";
+      const method = machine ? "put" : "post";
 
-      const response = await fetch(url, {
+      await axios({
+        url,
         method,
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(submitData),
+        data: { ...submitData, user_id: userId },
       });
 
-      if (response.ok) {
-        onSave();
-      } else {
-        const errorData = await response.json();
-        console.error("Failed to save machine:", errorData);
-        
-        if (errorData.detail) {
-            message.error(typeof errorData.detail === 'string' ? errorData.detail : "Failed to save machine");
-        } else {
-            message.error("Failed to save machine. Please check your input.");
-        }
-      }
+      onSave();
     } catch (error) {
       console.error("Error saving machine:", error);
-      message.error("Error saving machine. Please try again.");
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        "Failed to save machine. Please check your input.";
+      message.error(detail);
     } finally {
       setLoading(false);
     }
@@ -89,16 +85,32 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
       title={machine ? "Edit Machine" : "Add Machine"}
       open={isOpen}
       onCancel={onClose}
-      width={800}
+      width="95%"
+      style={{ maxWidth: 800 }}
       footer={null}
       destroyOnHidden
+      centered
     >
+      <style>{`
+        @media (max-width: 768px) {
+          .responsive-grid {
+            grid-template-columns: 1fr !important;
+            gap: 12px !important;
+          }
+          .ant-modal-body {
+            padding: 16px;
+          }
+        }
+      `}</style>
       <Form
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <div 
+          className="responsive-grid"
+          style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}
+        >
           <Form.Item
             name="type"
             label="Type"
@@ -127,7 +139,13 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
             name="year_of_installation"
             label="Year of Installation"
           >
-            <InputNumber style={{ width: '100%' }} placeholder="e.g., 2020" />
+            <DatePicker 
+              picker="year" 
+              style={{ width: '100%' }} 
+              placeholder="Select year" 
+              inputReadOnly={true}
+              disabledDate={(current) => current && current > dayjs().endOf('year')}
+            />
           </Form.Item>
 
           <Form.Item
@@ -148,14 +166,33 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
             name="calibration_date"
             label="Calibration Date"
           >
-            <DatePicker style={{ width: '100%' }} />
+            <DatePicker 
+              style={{ width: '100%' }} 
+              inputReadOnly={true}
+              onChange={() => form.setFieldsValue({ calibration_due_date: null })}
+            />
           </Form.Item>
 
           <Form.Item
-            name="calibration_due_date"
-            label="Calibration Due Date"
+            noStyle
+            shouldUpdate={(prevValues, currentValues) => prevValues.calibration_date !== currentValues.calibration_date}
           >
-            <DatePicker style={{ width: '100%' }} />
+            {({ getFieldValue }) => (
+              <Form.Item
+                name="calibration_due_date"
+                label="Calibration Due Date"
+              >
+                <DatePicker 
+                  style={{ width: '100%' }} 
+                  inputReadOnly={true}
+                  disabledDate={(current) => {
+                    const calibrationDate = getFieldValue('calibration_date');
+                    return current && calibrationDate && current.isBefore(calibrationDate, 'day');
+                  }}
+                  disabled={!getFieldValue('calibration_date')}
+                />
+              </Form.Item>
+            )}
           </Form.Item>
 
           <Form.Item

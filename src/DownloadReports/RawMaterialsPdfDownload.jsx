@@ -57,6 +57,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e5e7eb",
     borderStyle: "solid",
+    width: "100%",
   },
   tableHeader: {
     flexDirection: "row",
@@ -95,28 +96,28 @@ const styles = StyleSheet.create({
 });
 
 const inventoryColumnWidths = {
-  slNo: 30,
-  name: 120,
-  spec: 150,
-  mass: 50,
-  density: 60,
-  volume: 60,
-  stockType: 70,
-  qty: 50,
-  dimensions: 120,
-  status: 70,
+  slNo: 25,
+  name: 110,
+  spec: 140,
+  mass: 45,
+  density: 55,
+  volume: 55,
+  stockType: 65,
+  qty: 45,
+  dimensions: 110,
+  status: 65,
 };
 
 const statusColumnWidths = {
-  slNo: 30,
-  projectNumber: 80,
-  projectName: 120,
-  materialName: 120,
-  quantity: 50,
-  mass: 50,
-  status: 100,
-  partNumbers: 140,
-  partNames: 140,
+  slNo: 25,
+  projectNumber: 75,
+  projectName: 110,
+  materialName: 110,
+  quantity: 35,
+  mass: 35,
+  status: 80,
+  partNumbers: 130,
+  partNames: 130,
 };
 
 const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
@@ -128,7 +129,7 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE
+            CMF DIGITIZATION 
           </Text>
           <Text style={styles.subtitle}>
             Raw Materials Inventory Report
@@ -236,7 +237,7 @@ const groupLinkedMaterials = (linkedMaterials) => {
         raw_material_id: item.raw_material_id,
         order_id: item.order_id,
         sale_order_number: item.sale_order_number,
-        project_name: item.project_name,
+        project_name: item.project_name || item.product_name,
         material_name: item.material_name,
         quantity: item.order_quantity,
         mass: item.mass,
@@ -285,7 +286,7 @@ const PartsWithRawMaterialsStatusPdfDocument = ({ linkedMaterials }) => {
       <Page size="A4" orientation="landscape" style={styles.page}>
         <View style={styles.header}>
           <Text style={styles.title}>
-            CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE
+            CMF DIGITIZATION 
           </Text>
           <Text style={styles.subtitle}>
             Parts with Raw Materials Status Report
@@ -383,7 +384,7 @@ export const RawMaterialsInventoryPdfDownload = ({
 
     // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE"],
+      ["CMF DIGITIZATION"],
       ["Raw Materials Inventory Report"],
       [],
       [`Total Materials: ${rawMaterials.length}`],
@@ -570,7 +571,7 @@ export const PartsWithRawMaterialsStatusPdfDownload = ({
           raw_material_id: item.raw_material_id,
           order_id: item.order_id,
           sale_order_number: item.sale_order_number,
-          project_name: item.project_name,
+          project_name: item.project_name || item.product_name,
           material_name: item.material_name,
           quantity: item.order_quantity,
           mass: item.mass,
@@ -612,7 +613,7 @@ export const PartsWithRawMaterialsStatusPdfDownload = ({
 
     // Add header information
     XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION - CENTRAL GOVERNMENT ENTERPRISE"],
+      ["CMF DIGITIZATION"],
       ["Parts with Raw Materials Status Report"],
       [],
       [`Total Records: ${groupedData.length}`],

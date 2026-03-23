@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Tabs, Button, Tag, message, Popconfirm, Tooltip, Space, Card } from "antd";
 import { EditOutlined, DeleteOutlined, PlusOutlined, EyeOutlined } from "@ant-design/icons";
@@ -14,20 +15,30 @@ const Configuration = () => {
   const [selectedWorkCenter, setSelectedWorkCenter] = useState(null);
   const [showMachines, setShowMachines] = useState(false);
 
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u?.id == null) return null;
+      return u.id;
+    } catch {
+      return null;
+    }
+  };
+
+  const userId = getCurrentUserId();
+
   useEffect(() => {
     fetchWorkCenters();
   }, []);
 
   const fetchWorkCenters = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/workcenters/`);
-      if (response.ok) {
-        const data = await response.json();
-        setWorkCenters(data);
-      } else {
-        console.error("Failed to fetch work centers:", response.statusText);
-        setWorkCenters([]);
-      }
+      const response = await axios.get(`${API_BASE_URL}/workcenters/`, {
+        params: userId != null ? { user_id: userId } : undefined,
+      });
+      setWorkCenters(response.data);
     } catch (error) {
       console.error("Error fetching work centers:", error);
       setWorkCenters([]);
@@ -43,18 +54,19 @@ const Configuration = () => {
 
   const handleDelete = async (id) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/workcenters/${id}`, {
-        method: "DELETE",
+      await axios.delete(`${API_BASE_URL}/workcenters/${id}`, {
+        params: userId != null ? { user_id: userId } : undefined,
       });
-      if (response.ok) {
-        message.success("Work center deleted successfully");
-        fetchWorkCenters();
-      } else {
-        message.error("Failed to delete work center");
-      }
+      message.success("Work center deleted successfully");
+      fetchWorkCenters();
     } catch (error) {
       console.error("Error deleting work center:", error);
-      message.error("Error deleting work center");
+      let detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error deleting work center";
+      message.error(detail);
     }
   };
 
@@ -150,10 +162,13 @@ const Configuration = () => {
 
   if (showMachines) {
     return (
-      <Machines 
-        workCenter={selectedWorkCenter}
-        onBack={handleBackToWorkCenters}
-      />
+      <div className="p-4 sm:p-6 lg:p-8">
+        <Machines 
+          workCenter={selectedWorkCenter}
+          userId={userId}
+          onBack={handleBackToWorkCenters}
+        />
+      </div>
     );
   }
 
@@ -184,9 +199,17 @@ const Configuration = () => {
             dataSource={workCenters}
             rowKey="id"
             loading={loading}
-            pagination={{ pageSize: 10 }}
+            pagination={{
+              pageSize: 10,
+              size: "small",
+              responsive: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              showSizeChanger: true,
+              showQuickJumper: true,
+            }}
             bordered
             size="middle"
+            scroll={{ x: 1000 }}
             className="modern-table"
           />
         </Card>
@@ -195,17 +218,18 @@ const Configuration = () => {
     {
       key: 'customers',
       label: 'Customers',
-      children: <CustomersTable />,
+      children: <CustomersTable userId={userId} />,
     },
   ];
 
   return (
-    <div style={{ padding: '24px' }}>
+    <div className="p-4 sm:p-6 lg:p-8">
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
           font-weight: 600;
           border-bottom: 2px solid #1890ff;
+          white-space: nowrap;
         }
         .modern-table .ant-table-tbody > tr:hover > td {
           background: #f0f8ff !important;
@@ -213,13 +237,35 @@ const Configuration = () => {
         .modern-table .ant-table-tbody > tr > td {
           border-bottom: 1px solid #f0f0f0;
         }
+        @media (max-width: 640px) {
+          .ant-tabs-nav-list {
+            width: 100%;
+            display: flex;
+          }
+          .ant-tabs-tab {
+            flex: 1;
+            text-align: center;
+            margin: 0 !important;
+          }
+          .ant-card-head-title {
+            font-size: 16px;
+          }
+          .ant-card-extra {
+            padding: 8px 0;
+          }
+        }
       `}</style>
-      <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '24px' }}>Configuration</h1>
-      <Tabs defaultActiveKey="work-center" items={items} />
+      <h1 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Configuration</h1>
+      <Tabs 
+        defaultActiveKey="work-center" 
+        items={items} 
+        className="responsive-tabs"
+      />
 
       <WorkCenterModal
         workCenter={editingWorkCenter}
         isOpen={workCenterModalOpen}
+        userId={userId}
         onClose={() => setWorkCenterModalOpen(false)}
         onSave={() => {
           setWorkCenterModalOpen(false);
