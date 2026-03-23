@@ -40,6 +40,8 @@ from routers.pokayoke_checklists import router as pokayoke_checklists_router, co
 # Import general documents router
 from document_routers.general_documents import router as general_documents_router
 
+from document_routers.common_documents import router as common_documents_router
+
 # Import machine documents router
 from document_routers.machine_documents import router as machine_documents_router
 

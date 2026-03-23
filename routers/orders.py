@@ -33,6 +33,7 @@ from DB.schemas.oms import (
 )
 from .products import fetch_product_hierarchy, delete_product_cascade
 from DB.minio_client import get_minio_client
+from DB.models.notifications import OrderNotification as OrderNotificationModel
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -115,6 +116,10 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     db.add(db_order)
     db.commit()
     db.refresh(db_order)
+
+    notif = OrderNotificationModel(order_id=db_order.id)
+    db.add(notif)
+    db.commit()
 
     # Reload with relationships for response
     order_with_relations = (
@@ -837,6 +842,17 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
             text(
                 """
                 DELETE FROM scheduling.order_schedule_status
+                WHERE order_id = :order_id
+                """
+            ),
+            {"order_id": order_id},
+        )
+
+        # Delete order notifications referencing this order to satisfy FK in notifications.order_notifications
+        db.execute(
+            text(
+                """
+                DELETE FROM notifications.order_notifications
                 WHERE order_id = :order_id
                 """
             ),
