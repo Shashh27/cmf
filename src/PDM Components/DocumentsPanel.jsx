@@ -16,34 +16,9 @@ const { Text } = Typography;
 const { Dragger } = Upload;
 
 // ── OperationDocumentsList ──────────────────────────────────────────────────
-const OperationDocumentsList = ({ operationId, onPreview }) => {
-  const [docs, setDocs]       = useState([]);
-  const [loading, setLoading] = useState(false);
-
-    useEffect(() => {
-    let alive = true;
-    const ctrl = new AbortController();
-    const t = setTimeout(async () => {
-      if (!operationId || !alive) return;
-      setLoading(true);
-      try {
-        const r = await axios.get(
-          `${API_BASE_URL}/operation-documents/operation/${operationId}`,
-          { signal: ctrl.signal }
-        );
-        if (alive) setDocs(r.data);
-      } catch (e) {
-        if (e.name !== 'CanceledError' && e.name !== 'AbortError') console.error(e);
-      }
-      finally { if (alive && !ctrl.signal.aborted) setLoading(false); }
-    }, 100);
-    return () => { alive = false; clearTimeout(t); ctrl.abort(); };
-  }, [operationId]);
-
-  const parseV = (v) => parseFloat(String(v).replace(/^v/i, ''));
-
+const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
   if (loading) return <div className="p-4 flex justify-center"><Spin size="small"><span className="text-xs text-gray-600">Loading documents...</span></Spin></div>;
-  if (!docs.length) return (
+  if (!docs || !docs.length) return (
     <div className="p-6 text-center border border-dashed border-gray-300 rounded-lg bg-gray-50">
       <FileTextOutlined className="text-2xl text-gray-300 mb-2" />
       <p className="text-sm text-gray-500">No documents attached to this operation</p>
@@ -51,7 +26,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
   );
 
   const grouped = docs.reduce((acc, d) => { const r = d.parent_id || d.id; (acc[r] = acc[r] || []).push(d); return acc; }, {});
-  const latest  = Object.values(grouped).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]);
+  const latest  = Object.values(grouped).map(g => [...g].sort((a, b) => a.id - b.id)[0]);
 
   const columns = [
     { title: 'Type', dataIndex: 'document_type', width: 120, render: t => <Tag color="blue" variant="filled" className="mr-0">{t || 'DOC'}</Tag> },
@@ -72,7 +47,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
       expandable={{
         rowExpandable: r => (grouped[r.parent_id || r.id] || []).length > 1,
         expandedRowRender: r => {
-          const versions = [...(grouped[r.parent_id || r.id] || [])].sort((a, b) => parseV(b.document_version) - parseV(a.document_version));
+          const versions = [...(grouped[r.parent_id || r.id] || [])].sort((a, b) => a.id - b.id);
           return (
             <div className="bg-gray-50 p-3 rounded">
               <p className="text-xs font-medium text-gray-600 mb-2">Version History:</p>
@@ -104,7 +79,15 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
   const [scrollY, setScrollY] = useState(400);
 
   useEffect(() => {
-    const update = () => { if (ref.current) setScrollY(Math.max(window.innerHeight - ref.current.getBoundingClientRect().top - 40, 300)); };
+    // Use the container's own height so the table always gets an internal scroll area
+    // even when this panel sits inside another fixed-height/overflow-hidden layout (PDM).
+    const update = () => {
+      if (!ref.current) return;
+      const h = ref.current.clientHeight || 0;
+      // Account for table header + a little breathing room so the last row isn't clipped.
+      // (Header is typically ~40-56px depending on density, plus horizontal scrollbar if any.)
+      setScrollY(Math.max(h - 110, 200));
+    };
     const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
     if (ref.current) ro.observe(ref.current);
     update();
@@ -133,11 +116,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const [showPartActionModal, setShowPartActionModal] = useState(false);
   const [partActionType, setPartActionType]           = useState('');
   const [selectedOperation, setSelectedOperation]     = useState(null);
+  const [viewOperation, setViewOperation]             = useState(null);
   const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen]         = useState(false);
-  const [viewOperation, setViewOperation]             = useState(null);
-  const [viewOperationTools, setViewOperationTools]   = useState([]);
-  const [loadingViewTools, setLoadingViewTools]       = useState(false);
   const [modalTab, setModalTab]                       = useState('details');
   const [showAddToolForm, setShowAddToolForm]         = useState(false);
   const [showImportModal, setShowImportModal]         = useState(false);
@@ -175,7 +156,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   [documents]);
 
   const latestPartDocs = useMemo(() =>
-    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]),
+    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => a.id - b.id)[0]),
   [groupedPartDocs]);
 
   useEffect(() => {
@@ -193,22 +174,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (selectedItem.itemType === 'part') fetchDocuments();
     else { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); }
   }, [selectedItem]);
-
-  useEffect(() => {
-    if (viewOperation && isViewModalOpen) {
-      const fetchTools = async () => {
-        setLoadingViewTools(true);
-        try {
-          const r = await axios.get(`${API_BASE_URL}/tools/operation/${viewOperation.id}`);
-          setViewOperationTools(r.data);
-        } catch (e) { console.error(e); setViewOperationTools([]); }
-        finally { setLoadingViewTools(false); }
-      };
-      fetchTools();
-    } else {
-      setViewOperationTools([]);
-    }
-  }, [viewOperation, isViewModalOpen]);
 
   const getCurrentUserId = () => {
     try {
@@ -240,7 +205,20 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   };
 
   const handleDownload = (id) => { const a = document.createElement('a'); a.href = `${API_BASE_URL}/documents/${id}/download`; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); };
-  const handlePreview  = (doc) => { if (!doc.document_url) { message.error("Document URL not found"); return; } setPreviewDoc(doc); };
+  const handlePreview  = (doc) => { setPreviewDoc({ doc, source: 'part' }); };
+  const getPreviewType = (name) => {
+    const ext = (name || '').split('.').pop().toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) return 'image';
+    if (ext === 'pdf') return 'pdf';
+    return 'other';
+  };
+  const previewPreviewUrl = previewDoc && (previewDoc.source === 'part' ? `${API_BASE_URL}/documents/${previewDoc.doc.id}/preview` : `${API_BASE_URL}/operation-documents/${previewDoc.doc.id}/preview`);
+  const previewDownload = () => {
+    if (!previewDoc) return;
+    const url = previewDoc.source === 'part' ? `${API_BASE_URL}/documents/${previewDoc.doc.id}/download` : `${API_BASE_URL}/operation-documents/${previewDoc.doc.id}/download`;
+    const a = document.createElement('a'); a.href = url; a.setAttribute('download', previewDoc.doc.document_name); document.body.appendChild(a); a.click(); a.remove();
+    setPreviewDoc(null);
+  };
 
   const handleUpload = async () => {
     if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
@@ -283,11 +261,17 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       await fetchDocuments();
     } catch (e) {
       console.error(e);
-      const detail =
+      const raw =
         e?.response?.data?.detail ||
         e?.response?.data?.message ||
-        'Failed to delete document';
-      message.error(detail);
+        e?.message ||
+        '';
+      const msg = String(raw || '');
+      if (msg.toLowerCase().includes('foreignkeyviolation') || msg.toLowerCase().includes('violates foreign key')) {
+        message.error('Cannot delete this document because it has versions (child documents). Delete the versions first.');
+      } else {
+        message.error(msg.length > 160 ? `${msg.slice(0, 160)}...` : (msg || 'Failed to delete document'));
+      }
     }
   };
 
@@ -381,10 +365,19 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     },
   ];
 
+  const getDocumentDisplayName = (doc) => {
+    if (!doc) return '';
+    if (doc.document_url) {
+      const segment = doc.document_url.split('/').filter(Boolean).pop();
+      if (segment) return segment.replace(/^\d+_\d+_/, ''); // strip leading timestamp e.g. 20260312_155636_
+    }
+    return doc.document_name || '';
+  };
+
   // ── eBOM table columns ─────────────────────────────────────────────────────
   const eBomColumns = [
     { title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{cur.document_name}</Text></div>; }
+      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; const displayName = getDocumentDisplayName(cur); return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text></div>; }
     },
     { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
       render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
@@ -395,28 +388,44 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         const group  = groupedPartDocs[rootId] || [];
         const cur    = selectedVersions[rootId] || r;
         const fmtV   = (v) => String(v).startsWith('v') ? String(v) : `v${v}`;
+        const versionWidth = 88;
+        if (group.length <= 1) {
+          const ver = cur?.document_version || '1.0';
+          return (
+            <Select
+              size="small"
+              value={cur.id}
+              disabled
+              suffixIcon={null}
+              variant="filled"
+              style={{ width: versionWidth }}
+              options={[{ value: cur.id, label: fmtV(ver) }]}
+            />
+          );
+        }
         return (
-          <Select size="small" value={cur.id} variant="filled" className="w-full"
+          <Select
+            size="small"
+            value={cur.id}
+            variant="filled"
+            style={{ width: versionWidth }}
             onChange={val => { const s = group.find(d => d.id === val); setSelectedVersions(p => ({ ...p, [rootId]: s })); }}
-            styles={{ popup: { root: { minWidth: 180, padding: 4 } } }}
-            labelRender={({ value }) => { const v = group.find(d => d.id === value); const ver = v?.document_version || '1.0'; return <div className="flex items-center gap-2"><span className="font-bold text-blue-600">{fmtV(ver)}</span><span className="text-[10px] text-gray-400">{new Date(v?.created_at || Date.now()).toLocaleDateString()}</span></div>; }}
-          >
-            {[...group].sort((a, b) => parseV(b.document_version) - parseV(a.document_version)).map(ver => (
-              <Select.Option key={ver.id} value={ver.id}>
-                <div className="flex justify-between items-center w-full py-1">
-                  <div className="flex items-center gap-2">
-                    <Badge status={ver.id === r.id ? 'success' : 'default'} />
-                    <span className={`font-bold ${ver.id === cur.id ? 'text-blue-600' : 'text-gray-600'}`}>{fmtV(ver.document_version || '1.0')}</span>
-                  </div>
-                  <span className="text-[10px] text-gray-400 bg-gray-50 px-1 rounded">{new Date(ver.created_at || Date.now()).toLocaleDateString()}</span>
-                </div>
-              </Select.Option>
-            ))}
-          </Select>
+            popupMatchSelectWidth={false}
+            styles={{ popup: { root: { minWidth: 120, padding: 4 } } }}
+            labelRender={({ value }) => {
+              const v = group.find(d => d.id === value);
+              const ver = v?.document_version || '1.0';
+              return <span className="font-bold text-blue-600">{fmtV(ver)}</span>;
+            }}
+            options={[...group]
+              .sort((a, b) => a.id - b.id)
+              .map((ver) => ({ value: ver.id, label: fmtV(ver.document_version || '1.0') }))
+            }
+          />
         );
       }
     },
-    { title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 200, align: 'center',
+    { title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 220, align: 'center', fixed: 'right',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         return (
@@ -439,7 +448,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   const tabItems = [
     ...(isPart ? [{
-      key: 'mbom', label: <span className="font-medium">mBOM</span>,
+      key: 'mbom', label: <span className="font-medium">Process Plan</span>,
       children: (
         <div className="h-full flex flex-col min-h-0">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
@@ -473,7 +482,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       ),
     }] : []),
     {
-      key: 'ebom', label: <span className="font-medium">{isPart ? 'eBOM' : 'Documents'}</span>,
+      key: 'ebom', label: <span className="font-medium">{isPart ? 'Part Documents' : 'Documents'}</span>,
       children: (
         <div className="h-full flex flex-col min-h-0 overflow-hidden">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 shrink-0 gap-2">
@@ -484,7 +493,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden w-full">
-            <FitTable dataSource={latestPartDocs} rowKey="id" size="small" pagination={false} className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden" scrollX={600} columns={eBomColumns} />
+            <FitTable dataSource={latestPartDocs} rowKey="id" size="small" pagination={false} className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden" scrollX="max-content" columns={eBomColumns} />
           </div>
 
           {/* Upload Modal */}
@@ -567,10 +576,32 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
       {/* Preview Modal */}
       {previewDoc && (
-        <Modal title={previewDoc.document_name || "Document Preview"} open onCancel={() => setPreviewDoc(null)} width="95%" style={{ maxWidth: 1000, top: 20 }} footer={null} destroyOnHidden styles={{ body: { height: '75vh', padding: 0, overflow: 'hidden' } }}>
-          <div className="w-full h-full bg-gray-50 flex items-center justify-center">
-            <iframe src={previewDoc.document_url} className="w-full h-full border-0" title={previewDoc.document_name} />
-          </div>
+        <Modal
+          title={getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name || "Document Preview"}
+          open
+          onCancel={() => setPreviewDoc(null)}
+          width="95%"
+          style={{ maxWidth: 1000, top: 20 }}
+          destroyOnHidden
+          styles={{ body: { height: '75vh', padding: 0, minHeight: 200 } }}
+          footer={[
+            <Button key="dl" icon={<DownloadOutlined />} onClick={previewDownload}>Download</Button>,
+            <Button key="cl" type="primary" onClick={() => setPreviewDoc(null)}>Close</Button>
+          ]}
+        >
+          {getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === 'image' ? (
+            <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+              <img src={previewPreviewUrl} alt={getDocumentDisplayName(previewDoc.doc)} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            </div>
+          ) : getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === 'pdf' ? (
+            <iframe src={`${previewPreviewUrl}#toolbar=0`} title={getDocumentDisplayName(previewDoc.doc)} width="100%" height="100%" style={{ border: 'none' }} />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+              <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
+              <p className="text-gray-700 font-medium mb-2">Preview is not available for this file type.</p>
+              <p className="text-gray-500">Please download the file to view it.</p>
+            </div>
+          )}
         </Modal>
       )}
 
@@ -610,29 +641,25 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               </div>
             </div>
 
-            {(viewOperationTools.length > 0 || loadingViewTools) && (
+            {((viewOperation.tools && viewOperation.tools.length > 0)) && (
               <div className="bg-white p-2 sm:p-3 rounded-lg border border-gray-200 shadow-sm overflow-x-auto">
                 <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                   <ToolOutlined /> Tools Required:
                 </p>
-                {loadingViewTools ? (
-                  <div className="flex justify-center p-4"><Spin size="small" /></div>
-                ) : (
-                  <Table
-                    dataSource={viewOperationTools}
-                    rowKey="id"
-                    pagination={false}
-                    size="small"
-                    bordered
-                    scroll={{ x: 600 }}
-                    columns={[
-                      { title: 'Tool Name', dataIndex: ['tool', 'item_description'], key: 'name', render: (text) => <span className="font-medium text-xs sm:text-sm">{text}</span> },
-                      { title: 'Code', dataIndex: ['tool', 'identification_code'], key: 'code', render: (text) => <Tag className="text-xs">{text}</Tag> },
-                      { title: 'Make', dataIndex: ['tool', 'make'], key: 'make', render: (text) => <span className="text-xs sm:text-sm">{text}</span> },
-                      { title: 'Specification', dataIndex: ['tool', 'range'], key: 'range', render: (text) => <span className="text-xs sm:text-sm">{text}</span> },
-                    ]}
-                  />
-                )}
+                <Table
+                  dataSource={[...viewOperation.tools].sort((a, b) => a.id - b.id)}
+                  rowKey="id"
+                  pagination={false}
+                  size="small"
+                  bordered
+                  scroll={{ x: 600 }}
+                  columns={[
+                    { title: 'Tool Name', dataIndex: ['tool', 'item_description'], key: 'name', render: (text) => <span className="font-medium text-xs sm:text-sm">{text}</span> },
+                    { title: 'Code', dataIndex: ['tool', 'identification_code'], key: 'code', render: (text) => <Tag className="text-xs">{text}</Tag> },
+                    { title: 'Make', dataIndex: ['tool', 'make'], key: 'make', render: (text) => <span className="text-xs sm:text-sm">{text}</span> },
+                    { title: 'Specification', dataIndex: ['tool', 'range'], key: 'range', render: (text) => <span className="text-xs sm:text-sm">{text}</span> },
+                  ]}
+                />
               </div>
             )}
 
@@ -640,7 +667,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               <p className="text-xs font-semibold text-gray-600 mb-2 flex items-center gap-1">
                 <FileTextOutlined /> Operation Documents:
               </p>
-              <OperationDocumentsList operationId={viewOperation.id} onPreview={(doc) => setPreviewDoc(doc)} />
+              <OperationDocumentsList docs={viewOperation.operation_documents} onPreview={(doc) => setPreviewDoc({ doc, source: 'operation' })} />
             </div>
           </div>
         )}

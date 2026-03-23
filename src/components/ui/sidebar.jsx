@@ -15,7 +15,8 @@ import {
   BellOutlined,
   LockOutlined,
   MenuOutlined,
-  CloseOutlined
+  CloseOutlined,
+  ExperimentOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 
@@ -82,14 +83,21 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       icon: <ShoppingCartOutlined />,
       children: [
         { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
-        { key: `${prefix}/oms/rawmaterials`, label: <Link to={`${prefix}/oms/rawmaterials`} onClick={() => setMobileDrawerOpen(false)}>Raw Materials</Link> },
         { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
       ],
     },
+    ...(prefix === '/admin'
+      ? []
+      : [{
+          key: `${prefix}/pdm`,
+          label: <Link to={`${prefix}/pdm`} onClick={() => setMobileDrawerOpen(false)}>PDM</Link>,
+          icon: <DeploymentUnitOutlined />,
+        }]
+    ),
     {
-      key: `${prefix}/pdm`,
-      label: <Link to={`${prefix}/pdm`} onClick={() => setMobileDrawerOpen(false)}>PDM</Link>,
-      icon: <DeploymentUnitOutlined />,
+      key: `${prefix}/rawmaterials`,
+      label: <Link to={`${prefix}/rawmaterials`} onClick={() => setMobileDrawerOpen(false)}>Raw Materials</Link>,
+      icon: <ExperimentOutlined />,
     },
     {
       key: 'pps',
@@ -196,6 +204,72 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/dashboard`,
         label: <Link to={`${prefix}/dashboard`} onClick={() => setMobileDrawerOpen(false)}>Dashboard</Link>,
         icon: <DashboardOutlined />,
+      },
+      {
+        key: 'oms',
+        label: 'OMS',
+        icon: <ShoppingCartOutlined />,
+        children: [
+          { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
+          { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
+        ],
+      },
+      {
+        key: `${prefix}/rawmaterials`,
+        label: <Link to={`${prefix}/rawmaterials`} onClick={() => setMobileDrawerOpen(false)}>Raw Materials</Link>,
+        icon: <ExperimentOutlined />,
+      },
+      {
+        key: 'pps',
+        label: 'PPS',
+        icon: <AppstoreOutlined />,
+        children: [
+          { key: `${prefix}/pps/process-planning`, label: <Link to={`${prefix}/pps/process-planning`} onClick={() => setMobileDrawerOpen(false)}>Process Planning</Link> },
+          { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link> },
+          { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link> },
+          { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`} onClick={() => setMobileDrawerOpen(false)}>Capacity Planning</Link> },
+        ],
+      },
+      {
+        key: `${prefix}/configuration`,
+        label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
+        icon: <SettingOutlined />,
+      },
+      {
+        key: 'product-monitoring',
+        label: 'Product Monitoring',
+        icon: <MonitorOutlined />,
+        children: [
+          { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`} onClick={() => setMobileDrawerOpen(false)}>Live Monitoring</Link> },
+          { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link> },
+          { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`} onClick={() => setMobileDrawerOpen(false)}>Order Tracking</Link> },
+          { key: `${prefix}/product-monitoring/maintenance`, label: <Link to={`${prefix}/product-monitoring/maintenance`} onClick={() => setMobileDrawerOpen(false)}>Maintenance</Link> },
+          { key: `${prefix}/product-monitoring/pokayoke-checklists`, label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>PokaYoke Checklists</Link> },
+        ],
+      },
+      {
+        key: 'inventory-management',
+        label: 'Inventory Management',
+        icon: <DatabaseOutlined />,
+        children: [
+          { key: `${prefix}/inventory-management/inventory-master`, label: <Link to={`${prefix}/inventory-management/inventory-master`} onClick={() => setMobileDrawerOpen(false)}>Inventory Master</Link> },
+          { key: `${prefix}/inventory-management/overview-data`, label: <Link to={`${prefix}/inventory-management/overview-data`} onClick={() => setMobileDrawerOpen(false)}>Overview Data</Link> },
+        ],
+      },
+      {
+        key: `${prefix}/document-management`,
+        label: <Link to={`${prefix}/document-management`} onClick={() => setMobileDrawerOpen(false)}>Document Management</Link>,
+        icon: <FileTextOutlined />,
+      },
+      {
+        key: `${prefix}/notification`,
+        label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Notification</Link>,
+        icon: <BellOutlined />,
+      },
+      {
+        key: `${prefix}/access_control`,
+        label: <Link to={`${prefix}/access_control`} onClick={() => setMobileDrawerOpen(false)}>Access Control</Link>,
+        icon: <LockOutlined />,
       },
     ];
   } else if (prefix === '/supervisor') {

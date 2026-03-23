@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, UpOutlined, DownOutlined, LeftOutlined, RightOutlined, ExpandOutlined } from "@ant-design/icons";
 import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
@@ -15,6 +15,8 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   const [loadingThreeD, setLoadingThreeD] = useState(false);
   const [viewerModalOpen, setViewerModalOpen] = useState(false);
   const [selectedView, setSelectedView] = useState('default');
+  const extractedDocsSigRef = useRef("");
+  const extractedPartIdRef = useRef(null);
 
   const getCurrentUserId = () => {
     try {
@@ -48,29 +50,77 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
 
       setRawMaterials(materials);
 
-      // 2. Map extracted materials from hierarchical data (passed via selectedItem)
-      if (selectedItem.itemType === "part") {
-        const extracted = selectedItem.extracted_data || [];
-        // Map document info to each extracted data entry for display
-        const mappedExtracted = extracted.map(ex => {
-          // Fallback to partDocuments prop if selectedItem.documents is empty
-          const docsSource = (selectedItem.documents || []).length > 0 
-            ? selectedItem.documents 
-            : (Array.isArray(partDocuments) ? partDocuments : []);
-            
-          const doc = docsSource.find(d => d.id === ex.document_id);
-          return {
-            ...ex,
-            document_name: doc?.document_name || "N/A",
-            document_version: doc?.document_version || "1.0"
-          };
-        });
-        setExtractedMaterials(mappedExtracted);
-      } else {
+      // 2. Extracted raw materials from 2D files (refresh from backend so ADD reflects immediately)
+      if (selectedItem.itemType !== "part") {
         setExtractedMaterials([]);
+      } else {
+        const parseV = (v) => parseFloat(String(v || "").replace(/^v/i, "")) || 0;
+        const docsSource = (Array.isArray(partDocuments) && partDocuments.length > 0)
+          ? partDocuments
+          : (selectedItem.documents || []);
+        const docById = new Map(docsSource.map((d) => [d.id, d]));
+        const docsSig = (docsSource || [])
+          .map((d) => `${d?.id ?? ""}:${d?.document_version ?? ""}`)
+          .join("|");
+
+        const buildRows = (extractedList) => {
+          const grouped = new Map();
+          (extractedList || []).forEach((ex) => {
+            const doc = docById.get(ex.document_id);
+            if (!doc) return;
+            const rootId = doc.parent_id || doc.id || ex.document_id;
+            const versionNum = parseV(doc.document_version);
+            const entry = grouped.get(rootId) || { rootId, variants: [] };
+            entry.variants.push({ ex, doc, versionNum });
+            grouped.set(rootId, entry);
+          });
+          return Array.from(grouped.values()).map(({ rootId, variants }) => {
+            // FIFO by document id (oldest first)
+            const sorted = [...variants].sort((a, b) => (a.doc?.id || 0) - (b.doc?.id || 0));
+            const chosen = sorted[0];
+            return {
+              ...chosen.ex,
+              _rootId: rootId,
+              _variants: sorted.map((v) => ({
+                document_id: v.ex.document_id,
+                document_name: v.doc?.document_name || "N/A",
+                document_version: v.doc?.document_version || "1.0",
+                ex: v.ex,
+              })),
+              document_name: chosen.doc?.document_name || "N/A",
+              document_version: chosen.doc?.document_version || "1.0",
+            };
+          });
+        };
+
+        const partId = selectedItem.id;
+        const isNewPart = extractedPartIdRef.current !== partId;
+        if (isNewPart) {
+          extractedPartIdRef.current = partId;
+          extractedDocsSigRef.current = docsSig;
+          setExtractedMaterials(buildRows(selectedItem.extracted_data || []));
+          return;
+        }
+
+        if (docsSig === extractedDocsSigRef.current) {
+          setExtractedMaterials(buildRows(selectedItem.extracted_data || []));
+          return;
+        }
+        extractedDocsSigRef.current = docsSig;
+
+        const controller = new AbortController();
+        (async () => {
+          try {
+            const res = await axios.get(`${API_BASE_URL}/documents/part/${partId}/extracted-data`, { signal: controller.signal });
+            setExtractedMaterials(buildRows(res.data || []));
+          } catch {
+            setExtractedMaterials(buildRows(selectedItem.extracted_data || []));
+          }
+        })();
+        return () => controller.abort();
       }
     }
-  }, [selectedItem]);
+  }, [selectedItem, partDocuments]);
 
   useEffect(() => {
     if (!selectedItem || selectedItem.itemType !== "part") {
@@ -91,9 +141,8 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       return byExt || byType;
     });
     const sorted = [...filtered].sort((a, b) => {
-      const av = parseFloat(a.document_version || "0") || 0;
-      const bv = parseFloat(b.document_version || "0") || 0;
-      return bv - av;
+      // Sort by ID in FIFO order (ascending)
+      return (a.id || 0) - (b.id || 0);
     });
     setThreeDDocuments(sorted);
     setSelectedThreeDDocumentId(sorted[0]?.id || null);
@@ -127,7 +176,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   
   const getItemNumber = () => {
     switch(itemType) {
-      case 'product': return item?.product_number || item?.id;
+      case 'product': return item?.id;
       case 'assembly': return item?.assembly_number || item?.id;
       case 'part': return item?.part_number || item?.id;
       default: return item?.id;
@@ -145,6 +194,9 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
 
   const itemNumber = getItemNumber();
   const itemName = getItemName();
+  const partDetailLabel = itemType === 'part' && item?.part_detail
+    ? (item.part_detail === 'WITH_RAW_MATERIAL' ? 'With raw material' : item.part_detail === 'WITHOUT_RAW_MATERIAL' ? 'Without raw material' : null)
+    : null;
 
   const handleClearRawMaterial = (material) => {
     if (itemType !== "part" || !item?.id || !material) return;
@@ -282,25 +334,57 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       width: 70,
       align: 'center',
       onHeaderCell: headerNoWrap,
-      render: (text) => {
+      render: (text, row) => {
+        const variants = Array.isArray(row?._variants) ? row._variants : [];
         const v = text || '1.0';
-        return <Tag className="text-[10px] m-0" color="blue">{v.startsWith('v') ? v : `v${v}`}</Tag>;
+        if (variants.length <= 1) {
+          const label = String(v).startsWith('v') ? v : `v${v}`;
+          return (
+            <Select
+              size="small"
+              value={row.document_id}
+              disabled
+              suffixIcon={null}
+              style={{ width: 74 }}
+              options={[{ value: row.document_id, label }]}
+            />
+          );
+        }
+        return (
+          <Select
+            size="small"
+            value={row.document_id}
+            style={{ width: 74 }}
+            onChange={(nextDocId) => {
+              setExtractedMaterials((prev) =>
+                prev.map((r) => {
+                  if (r._rootId !== row._rootId) return r;
+                  const next = (r._variants || []).find((vv) => vv.document_id === nextDocId);
+                  if (!next) return r;
+                  return {
+                    ...r,
+                    ...next.ex,
+                    document_id: next.document_id,
+                    document_name: next.document_name,
+                    document_version: next.document_version,
+                  };
+                })
+              );
+            }}
+            options={variants.map((vv) => {
+              const raw = vv.document_version || '1.0';
+              const label = String(raw).startsWith('v') ? raw : `v${raw}`;
+              return { value: vv.document_id, label };
+            })}
+          />
+        );
       }
     },
     {
-      title: 'Note',
-      dataIndex: 'note',
-      key: 'note',
-      width: 130,
-      ellipsis: { showTitle: false },
-      onHeaderCell: headerNoWrap,
-      render: (text) => text ? <Tooltip title={text}><span className="text-xs block truncate">{text}</span></Tooltip> : <Text type="secondary" italic>N/A</Text>
-    },
-    {
-      title: 'Title',
-      dataIndex: 'title',
-      key: 'title',
-      width: 90,
+      title: 'Material',
+      dataIndex: 'material',
+      key: 'material',
+      width: 95,
       ellipsis: { showTitle: false },
       onHeaderCell: headerNoWrap,
       render: (text) => cellWithTooltip(text, 'N/A')
@@ -309,15 +393,6 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       title: 'Stock Size',
       dataIndex: 'stock_size',
       key: 'stock_size',
-      width: 95,
-      ellipsis: { showTitle: false },
-      onHeaderCell: headerNoWrap,
-      render: (text) => cellWithTooltip(text, 'N/A')
-    },
-    {
-      title: 'Material',
-      dataIndex: 'material',
-      key: 'material',
       width: 95,
       ellipsis: { showTitle: false },
       onHeaderCell: headerNoWrap,
@@ -336,6 +411,24 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       dataIndex: 'net_wt_kg',
       key: 'net_wt_kg',
       width: 92,
+      onHeaderCell: headerNoWrap,
+      render: (text) => cellWithTooltip(text, 'N/A')
+    },
+    {
+      title: 'Note',
+      dataIndex: 'note',
+      key: 'note',
+      width: 130,
+      ellipsis: { showTitle: false },
+      onHeaderCell: headerNoWrap,
+      render: (text) => text ? <Tooltip title={text}><span className="text-xs block truncate">{text}</span></Tooltip> : <Text type="secondary" italic>N/A</Text>
+    },
+    {
+      title: 'Title',
+      dataIndex: 'title',
+      key: 'title',
+      width: 90,
+      ellipsis: { showTitle: false },
       onHeaderCell: headerNoWrap,
       render: (text) => cellWithTooltip(text, 'N/A')
     },
@@ -370,18 +463,18 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
             <div>
               <div className="flex items-center gap-1 mb-1 flex-wrap">
                 <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
-                <Text type="secondary" className="text-xs">Extracted from 2D Files ({extractedMaterials.length})</Text>
+                <Text type="secondary" className="text-xs">Extracted from 2D Files</Text>
                 <span className="text-[10px] text-slate-400 ml-1 sm:hidden">— scroll →</span>
               </div>
               {extractedMaterials.length > 0 ? (
-                <div className="w-full overflow-x-auto -mx-px">
+                <div className="w-full overflow-x-auto overflow-y-hidden -mx-px">
                   <Table 
                     dataSource={extractedMaterials} 
                     columns={extractedMaterialColumns} 
-                    rowKey="id" 
+                    rowKey="_rootId" 
                     size="small" 
                     pagination={false} 
-                    scroll={{ x: 777, y: 120 }} 
+                    scroll={{ x: 'max-content', y: 120 }} 
                     bordered 
                     className="extracted-materials-table"
                   />
@@ -401,13 +494,14 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   return (
     <div className="flex flex-col bg-white border-b border-slate-200 h-full overflow-hidden">
       <Card variant="borderless" className="shadow-none rounded-none flex flex-col" styles={{ body: { padding: 'clamp(6px, 1.5vw, 12px)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } }}>
-        <div className="flex items-baseline gap-2 shrink-0 mb-1">
+        <div className="flex items-baseline gap-2 shrink-0 mb-1 flex-wrap">
           <span className="font-semibold text-slate-800 truncate" style={{ fontSize: 'clamp(12px, 2.5vw, 14px)' }}>{itemName || 'Unknown Item'}</span>
           <span className="font-mono text-xs text-slate-500 truncate">({itemNumber || 'N/A'})</span>
+          {partDetailLabel != null && <Tag color="blue" className="text-xs m-0">{partDetailLabel}</Tag>}
         </div>
         <div className="flex-1 min-h-0 flex flex-col">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 min-h-0">
-            <div className="overflow-y-auto pr-1 min-h-0">
+            <div className="overflow-auto pr-1 min-h-0">
               <Tabs defaultActiveKey="info" items={items} size="small" className="product-details-tabs" />
             </div>
             <div className="bg-slate-50/80 rounded-lg p-1.5 flex flex-col border border-slate-200 min-h-[100px] sm:min-h-[120px]">

@@ -38,9 +38,10 @@ function App() {
           <Route path="/admin/oms/orders" element={<OMS />} />
           <Route path="/admin/oms/parts-priority" element={<PartsPriority />} />
           <Route path="/admin/oms/product/:productId" element={<OMS />} />
-          <Route path="/admin/oms/rawmaterials" element={<RawMaterials />} />
 
           <Route path="/admin/pdm" element={<PDM />} />
+
+          <Route path="/admin/rawmaterials" element={<RawMaterials />} />
 
           <Route path="/admin/pps" element={<Navigate to="/admin/pps/assets-availability" replace />} />
           <Route path="/admin/pps/assets-availability" element={<PPS />} />
@@ -80,6 +81,30 @@ function App() {
           {/* Manufacturing Coordinator */}
           <Route path="/manufacturing_coordinator" element={<Navigate to="/manufacturing_coordinator/dashboard" replace />} />
           <Route path="/manufacturing_coordinator/dashboard" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/oms" element={<Navigate to="/manufacturing_coordinator/oms/orders" replace />} />
+          <Route path="/manufacturing_coordinator/oms/orders" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/rawmaterials" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/oms/parts-priority" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/oms/product/:productId" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/pdm" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/pps" element={<Navigate to="/manufacturing_coordinator/pps/assets-availability" replace />} />
+          <Route path="/manufacturing_coordinator/pps/assets-availability" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/pps/capacity-planning" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/pps/machine-scheduling" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/pps/process-planning" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/product-monitoring" element={<Navigate to="/manufacturing_coordinator/product-monitoring/live-monitoring" replace />} />
+          <Route path="/manufacturing_coordinator/product-monitoring/live-monitoring" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/product-monitoring/planned-vs-actual" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/product-monitoring/order-tracking" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/product-monitoring/maintenance" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/product-monitoring/pokayoke-checklists" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/inventory-management" element={<Navigate to="/manufacturing_coordinator/inventory-management/inventory-master" replace />} />
+          <Route path="/manufacturing_coordinator/inventory-management/inventory-master" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/inventory-management/overview-data" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/document-management" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/notification" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/access_control" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/configuration" element={<Configuration />} />
           
           {/* Supervisor */}
           <Route path="/supervisor" element={<Navigate to="/login" replace />} />

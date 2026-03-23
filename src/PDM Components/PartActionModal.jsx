@@ -132,77 +132,118 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     const ts  = (d) => d ? dayjs(d).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString() : null;
     const resolveType = (type, other) => (type === 'Other' && other?.trim()) ? other.trim() : type;
 
-    for (const item of items) {
+    let bulkDocFormData = null;
+
+    // Bulk create operations + reduce tool/doc upload calls
+    if (actionType === 'operation') {
+      const uid = getCurrentUserId();
+      const opPayloads = items.map((item) => {
+        const out = item.part_type_id === 2;
+        return {
+          operation_name: item.operation_name,
+          part_type_id: item.part_type_id ?? 1,
+          from_date: ts(item.from_date),
+          to_date: ts(item.to_date),
+          setup_time: out ? null : (item.setup_time?.format('HH:mm:ss') ?? null),
+          cycle_time: out ? null : (item.cycle_time?.format('HH:mm:ss') ?? null),
+          workcenter_id: out ? null : (item.workcenter_id ? parseInt(item.workcenter_id) : null),
+          machine_id: out ? null : (item.machine_id ? parseInt(item.machine_id) : null),
+          work_instructions: out ? null : (item.work_instructions || null),
+          notes: out ? null : (item.notes || null),
+          part_id: selectedPart.id,
+          user_id: uid,
+        };
+      });
+
       try {
-        if (actionType === 'operation') {
-          const out = item.part_type_id === 2;
-          const uid = getCurrentUserId();
-          const payload = {
-            operation_name:    item.operation_name,
-            part_type_id:      item.part_type_id ?? 1,
-            from_date:         ts(item.from_date),
-            to_date:           ts(item.to_date),
-            setup_time:        out ? null : (item.setup_time?.format('HH:mm:ss') ?? null),
-            cycle_time:        out ? null : (item.cycle_time?.format('HH:mm:ss') ?? null),
-            workcenter_id:     out ? null : (item.workcenter_id ? parseInt(item.workcenter_id) : null),
-            machine_id:        out ? null : (item.machine_id   ? parseInt(item.machine_id)    : null),
-            work_instructions: out ? null : (item.work_instructions || null),
-            notes:             out ? null : (item.notes || null),
-            part_id:           selectedPart.id,
-            user_id:           uid,
-          };
-          const opRes = await axios.post(
-            `${API_BASE_URL}/operations/`,
-            payload,
-            {
-              headers: { 'Content-Type': 'application/json' },
-            }
-          );
-          const newOp = opRes.data;
-          results.push(newOp);
+        const opRes = await axios.post(
+          `${API_BASE_URL}/operations/bulk`,
+          opPayloads,
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+        const createdOps = Array.isArray(opRes.data) ? opRes.data : [];
+        createdOps.forEach((o) => results.push(o));
 
-          // Tools
-          for (const toolId of (item.tool_ids || [])) {
-            try {
-              await axios.post(
-                `${API_BASE_URL}/tools/`,
-                { tool_id: toolId, part_id: selectedPart.id, operation_id: newOp.id, user_id: uid },
-                { headers: { 'Content-Type': 'application/json' } }
-              );
+        // Build ONE tools bulk request (across all operations)
+        try {
+          const links = [];
+          for (let i = 0; i < createdOps.length; i++) {
+            const newOp = createdOps[i];
+            const item = items[i];
+            const toolIds = item?.tool_ids || [];
+            for (const tid of toolIds) {
+              links.push({ tool_id: tid, part_id: selectedPart.id, operation_id: newOp.id, user_id: uid });
             }
-            catch (e) { console.error(e); }
+          }
+          if (links.length) {
+            await axios.post(`${API_BASE_URL}/tools/bulk-links`, links, { headers: { 'Content-Type': 'application/json' } });
+          }
+        } catch (e) { console.error(e); }
+
+        // Build ONE operation-documents bulk request (across all operations)
+        try {
+          const fd = new FormData();
+          if (uid != null) fd.append('user_id', String(uid));
+
+          for (let i = 0; i < createdOps.length; i++) {
+            const newOp = createdOps[i];
+            const item = items[i];
+            const docs = item?.documents || [];
+            for (const doc of docs) {
+              if (!doc.files?.length) continue;
+              const fileObj = doc.files?.[0]?.originFileObj;
+              if (!fileObj) continue;
+              fd.append('operation_id', String(newOp.id));
+              fd.append('files', fileObj);
+              fd.append('document_name', fileObj.name || 'Document');
+              fd.append('document_type', resolveType(doc.document_type, doc.document_type_other) || 'Balloon');
+              fd.append('document_version', (doc.document_version || 'v1.0').replace(/^v/i, ''));
+              fd.append('parent_id', '');
+            }
           }
 
-          // Documents
-          for (const doc of (item.documents || [])) {
-            if (!doc.files?.length) continue;
+          if (fd.getAll('files')?.length) {
+            await axios.post(`${API_BASE_URL}/operation-documents/upload-bulk-multi/`, fd);
+          }
+        } catch (e) { console.error(e); }
+      } catch (e) {
+        console.error(e);
+        message.error('Failed to create operations');
+      }
+    } else {
+      for (const item of items) {
+        try {
+          if (actionType === 'document') {
+          if (!bulkDocFormData) {
             const fd = new FormData();
-            fd.append('operation_id', newOp.id);
-            fd.append('document_version', doc.document_version || 'v1.0');
-            fd.append('document_type', resolveType(doc.document_type, doc.document_type_other) || 'Balloon');
-            doc.files.forEach(f => { if (f.originFileObj) fd.append('files', f.originFileObj); });
+            fd.append('part_id', selectedPart.id.toString());
+            const uid = getCurrentUserId();
             if (uid != null) fd.append('user_id', String(uid));
-            try {
-              await axios.post(`${API_BASE_URL}/operation-documents/upload/`, fd);
-            } catch (e) { console.error(e); }
+            bulkDocFormData = fd;
           }
-
-        } else if (actionType === 'document') {
           const file = item.file?.[0]?.originFileObj;
           if (!file) continue;
-          const fd = new FormData();
-          fd.append('file', file);
-          fd.append('document_name', item.document_name);
-          fd.append('document_type', resolveType(item.document_type, item.document_type_other));
-          fd.append('document_version', item.document_version || 'v1.0');
-          fd.append('part_id', selectedPart.id.toString());
-          if (item.parent_id) fd.append('parent_id', item.parent_id.toString());
-          const uid = getCurrentUserId();
-          if (uid != null) fd.append('user_id', String(uid));
-          const r = await axios.post(`${API_BASE_URL}/documents/`, fd);
-          results.push(r.data);
-        }
-      } catch (e) { console.error(e); message.error('Failed to create item'); }
+
+          bulkDocFormData.append('files', file);
+          bulkDocFormData.append('document_name', item.document_name || file.name?.replace(/\.[^/.]+$/, '') || 'Document');
+          bulkDocFormData.append('document_type', resolveType(item.document_type, item.document_type_other));
+          bulkDocFormData.append('document_version', item.document_version || 'v1.0');
+          if (item.parent_id) bulkDocFormData.append('parent_id', String(item.parent_id));
+          }
+        } catch (e) { console.error(e); message.error('Failed to create item'); }
+      }
+    }
+
+    // Submit bulk part documents (if any)
+    if (actionType === 'document' && bulkDocFormData) {
+      try {
+        const resp = await axios.post(`${API_BASE_URL}/documents/bulk`, bulkDocFormData);
+        const created = Array.isArray(resp.data) ? resp.data : [];
+        created.forEach(d => results.push(d));
+      } catch (e) {
+        console.error(e);
+        message.error('Failed to upload documents');
+      }
     }
 
     setLoading(false);
@@ -239,8 +280,13 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                             const isOut = getFieldValue(['items', index, 'part_type_id']) === 2;
                             return (
                               <Row gutter={[12, 12]}>
+                                <Col xs={24} sm={6} md={3}>
+                                  <Form.Item label="Op Number" required>
+                                    <Input value={(index + 1) * 10} disabled />
+                                  </Form.Item>
+                                </Col>
                                 <Col xs={24} sm={8} md={5}>
-                                  <Form.Item {...rest} name={[name, 'operation_name']} label="Operation Name" rules={[{ required: true, message: 'Req' }]} getValueFromEvent={e => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}>
+                                  <Form.Item {...rest} name={[name, 'operation_name']} label="Operation Name" rules={[{ required: true, message: 'Operation Name is required' }]} getValueFromEvent={e => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}>
                                     <Input placeholder="Cutting" autoComplete="off" maxLength={30} />
                                   </Form.Item>
                                 </Col>
@@ -252,12 +298,12 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                 {!isOut && (
                                   <>
                                     <Col xs={12} sm={12} md={5}>
-                                      <Form.Item {...rest} name={[name, 'setup_time']} label="Setup Time" rules={timePickerRules('Setup Time')}>
+                                      <Form.Item {...rest} name={[name, 'setup_time']} label="Setup Time" required rules={timePickerRules('Setup Time')}>
                                         <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
                                       </Form.Item>
                                     </Col>
                                     <Col xs={12} sm={12} md={6}>
-                                      <Form.Item {...rest} name={[name, 'cycle_time']} label="Cycle Time" rules={timePickerRules('Cycle Time')}>
+                                      <Form.Item {...rest} name={[name, 'cycle_time']} label="Cycle Time" required rules={timePickerRules('Cycle Time')}>
                                         <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
                                       </Form.Item>
                                     </Col>
@@ -309,9 +355,17 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                   </Col>
                                   <Col xs={24} sm={24} md={8} lg={12}>
                                     <Form.Item {...rest} name={[name, 'tool_ids']} label="Tools">
-                                      <Select mode="multiple" placeholder="Select Tools" loading={toolsLoading} onOpenChange={o => { if (o) fetchTools(); }} optionFilterProp="children" maxTagCount="responsive"
-                                        filterOption={(input, option) => (option?.children ?? '').toLowerCase().includes(input.toLowerCase())}>
-                                        {toolsList.map(t => <Select.Option key={t.id} value={t.id}>{t.item_description} ({t.identification_code}){t.range ? ` - ${t.range}` : ''}</Select.Option>)}
+                                      <Select mode="multiple" placeholder="Select Tools" loading={toolsLoading} onOpenChange={o => { if (o) fetchTools(); }} optionFilterProp="label" maxTagCount="responsive"
+                                        filterOption={(input, option) => {
+                                        const label = option?.label ?? option?.children;
+                                        const str = (label != null && typeof label === 'string') ? label : String(label ?? '');
+                                        const inp = (input != null && typeof input === 'string') ? input : String(input ?? '');
+                                        return str.toLowerCase().includes(inp.toLowerCase());
+                                      }}>
+                                        {toolsList.map(t => {
+                                          const searchLabel = `${t.item_description || ''} ${t.identification_code || ''} ${t.range || ''}`.trim();
+                                          return <Select.Option key={t.id} value={t.id} label={searchLabel}>{t.item_description} ({t.identification_code}){t.range ? ` - ${t.range}` : ''}</Select.Option>;
+                                        })}
                                       </Select>
                                     </Form.Item>
                                   </Col>

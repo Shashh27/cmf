@@ -5,7 +5,7 @@ import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import { API_BASE_URL } from "../Config/auth";
 import dayjs from "dayjs";
 
-const ProcessPlanning = () => {
+const ProcessPlanning = ({ initialOrderId }) => {
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
@@ -38,6 +38,21 @@ const ProcessPlanning = () => {
     };
     fetchOrders();
   }, []);
+
+  // Auto-select order when initialOrderId provided
+  useEffect(() => {
+    if (!initialOrderId || !orders?.length) return;
+    const numericId = Number(initialOrderId);
+    const exists = orders.some(o => Number(o.id) === numericId);
+    if (exists) {
+      setSelectedOrderId(numericId);
+    }
+  }, [initialOrderId, orders]);
+
+  const isLockedToInitialOrder = initialOrderId != null && String(initialOrderId).trim() !== "";
+  const visibleOrders = isLockedToInitialOrder
+    ? orders.filter(o => Number(o.id) === Number(initialOrderId))
+    : orders;
 
   // ================================
   // FETCH ORDER DETAILS (hierarchy)
@@ -473,8 +488,9 @@ const ProcessPlanning = () => {
           <Select
             style={{ width: 300 }}
             value={selectedOrderId}
-            onChange={setSelectedOrderId}
-            options={orders.map(o => ({
+            onChange={isLockedToInitialOrder ? undefined : setSelectedOrderId}
+            disabled={isLockedToInitialOrder}
+            options={visibleOrders.map(o => ({
               value: o.id,
               label: `${o.sale_order_number}`
             }))}

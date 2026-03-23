@@ -77,7 +77,11 @@ const OMS = () => {
 
   const fetchProducts = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/products/`);
+      const adminId = getCurrentAdminId();
+      const response = await axios.get(`${API_BASE_URL}/products/`, {
+        // Only show products created by this admin in the Project Name dropdown
+        params: adminId != null ? { user_id: adminId } : undefined,
+      });
       setProducts(response.data);
     } catch (error) {
       console.error("Error fetching products:", error);
@@ -113,8 +117,8 @@ const OMS = () => {
 
   const getProductName = (productId, record) => {
     const product = products.find((p) => p.id === productId);
-    if (product) return (product.product_name || product.product_number);
-    return record?.product_name ?? productId;
+    if (product) return product.product_name || `Project ${productId}`;
+    return record?.product_name ?? `Project ${productId}`;
   };
 
   const formatDate = (dateStr) => {
@@ -226,13 +230,12 @@ const OMS = () => {
       const orderDate = order.order_date ? dayjs(order.order_date) : null;
       const dueDate = order.due_date ? dayjs(order.due_date) : null;
 
-      // Strict containment: If a date exists, it MUST be within the [start, end] range.
-      // If it's "beyond" (before start or after end), hide the row.
-      if (orderDate && (orderDate.isBefore(start) || orderDate.isAfter(end))) return false;
-      if (dueDate && (dueDate.isBefore(start) || dueDate.isAfter(end))) return false;
-      
-      // If no date exists at all, hide it when filtering
-      if (!orderDate && !dueDate) return false;
+      // If a date exists, check if it falls within the range [start, end]
+      const isOrderDateInRange = orderDate && (orderDate.isAfter(start) || orderDate.isSame(start)) && (orderDate.isBefore(end) || orderDate.isSame(end));
+      const isDueDateInRange = dueDate && (dueDate.isAfter(start) || dueDate.isSame(start)) && (dueDate.isBefore(end) || dueDate.isSame(end));
+
+      // Show the order if EITHER date falls within the range
+      if (!isOrderDateInRange && !isDueDateInRange) return false;
     }
 
     // 2. Global Search Filter (Table Headers)
@@ -307,6 +310,33 @@ const OMS = () => {
       render: (text) => <span className="font-medium text-gray-800">{text}</span>,
     },
     {
+      title: <span className="font-semibold text-gray-700">Project Name</span>,
+      dataIndex: "product_id",
+      key: "product_id",
+      render: (productId, record) => (
+        <Button
+          type="link"
+          className="p-0 h-auto"
+          onClick={() => {
+            if (!productId) return;
+            navigate(`/admin/pdm?from=oms&productId=${productId}&orderId=${record.id}`);
+          }}
+        >
+          <Space className="text-gray-700">
+            <AppstoreOutlined className="text-blue-500" />
+            <span className="underline">{getProductName(productId, record)}</span>
+          </Space>
+        </Button>
+      ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Qty</span>,
+      dataIndex: "quantity",
+      key: "quantity",
+      width: 80,
+      render: (text) => <span className="font-mono text-gray-700">{text}</span>,
+    },
+    {
       title: <span className="font-semibold text-gray-700">Customer</span>,
       dataIndex: "customer_id",
       key: "customer_id",
@@ -316,24 +346,6 @@ const OMS = () => {
             <span className="text-gray-700">{getCustomerName(customerId, record)}</span>
         </Space>
       ),
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Project Name</span>,
-      dataIndex: "product_id",
-      key: "product_id",
-      render: (productId, record) => (
-        <Space className="text-gray-700">
-          <AppstoreOutlined className="text-blue-500" />
-          <span>{getProductName(productId, record)}</span>
-        </Space>
-      ),
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Qty</span>,
-      dataIndex: "quantity",
-      key: "quantity",
-      width: 80,
-      render: (text) => <span className="font-mono text-gray-700">{text}</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Order Date</span>,
@@ -358,12 +370,6 @@ const OMS = () => {
       ),
     },
     {
-      title: <span className="font-semibold text-gray-700">Status</span>,
-      dataIndex: "status",
-      key: "status",
-      render: (status) => getStatusBadge(status),
-    },
-    {
       title: <span className="font-semibold text-gray-700">Project Coordinator</span>,
       dataIndex: "user_name",
       key: "user_name",
@@ -386,6 +392,12 @@ const OMS = () => {
           </span>
         </Space>
       ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Status</span>,
+      dataIndex: "status",
+      key: "status",
+      render: (status) => getStatusBadge(status),
     },
     {
       title: <span className="font-semibold text-gray-700">Actions</span>,

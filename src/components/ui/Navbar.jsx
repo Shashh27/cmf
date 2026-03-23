@@ -76,13 +76,13 @@ const Navbar = ({ collapsed }) => {
     }
     try {
       setNotifLoading(true);
-      const endpoints = [
-        `${config.API_BASE_URL}/order-notifications/`,
-        `${config.API_BASE_URL}/machine-notifications/`,
-        `${config.API_BASE_URL}/tool-issues-notifications/`,
-        `${config.API_BASE_URL}/component-issues-notifications/`,
-        `${config.API_BASE_URL}/machine-calibration-notifications/`,
-      ];
+      // const endpoints = [
+      //   `${config.API_BASE_URL}/order-notifications/`,
+      //   `${config.API_BASE_URL}/machine-notifications/`,
+      //   `${config.API_BASE_URL}/tool-issues-notifications/`,
+      //   `${config.API_BASE_URL}/component-issues-notifications/`,
+      //   `${config.API_BASE_URL}/machine-calibration-notifications/`,
+      // ];
       const [orders, machines, tools, components, calibrations] = await Promise.all(
         endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : [])))
       );

@@ -270,7 +270,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
       value !== null && value !== undefined && 
       String(value).toLowerCase().includes(searchLower)
     );
-  });
+  }).sort((a, b) => (a.id || 0) - (b.id || 0));
 
   const columns = [
     {

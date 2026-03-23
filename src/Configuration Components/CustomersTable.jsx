@@ -5,7 +5,7 @@ import { Table, Button, message, Popconfirm, Space, Card, Tooltip } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import CustomerModal from "./CustomerModal";
 
-const CustomersTable = () => {
+const CustomersTable = ({ userId }) => {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
@@ -17,7 +17,9 @@ const CustomersTable = () => {
 
   const fetchCustomers = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/customers/`);
+      const response = await axios.get(`${API_BASE_URL}/customers/`, {
+        params: userId != null ? { user_id: userId } : undefined,
+      });
       setCustomers(response.data);
     } catch (error) {
       console.error("Error fetching customers:", error);
@@ -39,7 +41,9 @@ const CustomersTable = () => {
 
   const handleDeleteCustomer = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/customers/${id}/`);
+      await axios.delete(`${API_BASE_URL}/customers/${id}/`, {
+        params: userId != null ? { user_id: userId } : undefined,
+      });
       message.success("Customer deleted successfully");
       fetchCustomers();
     } catch (error) {
@@ -205,6 +209,7 @@ const CustomersTable = () => {
         <CustomerModal
           isOpen={customerModalOpen}
           onClose={() => setCustomerModalOpen(false)}
+          userId={userId}
           onCustomerCreated={editingCustomer ? handleCustomerUpdated : handleCustomerCreated}
           editingCustomer={editingCustomer}
         />

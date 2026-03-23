@@ -69,6 +69,7 @@ const EditOperationModal = ({
   const [loadingTools, setLoadingTools]         = useState(false);
   const [preview, setPreview]                   = useState(null); // { url, title, type }
   const [viewingDoc, setViewingDoc]             = useState(null); // { url, title, type, id, name }
+  const [documentPreviewModal, setDocumentPreviewModal] = useState(null); // { url, title, type, id, name } — preview in modal
   const [partTypes, setPartTypes]               = useState([]);
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
   const [workCentersLoading, setWorkCentersLoading] = useState(false);
@@ -124,7 +125,13 @@ const EditOperationModal = ({
 
   // ── effects ────────────────────────────────────────────────────────────────
   useEffect(() => { if (open) setActiveTab(defaultTab); }, [open, defaultTab]);
-  useEffect(() => { if (open) { fetchWorkCenters(); fetchMachines(); fetchPartTypes(); } }, [open]);
+  useEffect(() => {
+    if (open && !showAddToolForm) {
+      fetchWorkCenters();
+      fetchMachines();
+      fetchPartTypes();
+    }
+  }, [open, showAddToolForm]);
   useEffect(() => { if (open && showAddToolForm) fetchTools(); }, [open, showAddToolForm]);
   useEffect(() => { if (open && isCreateMode) { form.resetFields(); form.setFieldsValue({ part_type_id: 1 }); } }, [open, isCreateMode]);
 
@@ -154,7 +161,13 @@ const EditOperationModal = ({
       work_instructions: operation.work_instructions,
       notes:             operation.notes,
     });
-    if (!showAddToolForm) fetchDocuments(); else fetchExistingTools();
+    if (!showAddToolForm) {
+      if (operation.operation_documents) setDocuments(operation.operation_documents);
+      else fetchDocuments();
+    } else {
+      if (operation.tools) setExistingTools(operation.tools);
+      else fetchExistingTools();
+    }
   }, [open, operation?.id, showAddToolForm]);
 
   // ── handlers ───────────────────────────────────────────────────────────────
@@ -206,10 +219,9 @@ const EditOperationModal = ({
     let type = 'other';
     if (['jpg','jpeg','png','gif','svg'].includes(ext)) type = 'image';
     else if (ext === 'pdf') type = 'pdf';
-    
-    // Instead of opening a new modal, we show it in the right panel
-    setViewingDoc({ url, title: doc.document_name, type, id: doc.id, name: doc.document_name });
-    setParentId(null); // Switch off "Update Version" mode if it was on
+    setViewingDoc(null);
+    setParentId(null);
+    setDocumentPreviewModal({ url, title: doc.document_name, type, id: doc.id, name: doc.document_name });
   };
 
   const handleDownloadFile = (doc) => {
@@ -225,32 +237,47 @@ const EditOperationModal = ({
   };
 
   const handleAddTools = async ({ tool_ids }) => {
-    setLoadingTools(true);
-    let count = 0;
-    const uid = getCurrentUserId();
-    for (const toolId of tool_ids) {
-      if (existingTools.some(t => t.tool_id === toolId)) continue;
-      try {
-        await axios.post(
-          `${API_BASE_URL}/tools/`,
-          {
-            tool_id: toolId,
-            part_id: operation.part_id,
-            operation_id: operation.id,
-            user_id: uid,
-          },
-          {
-            headers: { 'Content-Type': 'application/json' },
-          }
-        );
-        count++;
-      } catch (e) {
-        console.error(e);
-      }
+    if (!tool_ids || tool_ids.length === 0) {
+      message.info('No tools selected');
+      return;
     }
-    setLoadingTools(false);
-    if (count > 0) { message.success(`Successfully added ${count} tools`); form.setFieldValue('tool_ids', []); fetchExistingTools(); if (onUpdate) onUpdate(); }
-    else message.info('No new tools added');
+
+    setLoadingTools(true);
+    const uid = getCurrentUserId();
+    const newLinks = tool_ids
+      .filter(toolId => !existingTools.some(t => t.tool_id === toolId))
+      .map(toolId => ({
+        tool_id: toolId,
+        part_id: operation.part_id,
+        operation_id: operation.id,
+        user_id: uid,
+      }));
+
+    if (newLinks.length === 0) {
+      setLoadingTools(false);
+      message.info('Selected tools are already assigned');
+      return;
+    }
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/tools/bulk-links`,
+        newLinks,
+        {
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      message.success(`Successfully added ${newLinks.length} new tools`);
+      form.setFieldValue('tool_ids', []);
+      fetchExistingTools();
+      if (onUpdate) onUpdate();
+    } catch (e) {
+      console.error('Error adding tools in bulk:', e);
+      const detail = e?.response?.data?.detail || 'Failed to add tools';
+      message.error(detail);
+    } finally {
+      setLoadingTools(false);
+    }
   };
 
   const handleRemoveTool = async (id) => {
@@ -330,7 +357,7 @@ const EditOperationModal = ({
   );
 
   const documentsTab = (() => {
-    const rootDocs = documents.filter(d => !d.parent_id);
+    const rootDocs = documents.filter(d => !d.parent_id).sort((a, b) => a.id - b.id);
     return (
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={14}>
@@ -347,14 +374,15 @@ const EditOperationModal = ({
                   {rootDocs.map(item => {
                     const group    = documents.filter(d => d.parent_id === item.id || d.id === item.id);
                     const latestV  = Math.max(...group.map(d => parseV(d.document_version)));
-                    const versions = group.filter(d => d.id !== item.id).sort((a, b) => parseV(b.document_version) - parseV(a.document_version));
+                    // FIFO: oldest operation-document id first
+                    const versions = group.filter(d => d.id !== item.id).sort((a, b) => a.id - b.id);
                     return (
                       <div key={item.id} className="flex flex-col gap-2">
                         <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm hover:shadow transition-shadow flex items-start justify-between gap-4 border-l-4 border-l-blue-500">
                           <div className="flex gap-3 flex-1 min-w-0">
                             <div className="bg-blue-50 p-2 rounded text-blue-500 h-fit mt-1"><FileTextOutlined /></div>
                             <div className="flex-1 overflow-hidden">
-                              <a href={`${API_BASE_URL}/operation-documents/${item.id}/download`} className="text-gray-800 hover:text-blue-600 font-semibold truncate block mb-1" target="_blank" rel="noopener noreferrer">{item.document_name}</a>
+                              <span className="text-gray-800 font-semibold truncate block mb-1">{item.document_name}</span>
                               <div className="flex gap-2 items-center">
                                 <Tag color="blue" variant="filled" className="m-0 text-[10px] font-bold">{item.document_type}</Tag>
                                 <Tag color="blue" className="m-0 text-[10px] font-bold">{fmtV(item.document_version)}</Tag>
@@ -367,7 +395,7 @@ const EditOperationModal = ({
                           <div key={ver.id} className="bg-gray-50 p-2 ml-6 rounded-lg border border-gray-100 flex items-start justify-between gap-4 border-l-4 border-l-orange-400">
                             <div className="flex gap-2 flex-1 min-w-0 items-center">
                               <FileTextOutlined className="text-orange-400 text-xs shrink-0" />
-                              <a href={`${API_BASE_URL}/operation-documents/${ver.id}/download`} className="text-gray-700 hover:text-blue-600 text-sm truncate font-medium" target="_blank" rel="noopener noreferrer">{ver.document_name}</a>
+                              <span className="text-gray-700 text-sm truncate font-medium block">{ver.document_name}</span>
                               <Tag color="orange" className="m-0 text-[10px] font-bold shrink-0">{fmtV(ver.document_version)}</Tag>
                             </div>
                             <DocActions doc={ver} rootId={item.id} latestV={latestV} />
@@ -382,7 +410,7 @@ const EditOperationModal = ({
           </div>
         </Col>
         <Col xs={24} lg={10}>
-          <div className="bg-gray-50 p-3 sm:p-5 rounded-xl border border-gray-200 h-full flex flex-col min-h-[400px]">
+          <div className="bg-gray-50 p-3 sm:p-5 pb-8 rounded-xl border border-gray-200 h-full flex flex-col min-h-[400px]">
             {viewingDoc ? (
               <div className="flex flex-col h-full">
                 <div className="flex justify-between items-center mb-4">
@@ -421,22 +449,28 @@ const EditOperationModal = ({
                   </div>
                 )}
                 <div className="mb-4">
-                  <Dragger fileList={selectedFileList} beforeUpload={(f) => { setSelectedFileList([f]); return false; }} onRemove={() => setSelectedFileList([])} multiple={false} className="bg-white border-dashed border-2 hover:border-blue-400 transition-colors rounded-xl overflow-hidden">
+                  <Dragger fileList={selectedFileList} beforeUpload={(f) => { setSelectedFileList([f]); return false; }} onRemove={() => setSelectedFileList([])} multiple={false} className="bg-white border-dashed border-2 border-gray-300 hover:border-gray-300 rounded-xl overflow-hidden" showUploadList={false}>
                     <p className="ant-upload-drag-icon mb-2"><UploadOutlined className="text-blue-500 text-3xl" /></p>
                     <p className="ant-upload-text text-sm font-medium">Click or drag file</p>
                     <p className="ant-upload-hint text-[11px] text-gray-400 px-4">PDF, DOC, XLS, CSV, TXT</p>
                   </Dragger>
+                  {selectedFileList.length > 0 && (
+                    <div className="mt-3 p-3 bg-blue-50 border border-blue-100 rounded-lg flex items-start justify-between gap-3">
+                      <span className="text-sm font-medium text-gray-800 break-all min-w-0 flex-1">Selected: {selectedFileList[0].name}</span>
+                      <Button type="link" size="small" danger onClick={() => setSelectedFileList([])} className="shrink-0">Remove</Button>
+                    </div>
+                  )}
                 </div>
                 <Row gutter={[8, 8]} className="mb-4">
                   <Col xs={24} sm={14}>
-                    <div className="text-[11px] font-semibold text-gray-500 mb-1 uppercase">Document Type</div>
+                    <div className="text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Document Type</div>
                     <Select value={uploadType} onChange={setUploadType} className="w-full">
                       {['Balloon','Image','CNC','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
                     </Select>
                     {uploadType === 'Other' && <Input className="mt-2" placeholder="Custom type" value={uploadTypeOther} onChange={e => setUploadTypeOther(e.target.value)} autoComplete="off" />}
                   </Col>
                   <Col xs={24} sm={10}>
-                    <div className="text-[11px] font-semibold text-gray-500 mb-1 uppercase">Version</div>
+                    <div className="text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wide">Version</div>
                     <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} placeholder="v1.0" disabled={!parentId} className="font-bold text-center" style={{ backgroundColor: !parentId ? '#f0f2f5' : '#fff' }} />
                   </Col>
                 </Row>
@@ -458,7 +492,7 @@ const EditOperationModal = ({
       {loadingTools ? <div className="flex justify-center p-4"><Spin /></div>
         : existingTools.length > 0 ? (
           <Flex vertical className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
-            {existingTools.map((item, i) => {
+            {[...existingTools].sort((a, b) => a.id - b.id).map((item, i) => {
               const td = toolsList.find(t => t.id === item.tool_id);
               return (
                 <div key={item.id} className={`flex items-center justify-between p-3 ${i < existingTools.length - 1 ? 'border-b border-gray-100' : ''} hover:bg-gray-50`}>
@@ -528,12 +562,12 @@ const EditOperationModal = ({
             <>
               <Row gutter={[12, 0]}>
                 <Col xs={24} sm={12} lg={6}>
-                  <Form.Item name="setup_time" label="Setup Time" rules={timePickerRules('Setup Time')}>
+                  <Form.Item name="setup_time" label="Setup Time" required rules={timePickerRules('Setup Time')}>
                     <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                  <Form.Item name="cycle_time" label="Cycle Time" rules={timePickerRules('Cycle Time')}>
+                  <Form.Item name="cycle_time" label="Cycle Time" required rules={timePickerRules('Cycle Time')}>
                     <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
                   </Form.Item>
                 </Col>
@@ -603,6 +637,32 @@ const EditOperationModal = ({
       <div className="mt-2">
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={filteredTabs} />
       </div>
+      {documentPreviewModal && (
+        <Modal
+          title={documentPreviewModal.title}
+          open
+          onCancel={() => setDocumentPreviewModal(null)}
+          footer={[
+            <Button key="dl" icon={<DownloadOutlined />} onClick={() => { handleDownloadFile({ id: documentPreviewModal.id, document_name: documentPreviewModal.name }); setDocumentPreviewModal(null); }}>Download</Button>,
+            <Button key="cl" type="primary" onClick={() => setDocumentPreviewModal(null)}>Close</Button>
+          ]}
+          width="95%"
+          style={{ maxWidth: 1000, top: 20 }}
+          styles={{ body: { height: '75vh', padding: 0, minHeight: 200 } }}
+        >
+          {documentPreviewModal.type === 'image' ? (
+            <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto"><img src={documentPreviewModal.url} alt={documentPreviewModal.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /></div>
+          ) : documentPreviewModal.type === 'pdf' ? (
+            <iframe src={`${documentPreviewModal.url}#toolbar=0`} title={documentPreviewModal.title} width="100%" height="100%" style={{ border: 'none' }} />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+              <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
+              <p className="text-gray-700 font-medium mb-2">Preview is not available for this file type.</p>
+              <p className="text-gray-500">Please download the file to view it.</p>
+            </div>
+          )}
+        </Modal>
+      )}
       {preview && (
         <Modal title={preview.title} open onCancel={() => setPreview(null)}
           footer={[

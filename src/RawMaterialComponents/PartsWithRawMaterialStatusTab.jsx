@@ -27,6 +27,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   const [statusEditPartsToAdd, setStatusEditPartsToAdd] = useState([]);
   const [statusEditAvailableParts, setStatusEditAvailableParts] = useState([]);
   const [orderHierarchyMap, setOrderHierarchyMap] = useState({});
+  const [statusEditPartMetaById, setStatusEditPartMetaById] = useState({});
   const [decimalWarnings, setDecimalWarnings] = useState({});
 
   const fetching = useRef(false);
@@ -310,25 +311,42 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   };
 
   const flattenPartsFromOrderHierarchy = (orderHierarchy) => {
-    if (!orderHierarchy || !orderHierarchy.product_hierarchy) return [];
+    if (!orderHierarchy || !orderHierarchy.product_hierarchy) return { parts: [], meta: {} };
     const { assemblies = [], direct_parts = [] } = orderHierarchy.product_hierarchy || {};
     const parts = [];
-    const visitAssemblies = (assemblyDetailsList) => {
+    const meta = {};
+    const visitAssemblies = (assemblyDetailsList, parentPath = []) => {
       (assemblyDetailsList || []).forEach((ad) => {
+        const a = ad.assembly || ad;
+        const currentPath = a && a.assembly_name ? [...parentPath, a.assembly_name] : parentPath;
         (ad.parts || []).forEach((pd) => {
           const p = pd.part || pd;
-          if (p && p.id && (!p.type_name || p.type_name === "IN-House")) parts.push(p);
+          if (p && p.id && (!p.type_name || p.type_name === "IN-House")) {
+            parts.push(p);
+            meta[p.id] = {
+              path: currentPath,
+              isDirect: false,
+            };
+          }
         });
         const subs = ad.subassemblies || [];
-        if (subs.length) visitAssemblies(subs);
+        if (subs.length) visitAssemblies(subs, currentPath);
       });
     };
-    visitAssemblies(assemblies);
+    visitAssemblies(assemblies, []);
     (direct_parts || []).forEach((pd) => {
       const p = pd.part || pd;
-      if (p && p.id && (!p.type_name || p.type_name === "IN-House")) parts.push(p);
+      if (p && p.id && (!p.type_name || p.type_name === "IN-House")) {
+        parts.push(p);
+        if (!meta[p.id]) {
+          meta[p.id] = {
+            path: [],
+            isDirect: true,
+          };
+        }
+      }
     });
-    return parts;
+    return { parts, meta };
   };
 
   const openStatusEditModal = async (record) => {
@@ -348,9 +366,10 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         setOrderHierarchyMap(prev => ({ ...prev, [orderId]: hierarchy }));
       }
       if (hierarchy) {
-        const allParts = flattenPartsFromOrderHierarchy(hierarchy) || [];
+        const { parts: allParts, meta } = flattenPartsFromOrderHierarchy(hierarchy) || { parts: [], meta: {} };
         const existingPartIds = new Set(current.map(l => l.part_id));
         setStatusEditAvailableParts(allParts.filter(p => p && p.id && !existingPartIds.has(p.id)));
+        setStatusEditPartMetaById(meta || {});
       }
     } catch (e) { console.error(e); }
     setStatusEditModalOpen(true);
@@ -400,16 +419,39 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   filtered.forEach((item) => {
     const key = `${item.raw_material_id}-${item.linkage_group_id || 'no-group'}-${item.order_id}`;
     if (!groupedMap[key]) {
-      groupedMap[key] = { ...item, part_numbers: [], part_names: [], linkage_ids: [], first_created_at: item.created_at };
+      groupedMap[key] = { 
+        ...item, 
+        _items: [], // Store all items in this group to sort parts later
+        linkage_ids: [], 
+        min_id: item.id 
+      };
     }
-    if (!groupedMap[key].part_numbers.includes(item.part_number)) groupedMap[key].part_numbers.push(item.part_number);
-    if (!groupedMap[key].part_names.includes(item.part_name)) groupedMap[key].part_names.push(item.part_name);
+    groupedMap[key]._items.push(item);
     groupedMap[key].linkage_ids.push(item.id);
+    if (item.id < groupedMap[key].min_id) {
+      groupedMap[key].min_id = item.id;
+    }
     groupedMap[key].quantity = item.order_quantity;
     groupedMap[key].mass = item.mass;
   });
 
-  const groupedData = Object.values(groupedMap).sort((a, b) => new Date(b.first_created_at).getTime() - new Date(a.first_created_at).getTime());
+  const groupedData = Object.values(groupedMap).map(group => {
+    // Sort items within group by id
+    const sortedItems = [...group._items].sort((a, b) => (a.id || 0) - (b.id || 0));
+    const part_numbers = [];
+    const part_names = [];
+    
+    sortedItems.forEach(item => {
+      if (!part_numbers.includes(item.part_number)) part_numbers.push(item.part_number);
+      if (!part_names.includes(item.part_name)) part_names.push(item.part_name);
+    });
+
+    return {
+      ...group,
+      part_numbers,
+      part_names
+    };
+  }).sort((a, b) => (a.min_id || 0) - (b.min_id || 0)); // Sort table by FIFO (min linkage id)
 
   const getMaterialRowSpan = (record, index) => {
     const prev = groupedData[index - 1];
@@ -548,13 +590,59 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
           <div className="space-y-3">
             <div className="flex items-center justify-between"><Text className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Linked Parts</Text><Text className="text-xs text-gray-400">{statusEditCurrentLinkages.filter(l => !statusEditPartsToRemove.includes(l.id)).length} Parts Linked</Text></div>
             <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 min-h-[60px] flex flex-wrap gap-2">
-              {statusEditCurrentLinkages.filter(l => !statusEditPartsToRemove.includes(l.id)).map(l => (<Tag key={l.id} color="geekblue" closable onClose={() => setStatusEditPartsToRemove(prev => [...prev, l.id])} className="flex items-center px-2 py-1 rounded-md text-sm border-none shadow-sm"><span className="font-semibold">{l.part_number}</span><span className="mx-1 opacity-60">|</span><span className="text-xs opacity-80">{l.part_name}</span></Tag>))}
+              {statusEditCurrentLinkages
+                .filter(l => !statusEditPartsToRemove.includes(l.id))
+                .map(l => {
+                  const meta = statusEditPartMetaById[l.part_id];
+                  const pathLabel = meta?.path?.length
+                    ? `Assembly: ${meta.path.join(" / ")}`
+                    : meta?.isDirect
+                      ? "Direct Part"
+                      : "";
+                  return (
+                    <Tag
+                      key={l.id}
+                      color="geekblue"
+                      closable
+                      onClose={() => setStatusEditPartsToRemove(prev => [...prev, l.id])}
+                      className="flex items-center px-2 py-1 rounded-md text-sm border-none shadow-sm"
+                    >
+                      <span className="font-semibold">{l.part_number}</span>
+                      <span className="mx-1 opacity-60">|</span>
+                      <span className="text-xs opacity-80">{l.part_name}</span>
+                      {pathLabel && (
+                        <>
+                          <span className="mx-1 opacity-40">|</span>
+                          <span className="text-[10px] opacity-70">{pathLabel}</span>
+                        </>
+                      )}
+                    </Tag>
+                  );
+                })}
             </div>
           </div>
           <div className="space-y-2">
             <Text className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Add More Parts</Text>
             <Select mode="multiple" style={{ width: '100%' }} placeholder="Select parts to add" value={statusEditPartsToAdd} onChange={setStatusEditPartsToAdd} size="large" className="rounded-md" optionFilterProp="children" allowClear>
-              {statusEditAvailableParts.map(p => (<Option key={p.id} value={p.id}><div className="flex flex-col py-1"><span className="font-semibold text-gray-800">{p.part_number}</span><span className="text-xs text-gray-500">{p.part_name}</span></div></Option>))}
+              {statusEditAvailableParts.map(p => {
+                const meta = statusEditPartMetaById[p.id];
+                const pathLabel = meta?.path?.length
+                  ? `Assembly: ${meta.path.join(" / ")}`
+                  : meta?.isDirect
+                    ? "Direct Part"
+                    : "";
+                return (
+                  <Option key={p.id} value={p.id}>
+                    <div className="flex flex-col py-1">
+                      <span className="font-semibold text-gray-800">{p.part_number}</span>
+                      <span className="text-xs text-gray-500">{p.part_name}</span>
+                      {pathLabel && (
+                        <span className="text-[10px] text-gray-400 mt-0.5">{pathLabel}</span>
+                      )}
+                    </div>
+                  </Option>
+                );
+              })}
             </Select>
           </div>
         </div>

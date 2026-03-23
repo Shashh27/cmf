@@ -61,6 +61,7 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
     borderStyle: "solid",
     marginBottom: 8,
+    width: "100%",
   },
   tableHeader: {
     flexDirection: "row",
@@ -100,50 +101,50 @@ const styles = StyleSheet.create({
 
 const assembliesColumnWidths = {
   slNo: 24,
-  number: 80,
-  name: 160,
-  parent: 160,
+  number: 75,
+  name: 150,
+  parent: 150,
 };
 
 const partsColumnWidths = {
   slNo: 24,
-  number: 80,
-  name: 160,
-  type: 60,
-  parentAssembly: 120,
+  number: 75,
+  name: 150,
+  type: 55,
+  parentAssembly: 110,
 };
 
 const operationsColumnWidths = {
   slNo: 20,
-  partNumber: 55,
-  partName: 85,
-  opNumber: 30,
-  opName: 90,
-  type: 50,
-  machine: 65,
-  setup: 45,
-  cycle: 45,
-  workcenter: 65,
+  partNumber: 50,
+  partName: 75,
+  opNumber: 25,
+  opName: 75,
+  type: 45,
+  machine: 60,
+  setup: 40,
+  cycle: 40,
+  workcenter: 60,
 };
 
 const opNotesColumnWidths = {
   slNo: 20,
-  partNumber: 55,
-  partName: 85,
-  opNumber: 30,
-  opName: 80,
-  type: 50,
-  instructions: 110,
-  notes: 110,
+  partNumber: 50,
+  partName: 75,
+  opNumber: 25,
+  opName: 75,
+  type: 45,
+  instructions: 100,
+  notes: 100,
 };
 
 const documentsColumnWidths = {
   slNo: 24,
-  partNumber: 70,
-  partName: 130,
-  type: 70,
-  document: 160,
-  version: 50,
+  partNumber: 65,
+  partName: 120,
+  type: 60,
+  document: 150,
+  version: 40,
 };
 
 const ProductBOMPdfDocument = ({ product, bomExport }) => {
@@ -165,9 +166,7 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
           </Text>
           <View style={styles.metaRow}>
             <Text style={styles.metaText}>
-              Product: {(product?.product_number || "") && (product?.product_name || "")
-                ? `${product.product_number} - ${product.product_name}`
-                : product?.product_name || product?.product_number || "-"}
+              Product: {product?.product_name || (product?.id != null ? `Product ${product.id}` : "-")}
             </Text>
             <Text style={styles.metaText}>Generated on: {generatedAt}</Text>
           </View>
@@ -474,7 +473,7 @@ const ProductBOMPdfDownload = ({
 
   const safeFileName =
     fileName ||
-    `product-bom-${product?.product_number || product?.product_name || "report"}.pdf`;
+    `product-bom-${product?.product_name || product?.id || "report"}.pdf`;
 
   const hasContent =
     (bomExport.assemblies && bomExport.assemblies.length > 0) ||
