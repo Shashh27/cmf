@@ -50,6 +50,16 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
   const [machineUploadMachineId, setMachineUploadMachineId] = useState(null);
   const [machineFileList, setMachineFileList] = useState([]);
   const [commonRootDocumentCount, setCommonRootDocumentCount] = useState(0);
+  const getUserId = () => {
+    try {
+      const s = localStorage.getItem('user');
+      if (!s) return null;
+      const u = JSON.parse(s);
+      return u && (u.id || u.user_id || u.userId) ? (u.id || u.user_id || u.userId) : null;
+    } catch {
+      return null;
+    }
+  };
 
   // Fetch orders, parts and general folders on component mount
   useEffect(() => {
@@ -741,6 +751,11 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
 
     try {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
       const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders`, {
         method: 'POST',
         headers: {
@@ -748,7 +763,8 @@ const buildMachineFoldersTree = (folders, machine) => {
         },
         body: JSON.stringify({
           folder_name: newFolderName.trim(),
-          parent_id: parentFolderId
+          parent_id: parentFolderId,
+          user_id: userId
         })
       });
 
@@ -778,6 +794,11 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
 
     try {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
       const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders`, {
         method: 'POST',
         headers: {
@@ -785,7 +806,8 @@ const buildMachineFoldersTree = (folders, machine) => {
         },
         body: JSON.stringify({
           folder_name: commonNewFolderName.trim(),
-          parent_id: commonParentFolderId
+          parent_id: commonParentFolderId,
+          user_id: userId
         })
       });
 
@@ -900,6 +922,14 @@ const buildMachineFoldersTree = (folders, machine) => {
     let uploadUrl;
     // General folder upload
     formData.append('folder_id', uploadFolderId.toString());
+    {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
+      formData.append('user_id', userId.toString());
+    }
     uploadUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
     
     try {
@@ -965,6 +995,14 @@ const buildMachineFoldersTree = (folders, machine) => {
     if (commonUploadFolderId !== null && commonUploadFolderId !== undefined) {
       formData.append('folder_id', commonUploadFolderId.toString());
     }
+    {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
+      formData.append('user_id', userId.toString());
+    }
 
     try {
       setLoading(true);
@@ -1013,6 +1051,11 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
 
     try {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
       const targetMachineId = machineParentMachineId;
       const baseUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
       const response = await fetch(`${baseUrl}machine-documents/folders`, {
@@ -1023,7 +1066,8 @@ const buildMachineFoldersTree = (folders, machine) => {
         body: JSON.stringify({
           folder_name: machineNewFolderName.trim(),
           machine_id: machineParentMachineId,
-          parent_id: machineParentFolderId
+          parent_id: machineParentFolderId,
+          user_id: userId
         })
       });
 
@@ -1144,6 +1188,14 @@ const buildMachineFoldersTree = (folders, machine) => {
     }
     if (machineUploadMachineId) {
       formData.append('machine_id', machineUploadMachineId.toString());
+    }
+    {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
+      formData.append('user_id', userId.toString());
     }
 
     try {

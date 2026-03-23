@@ -4,7 +4,6 @@ import { HistoryOutlined } from '@ant-design/icons';
 import { InventoryRequestsTable, ReturnRequestsTable, InventoryAnalytics, TransactionHistory, ToolsIssues } from '../InventorySupervisor Components/Inventory/OverviewData';
 import { API_BASE_URL } from '../Config/auth';
 
-const { TabPane } = Tabs;
 const { Title, Text } = Typography;
 
 const OverviewData = () => {
@@ -75,7 +74,7 @@ const OverviewData = () => {
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
           marginBottom: '16px'
         }}
-        bodyStyle={{ padding: '16px 24px' }}
+        styles={{ body: { padding: '16px 24px' } }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <HistoryOutlined style={{ fontSize: '28px', color: '#1890ff' }} />
@@ -91,62 +90,68 @@ const OverviewData = () => {
       </Card>
       
       <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-        <Tabs defaultActiveKey="inventory-requests" size="small" destroyInactiveTabPane={false}>
-          <TabPane 
-            tab={
-              <span>
-                {isInventorySupervisor ? (
-                  <Badge count={counts.requests} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+        <Tabs 
+          defaultActiveKey="inventory-requests" 
+          size="small" 
+          destroyOnHidden={false}
+          items={[
+            {
+              key: 'inventory-requests',
+              label: (
+                <span>
+                  {isInventorySupervisor ? (
+                    <Badge count={counts.requests} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+                      <span>Inventory Requests</span>
+                    </Badge>
+                  ) : (
                     <span>Inventory Requests</span>
-                  </Badge>
-                ) : (
-                  <span>Inventory Requests</span>
-                )}
-              </span>
-            } 
-            key="inventory-requests"
-          >
-            <InventoryRequestsTable />
-          </TabPane>
-          <TabPane 
-            tab={
-              <span>
-                {isInventorySupervisor ? (
-                  <Badge count={counts.returns} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+                  )}
+                </span>
+              ),
+              children: <InventoryRequestsTable />,
+            },
+            {
+              key: 'return-requests',
+              label: (
+                <span>
+                  {isInventorySupervisor ? (
+                    <Badge count={counts.returns} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+                      <span>Return Requests</span>
+                    </Badge>
+                  ) : (
                     <span>Return Requests</span>
-                  </Badge>
-                ) : (
-                  <span>Return Requests</span>
-                )}
-              </span>
-            } 
-            key="return-requests"
-          >
-            <ReturnRequestsTable />
-          </TabPane>
-          <TabPane 
-            tab={
-              <span>
-                {isInventorySupervisor ? (
-                  <Badge count={counts.issues} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+                  )}
+                </span>
+              ),
+              children: <ReturnRequestsTable />,
+            },
+            {
+              key: 'tools-issues',
+              label: (
+                <span>
+                  {isInventorySupervisor ? (
+                    <Badge count={counts.issues} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+                      <span>Tools Issues</span>
+                    </Badge>
+                  ) : (
                     <span>Tools Issues</span>
-                  </Badge>
-                ) : (
-                  <span>Tools Issues</span>
-                )}
-              </span>
-            } 
-            key="tools-issues"
-          >
-            <ToolsIssues />
-          </TabPane>
-          <TabPane tab="Inventory Analytics" key="analytics">
-            <InventoryAnalytics />
-          </TabPane>
-          <TabPane tab="Transaction History" key="transaction-history">
-            <TransactionHistory />
-          </TabPane>
-        </Tabs>
+                  )}
+                </span>
+              ),
+              children: <ToolsIssues />,
+            },
+            {
+              key: 'analytics',
+              label: 'Inventory Analytics',
+              children: <InventoryAnalytics />,
+            },
+            {
+              key: 'transaction-history',
+              label: 'Transaction History',
+              children: <TransactionHistory />,
+            },
+          ]}
+        />
       </div>
     </div>
   );

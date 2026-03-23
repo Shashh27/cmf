@@ -1,594 +1,402 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Table, Button, Space, message, Input, Select, Card, Row, Col, Upload } from 'antd';
-import { EditOutlined, DeleteOutlined, SearchOutlined, ToolOutlined, CheckCircleOutlined, BlockOutlined, HistoryOutlined, UploadOutlined } from '@ant-design/icons';
-import {API_BASE_URL} from '../../../Config/auth';
+import {
+  Table, Button, Space, message, Input, Upload, Tag, Breadcrumb, Spin, Badge, Popconfirm, Tooltip
+} from 'antd';
+import {
+  EditOutlined, DeleteOutlined, SearchOutlined, UploadOutlined,
+  PlusOutlined, DownloadOutlined, ReloadOutlined,
+  RightOutlined, FolderOutlined, FileTextOutlined,
+  AppstoreOutlined, ToolOutlined, ExperimentOutlined, InboxOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined, PlusSquareOutlined, MinusSquareOutlined,
+  BlockOutlined, ExpandOutlined, CompressOutlined
+} from '@ant-design/icons';
+import { API_BASE_URL } from '../../../Config/auth';
 import ToolsHistory from './ToolsHistory';
+import * as XLSX from 'xlsx';
 
-const { Option } = Select;
 const { Search } = Input;
 
+/* ─── constants ─────────────────────────────────────────── */
+const CATEGORY_COLORS = {
+  Tools:       { bg: '#e6f4ff', text: '#1677ff', border: '#91caff', dot: '#1677ff' },
+  Instruments: { bg: '#f6ffed', text: '#389e0d', border: '#b7eb8f', dot: '#52c41a' },
+  Misc:        { bg: '#fff7e6', text: '#d46b08', border: '#ffd591', dot: '#fa8c16' },
+};
+
+/* ═══════════════════════════════════════════════════════════
+   SIDEBAR — 2-level tree
+═══════════════════════════════════════════════════════════ */
+function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCat }) {
+  if (loading) {
+    return <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>;
+  }
+
+  return (
+    <div style={{ paddingBottom: 16 }}>
+      {tree.filter(cat => cat.category !== 'Misc').map(catNode => {
+        const catExpanded = !!expandedCats[catNode.category];
+        const cc = CATEGORY_COLORS[catNode.category] || { bg: '#fff', text: '#555' };
+
+        return (
+          <div key={catNode.category} style={{ position: 'relative' }}>
+            {/* ── LEVEL 1: Category ── */}
+            <div
+              onClick={() => {
+                toggleCat(catNode.category);
+                onSelect({ category: catNode.category, sub_category: null });
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '8px 12px',
+                cursor: 'pointer', userSelect: 'none',
+                background: (selected?.category === catNode.category && !selected?.sub_category) ? '#e6f4ff' : 'transparent',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => { if (selected?.category !== catNode.category || selected?.sub_category) e.currentTarget.style.background = '#f5f8ff'; }}
+              onMouseLeave={e => { if (selected?.category !== catNode.category || selected?.sub_category) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <div style={{ fontSize: 13, color: '#555', width: 16, display: 'flex', alignItems: 'center' }}>
+                {catExpanded ? <MinusSquareOutlined /> : <PlusSquareOutlined />}
+              </div>
+
+              <div style={{
+                width: 22, height: 22, flexShrink: 0,
+                color: cc.text,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 14,
+              }}>
+                <BlockOutlined />
+              </div>
+
+              <span style={{ flex: 1, fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>
+                {catNode.category}
+              </span>
+
+              <span style={{
+                fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
+                background: '#e6f4ff', color: '#1677ff', border: '1px solid #91caff',
+              }}>
+                {catNode.sub_categories.length}
+              </span>
+            </div>
+
+            {/* ── LEVEL 2: Sub-categories ── */}
+            {catExpanded && (
+              <div style={{ position: 'relative', marginLeft: 20, borderLeft: '1px solid #e0e0e0' }}>
+                {catNode.sub_categories.map((subNode) => {
+                  const subActive = selected?.category === catNode.category && selected?.sub_category === subNode.sub_category;
+                  return (
+                    <div key={subNode.sub_category} style={{ position: 'relative' }}>
+                      <div style={{ position: 'absolute', left: 0, top: 18, width: 14, height: 1, background: '#e0e0e0' }} />
+                      <div
+                        onClick={() => onSelect({ category: catNode.category, sub_category: subNode.sub_category })}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '6px 12px 6px 16px',
+                          cursor: 'pointer', userSelect: 'none',
+                          background: subActive ? '#e6f4ff' : 'transparent',
+                          transition: 'background 0.12s',
+                        }}
+                        onMouseEnter={e => { if (!subActive) e.currentTarget.style.background = '#f5f8ff'; }}
+                        onMouseLeave={e => { if (!subActive) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <FileTextOutlined style={{ fontSize: 13, color: '#555', flexShrink: 0 }} />
+                        <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: '#2d2d3a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {subNode.sub_category}
+                        </span>
+                        <span style={{ fontSize: 11, fontWeight: 500, padding: '1px 6px', borderRadius: 4, background: '#f6ffed', color: '#389e0d', border: '1px solid #b7eb8f', flexShrink: 0 }}>
+                          {subNode.count}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MAIN COMPONENT
+═══════════════════════════════════════════════════════════ */
 const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
-  const [tools, setTools] = useState(() => {
-    try {
-      const cached = sessionStorage.getItem('tools_list_cache');
-      return cached ? JSON.parse(cached) : [];
-    } catch (e) {
-      console.error('Failed to parse tools cache', e);
-      return [];
-    }
-  });
-  const [loading, setLoading] = useState(false);
-  const [searchText, setSearchText] = useState('');
+  const [tree,         setTree]         = useState([]);
+  const [treeLoading,  setTreeLoading]  = useState(false);
+  const [expandedCats, setExpandedCats] = useState({});
+  const [selected,     setSelected]     = useState(null);
+  const [tools,        setTools]        = useState([]);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [searchText,   setSearchText]   = useState('');
   const [filteredData, setFilteredData] = useState([]);
-  const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'consumables', 'non-consumables'
-  const [pagination, setPagination] = useState({
-    current: 1,
-    pageSize: 10,
-  });
-  const [kpiData, setKpiData] = useState({
-    totalTools: 0,
-    consumables: 0,
-    nonConsumables: 0,
-  });
+  const [pagination,   setPagination]   = useState({ current: 1, pageSize: 10 });
+  const [collapsed,    setCollapsed]    = useState(false);
   const [historyVisible, setHistoryVisible] = useState(false);
-  const [historyTool, setHistoryTool] = useState(null);
-  const [hoveredCard, setHoveredCard] = useState(null);
-  const [activeCard, setActiveCard] = useState(null);
+  const [historyTool,    setHistoryTool]    = useState(null);
 
-  // Prevent multiple API calls with a ref
-  const isFetchingRef = useRef(false);
+  const fetchingTree  = useRef(false);
+  const fetchingTable = useRef(false);
 
-  // Mock data - replace with actual API call
+  useEffect(() => { fetchTree(); }, []);
+
+  const DEFAULT_CATEGORIES = [
+    { category: 'Tools', sub_categories: [], total_count: 0 },
+    { category: 'Instruments', sub_categories: [], total_count: 0 },
+  ];
+
+  const displayTree = (tree.length > 0 ? tree : DEFAULT_CATEGORIES).filter(cat => cat.category !== 'Misc');
+
   useEffect(() => {
-    if (!isFetchingRef.current) {
-      fetchTools();
+    if (selected?.sub_category && selected?.category) {
+      fetchBySubCategory(selected.category, selected.sub_category);
+    } else {
+      setTools([]);
+      setFilteredData([]);
     }
-  }, []);
+  }, [selected]);
 
-  // Debounced filter and KPI calculation
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      filterData();
-      calculateKPI();
-    }, 300); // 300ms debounce
+    if (!searchText.trim()) { setFilteredData(tools); return; }
+    const lower = searchText.toLowerCase();
+    setFilteredData(
+      tools.filter(t =>
+        Object.values(t).some(v =>
+          v != null && String(v).toLowerCase().includes(lower)
+        )
+      )
+    );
+    setPagination(p => ({ ...p, current: 1 }));
+  }, [searchText, tools]);
 
-    return () => clearTimeout(timeoutId);
-  }, [tools, searchText, activeFilter]);
-
-  const calculateKPI = () => {
-    const total = tools.length;
-    const consumables = tools.filter(tool => tool.type === 'CONSUMABLES').length;
-    const nonConsumables = tools.filter(tool => tool.type === 'NON-CONSUMABLES').length;
-    
-    setKpiData({
-      totalTools: total,
-      consumables: consumables,
-      nonConsumables: nonConsumables,
-    });
+  const fetchTree = async () => {
+    if (fetchingTree.current) return;
+    fetchingTree.current = true;
+    setTreeLoading(true);
+    try {
+      const res  = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTree(data);
+    } catch (e) {
+      message.error('Failed to load categories: ' + e.message);
+    } finally {
+      setTreeLoading(false);
+      fetchingTree.current = false;
+    }
   };
 
-  const fetchTools = async () => {
-    if (isFetchingRef.current) return; // Prevent multiple calls
-    
-    isFetchingRef.current = true;
-    // Only show loading spinner if we don't have cached data
-    if (tools.length === 0) {
-      setLoading(true);
-    }
-    
+  const fetchBySubCategory = async (category, sub_category) => {
+    if (fetchingTable.current) return;
+    fetchingTable.current = true;
+    setTableLoading(true);
+    setTools([]);
+    setFilteredData([]);
     try {
-      const response = await fetch(`${API_BASE_URL}/tools-list/`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const data = await response.json();
-      const sortedData = Array.isArray(data)
+      const url = `${API_BASE_URL}/tools-list/category/${encodeURIComponent(category)}/sub/${encodeURIComponent(sub_category)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const sorted = Array.isArray(data)
         ? [...data].sort((a, b) => (a.id || 0) - (b.id || 0))
         : [];
-      
-      // Update cache and state
-      sessionStorage.setItem('tools_list_cache', JSON.stringify(sortedData));
-      setTools(sortedData);
-      
-      // Check if any tools have null total_quantity and migrate if needed
-      const needsMigration = sortedData.some(tool => tool.total_quantity === null);
-      if (needsMigration) {
-        console.log('Detected tools with null total_quantity, running migration...');
-        try {
-          const migrateResponse = await fetch(`${API_BASE_URL}/tools-list/migrate-total-quantity`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-          });
-          if (migrateResponse.ok) {
-            const migrateResult = await migrateResponse.json();
-            console.log('Migration completed:', migrateResult);
-            // Refetch tools after migration
-            isFetchingRef.current = false; // Reset ref to allow recursive call
-            return fetchTools(); // Recursive call to get updated data
-          }
-        } catch (migrationError) {
-          console.error('Migration failed:', migrationError);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch tools:', error);
-      message.error('Failed to fetch tools: ' + error.message);
+      setTools(sorted);
+      setFilteredData(sorted);
+      setPagination(p => ({ ...p, current: 1 }));
+    } catch (e) {
+      message.error('Failed to load sub-category tools: ' + e.message);
     } finally {
-      setLoading(false);
-      isFetchingRef.current = false; // Reset the ref
+      setTableLoading(false);
+      fetchingTable.current = false;
     }
-  };
-
-  const filterData = () => {
-    let filtered = tools;
-
-    // Apply KPI filter first
-    if (activeFilter === 'consumables') {
-      filtered = filtered.filter(tool => tool.type === 'CONSUMABLES');
-    } else if (activeFilter === 'non-consumables') {
-      filtered = filtered.filter(tool => tool.type === 'NON-CONSUMABLES');
-    }
-
-    // Then apply search filter - Search by any field
-    if (searchText) {
-      const lowerSearch = searchText.toLowerCase();
-      filtered = filtered.filter(tool => {
-        return Object.values(tool).some(value => {
-          if (value === null || value === undefined) return false;
-          return String(value).toLowerCase().includes(lowerSearch);
-        });
-      });
-    }
-    
-    setFilteredData(filtered);
-    // Reset to first page when filtering
-    setPagination(prev => ({ ...prev, current: 1 }));
   };
 
   const handleBulkUpload = async (file) => {
-    if (!file) return;
-    
-    setLoading(true);
+    setTableLoading(true);
     const formData = new FormData();
     formData.append('file', file);
-
     try {
-      const response = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
-        method: 'POST',
-        body: formData,
+      const res = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
+        method: 'POST', body: formData,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to upload tools');
-      }
-
-      const result = await response.json();
-      message.success(`Successfully uploaded ${result.length} tools`);
-      fetchTools(); // Refresh the list
-    } catch (error) {
-      console.error('Bulk upload failed:', error);
-      message.error('Bulk upload failed: ' + error.message);
+      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Upload failed'); }
+      const result = await res.json();
+      message.success(`Uploaded ${result.length} tools successfully`);
+      fetchTree();
+    } catch (e) {
+      message.error('Upload failed: ' + e.message);
     } finally {
-      setLoading(false);
+      setTableLoading(false);
     }
   };
 
-  const handleKpiClick = (filterType) => {
-    setActiveFilter(filterType);
-    setSearchText(''); // Clear search when applying KPI filter
+  const handleExportExcel = () => {
+    if (!tools || tools.length === 0) {
+      message.warning('No data to export');
+      return;
+    }
+    const exportData = tools.map((t, index) => ({
+      'SL No': index + 1,
+      'Item Description': t.item_description || '',
+      'Range / Size': t.range || '',
+      'ID Code': t.identification_code || '',
+      'Make': t.make || '',
+      'Total Qty': t.total_quantity ?? t.quantity ?? 0,
+      'Available': t.quantity ?? 0,
+      'Issued': t.issues_qty ?? 0,
+      'Location': t.location || '',
+      'Gauge': t.gauge || '',
+      'Remarks': t.remarks || '',
+      'Amount': t.amount != null ? `₹${Number(t.amount).toFixed(2)}` : '',
+      'Type': t.type || '',
+    }));
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Tools List');
+    XLSX.writeFile(wb, 'Inventory_Master_Data.xlsx');
+    message.success('Exported successfully');
   };
 
-  const handleSearch = (value) => {
-    setSearchText(value);
+  const toggleCat = (cat) => setExpandedCats(p => ({ ...p, [cat]: !p[cat] }));
+  const expandAll = () => {
+    const newCats = {};
+    tree.forEach(catNode => { newCats[catNode.category] = true; });
+    setExpandedCats(newCats);
   };
-
-  const handleTableChange = (paginationConfig) => {
-    setPagination({
-      current: paginationConfig.current,
-      pageSize: paginationConfig.pageSize,
-    });
-  };
-
-  const openToolHistory = (tool) => {
-    setHistoryTool(tool);
-    setHistoryVisible(true);
-  };
-
-  const handleCloseHistory = () => {
-    setHistoryVisible(false);
-    setHistoryTool(null);
-  };
+  const collapseAll = () => setExpandedCats({});
 
   const columns = [
     {
-      title: 'SL NO',
-      key: 'sl_no',
-      width: 70,
-      fixed: 'left',
-      align: 'center',
-      className: 'table-header-styled',
-      render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1,
+      title: 'SL No', key: 'sl_no', width: 60, fixed: 'left', align: 'center',
+      render: (_, __, i) => <span style={{ color: '#8c8c8c', fontSize: 12 }}>{(pagination.current - 1) * pagination.pageSize + i + 1}</span>,
     },
     {
-      title: 'Item Description',
-      dataIndex: 'item_description',
-      key: 'item_description',
-      width: 180,
-      fixed: 'left',
-      ellipsis: true,
-      className: 'table-header-styled',
-      render: (text, record) => (
-        <Button
-          type="link"
-          style={{ padding: 0, fontWeight: 500 }}
-          onClick={() => openToolHistory(record)}
-        >
-          {text}
-        </Button>
-      ),
+      title: 'Item Description', dataIndex: 'item_description', key: 'item_description', width: 200, fixed: 'left', ellipsis: true,
+      render: (text, record) => <Button type="link" style={{ padding: 0, fontSize: 12, fontWeight: 600 }} onClick={() => { setHistoryTool(record); setHistoryVisible(true); }}>{text}</Button>,
     },
+    { title: 'Range / Size', dataIndex: 'range', key: 'range', width: 120, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
+    { title: 'ID Code', dataIndex: 'identification_code', key: 'identification_code', width: 150, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
+    { title: 'Make', dataIndex: 'make', key: 'make', width: 110, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
+    { title: 'Total Qty', dataIndex: 'total_quantity', key: 'total_quantity', width: 85, align: 'center', render: (v, r) => <span style={{ fontWeight: 600 }}>{v ?? r.quantity ?? 0}</span> },
     {
-      title: 'Range',
-      dataIndex: 'range',
-      key: 'range',
-      width: 100,
-      ellipsis: true,
-      className: 'table-header-styled',
+      title: 'Available', dataIndex: 'quantity', key: 'quantity', width: 90, align: 'center',
+      render: (v) => {
+        const n = v ?? 0;
+        return <Tag color={n === 0 ? 'red' : n <= 5 ? 'orange' : 'green'} style={{ borderRadius: 6, fontWeight: 600, minWidth: 32, textAlign: 'center' }}>{n}</Tag>;
+      },
     },
+    { title: 'Issues', dataIndex: 'issues_qty', key: 'issues_qty', width: 75, align: 'center', render: v => <span style={{ color: '#8c8c8c' }}>{v ?? 0}</span> },
+    { title: 'Location', dataIndex: 'location', key: 'location', width: 100, ellipsis: true, render: v => v ? <Tag style={{ borderRadius: 5, fontSize: 11 }}>{v}</Tag> : <span style={{ color: '#bbb' }}>—</span> },
+    { title: 'Gauge', dataIndex: 'gauge', key: 'gauge', width: 90, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
+    { title: 'Remarks', dataIndex: 'remarks', key: 'remarks', width: 160, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
+    { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 90, align: 'right', render: v => v != null ? <span style={{ fontWeight: 500 }}>₹{Number(v).toFixed(2)}</span> : <span style={{ color: '#bbb' }}>—</span> },
+    { title: 'Type', dataIndex: 'type', key: 'type', width: 130, render: v => v ? <Tag color={v === 'CONSUMABLES' ? 'green' : 'blue'} style={{ borderRadius: 5, fontSize: 10, fontWeight: 600 }}>{v}</Tag> : null },
     {
-      title: 'ID Code',
-      dataIndex: 'identification_code',
-      key: 'identification_code',
-      width: 120,
-      ellipsis: true,
-      className: 'table-header-styled',
-    },
-    {
-      title: 'Make',
-      dataIndex: 'make',
-      key: 'make',
-      width: 100,
-      ellipsis: true,
-      className: 'table-header-styled',
-    },
-    {
-      title: 'Total Qty',
-      dataIndex: 'total_quantity',
-      key: 'total_quantity',
-      width: 90,
-      align: 'center',
-      className: 'table-header-styled',
-      render: (totalQty, record) => totalQty || record.quantity || 0
-    },
-    {
-      title: 'Available Qty',
-      dataIndex: 'quantity',
-      key: 'quantity',
-      width: 140,
-      align: 'center',
-      className: 'table-header-styled',
-    },
-    {
-      title: 'Issue Qty',
-      dataIndex: 'issues_qty',
-      key: 'issues_qty',
-      width: 110,
-      align: 'center',
-      className: 'table-header-styled',
-      render: (issuesQty) => issuesQty || 0
-    },
-    {
-      title: 'Location',
-      dataIndex: 'location',
-      key: 'location',
-      width: 110,
-      ellipsis: true,
-      className: 'table-header-styled',
-    },
-    {
-      title: 'Gauge',
-      dataIndex: 'gauge',
-      key: 'gauge',
-      width: 90,
-      ellipsis: true,
-      className: 'table-header-styled',
-    },
-    {
-      title: 'Remarks',
-      dataIndex: 'remarks',
-      key: 'remarks',
-      width: 140,
-      ellipsis: true,
-      className: 'table-header-styled',
-    },
-    {
-      title: 'Amount',
-      dataIndex: 'amount',
-      key: 'amount',
-      width: 100,
-      align: 'right',
-      className: 'table-header-styled',
-      render: (amount) => amount ? `${amount.toFixed(2)}` : '-'
-    },
-    {
-      title: 'Ref Ledger',
-      dataIndex: 'ref_ledger',
-      key: 'ref_ledger',
-      width: 110,
-      ellipsis: true,
-      className: 'table-header-styled',
-    },
-    {
-      title: 'Type',
-      dataIndex: 'type',
-      key: 'type',
-      width: 130,
-      ellipsis: true,
-      className: 'table-header-styled',
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 100,
-      fixed: 'right',
-      align: 'center',
-      className: 'table-header-styled',
+      title: 'Actions', key: 'actions', width: 90, fixed: 'right', align: 'center',
       render: (_, record) => (
-        <Space>
-          <Button
-            type="text"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => onEdit(record)}
-          />
-          <Button
-            type="text"
-            size="small"
-            icon={<DeleteOutlined />}
-            danger
-            onClick={() => onDelete(record)}
-          />
+        <Space size={0}>
+          <Tooltip title="Edit Record"><Button type="text" size="small" icon={<EditOutlined />} style={{ color: '#1677ff' }} onClick={() => onEdit(record)} /></Tooltip>
+          <Popconfirm title="Delete this tool record?" description="This action cannot be undone." onConfirm={() => onDelete(record)} okText="Yes, Delete" cancelText="Cancel" okButtonProps={{ danger: true }}>
+            <Tooltip title="Delete Record"><Button type="text" size="small" icon={<DeleteOutlined />} danger /></Tooltip>
+          </Popconfirm>
         </Space>
       ),
     },
   ];
 
-  return (
-    <div style={{ maxWidth: '100%' }}>
-      {/* KPI Cards */}
-      <Row gutter={16} style={{ marginTop: 10, marginBottom: 12 }}>
-        <Col xs={24} sm={12} md={8}>
-          <Card 
-            style={{ 
-              borderRadius: '12px', 
-              borderBottom: '4px solid #1890ff',
-              boxShadow: activeCard === 'all'
-                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(24,144,255,0.35)'
-                : hoveredCard === 'all'
-                  ? '0 6px 18px rgba(0,0,0,0.12)'
-                  : '0 2px 10px rgba(0,0,0,0.05)',
-              transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
-              cursor: 'pointer',
-              transform: hoveredCard === 'all' ? 'translateY(-1px)' : 'none',
-              userSelect: 'none',
-              background: '#f0f7ff'
-            }}
-            hoverable
-            bodyStyle={{ padding: '16px 20px' }}
-            onClick={() => handleKpiClick('all')}
-            onMouseEnter={() => setHoveredCard('all')}
-            onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
-            onMouseDown={(e) => { e.preventDefault(); setActiveCard('all'); }}
-            onMouseUp={() => setActiveCard(null)}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '700', marginBottom: '2px' }}>Total Tools</div>
-                <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '12px' }}>Inventory Items</div>
-                <div style={{ fontSize: '28px', fontWeight: '700', color: '#1890ff' }}>{kpiData.totalTools}</div>
-              </div>
-              <div style={{ 
-                width: '56px', 
-                height: '56px', 
-                borderRadius: '12px', 
-                background: '#e6f7ff', 
-                display: 'flex', 
-                justifyContent: 'center', 
-                alignItems: 'center'
-              }}>
-                <ToolOutlined style={{ fontSize: '32px', color: '#1890ff' }} />
-              </div>
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card 
-            style={{ 
-              borderRadius: '12px', 
-              borderBottom: '4px solid #52c41a',
-              boxShadow: activeCard === 'consumables'
-                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(82,196,26,0.35)'
-                : hoveredCard === 'consumables'
-                  ? '0 6px 18px rgba(0,0,0,0.12)'
-                  : '0 2px 10px rgba(0,0,0,0.05)',
-              transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
-              cursor: 'pointer',
-              transform: hoveredCard === 'consumables' ? 'translateY(-1px)' : 'none',
-              userSelect: 'none',
-              background: '#f6ffed'
-            }}
-            hoverable
-            bodyStyle={{ padding: '16px 20px' }}
-            onClick={() => handleKpiClick('consumables')}
-            onMouseEnter={() => setHoveredCard('consumables')}
-            onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
-            onMouseDown={(e) => { e.preventDefault(); setActiveCard('consumables'); }}
-            onMouseUp={() => setActiveCard(null)}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '700', marginBottom: '2px' }}>Consumables</div>
-                <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '12px' }}>Fast-Moving Items</div>
-                <div style={{ fontSize: '28px', fontWeight: '700', color: '#52c41a' }}>{kpiData.consumables}</div>
-              </div>
-              <div style={{ 
-                width: '56px', 
-                height: '56px', 
-                borderRadius: '12px', 
-                background: '#f6ffed', 
-                display: 'flex', 
-                justifyContent: 'center', 
-                alignItems: 'center'
-              }}>
-                <CheckCircleOutlined style={{ fontSize: '32px', color: '#52c41a' }} />
-              </div>
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card 
-            style={{ 
-              borderRadius: '12px', 
-              borderBottom: '4px solid #ff4d4f',
-              boxShadow: activeCard === 'non-consumables'
-                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(255,77,79,0.35)'
-                : hoveredCard === 'non-consumables'
-                  ? '0 6px 18px rgba(0,0,0,0.12)'
-                  : '0 2px 10px rgba(0,0,0,0.05)',
-              transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
-              cursor: 'pointer',
-              transform: hoveredCard === 'non-consumables' ? 'translateY(-1px)' : 'none',
-              userSelect: 'none',
-              background: '#fff1f0'
-            }}
-            hoverable
-            bodyStyle={{ padding: '16px 20px' }}
-            onClick={() => handleKpiClick('non-consumables')}
-            onMouseEnter={() => setHoveredCard('non-consumables')}
-            onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
-            onMouseDown={(e) => { e.preventDefault(); setActiveCard('non-consumables'); }}
-            onMouseUp={() => setActiveCard(null)}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: '15px', color: '#262626', fontWeight: '700', marginBottom: '2px' }}>Non-Consumables</div>
-                <div style={{ fontSize: '12px', color: '#8c8c8c', marginBottom: '12px' }}>Fixed Assets</div>
-                <div style={{ fontSize: '28px', fontWeight: '700', color: '#ff4d4f' }}>{kpiData.nonConsumables}</div>
-              </div>
-              <div style={{ 
-                width: '56px', 
-                height: '56px', 
-                borderRadius: '12px', 
-                background: '#fff1f0', 
-                display: 'flex', 
-                justifyContent: 'center', 
-                alignItems: 'center'
-              }}>
-                <BlockOutlined style={{ fontSize: '32px', color: '#ff4d4f' }} />
-              </div>
-            </div>
-          </Card>
-        </Col>
-      </Row>
+  const breadcrumbItems = [
+    { title: 'Inventory' },
+    selected?.category     ? { title: selected.category }     : null,
+    selected?.sub_category ? { title: selected.sub_category } : null,
+  ].filter(Boolean);
 
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Search
-          placeholder="Search tools by any field..."
-          allowClear
-          enterButton={<SearchOutlined />}
-          size="medium"
-          style={{ width: 300 }}
-          maxLength={20}
-          onSearch={handleSearch}
-          onChange={(e) => setSearchText(e.target.value)}
-        />
-        <Space>
-          <Upload
-            beforeUpload={(file) => {
-              handleBulkUpload(file);
-              return false; // Prevent automatic upload
-            }}
-            showUploadList={false}
-            accept=".xlsx,.xls"
-          >
-            <Button icon={<UploadOutlined />} loading={loading}>
-              Bulk Upload
-            </Button>
-          </Upload>
-          <Button 
-            type="primary" 
-            onClick={onCreateNew}
-          >
-            Create New Tool
-          </Button>
-        </Space>
+  return (
+    <div style={{ display: 'flex', height: '100%', background: '#f5f6fa', overflow: 'hidden' }}>
+      <div style={{ width: collapsed ? 0 : 320, minWidth: collapsed ? 0 : 320, background: '#fff', borderRight: '1px solid #e8eaed', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', zIndex: 10 }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>Categories</span>
+          <Space size={4}>
+            <Tooltip title="Expand All"><Button type="text" size="small" icon={<ExpandOutlined />} onClick={expandAll} style={{ color: '#555' }} /></Tooltip>
+            <Tooltip title="Collapse All"><Button type="text" size="small" icon={<CompressOutlined />} onClick={collapseAll} style={{ color: '#555' }} /></Tooltip>
+            <Button type="text" size="small" icon={<MenuFoldOutlined />} style={{ color: '#8c8c8c', marginLeft: 4 }} onClick={() => setCollapsed(true)} />
+          </Space>
+        </div>
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          <SidebarTree tree={displayTree} selected={selected} onSelect={(node) => { setSelected(node); setSearchText(''); }} loading={treeLoading} expandedCats={expandedCats} toggleCat={toggleCat} />
+        </div>
       </div>
-      
-      <Table
-        columns={columns}
-        dataSource={filteredData}
-        rowKey="id"
-        loading={loading}
-        pagination={{
-          current: pagination.current,
-          pageSize: pagination.pageSize,
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-          pageSizeOptions: ['10', '20', '50', '100'],
-          onChange: (page, pageSize) => {
-            setPagination({
-              current: page,
-              pageSize: pageSize || pagination.pageSize,
-            });
-          },
-          onShowSizeChange: (current, size) => {
-            setPagination({
-              current: 1,
-              pageSize: size,
-            });
-          },
-        }}
-        onChange={handleTableChange}
-        size="small"
-        components={{
-          header: {
-            cell: (props) => (
-              <th
-                {...props}
-                style={{
-                  ...(props.style || {}),
-                  paddingTop: 'clamp(4px, 0.6vw, 6px)',
-                  paddingBottom: 'clamp(4px, 0.6vw, 6px)',
-                }}
-              />
-            ),
-          },
-          body: {
-            cell: (props) => (
-              <td
-                {...props}
-                style={{
-                  ...(props.style || {}),
-                  paddingTop: 'clamp(3px, 0.5vw, 5px)',
-                  paddingBottom: 'clamp(3px, 0.5vw, 5px)',
-                  paddingLeft: 'clamp(6px, 0.8vw, 10px)',
-                  paddingRight: 'clamp(6px, 0.8vw, 10px)',
-                  fontSize: 'clamp(10px, 0.9vw, 12px)',
-                  lineHeight: 1.1,
-                }}
-              />
-            ),
-          },
-        }}
-        scroll={{ x: 'max-content' }}
-      />
-      <ToolsHistory
-        tool={historyTool}
-        visible={historyVisible}
-        onClose={handleCloseHistory}
-      />
+
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f5f6fa' }}>
+        {!selected ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, color: '#8c8c8c', padding: '60px 20px', textAlign: 'center' }}>
+            <div style={{ width: 80, height: 80, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', marginBottom: 8 }}>
+              <AppstoreOutlined style={{ fontSize: 40, color: '#bfbfbf' }} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: 20, fontWeight: 600, color: '#595959', margin: '0 0 8px 0' }}>Please select a category from the left sidebar</h3>
+              <p style={{ fontSize: 14, color: '#8c8c8c', maxWidth: 400, margin: 0 }}>Select a category or sub-category from the tree menu to view and manage its inventory records.</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div style={{ background: '#fff', borderBottom: '1px solid #e8eaed', padding: '8px 20px', minHeight: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '1 1 auto', minWidth: 200 }}>
+                {collapsed && <Button type="text" icon={<MenuUnfoldOutlined />} style={{ color: '#666' }} onClick={() => setCollapsed(false)} />}
+                <Breadcrumb items={breadcrumbItems} separator="/" style={{ fontSize: 14 }} />
+              </div>
+              <div style={{ flex: '0 0 auto' }}>
+                <Search placeholder="Search items..." allowClear value={searchText} onChange={e => setSearchText(e.target.value)} style={{ width: 220 }} size="small" maxLength={20} />
+              </div>
+            </div>
+
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '12px 16px', gap: 10, minHeight: 0 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexShrink: 0 }}>
+                <div style={{ flex: '1 1 auto', minWidth: 250 }}>
+                  <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e', margin: 0, lineHeight: 1.2 }}>{selected?.sub_category || selected?.category || 'Inventory Master Data'}</h2>
+                  <p style={{ fontSize: 14, color: '#8c8c8c', marginTop: 4, margin: 0 }}>{selected.category} {selected.sub_category && `› ${selected.sub_category}`}</p>
+                </div>
+                <Space wrap style={{ flex: '0 0 auto' }}>
+                  <Button icon={<PlusOutlined />} type="primary" style={{ borderRadius: 7, fontWeight: 600 }} onClick={() => onCreateNew(selected)}>Add Row</Button>
+                  <Upload beforeUpload={file => { handleBulkUpload(file); return false; }} showUploadList={false} accept=".xlsx,.xls"><Button icon={<UploadOutlined />} style={{ borderRadius: 7 }}>Import</Button></Upload>
+                  <Button icon={<DownloadOutlined />} style={{ borderRadius: 7 }} onClick={handleExportExcel}>Export</Button>
+                  <Button icon={<ReloadOutlined />} style={{ borderRadius: 7 }} onClick={() => selected?.sub_category && fetchBySubCategory(selected.category, selected.sub_category)} />
+                </Space>
+              </div>
+
+              <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e8eaed', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <Table
+                  columns={columns}
+                  dataSource={filteredData}
+                  rowKey="id"
+                  loading={tableLoading}
+                  size="small"
+                  scroll={{ x: 'max-content', y: 'calc(100vh - 340px)' }}
+                  pagination={{
+                    current: pagination.current,
+                    pageSize: pagination.pageSize,
+                    showSizeChanger: true,
+                    pageSizeOptions: ['10', '20', '50'],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                    size: 'small',
+                    style: { padding: '8px 12px', margin: 0, borderTop: '1px solid #f0f0f0' },
+                    onChange: (page, size) => setPagination({ current: page, pageSize: size }),
+                  }}
+                  rowClassName={(_, i) => i % 2 === 0 ? '' : 'row-alt'}
+                />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      <ToolsHistory tool={historyTool} visible={historyVisible} onClose={() => { setHistoryVisible(false); setHistoryTool(null); }} />
+      <style>{`
+        .row-alt td { background: #fafbff !important; }
+        .ant-table-row:hover td { background: #f0f5ff !important; }
+        .ant-table-thead > tr > th::before { display: none !important; }
+        .ant-table-cell { padding: 12px 10px !important; }
+      `}</style>
     </div>
   );
 };
