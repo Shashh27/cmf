@@ -39,7 +39,7 @@ function App() {
           <Route path="/admin/oms/parts-priority" element={<PartsPriority />} />
           <Route path="/admin/oms/product/:productId" element={<OMS />} />
 
-          <Route path="/admin/pdm" element={<PDM />} />
+          <Route path="/admin/pdm/:productId" element={<PDM />} />
 
           <Route path="/admin/rawmaterials" element={<RawMaterials />} />
 
@@ -86,7 +86,7 @@ function App() {
           <Route path="/manufacturing_coordinator/rawmaterials" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/oms/parts-priority" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/oms/product/:productId" element={<ManufacturingCoordinator />} />
-          <Route path="/manufacturing_coordinator/pdm" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/pdm/:productId" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/pps" element={<Navigate to="/manufacturing_coordinator/pps/assets-availability" replace />} />
           <Route path="/manufacturing_coordinator/pps/assets-availability" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/pps/capacity-planning" element={<ManufacturingCoordinator />} />

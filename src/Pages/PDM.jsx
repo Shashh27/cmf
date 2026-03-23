@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Layout, Drawer, Button, Tabs } from "antd";
 import { MenuOutlined } from "@ant-design/icons";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import BillOfMaterials from "../PDM Components/BillOfMaterials";
 import ProductDetails from "../PDM Components/ProductDetails";
 import ProductSummary from "../PDM Components/ProductSummary";
@@ -13,9 +13,10 @@ const { Sider, Content } = Layout;
 
 const PDM = () => {
   const navigate = useNavigate();
+  const { productId: routeProductId } = useParams();
   const [searchParams] = useSearchParams();
   const fromOms = (searchParams.get("from") || "").toLowerCase() === "oms";
-  const initialProductId = searchParams.get("productId");
+  const initialProductId = routeProductId || searchParams.get("productId");
   const initialOrderId = searchParams.get("orderId");
 
   const [selectedItem, setSelectedItem] = useState(null);

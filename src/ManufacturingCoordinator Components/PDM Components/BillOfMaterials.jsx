@@ -99,7 +99,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           }
         })();
       } else {
-        fetchProducts().finally(() => setLoading(false));
+        // Standalone PDM access is no longer supported for Admin/MC roles.
+        setLoading(false);
       }
     }
   }, []);
