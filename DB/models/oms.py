@@ -24,7 +24,6 @@ class Product(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     product_name = Column(String, nullable=False)
-    product_number = Column(String, unique=True, nullable=False)
     product_version = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -49,11 +48,18 @@ class Assembly(Base):
 
     product_id = Column(Integer, ForeignKey("oms.products.id"))
     parent_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     product = relationship("Product", back_populates="assemblies")
     parts = relationship("Part", back_populates="assembly", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="assembly", cascade="all, delete-orphan")
+    user = relationship("AccessUser")
+
+    @property
+    def user_name(self):
+        return self.user.user_name if self.user else None
 
     parent = relationship("Assembly", remote_side=[id])
     children = relationship("Assembly", cascade="all, delete-orphan", overlaps="parent")
@@ -73,6 +79,8 @@ class PartType(Base):
 
     parts = relationship("Part", back_populates="type")
     operations = relationship("Operation", back_populates="part_type")
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    user = relationship("AccessUser")
 
 
 # =======================
@@ -88,8 +96,10 @@ class Part(Base):
 
     type_id = Column(Integer, ForeignKey("oms.part_types.id"))
     raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"))
+    part_detail = Column(String, nullable=True)  # For out-source: WITH_RAW_MATERIAL | WITHOUT_RAW_MATERIAL
     assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
     product_id = Column(Integer, ForeignKey("oms.products.id"))
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -97,6 +107,11 @@ class Part(Base):
     raw_material = relationship("RawMaterial")
     assembly = relationship("Assembly", back_populates="parts")
     product = relationship("Product", back_populates="parts")
+    user = relationship("AccessUser")
+
+    @property
+    def user_name(self):
+        return self.user.user_name if self.user else None
 
     operations = relationship("Operation", back_populates="part", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="part", cascade="all, delete-orphan")
@@ -124,6 +139,7 @@ class Operation(Base):
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=True)
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"))
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
     work_instructions = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
@@ -133,7 +149,13 @@ class Operation(Base):
     part = relationship("Part", back_populates="operations")
     part_type = relationship("PartType", back_populates="operations")
     machine = relationship("DB.models.configuration.Machine")
+    user = relationship("AccessUser")
     operation_documents = relationship("OperationDocument", back_populates="operation", cascade="all, delete-orphan")
+    tools = relationship("ToolWithPart", back_populates="operation", cascade="all, delete-orphan")
+
+    @property
+    def user_name(self):
+        return self.user.user_name if self.user else None
 
 
 
@@ -151,13 +173,17 @@ class Document(Base):
     document_type = Column(String, nullable=False)
     document_version = Column(String, nullable=False)
 
-    part_id = Column(Integer, ForeignKey("oms.parts.id"))
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=True)
+    assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
     parent_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     part = relationship("Part", back_populates="documents")
+    assembly = relationship("Assembly", back_populates="documents")
     parent = relationship("Document", remote_side=[id])
+    user = relationship("AccessUser")
 
 
 # =======================
@@ -171,12 +197,14 @@ class ToolWithPart(Base):
     tool_id = Column(Integer, ForeignKey("inventory.tools_list.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"))
     operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     part = relationship("Part", back_populates="tools")
     tool = relationship("DB.models.inventory.ToolsList")
-    operation = relationship("Operation")
+    operation = relationship("Operation", back_populates="tools")
+    user = relationship("AccessUser")
 
 
 
@@ -189,11 +217,13 @@ class Order(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     sale_order_number = Column(String, unique=True, nullable=False)
-    project_name = Column(String, nullable=True)
     order_date = Column(TIMESTAMP, nullable=True)
     customer_id = Column(Integer, ForeignKey("configuration.customers.id"), nullable=False)
     product_id = Column(Integer, ForeignKey("oms.products.id"), nullable=False)
-    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # creator (PC or admin)
+    project_coordinator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    admin_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    manufacturing_coordinator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     quantity = Column(Integer, nullable=False)
     due_date = Column(TIMESTAMP, nullable=True)
     status = Column(String, nullable=False)
@@ -202,10 +232,20 @@ class Order(Base):
 
     customer = relationship("Customer", back_populates="orders")
     product = relationship("Product", back_populates="orders")
-    user = relationship("AccessUser")
+    user = relationship("AccessUser", foreign_keys=[user_id])
+    project_coordinator = relationship("AccessUser", foreign_keys=[project_coordinator_id])
+    admin = relationship("AccessUser", foreign_keys=[admin_id])
+    manufacturing_coordinator = relationship("AccessUser", foreign_keys=[manufacturing_coordinator_id])
     order_documents = relationship("OrderDocument", back_populates="order", cascade="all, delete-orphan")
     raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order", cascade="all, delete-orphan")
     part_priorities = relationship("OrderPartPriority", back_populates="order", cascade="all, delete-orphan")
+
+    # Kept for backward compatibility in code that still expects an
+    # attribute named project_name, but the actual database column has
+    # been dropped. Always returns None.
+    @property
+    def project_name(self):
+        return None
 
 # =======================
 # Order Document
@@ -221,11 +261,13 @@ class OrderDocument(Base):
     document_type = Column(String, nullable=False)
     document_version = Column(String, nullable=False)
     parent_id = Column(Integer, ForeignKey("oms.order_documents.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     order = relationship("Order", back_populates="order_documents")
     parent = relationship("OrderDocument", remote_side=[id])
+    user = relationship("AccessUser")
 
 
 
@@ -243,12 +285,14 @@ class OperationDocument(Base):
     document_version = Column(String, nullable=False)
     operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
     parent_id = Column(Integer, ForeignKey("oms.operation_documents.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     operation = relationship("Operation", back_populates="operation_documents")
     parent = relationship("OperationDocument", remote_side=[id])
+    user = relationship("AccessUser")
 
 
 # =======================
@@ -266,6 +310,8 @@ class OrderPartsRawMaterialLinked(Base):
     mass = Column(Float, nullable=True)
     material_status = Column(String, nullable=True)
     linkage_group_id = Column(String, nullable=True)  # Segregates demand batches (e.g. 20 kg vs 5 kg)
+     # Manufacturing coordinator responsible for this linkage (optional)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -273,6 +319,7 @@ class OrderPartsRawMaterialLinked(Base):
     raw_material = relationship("RawMaterial")
     part = relationship("Part")
     order = relationship("Order")
+    user = relationship("AccessUser")
 
 
 # =======================

@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from sqlalchemy import text, func
-from typing import List
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import text, func, literal
+from typing import List, Optional
 from datetime import datetime
 from DB.database import get_db
 from DB.models.oms import (
@@ -17,11 +17,11 @@ from DB.models.oms import (
 from DB.models.configuration import Customer, PokayokeCompletedLog
 from DB.models.inventory import InventoryRequest, InventoryReturnRequest
 from DB.models.access_control import AccessUser
-from DB.models.notifications import OrderNotification as OrderNotificationModel
 from DB.schemas.oms import (
     Order as OrderResponse,
     OrderCreate,
     OrderUpdate,
+    OrderAssign,
     OrderWithCustomer,
     OrderWithCustomerAndProduct,
     OrderWithHierarchy,
@@ -33,13 +33,46 @@ from DB.schemas.oms import (
 )
 from .products import fetch_product_hierarchy, delete_product_cascade
 from DB.minio_client import get_minio_client
+from DB.models.notifications import OrderNotification as OrderNotificationModel
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 # CRUD operations
+def _order_to_response(order, db: Session):
+    """Build order response dict with customer, product, and role user names."""
+    return {
+        "id": order.id,
+        "sale_order_number": order.sale_order_number,
+        "project_name": order.project_name,
+        "order_date": order.order_date,
+        "customer_id": order.customer_id,
+        "product_id": order.product_id,
+        "user_id": order.user_id or 0,
+        "project_coordinator_id": order.project_coordinator_id,
+        "admin_id": order.admin_id,
+        "manufacturing_coordinator_id": order.manufacturing_coordinator_id,
+        "quantity": order.quantity,
+        "due_date": order.due_date,
+        "status": order.status,
+        "company_name": order.customer.company_name if order.customer else None,
+        "product_name": order.product.product_name if order.product else None,
+        "user_name": order.user.user_name if order.user else None,
+        "project_coordinator_name": order.project_coordinator.user_name if order.project_coordinator else None,
+        "admin_name": order.admin.user_name if order.admin else None,
+        "manufacturing_coordinator_name": order.manufacturing_coordinator.user_name if order.manufacturing_coordinator else None,
+        "created_at": order.created_at,
+        "updated_at": order.updated_at,
+    }
+
+
 @router.post("/", response_model=OrderResponse)
 def create_order(order: OrderCreate, db: Session = Depends(get_db)):
-    """Create a new order"""
+    """
+    Create a new order.
+    Can be created by project_coordinator or admin.
+    project_coordinator_id is optional (no PC when admin creates directly).
+    admin_id is required. manufacturing_coordinator_id is set when admin assigns later.
+    """
     # Trim and normalize case for the sale_order_number
     order.sale_order_number = order.sale_order_number.strip().upper() if order.sale_order_number else order.sale_order_number
 
@@ -51,7 +84,7 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     )
     if existing_order:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Order with Project Number '{order.sale_order_number}' already exists."
         )
 
@@ -59,59 +92,64 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
-    # Check if user exists
-    user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    db_order = Order(**order.dict())
+
+    # Validate admin_id (required)
+    admin_user = db.query(AccessUser).filter(AccessUser.id == order.admin_id).first()
+    if not admin_user:
+        raise HTTPException(status_code=404, detail="Admin user not found")
+    if order.project_coordinator_id is not None:
+        pc_user = db.query(AccessUser).filter(AccessUser.id == order.project_coordinator_id).first()
+        if not pc_user:
+            raise HTTPException(status_code=404, detail="Project coordinator user not found")
+    if order.manufacturing_coordinator_id is not None:
+        mc_user = db.query(AccessUser).filter(AccessUser.id == order.manufacturing_coordinator_id).first()
+        if not mc_user:
+            raise HTTPException(status_code=404, detail="Manufacturing coordinator user not found")
+    if order.user_id is not None:
+        creator = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
+        if not creator:
+            raise HTTPException(status_code=404, detail="Creator user not found")
+
+    # Exclude legacy project_name field (column dropped, property is read-only)
+    data = order.model_dump(exclude={"project_name"})
+    db_order = Order(**data)
     db.add(db_order)
     db.commit()
     db.refresh(db_order)
 
-    # Create order notification only if created by Project Coordinator (not admin)
-    role = (user.role or "").strip().lower()
-    is_project_coordinator = ("project" in role and "coordinator" in role)
-    is_admin = ("admin" in role)
-    if is_project_coordinator and not is_admin:
-        try:
-            notif = OrderNotificationModel(order_id=db_order.id, is_ack=False)
-            db.add(notif)
-            db.commit()
-        except Exception:
-            db.rollback()
-
-    # Populate default part priorities (FIFO based on creation) only for IN-House parts
-    parts = (
-        db.query(Part)
-        .join(PartType, Part.type_id == PartType.id)
-        .filter(
-            Part.product_id == db_order.product_id,
-            func.lower(PartType.type_name) == "in-house",
-        )
-        .order_by(Part.id.asc())
-        .all()
-    )
-    
-    # Get current max priority globally
-    max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
-    
-    for index, part in enumerate(parts):
-        priority_entry = OrderPartPriority(
-            order_id=db_order.id,
-            product_id=db_order.product_id,
-            part_id=part.id,
-            priority=max_priority + 1 + index
-        )
-        db.add(priority_entry)
-    
+    notif = OrderNotificationModel(order_id=db_order.id)
+    db.add(notif)
     db.commit()
 
-    return db_order
+    # Reload with relationships for response
+    order_with_relations = (
+        db.query(Order)
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.product),
+            joinedload(Order.user),
+            joinedload(Order.project_coordinator),
+            joinedload(Order.admin),
+            joinedload(Order.manufacturing_coordinator),
+        )
+        .filter(Order.id == db_order.id)
+        .first()
+    )
+    return _order_to_response(order_with_relations, db)
 
 @router.get("/", response_model=List[OrderWithCustomerAndProduct])
-def get_orders(user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all orders with company_name, product_name, and user_name using efficient JOINs."""
+def get_orders(
+    user_id: int | None = None,
+    admin_id: int | None = None,
+    project_coordinator_id: int | None = None,
+    manufacturing_coordinator_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Get all orders with company_name, product_name, and role user names.
+    Filter by user_id (creator), admin_id, project_coordinator_id, or manufacturing_coordinator_id
+    for module-specific views (admin / project coordinator / manufacturing coordinator).
+    """
     from sqlalchemy.orm import joinedload
     query = (
         db.query(Order)
@@ -119,11 +157,52 @@ def get_orders(user_id: int | None = None, db: Session = Depends(get_db)):
             joinedload(Order.customer),
             joinedload(Order.product),
             joinedload(Order.user),
+            joinedload(Order.project_coordinator),
+            joinedload(Order.admin),
+            joinedload(Order.manufacturing_coordinator),
         )
         .order_by(Order.id.asc())
     )
     if user_id is not None:
         query = query.filter(Order.user_id == user_id)
+    if admin_id is not None:
+        query = query.filter(Order.admin_id == admin_id)
+    if project_coordinator_id is not None:
+        query = query.filter(Order.project_coordinator_id == project_coordinator_id)
+    if manufacturing_coordinator_id is not None:
+        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+    orders = query.all()
+    return [_order_to_response(order, db) for order in orders]
+
+@router.get("/with-customers", response_model=List[OrderWithCustomer])
+def get_orders_with_customers(
+    user_id: int | None = None,
+    admin_id: int | None = None,
+    project_coordinator_id: int | None = None,
+    manufacturing_coordinator_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """Get all orders with customer information. Filter by user_id, admin_id, project_coordinator_id, or manufacturing_coordinator_id."""
+    from sqlalchemy.orm import joinedload
+    query = (
+        db.query(Order)
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.user),
+            joinedload(Order.project_coordinator),
+            joinedload(Order.admin),
+            joinedload(Order.manufacturing_coordinator),
+        )
+        .order_by(Order.id.asc())
+    )
+    if user_id is not None:
+        query = query.filter(Order.user_id == user_id)
+    if admin_id is not None:
+        query = query.filter(Order.admin_id == admin_id)
+    if project_coordinator_id is not None:
+        query = query.filter(Order.project_coordinator_id == project_coordinator_id)
+    if manufacturing_coordinator_id is not None:
+        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
     orders = query.all()
     result = []
     for order in orders:
@@ -135,37 +214,9 @@ def get_orders(user_id: int | None = None, db: Session = Depends(get_db)):
             "customer_id": order.customer_id,
             "product_id": order.product_id,
             "user_id": order.user_id or 0,
-            "quantity": order.quantity,
-            "due_date": order.due_date,
-            "status": order.status,
-            "company_name": order.customer.company_name if order.customer else None,
-            "product_name": order.product.product_name if order.product else None,
-            "user_name": order.user.user_name if order.user else None,
-            "created_at": order.created_at,
-            "updated_at": order.updated_at,
-        })
-    return result
-
-@router.get("/with-customers", response_model=List[OrderWithCustomer])
-def get_orders_with_customers(db: Session = Depends(get_db)):
-    """Get all orders with customer information using efficient JOINs."""
-    from sqlalchemy.orm import joinedload
-    orders = (
-        db.query(Order)
-        .options(joinedload(Order.customer), joinedload(Order.user))
-        .order_by(Order.id.asc())
-        .all()
-    )
-    result = []
-    for order in orders:
-        result.append({
-            "id": order.id,
-            "sale_order_number": order.sale_order_number,
-            "project_name": order.project_name,
-            "order_date": order.order_date,
-            "customer_id": order.customer_id,
-            "product_id": order.product_id,
-            "user_id": order.user_id or 0,
+            "project_coordinator_id": order.project_coordinator_id,
+            "admin_id": order.admin_id,
+            "manufacturing_coordinator_id": order.manufacturing_coordinator_id,
             "quantity": order.quantity,
             "due_date": order.due_date,
             "status": order.status,
@@ -185,17 +236,23 @@ def get_orders_with_customers(db: Session = Depends(get_db)):
 @router.get("/{order_id}/hierarchical", response_model=OrderWithHierarchy)
 def get_order_hierarchical_data(order_id: int, db: Session = Depends(get_db)):
     """Get order with full product hierarchy including tools"""
-    order = db.query(Order).filter(Order.id == order_id).first()
+    from sqlalchemy.orm import joinedload
+    order = (
+        db.query(Order)
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.product),
+            joinedload(Order.user),
+            joinedload(Order.project_coordinator),
+            joinedload(Order.admin),
+            joinedload(Order.manufacturing_coordinator),
+        )
+        .filter(Order.id == order_id)
+        .first()
+    )
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
-    company_name = customer.company_name if customer else None
-    product = db.query(Product).filter(Product.id == order.product_id).first()
-    product_name = product.product_name if product else None
-    user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
-    user_name = user.user_name if user else None
-    
+
     hierarchy = fetch_product_hierarchy(db, order.product_id)
 
     priorities = (
@@ -222,56 +279,32 @@ def get_order_hierarchical_data(order_id: int, db: Session = Depends(get_db)):
 
     inject_priority(hierarchy.direct_parts)
     inject_priority_recursive(hierarchy.assemblies)
-    
-    return {
-        "id": order.id,
-        "sale_order_number": order.sale_order_number,
-        "project_name": order.project_name,
-        "order_date": order.order_date,
-        "customer_id": order.customer_id,
-        "product_id": order.product_id,
-        "user_id": order.user_id or 0,
-        "quantity": order.quantity,
-        "due_date": order.due_date,
-        "status": order.status,
-        "company_name": company_name,
-        "product_name": product_name,
-        "user_name": user_name,
-        "created_at": order.created_at,
-        "updated_at": order.updated_at,
-        "product_hierarchy": hierarchy
-    }
+
+    out = _order_to_response(order, db)
+    out["product_hierarchy"] = hierarchy
+    return out
 
 
 @router.get("/{order_id}", response_model=OrderWithCustomerAndProduct)
 def get_order(order_id: int, db: Session = Depends(get_db)):
-    """Get a specific order by ID with company_name and product_name"""
+    """Get a specific order by ID with company_name, product_name, and role names"""
     from sqlalchemy.orm import joinedload
     order = (
         db.query(Order)
-        .options(joinedload(Order.customer), joinedload(Order.product), joinedload(Order.user))
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.product),
+            joinedload(Order.user),
+            joinedload(Order.project_coordinator),
+            joinedload(Order.admin),
+            joinedload(Order.manufacturing_coordinator),
+        )
         .filter(Order.id == order_id)
         .first()
     )
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    return {
-        "id": order.id,
-        "sale_order_number": order.sale_order_number,
-        "project_name": order.project_name,
-        "order_date": order.order_date,
-        "customer_id": order.customer_id,
-        "product_id": order.product_id,
-        "user_id": order.user_id or 0,
-        "quantity": order.quantity,
-        "due_date": order.due_date,
-        "status": order.status,
-        "company_name": order.customer.company_name if order.customer else None,
-        "product_name": order.product.product_name if order.product else None,
-        "user_name": order.user.user_name if order.user else None,
-        "created_at": order.created_at,
-        "updated_at": order.updated_at,
-    }
+    return _order_to_response(order, db)
 
 @router.get("/customer/{customer_id}", response_model=List[OrderResponse])
 def get_orders_by_customer(customer_id: int, db: Session = Depends(get_db)):
@@ -360,17 +393,33 @@ def update_order_part_priorities(order_id: int, priorities: List[OrderPartPriori
     return get_order_part_priorities(order_id, db)
 
 @router.get("/part-priorities/all", response_model=List[OrderPartPrioritySchema])
-def get_all_part_priorities(db: Session = Depends(get_db)):
-    """Get all part priorities globally with details"""
-    priorities = (
+def get_all_part_priorities(
+    admin_id: Optional[int] = Query(None, description="Filter part priorities by admin who owns the order"),
+    manufacturing_coordinator_id: Optional[int] = Query(
+        None, description="Filter part priorities by manufacturing coordinator who owns the order"
+    ),
+    db: Session = Depends(get_db),
+):
+    """Get all part priorities globally with details.
+
+    - If admin_id is provided, filter by Order.admin_id.
+    - If manufacturing_coordinator_id is provided, filter by Order.manufacturing_coordinator_id.
+    - If both are omitted, return priorities for all orders.
+    """
+    query = (
         db.query(OrderPartPriority)
         .join(Part, OrderPartPriority.part_id == Part.id)
         .join(PartType, Part.type_id == PartType.id)
+        .join(Order, OrderPartPriority.order_id == Order.id)
         .filter(func.lower(PartType.type_name) == "in-house")
-        .order_by(OrderPartPriority.priority.asc())
-        .all()
     )
-    
+    if admin_id is not None:
+        query = query.filter(Order.admin_id == admin_id)
+    if manufacturing_coordinator_id is not None:
+        query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+
+    priorities = query.order_by(OrderPartPriority.priority.asc()).all()
+
     result = []
     for p in priorities:
         p_data = {
@@ -382,9 +431,8 @@ def get_all_part_priorities(db: Session = Depends(get_db)):
             "part_name": p.part.part_name if p.part else None,
             "part_number": p.part.part_number if p.part else None,
             "sale_order_number": p.order.sale_order_number if p.order else None,
-            "project_name": p.order.project_name if p.order else None,
+            "project_name": None,
             "product_name": p.product.product_name if p.product else None,
-            "product_number": p.product.product_number if p.product else None,
             "part_type_name": p.part.type.type_name if p.part and p.part.type else None,
             "created_at": p.created_at,
             "updated_at": p.updated_at,
@@ -458,8 +506,14 @@ def swap_part_priorities(swap: OrderPartPrioritySwap, db: Session = Depends(get_
 
 
 @router.get("/part-priorities/order-wise", response_model=List[OrderWisePriority])
-def get_order_wise_priorities(db: Session = Depends(get_db)):
-    groups_subquery = (
+def get_order_wise_priorities(
+    admin_id: Optional[int] = Query(None, description="Filter by admin_id owning the order"),
+    manufacturing_coordinator_id: Optional[int] = Query(
+        None, description="Filter by manufacturing_coordinator_id owning the order"
+    ),
+    db: Session = Depends(get_db),
+):
+    groups_query = (
         db.query(
             OrderPartPriority.order_id.label("order_id"),
             func.min(OrderPartPriority.priority).label("min_priority"),
@@ -468,18 +522,22 @@ def get_order_wise_priorities(db: Session = Depends(get_db)):
         )
         .join(Part, OrderPartPriority.part_id == Part.id)
         .join(PartType, Part.type_id == PartType.id)
+        .join(Order, OrderPartPriority.order_id == Order.id)
         .filter(func.lower(PartType.type_name) == "in-house")
-        .group_by(OrderPartPriority.order_id)
-        .subquery()
     )
+    if admin_id is not None:
+        groups_query = groups_query.filter(Order.admin_id == admin_id)
+    if manufacturing_coordinator_id is not None:
+        groups_query = groups_query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+
+    groups_subquery = groups_query.group_by(OrderPartPriority.order_id).subquery()
 
     rows = (
         db.query(
             Order.id,
             Order.sale_order_number,
-            Order.project_name,
+            literal(None).label("project_name"),
             Product.product_name,
-            Product.product_number,
             groups_subquery.c.min_priority,
             groups_subquery.c.max_priority,
             groups_subquery.c.part_count,
@@ -498,7 +556,6 @@ def get_order_wise_priorities(db: Session = Depends(get_db)):
                 "sale_order_number": row.sale_order_number,
                 "project_name": row.project_name,
                 "product_name": row.product_name,
-                "product_number": row.product_number,
                 "min_priority": row.min_priority,
                 "max_priority": row.max_priority,
                 "part_count": row.part_count,
@@ -509,19 +566,33 @@ def get_order_wise_priorities(db: Session = Depends(get_db)):
 
 class OrderWisePriorityUpdate(BaseModel):
     order_ids: List[int]
+    admin_id: Optional[int] = None
+    manufacturing_coordinator_id: Optional[int] = None
 
 
 @router.put("/part-priorities/order-wise/reorder")
 def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session = Depends(get_db)):
     order_ids = update.order_ids
+    admin_id = update.admin_id
+    manufacturing_coordinator_id = update.manufacturing_coordinator_id
     if not order_ids:
         return {"message": "No changes"}
 
-    existing_ids = {row[0] for row in db.query(OrderPartPriority.order_id).distinct().all()}
-    if set(order_ids) != existing_ids:
-        raise HTTPException(status_code=400, detail="Order list does not match existing priorities")
+    # Limit existing IDs to those belonging to this admin / manufacturing coordinator, if provided
+    existing_query = db.query(OrderPartPriority.order_id).join(Order, OrderPartPriority.order_id == Order.id)
+    if admin_id is not None:
+        existing_query = existing_query.filter(Order.admin_id == admin_id)
+    if manufacturing_coordinator_id is not None:
+        existing_query = existing_query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+    existing_ids = {row[0] for row in existing_query.distinct().all()}
 
-    records = db.query(OrderPartPriority).order_by(OrderPartPriority.priority.asc()).all()
+    if set(order_ids) != existing_ids:
+        raise HTTPException(status_code=400, detail="Order list does not match existing priorities for this admin")
+
+    records_query = db.query(OrderPartPriority).join(Order, OrderPartPriority.order_id == Order.id)
+    if admin_id is not None:
+        records_query = records_query.filter(Order.admin_id == admin_id)
+    records = records_query.order_by(OrderPartPriority.priority.asc()).all()
 
     grouped = {}
     for record in records:
@@ -540,13 +611,46 @@ def reorder_order_wise_priorities(update: OrderWisePriorityUpdate, db: Session =
     db.commit()
     return {"message": "Order-wise priorities updated successfully"}
 
-@router.put("/{order_id}", response_model=OrderWithCustomerAndProduct)
-def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends(get_db)):
-    """Update an order and return with company_name and product_name"""
+@router.put("/{order_id}/assign", response_model=OrderWithCustomerAndProduct)
+def assign_order_to_manufacturing(
+    order_id: int, payload: OrderAssign, db: Session = Depends(get_db)
+):
+    """
+    Assign the order to a manufacturing coordinator.
+    Typically called by admin after order creation.
+    """
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+    mc_user = db.query(AccessUser).filter(AccessUser.id == payload.manufacturing_coordinator_id).first()
+    if not mc_user:
+        raise HTTPException(status_code=404, detail="Manufacturing coordinator user not found")
+    order.manufacturing_coordinator_id = payload.manufacturing_coordinator_id
+    db.commit()
+    from sqlalchemy.orm import joinedload
+    order = (
+        db.query(Order)
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.product),
+            joinedload(Order.user),
+            joinedload(Order.project_coordinator),
+            joinedload(Order.admin),
+            joinedload(Order.manufacturing_coordinator),
+        )
+        .filter(Order.id == order_id)
+        .first()
+    )
+    return _order_to_response(order, db)
+
+
+@router.put("/{order_id}", response_model=OrderWithCustomerAndProduct)
+def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends(get_db)):
+    """Update an order and return with company_name, product_name, and role names"""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
     # Trim and normalize the sale_order_number if it is being updated
     if order_update.sale_order_number is not None:
         order_update.sale_order_number = order_update.sale_order_number.strip().upper()
@@ -563,7 +667,7 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
         )
         if existing_order:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"Order with Project Number '{order_update.sale_order_number}' already exists."
             )
 
@@ -575,57 +679,39 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
         product = db.query(Product).filter(Product.id == order_update.product_id).first()
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
-        
-        # If product is changing, update priorities
-        if order.product_id != order_update.product_id:
-            # Delete old priorities
-            db.query(OrderPartPriority).filter(OrderPartPriority.order_id == order_id).delete()
-            
-            # Add new priorities
-            parts = db.query(Part).filter(Part.product_id == order_update.product_id).order_by(Part.id.asc()).all()
-            
-            # Get current max priority globally
-            max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
-            
-            for index, part in enumerate(parts):
-                priority_entry = OrderPartPriority(
-                    order_id=order.id,
-                    product_id=order_update.product_id,
-                    part_id=part.id,
-                    priority=max_priority + 1 + index
-                )
-                db.add(priority_entry)
-            
-    update_data = order_update.dict(exclude_unset=True)
+    if order_update.admin_id is not None:
+        admin_user = db.query(AccessUser).filter(AccessUser.id == order_update.admin_id).first()
+        if not admin_user:
+            raise HTTPException(status_code=404, detail="Admin user not found")
+    if order_update.project_coordinator_id is not None:
+        pc_user = db.query(AccessUser).filter(AccessUser.id == order_update.project_coordinator_id).first()
+        if not pc_user:
+            raise HTTPException(status_code=404, detail="Project coordinator user not found")
+    if order_update.manufacturing_coordinator_id is not None:
+        mc_user = db.query(AccessUser).filter(AccessUser.id == order_update.manufacturing_coordinator_id).first()
+        if not mc_user:
+            raise HTTPException(status_code=404, detail="Manufacturing coordinator user not found")
+
+    # Exclude legacy project_name field (column dropped, property is read-only)
+    update_data = order_update.model_dump(exclude_unset=True, exclude={"project_name"})
     for field, value in update_data.items():
         setattr(order, field, value)
     db.commit()
-    db.refresh(order)
-    # Reload with relationships to avoid extra queries
     from sqlalchemy.orm import joinedload
     order = (
         db.query(Order)
-        .options(joinedload(Order.customer), joinedload(Order.product), joinedload(Order.user))
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.product),
+            joinedload(Order.user),
+            joinedload(Order.project_coordinator),
+            joinedload(Order.admin),
+            joinedload(Order.manufacturing_coordinator),
+        )
         .filter(Order.id == order_id)
         .first()
     )
-    return {
-        "id": order.id,
-        "sale_order_number": order.sale_order_number,
-        "project_name": order.project_name,
-        "order_date": order.order_date,
-        "customer_id": order.customer_id,
-        "product_id": order.product_id,
-        "user_id": order.user_id or 0,
-        "quantity": order.quantity,
-        "due_date": order.due_date,
-        "status": order.status,
-        "company_name": order.customer.company_name if order.customer else None,
-        "product_name": order.product.product_name if order.product else None,
-        "user_name": order.user.user_name if order.user else None,
-        "created_at": order.created_at,
-        "updated_at": order.updated_at,
-    }
+    return _order_to_response(order, db)
 
 @router.delete("/{order_id}")
 def delete_order(order_id: int, db: Session = Depends(get_db)):
@@ -641,16 +727,25 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     
     product_id = order.product_id
     sale_order_number = order.sale_order_number
-    minio_client = get_minio_client()
+    other_orders_count = 0
 
+    # Try to get MinIO client; if not initialized, skip MinIO deletion but still clean DB.
+    try:
+        minio_client = get_minio_client()
+    except RuntimeError as e:
+        print(f"Warning: {e}. Skipping MinIO file deletions for order {order_id}.")
+        minio_client = None
+
+    # Main deletion transaction: remove all related data and the order itself.
+    # This block should either fully succeed or fully roll back.
     try:
         # Delete part_schedule_status records using a savepoint to avoid transaction abort
-        # This table exists in the scheduling schema
+        # This table exists in the scheduling schema and uses sale_order_id (order_id)
         savepoint = db.begin_nested()
         try:
             db.execute(
-                text("DELETE FROM scheduling.part_schedule_status WHERE sale_order_number = :sale_order_number"),
-                {"sale_order_number": sale_order_number}
+                text("DELETE FROM scheduling.part_schedule_status WHERE sale_order_id = :order_id"),
+                {"order_id": order_id}
             )
             savepoint.commit()
         except Exception as e:
@@ -673,11 +768,13 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
         # Delete order documents and their MinIO files
         order_docs = db.query(OrderDocument).filter(OrderDocument.order_id == order_id).all()
         for order_doc in order_docs:
-            try:
-                object_name = order_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
-                minio_client.delete_file(object_name)
-            except Exception as e:
-                print(f"Error deleting order document from MinIO: {e}")
+            # Best-effort MinIO delete when client is available
+            if minio_client:
+                try:
+                    object_name = order_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
+                    minio_client.delete_file(object_name)
+                except Exception as e:
+                    print(f"Error deleting order document from MinIO: {e}")
             db.delete(order_doc)
 
         # Delete order part priorities
@@ -688,15 +785,79 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
             OrderPartsRawMaterialLinked.order_id == order_id
         ).delete()
 
-        # Delete inventory requests and returns
-        inventory_requests = (
-            db.query(InventoryRequest).filter(InventoryRequest.project_id == order_id).all()
+        # Delete inventory-related records using raw SQL to respect FK relationships
+        # 1) Delete tool issues that reference inventory requests for this order
+        db.execute(
+            text(
+                """
+                DELETE FROM inventory.tool_issues
+                WHERE request_id IN (
+                    SELECT id FROM inventory.inventory_requests
+                    WHERE project_id = :order_id
+                )
+                """
+            ),
+            {"order_id": order_id},
         )
-        for inv_req in inventory_requests:
-            db.query(InventoryReturnRequest).filter(
-                InventoryReturnRequest.requested_id == inv_req.id
-            ).delete()
-            db.delete(inv_req)
+
+        # 2) Delete return requests that reference inventory requests for this order
+        db.execute(
+            text(
+                """
+                DELETE FROM inventory.inventory_return_requests
+                WHERE requested_id IN (
+                    SELECT id FROM inventory.inventory_requests
+                    WHERE project_id = :order_id
+                )
+                """
+            ),
+            {"order_id": order_id},
+        )
+
+        # 3) Delete the inventory requests themselves
+        db.execute(
+            text(
+                """
+                DELETE FROM inventory.inventory_requests
+                WHERE project_id = :order_id
+                """
+            ),
+            {"order_id": order_id},
+        )
+
+        # Delete out source part status records linked to this order
+        db.execute(
+            text(
+                """
+                DELETE FROM oms.out_source_parts_status
+                WHERE order_id = :order_id
+                """
+            ),
+            {"order_id": order_id},
+        )
+
+        # Delete order-level schedule status records (scheduling.order_schedule_status)
+        # to satisfy FK constraint order_schedule_status_order_id_fkey
+        db.execute(
+            text(
+                """
+                DELETE FROM scheduling.order_schedule_status
+                WHERE order_id = :order_id
+                """
+            ),
+            {"order_id": order_id},
+        )
+
+        # Delete order notifications referencing this order to satisfy FK in notifications.order_notifications
+        db.execute(
+            text(
+                """
+                DELETE FROM notifications.order_notifications
+                WHERE order_id = :order_id
+                """
+            ),
+            {"order_id": order_id},
+        )
 
         # Delete pokayoke logs
         pokayoke_logs = (
@@ -715,32 +876,44 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
             .filter(Order.product_id == product_id, Order.id != order_id)
             .count()
         )
-        
+
         # Delete the order
         db.delete(order)
         db.flush()
-        
-        # If no other orders exist for this product, delete the product and all related data
+
+        # Only delete the product if there are no other orders referencing it
         if other_orders_count == 0:
             delete_product_cascade(db, product_id)
 
         db.commit()
 
-        # Re-sequence remaining priorities to fill gaps while maintaining relative order
-        remaining_priorities = db.query(OrderPartPriority).order_by(OrderPartPriority.priority.asc()).all()
-        for index, record in enumerate(remaining_priorities):
-            record.priority = index + 1
-        
-        db.commit()
-        
-        return {"message": "Order deleted successfully", "product_also_deleted": other_orders_count == 0}
-    
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting order: {str(e)}"
         )
+
+    # Best-effort resequencing of remaining priorities.
+    # If this fails for any reason, the order deletion should still be considered successful.
+    try:
+        remaining_priorities = (
+            db.query(OrderPartPriority)
+            .order_by(OrderPartPriority.priority.asc())
+            .all()
+        )
+        for index, record in enumerate(remaining_priorities):
+            record.priority = index + 1
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Warning: could not resequence order priorities after deleting order {order_id}: {e}")
+
+    return {
+        "message": "Order deleted successfully",
+        "product_also_deleted": other_orders_count == 0,
+    }
 
 # @router.get("/sale-order/{sale_order_number}/parts", response_model=List[PartResponse])
 # def get_order_parts(sale_order_number: str, db: Session = Depends(get_db)):

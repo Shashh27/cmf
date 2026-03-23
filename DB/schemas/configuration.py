@@ -16,6 +16,7 @@ class WorkCenterBase(BaseModel):
     work_center_name: str
     description: Optional[str] = None
     is_schedulable: bool = True
+    user_id: Optional[int] = None
 
 
 class WorkCenterCreate(WorkCenterBase):
@@ -27,6 +28,7 @@ class WorkCenterUpdate(BaseModel):
     work_center_name: Optional[str] = None
     description: Optional[str] = None
     is_schedulable: Optional[bool] = None
+    user_id: Optional[int] = None
 
 
 class WorkCenter(WorkCenterBase):
@@ -51,6 +53,7 @@ class MachineBase(BaseModel):
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     password: str
+    user_id: Optional[int] = None
 
 
 class MachineCreate(MachineBase):
@@ -69,6 +72,7 @@ class MachineUpdate(BaseModel):
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     password: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class Machine(MachineBase):
@@ -111,6 +115,7 @@ class CustomerBase(BaseModel):
     email: str
     contact_number: str
     contact_person: str
+    user_id: Optional[int] = None
 
 
 class CustomerCreate(CustomerBase):
@@ -124,6 +129,7 @@ class CustomerUpdate(BaseModel):
     email: Optional[str] = None
     contact_number: Optional[str] = None
     contact_person: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class Customer(CustomerBase):

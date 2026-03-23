@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List
-from datetime import datetime, timezone, timedelta
+from sqlalchemy.exc import IntegrityError
 
 from DB.database import get_db
 from DB.models.configuration import Machine as MachineModel, WorkCenter as WorkCenterModel
@@ -174,8 +174,20 @@ def delete_machine(machine_id: int, db: Session = Depends(get_db)):
     except Exception as e3:
         print(f"Warning: Could not update operations: {e3}")
 
-    db.delete(db_machine)
-    db.commit()
+    try:
+        db.delete(db_machine)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # Use available fields from the Machine model (type/model) in the message.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f'Cannot delete machine ID {db_machine.id} (type: {db_machine.type or "-"}, model: {db_machine.model or "-"}). '
+                "It is still referenced by other records (for example planned schedule items). "
+                "Remove or update those references first, then try again."
+            ),
+        )
     return None
 
 

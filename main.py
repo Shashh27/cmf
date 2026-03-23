@@ -31,6 +31,7 @@ from routers import (
     tool_issues_router,
     out_source_parts_status_router,
     maintenance_router,
+    maintenance_router,
 )
 
 # Import Pokayoke checklists router
@@ -38,6 +39,8 @@ from routers.pokayoke_checklists import router as pokayoke_checklists_router, co
 
 # Import general documents router
 from document_routers.general_documents import router as general_documents_router
+
+from document_routers.common_documents import router as common_documents_router
 
 # Import machine documents router
 from document_routers.machine_documents import router as machine_documents_router
@@ -127,6 +130,7 @@ app.include_router(tools_router, prefix="/api/v1")
 app.include_router(customers_router, prefix="/api/v1")
 app.include_router(orders_router, prefix="/api/v1")
 app.include_router(order_documents_router, prefix="/api/v1")
+
 app.include_router(rawmaterials_router, prefix="/api/v1")
 app.include_router(workcenter_router, prefix="/api/v1")
 app.include_router(general_documents_router)
@@ -231,7 +235,7 @@ if __name__ == "__main__":
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=3000,
         log_level="info"
     )
 
@@ -244,9 +248,16 @@ if __name__ == "__main__":
 
 
 
+# localsystem
 
+#  uvicorn main:app --reload --host 172.18.7.91 --port 8000
 
 #  uvicorn main:app --reload --host 172.18.7.86 --port 8000
 
+# python -m uvicorn main:app --reload --host 172.18.7.91 --port 8000
 
 # python -m uvicorn main:app --reload --host 172.18.100.76 --port 8000
+
+# server:
+# uvicorn main:app --reload --host 172.18.7.91 --port 3000
+#  uvicorn main:app --reload --host 172.18.7.86 --port 8000

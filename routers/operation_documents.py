@@ -106,9 +106,10 @@ async def upload_operation_documents(
     document_type: str = Form("Technical"),
     document_version: str = Form("1.0"),
     parent_id: Optional[int] = Form(None),
+    user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db)
 ):
-    """Upload multiple documents for an operation"""
+    """Upload multiple documents for an operation (user_id = uploader: project_coordinator, admin, or manufacturing_coordinator)."""
     # Check if operation exists
     operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not operation:
@@ -159,14 +160,15 @@ async def upload_operation_documents(
                 }
             )
             
-            # Create database record
+            # Create database record (user_id = uploader)
             db_document = OperationDocumentModel(
                 document_name=file.filename,
                 document_url=document_url,
                 document_type=effective_doc_type,
                 document_version=document_version,
                 operation_id=operation_id,
-                parent_id=parent_id
+                parent_id=parent_id,
+                user_id=user_id
             )
             
             db.add(db_document)
@@ -186,15 +188,228 @@ async def upload_operation_documents(
         )
 
 
+@router.post("/upload-bulk/", response_model=List[OperationDocument], status_code=status.HTTP_201_CREATED)
+async def upload_operation_documents_bulk(
+    operation_id: int = Form(...),
+    files: List[UploadFile] = File(...),
+    document_type: List[str] = Form([]),
+    document_version: List[str] = Form([]),
+    document_name: List[str] = Form([]),
+    parent_id: List[Optional[int]] = Form([]),
+    user_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Upload many operation documents with per-file metadata in one request."""
+    operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
+    if not operation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation with id {operation_id} not found"
+        )
+
+    if not files:
+        return []
+
+    uploaded_documents: List[OperationDocumentModel] = []
+    minio_client = get_minio_client()
+
+    try:
+        for idx, file in enumerate(files):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_extension = get_file_extension(file.filename)
+            object_name = f"operation_documents/operation_{operation_id}/{timestamp}_{file.filename}"
+
+            file_content = await file.read()
+            file_stream = io.BytesIO(file_content)
+            content_type = get_content_type_from_detection(file_content, file.filename)
+
+            effective_type = None
+            if idx < len(document_type) and document_type[idx]:
+                effective_type = str(document_type[idx]).strip()
+            if not effective_type:
+                ext_str = file_extension.replace('.', '').upper()
+                effective_type = ext_str or "Unknown"
+
+            effective_version = None
+            if idx < len(document_version) and document_version[idx]:
+                effective_version = str(document_version[idx]).strip()
+            if not effective_version:
+                effective_version = "1.0"
+
+            effective_name = None
+            if idx < len(document_name) and document_name[idx]:
+                effective_name = str(document_name[idx]).strip()
+            if not effective_name:
+                effective_name = file.filename
+
+            effective_parent = None
+            if idx < len(parent_id):
+                pid = parent_id[idx]
+                if pid not in (0, None):
+                    effective_parent = pid
+
+            document_url = minio_client.upload_file(
+                file_data=file_stream,
+                object_name=object_name,
+                content_type=content_type,
+                metadata={
+                    'document_name': effective_name,
+                    'document_type': effective_type,
+                    'document_version': effective_version,
+                    'operation_id': str(operation_id),
+                    'original_filename': file.filename
+                }
+            )
+
+            db_document = OperationDocumentModel(
+                document_name=effective_name,
+                document_url=document_url,
+                document_type=effective_type,
+                document_version=effective_version,
+                operation_id=operation_id,
+                parent_id=effective_parent,
+                user_id=user_id
+            )
+            db.add(db_document)
+            uploaded_documents.append(db_document)
+
+        db.commit()
+        for doc in uploaded_documents:
+            db.refresh(doc)
+        return uploaded_documents
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload documents: {str(e)}"
+        )
+
+
+@router.post("/upload-bulk-multi/", response_model=List[OperationDocument], status_code=status.HTTP_201_CREATED)
+async def upload_operation_documents_bulk_multi(
+    operation_id: List[int] = Form(...),
+    files: List[UploadFile] = File(...),
+    document_type: List[str] = Form([]),
+    document_version: List[str] = Form([]),
+    document_name: List[str] = Form([]),
+    parent_id: List[str] = Form([]),
+    user_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload many operation documents across multiple operations in one request.
+    Arrays must align by index: operation_id[i] belongs to files[i], document_type[i], etc.
+    """
+    if not files:
+        return []
+    if len(operation_id) != len(files):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="operation_id and files length must match"
+        )
+
+    op_ids = set(operation_id)
+    existing = db.query(OperationModel.id).filter(OperationModel.id.in_(op_ids)).all()
+    existing_ids = {row[0] for row in existing}
+    missing = [oid for oid in op_ids if oid not in existing_ids]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation(s) not found: {missing}"
+        )
+
+    uploaded_documents: List[OperationDocumentModel] = []
+    minio_client = get_minio_client()
+
+    try:
+        for idx, file in enumerate(files):
+            op_id = operation_id[idx]
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_extension = get_file_extension(file.filename)
+            object_name = f"operation_documents/operation_{op_id}/{timestamp}_{file.filename}"
+
+            file_content = await file.read()
+            file_stream = io.BytesIO(file_content)
+            content_type = get_content_type_from_detection(file_content, file.filename)
+
+            effective_type = None
+            if idx < len(document_type) and document_type[idx]:
+                effective_type = str(document_type[idx]).strip()
+            if not effective_type:
+                ext_str = file_extension.replace('.', '').upper()
+                effective_type = ext_str or "Unknown"
+
+            effective_version = None
+            if idx < len(document_version) and document_version[idx]:
+                effective_version = str(document_version[idx]).strip()
+            if not effective_version:
+                effective_version = "1.0"
+
+            effective_name = None
+            if idx < len(document_name) and document_name[idx]:
+                effective_name = str(document_name[idx]).strip()
+            if not effective_name:
+                effective_name = file.filename
+
+            effective_parent = None
+            if idx < len(parent_id):
+                raw = (parent_id[idx] or "").strip()
+                if raw and raw.lower() not in ("null", "none", "0"):
+                    try:
+                        effective_parent = int(raw)
+                    except ValueError:
+                        effective_parent = None
+
+            document_url = minio_client.upload_file(
+                file_data=file_stream,
+                object_name=object_name,
+                content_type=content_type,
+                metadata={
+                    'document_name': effective_name,
+                    'document_type': effective_type,
+                    'document_version': effective_version,
+                    'operation_id': str(op_id),
+                    'original_filename': file.filename
+                }
+            )
+
+            db_document = OperationDocumentModel(
+                document_name=effective_name,
+                document_url=document_url,
+                document_type=effective_type,
+                document_version=effective_version,
+                operation_id=op_id,
+                parent_id=effective_parent,
+                user_id=user_id
+            )
+            db.add(db_document)
+            uploaded_documents.append(db_document)
+
+        db.commit()
+        for doc in uploaded_documents:
+            db.refresh(doc)
+        return uploaded_documents
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload documents: {str(e)}"
+        )
+
+
 @router.get("/", response_model=List[OperationDocumentWithDetails])
-def get_operation_documents(db: Session = Depends(get_db)):
-    """Get all operation documents with operation details (single JOIN query)."""
-    documents = (
+def get_operation_documents(user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all operation documents with operation details. Filter by user_id (uploader) for module-specific views."""
+    query = (
         db.query(OperationDocumentModel)
         .options(joinedload(OperationDocumentModel.operation))
         .order_by(OperationDocumentModel.id.asc())
-        .all()
     )
+    if user_id is not None:
+        query = query.filter(OperationDocumentModel.user_id == user_id)
+    documents = query.all()
     return [_op_doc_to_dict(d) for d in documents]
 
 
@@ -325,17 +540,18 @@ def preview_operation_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/operation/{operation_id}", response_model=List[OperationDocumentWithDetails])
-def get_documents_by_operation(operation_id: int, db: Session = Depends(get_db)):
-    """Get all documents for a specific operation"""
-    # Check if operation exists
+def get_documents_by_operation(operation_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all documents for a specific operation. Filter by user_id (uploader) for module-specific views."""
     operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not operation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation with id {operation_id} not found"
         )
-    
-    documents = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id).all()
+    query = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id)
+    if user_id is not None:
+        query = query.filter(OperationDocumentModel.user_id == user_id)
+    documents = query.all()
     result = []
     for document in documents:
         # Create document dict with operation details

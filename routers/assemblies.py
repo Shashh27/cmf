@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import text
 from typing import List
 
 from DB.database import get_db
@@ -13,7 +14,9 @@ from DB.models.oms import (
     OrderPartPriority as OrderPartPriorityModel,
     Order as OrderModel,
     OperationDocument as OperationDocumentModel,
+    OutSourcePartStatus as OutSourcePartStatusModel,
 )
+from DB.models.configuration import PokayokeCompletedLog
 from DB.schemas.oms import Assembly, AssemblyCreate, AssemblyUpdate
 
 router = APIRouter(
@@ -24,24 +27,43 @@ router = APIRouter(
 
 @router.post("/", response_model=Assembly, status_code=status.HTTP_201_CREATED)
 def create_assembly(assembly: AssemblyCreate, db: Session = Depends(get_db)):
-    """Create a new assembly"""
+    """Create a new assembly (user_id = project_coordinator, admin, or manufacturing_coordinator)."""
     db_assembly = AssemblyModel(**assembly.model_dump())
     db.add(db_assembly)
     db.commit()
     db.refresh(db_assembly)
+    # Reload with user for user_name in response
+    db_assembly = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.id == db_assembly.id)
+        .first()
+    )
     return db_assembly
 
 
 @router.get("/", response_model=List[Assembly])
-def get_assemblies(db: Session = Depends(get_db)):
-    """Get all assemblies"""
-    return db.query(AssemblyModel).order_by(AssemblyModel.id.asc()).all()
+def get_assemblies(user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all assemblies with user_name. Filter by user_id for module-specific views."""
+    query = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .order_by(AssemblyModel.id.asc())
+    )
+    if user_id is not None:
+        query = query.filter(AssemblyModel.user_id == user_id)
+    return query.all()
 
 
 @router.get("/{assembly_id}", response_model=Assembly)
 def get_assembly(assembly_id: int, db: Session = Depends(get_db)):
-    """Get a specific assembly by ID"""
-    assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
+    """Get a specific assembly by ID with user_name."""
+    assembly = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.id == assembly_id)
+        .first()
+    )
     if not assembly:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -51,17 +73,29 @@ def get_assembly(assembly_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/product/{product_id}", response_model=List[Assembly])
-def get_assemblies_by_product(product_id: int, db: Session = Depends(get_db)):
-    """Get all assemblies for a specific product"""
-    assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).all()
-    return assemblies
+def get_assemblies_by_product(product_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all assemblies for a specific product with user_name. Filter by user_id for module-specific views."""
+    query = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.product_id == product_id)
+    )
+    if user_id is not None:
+        query = query.filter(AssemblyModel.user_id == user_id)
+    return query.all()
 
 
 @router.get("/parent/{parent_id}", response_model=List[Assembly])
-def get_child_assemblies(parent_id: int, db: Session = Depends(get_db)):
-    """Get all child assemblies for a parent assembly"""
-    assemblies = db.query(AssemblyModel).filter(AssemblyModel.parent_id == parent_id).all()
-    return assemblies
+def get_child_assemblies(parent_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all child assemblies for a parent assembly with user_name. Filter by user_id for module-specific views."""
+    query = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.parent_id == parent_id)
+    )
+    if user_id is not None:
+        query = query.filter(AssemblyModel.user_id == user_id)
+    return query.all()
 
 
 @router.put("/{assembly_id}", response_model=Assembly)
@@ -80,6 +114,12 @@ def update_assembly(assembly_id: int, assembly: AssemblyUpdate, db: Session = De
 
     db.commit()
     db.refresh(db_assembly)
+    db_assembly = (
+        db.query(AssemblyModel)
+        .options(joinedload(AssemblyModel.user))
+        .filter(AssemblyModel.id == assembly_id)
+        .first()
+    )
     return db_assembly
 
 
@@ -117,25 +157,42 @@ def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
     part_ids = [p.id for p in parts_under_assemblies]
 
     if part_ids:
-        linked_priorities = (
-            db.query(OrderPartPriorityModel)
-            .filter(OrderPartPriorityModel.part_id.in_(part_ids))
-            .all()
-        )
-        if linked_priorities:
-            order_ids = {p.order_id for p in linked_priorities}
-            orders = db.query(OrderModel).filter(OrderModel.id.in_(order_ids)).all()
-            order_numbers = [o.sale_order_number for o in orders]
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "This assembly cannot be deleted because its parts are linked to "
-                    f"orders: {', '.join(order_numbers)}. Please delete or update the "
-                    "related orders first."
+        # Delete pokayoke logs for parts
+        for pid in part_ids:
+            result = db.execute(
+                text(
+                    "SELECT id FROM configuration.pokayoke_completed_logs "
+                    "WHERE part_id = :pid"
                 ),
+                {"pid": pid},
             )
+            log_ids = [row[0] for row in result]
+            for log_id in log_ids:
+                log_obj = (
+                    db.query(PokayokeCompletedLog)
+                    .filter(PokayokeCompletedLog.id == log_id)
+                    .first()
+                )
+                if log_obj:
+                    db.delete(log_obj)
+        db.flush()
 
-    if part_ids:
+        # Delete part priorities
+        db.query(OrderPartPriorityModel).filter(
+            OrderPartPriorityModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # Delete out source part status records
+        db.query(OutSourcePartStatusModel).filter(
+            OutSourcePartStatusModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # Delete from scheduling.part_schedule_status to avoid FK violation
+        db.execute(
+            text("DELETE FROM scheduling.part_schedule_status WHERE part_id IN :pids"),
+            {"pids": tuple(part_ids)}
+        )
+
         operations = (
             db.query(OperationModel)
             .filter(OperationModel.part_id.in_(part_ids))
@@ -144,6 +201,12 @@ def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
         operation_ids = [op.id for op in operations]
 
         if operation_ids:
+            # Delete from scheduling.planned_schedule_items to avoid FK violation
+            db.execute(
+                text("DELETE FROM scheduling.planned_schedule_items WHERE operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
             db.query(OperationDocumentModel).filter(
                 OperationDocumentModel.operation_id.in_(operation_ids)
             ).delete(synchronize_session=False)

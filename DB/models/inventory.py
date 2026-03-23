@@ -33,6 +33,10 @@ class RawMaterial(Base):
     status = Column(String)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
+    # Who created/owns this raw material master (admin or coordinator)
+    user = relationship("AccessUser")
 
 
 # =======================
@@ -102,14 +106,14 @@ class InventoryReturnRequest(Base):
     returned_qty = Column(Integer, nullable=False, default=0)
     remarks = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, nullable=False)
-    inventory_supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # Added inventory_supervisor_id
+    inventory_supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     status = Column(String, nullable=False, default="pending")  # pending, collected
     updated_at = Column(TIMESTAMP, nullable=True)
 
     # Relationships
     inventory_request = relationship("InventoryRequest", back_populates="return_requests")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
-    inventory_supervisor = relationship("AccessUser", foreign_keys=[inventory_supervisor_id])  # Added inventory_supervisor relationship
+    inventory_supervisor = relationship("AccessUser", foreign_keys=[inventory_supervisor_id])
 
 
 # =======================

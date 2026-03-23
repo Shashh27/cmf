@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 # =======================
 class ProductBase(BaseModel):
     product_name: str
-    product_number: str
     product_version: str
     user_id: int
 
@@ -24,7 +23,6 @@ class ProductCreate(ProductBase):
 
 class ProductUpdate(BaseModel):
     product_name: Optional[str] = None
-    product_number: Optional[str] = None
     product_version: Optional[str] = None
     user_id: Optional[int] = None
 
@@ -47,6 +45,7 @@ class AssemblyBase(BaseModel):
     assembly_number: str
     product_id: Optional[int] = None
     parent_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class AssemblyCreate(AssemblyBase):
@@ -58,10 +57,12 @@ class AssemblyUpdate(BaseModel):
     assembly_number: Optional[str] = None
     product_id: Optional[int] = None
     parent_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class Assembly(AssemblyBase):
     id: int
+    user_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -74,6 +75,7 @@ class Assembly(AssemblyBase):
 # =======================
 class PartTypeBase(BaseModel):
     type_name: str
+    user_id: Optional[int] = None
 
 
 class PartTypeCreate(PartTypeBase):
@@ -82,6 +84,7 @@ class PartTypeCreate(PartTypeBase):
 
 class PartTypeUpdate(BaseModel):
     type_name: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class PartType(PartTypeBase):
@@ -101,8 +104,10 @@ class PartBase(BaseModel):
     part_number: str
     type_id: int
     raw_material_id: Optional[int] = None
+    part_detail: Optional[str] = None  # For out-source: WITH_RAW_MATERIAL | WITHOUT_RAW_MATERIAL
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class PartCreate(PartBase):
@@ -114,15 +119,19 @@ class PartUpdate(BaseModel):
     part_number: Optional[str] = None
     type_id: Optional[int] = None
     raw_material_id: Optional[int] = None
+    part_detail: Optional[str] = None
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class Part(PartBase):
     id: int
     type_name: Optional[str] = None
     raw_material_name: Optional[str] = None
+    raw_material_status: Optional[str] = None  # From raw_materials.status: Available / Not Available / N/A
     priority: Optional[int] = None
+    user_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -134,7 +143,7 @@ class Part(PartBase):
 # Operation Schemas
 # =======================
 class OperationBase(BaseModel):
-    operation_number: str
+    operation_number: Optional[str] = None
     operation_name: str
     part_type_id: Optional[int] = 1
     from_date: Optional[datetime] = None
@@ -144,6 +153,7 @@ class OperationBase(BaseModel):
     workcenter_id: Optional[int] = None
     machine_id: Optional[int] = None
     part_id: int
+    user_id: Optional[int] = None
     work_instructions: Optional[str] = None
     notes: Optional[str] = None
 
@@ -193,6 +203,7 @@ class OperationUpdate(BaseModel):
     workcenter_id: Optional[int] = None
     machine_id: Optional[int] = None
     part_id: Optional[int] = None
+    user_id: Optional[int] = None
     work_instructions: Optional[str] = None
     notes: Optional[str] = None
 
@@ -232,6 +243,7 @@ class Operation(OperationBase):
     part_type_name: Optional[str] = None
     work_center_name: Optional[str] = None
     machine_name: Optional[str] = None
+    user_name: Optional[str] = None
     operation_documents: List['OperationDocument'] = []
     tools: List['ToolWithPart'] = []
     created_at: Optional[datetime] = None
@@ -274,8 +286,10 @@ class DocumentBase(BaseModel):
     document_name: str
     document_type: str
     document_version: str
-    part_id: int
+    part_id: Optional[int] = None
+    assembly_id: Optional[int] = None
     parent_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class DocumentCreate(DocumentBase):
@@ -288,7 +302,9 @@ class DocumentUpdate(BaseModel):
     document_type: Optional[str] = None
     document_version: Optional[str] = None
     part_id: Optional[int] = None
+    assembly_id: Optional[int] = None
     parent_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class Document(DocumentBase):
@@ -308,6 +324,7 @@ class ToolWithPartBase(BaseModel):
     tool_id: int
     part_id: int
     operation_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class ToolWithPartCreate(ToolWithPartBase):
@@ -318,6 +335,7 @@ class ToolWithPartUpdate(BaseModel):
     tool_id: Optional[int] = None
     part_id: Optional[int] = None
     operation_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class ToolWithPart(ToolWithPartBase):
@@ -338,12 +356,14 @@ class PartDetails(BaseModel):
     operations: List[Operation] = []
     documents: List[Document] = []
     tools: List[ToolWithPart] = []
+    extracted_data: List['DocumentExtractedData'] = []
 
 
 class AssemblyDetails(BaseModel):
     assembly: Assembly
     parts: List[PartDetails] = []
     subassemblies: List['AssemblyDetails'] = []
+    documents: List[Document] = []
 
 
 class ProductHierarchicalData(BaseModel):
@@ -363,7 +383,10 @@ class OrderBase(BaseModel):
     order_date: Optional[datetime] = None
     customer_id: int
     product_id: int
-    user_id: int
+    user_id: Optional[int] = None
+    project_coordinator_id: Optional[int] = None
+    admin_id: int
+    manufacturing_coordinator_id: Optional[int] = None
     quantity: int
     due_date: Optional[datetime] = None
     status: str
@@ -380,9 +403,16 @@ class OrderUpdate(BaseModel):
     customer_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
+    project_coordinator_id: Optional[int] = None
+    admin_id: Optional[int] = None
+    manufacturing_coordinator_id: Optional[int] = None
     quantity: Optional[int] = None
     due_date: Optional[datetime] = None
     status: Optional[str] = None
+
+
+class OrderAssign(BaseModel):
+    manufacturing_coordinator_id: int
 
 
 class Order(OrderBase):
@@ -390,6 +420,9 @@ class Order(OrderBase):
     company_name: Optional[str] = None
     product_name: Optional[str] = None
     user_name: Optional[str] = None
+    project_coordinator_name: Optional[str] = None
+    admin_name: Optional[str] = None
+    manufacturing_coordinator_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -433,6 +466,7 @@ class OrderDocumentBase(BaseModel):
     document_type: str
     document_version: str
     parent_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class OrderDocumentCreate(OrderDocumentBase):
@@ -446,6 +480,7 @@ class OrderDocumentUpdate(BaseModel):
     document_version: Optional[str] = None
     document_url: Optional[str] = None
     parent_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class OrderDocument(OrderDocumentBase):
@@ -468,6 +503,7 @@ class OperationDocumentBase(BaseModel):
     document_version: str
     operation_id: int
     parent_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class OperationDocumentCreate(OperationDocumentBase):
@@ -481,6 +517,7 @@ class OperationDocumentUpdate(BaseModel):
     document_version: Optional[str] = None
     operation_id: Optional[int] = None
     parent_id: Optional[int] = None
+    user_id: Optional[int] = None
 
 
 class OperationDocument(OperationDocumentBase):
@@ -514,6 +551,7 @@ class OrderPartsRawMaterialLinkedBase(BaseModel):
     mass: Optional[float] = None
     material_status: Optional[str] = None
     linkage_group_id: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class OrderPartsRawMaterialLinkedCreate(OrderPartsRawMaterialLinkedBase):
@@ -528,6 +566,7 @@ class OrderPartsRawMaterialLinkedUpdate(BaseModel):
     mass: Optional[float] = None
     material_status: Optional[str] = None
     linkage_group_id: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class OrderPartsRawMaterialLinked(OrderPartsRawMaterialLinkedBase):
@@ -546,7 +585,7 @@ class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
     order_quantity: Optional[int] = None
     mass: Optional[float] = None
     sale_order_number: Optional[str] = None
-    project_name: Optional[str] = None
+    product_name: Optional[str] = None
     material_status: Optional[str] = None
     linkage_group_id: Optional[str] = None
     updated_at: Optional[datetime] = None
@@ -593,7 +632,6 @@ class OrderPartPriority(OrderPartPriorityBase):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
-    product_number: Optional[str] = None
     part_type_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -607,7 +645,6 @@ class OrderWisePriority(BaseModel):
     sale_order_number: Optional[str] = None
     project_name: Optional[str] = None
     product_name: Optional[str] = None
-    product_number: Optional[str] = None
     min_priority: int
     max_priority: int
     part_count: int
@@ -647,10 +684,15 @@ class DocumentExtractedDataUpdate(BaseModel):
 
 class DocumentExtractedData(DocumentExtractedDataBase):
     id: int
-    created_at: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+# Rebuild forward references for hierarchical schemas
+PartDetails.model_rebuild()
+AssemblyDetails.model_rebuild()
 
 
 # =======================

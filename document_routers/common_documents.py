@@ -376,6 +376,7 @@ def _get_common_documents_with_versions(
                 parent_id=latest_doc.parent_id,
                 created_at=latest_doc.created_at,
                 updated_at=latest_doc.updated_at,
+                user_id=latest_doc.user_id,
                 versions=versions
             ))
 
@@ -447,6 +448,7 @@ async def get_common_document(
         parent_id=document.parent_id,
         created_at=document.created_at,
         updated_at=document.updated_at,
+        user_id=document.user_id,
         versions=versions
     )
 
