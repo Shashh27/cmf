@@ -358,6 +358,13 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
                 )
             db.flush()
 
+        # Delete component_issues records that reference these parts
+        if part_ids:
+            db.execute(
+                text("DELETE FROM maintenance.component_issues WHERE part_id IN :pids"),
+                {"pids": tuple(part_ids)}
+            )
+
         # Delete parts
         db.query(PartModel).filter(PartModel.id.in_(part_ids)).delete(
             synchronize_session=False

@@ -615,26 +615,39 @@ def delete_operation_document(document_id: int, db: Session = Depends(get_db)):
         )
     
     try:
-        # Delete from MinIO
+        # Get MinIO client and path info before deleting from DB
         minio_client = get_minio_client()
-        parsed_url = urlparse(document.document_url)
-        path_parts = parsed_url.path.lstrip('/').split('/', 1)
-        
-        if len(path_parts) < 2:
-            if not parsed_url.netloc and '/' in document.document_url:
-                path_parts = document.document_url.lstrip('/').split('/', 1)
-        
-        if len(path_parts) >= 2:
-            bucket_name = path_parts[0]
-            object_name = path_parts[1]
-            minio_client.delete_file(object_name)
+        object_name = None
+        try:
+            parsed_url = urlparse(document.document_url)
+            path_parts = parsed_url.path.lstrip('/').split('/', 1)
+            
+            if len(path_parts) < 2:
+                if not parsed_url.netloc and '/' in document.document_url:
+                    path_parts = document.document_url.lstrip('/').split('/', 1)
+            
+            if len(path_parts) >= 2:
+                object_name = path_parts[1]
+        except Exception:
+            pass
+            
+        # Delete from database first
+        db.delete(document)
+        db.commit()
+
+        # Only delete from MinIO after successful database commit
+        if object_name:
+            try:
+                minio_client.delete_file(object_name)
+            except Exception as e:
+                print(f"Warning: Failed to delete operation document from MinIO: {str(e)}")
         
     except Exception as e:
-        print(f"Warning: Failed to delete operation document from MinIO: {str(e)}")
-    
-    # Delete from database
-    db.delete(document)
-    db.commit()
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete document: {str(e)}"
+        )
     return None
 
 
@@ -652,25 +665,39 @@ def delete_documents_by_operation(operation_id: int, db: Session = Depends(get_d
     documents = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id).all()
     minio_client = get_minio_client()
     
+    # Collect all object names for later deletion
+    objects_to_delete = []
     for document in documents:
-        # Delete from MinIO
         try:
             parsed_url = urlparse(document.document_url)
             path_parts = parsed_url.path.lstrip('/').split('/', 1)
-            
             if len(path_parts) < 2:
                 if not parsed_url.netloc and '/' in document.document_url:
                     path_parts = document.document_url.lstrip('/').split('/', 1)
-            
             if len(path_parts) >= 2:
-                bucket_name = path_parts[0]
-                object_name = path_parts[1]
-                minio_client.delete_file(object_name)
-        except Exception as e:
-            print(f"Warning: Failed to delete operation document from MinIO: {str(e)}")
+                objects_to_delete.append(path_parts[1])
+        except Exception:
+            pass
         
         # Delete from database
         db.delete(document)
     
-    db.commit()
+    try:
+        # Commit all DB deletions first
+        db.commit()
+
+        # Only delete from MinIO after successful database commit
+        for object_name in objects_to_delete:
+            try:
+                minio_client.delete_file(object_name)
+            except Exception as e:
+                print(f"Warning: Failed to delete operation document from MinIO: {str(e)}")
+                
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete documents: {str(e)}"
+        )
+        
     return None

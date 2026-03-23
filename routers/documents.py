@@ -683,10 +683,6 @@ async def replace_document_file(
     try:
         minio_client = get_minio_client()
 
-        # Delete old file from MinIO
-        old_object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
-        minio_client.delete_file(old_object_name)
-
         # Determine owning entity (part or assembly) for storage path
         owner_prefix = "part"
         owner_id = db_document.part_id
@@ -704,6 +700,14 @@ async def replace_document_file(
         file_stream = io.BytesIO(file_content)
         content_type = get_content_type(file.filename)
 
+        # Store old object name for deletion after successful DB update
+        old_object_name = None
+        try:
+            old_object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        except Exception:
+            pass
+
+        # Upload new file to MinIO
         document_url = minio_client.upload_file(
             file_data=file_stream,
             object_name=object_name,
@@ -718,10 +722,17 @@ async def replace_document_file(
             }
         )
 
-        # Update document URL
+        # Update document URL in database
         db_document.document_url = document_url
         db.commit()
         db.refresh(db_document)
+
+        # Only delete old file after successful database commit
+        if old_object_name:
+            try:
+                minio_client.delete_file(old_object_name)
+            except Exception as e:
+                print(f"Warning: Failed to delete old file from MinIO: {str(e)}")
 
         return {
             "message": "Document file replaced successfully",
@@ -747,19 +758,29 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
         )
 
     try:
-        # Delete file from MinIO
+        # Get object name before deleting from database
         minio_client = get_minio_client()
-        object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
-        minio_client.delete_file(object_name)
+        object_name = None
+        try:
+            object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        except Exception:
+            pass
 
         # Delete extracted data if exists
         db.query(DocumentExtractedDataModel).filter(
             DocumentExtractedDataModel.document_id == document_id
         ).delete()
 
-        # Delete from database
+        # Delete from database first
         db.delete(db_document)
         db.commit()
+
+        # Only delete from MinIO after successful database commit
+        if object_name:
+            try:
+                minio_client.delete_file(object_name)
+            except Exception as e:
+                print(f"Warning: Failed to delete file from MinIO: {str(e)}")
 
         return None
 

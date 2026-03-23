@@ -244,7 +244,13 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             OrderPartsRawMaterialLinkedModel.part_id == part_id
         ).delete(synchronize_session=False)
 
-        # 7. Delete tools with part (that are not associated with operations)
+        # 7. Delete component_issues records that reference this part
+        db.execute(
+            text("DELETE FROM maintenance.component_issues WHERE part_id = :pid"),
+            {"pid": part_id}
+        )
+
+        # 8. Delete tools with part (that are not associated with operations)
         db.query(ToolWithPartModel).filter(ToolWithPartModel.part_id == part_id).delete(
             synchronize_session=False
         )

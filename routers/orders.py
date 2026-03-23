@@ -865,8 +865,9 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
         db.delete(order)
         db.flush()
 
-        # Always delete the product and all related data when an order is deleted (Scenario 3)
-        delete_product_cascade(db, product_id)
+        # Only delete the product if there are no other orders referencing it
+        if other_orders_count == 0:
+            delete_product_cascade(db, product_id)
 
         db.commit()
 
@@ -895,7 +896,7 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
 
     return {
         "message": "Order deleted successfully",
-        "product_also_deleted": True,
+        "product_also_deleted": other_orders_count == 0,
     }
 
 # @router.get("/sale-order/{sale_order_number}/parts", response_model=List[PartResponse])
