@@ -41,21 +41,23 @@ class RawMaterial(Base):
 class ToolsList(Base):
     __tablename__ = "tools_list"
     __table_args__ = {'schema': 'inventory'}
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    item_description = Column(String, nullable=True)  # Changed to nullable
-    range = Column(String, nullable=True)
-    identification_code = Column(String, nullable=True)  # Changed to nullable
-    make = Column(String, nullable=True)
-    quantity = Column(Integer, nullable=True)  # Changed to nullable - This will be available quantity
-    total_quantity = Column(Integer, nullable=True)  # New field - Original total quantity
-    location = Column(String, nullable=True)
-    gauge = Column(String, nullable=True)
-    remarks = Column(Text, nullable=True)
-    amount = Column(Float, nullable=True)
-    ref_ledger = Column(String, nullable=True)
-    type = Column(String, nullable=True)  # Changed to nullable
-    issues_qty = Column(Integer, nullable=True)
+ 
+    id                  = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    item_description    = Column(String, nullable=True)
+    range               = Column(String, nullable=True)
+    identification_code = Column(String, nullable=True)
+    make                = Column(String, nullable=True)
+    quantity            = Column(Integer, nullable=True)      # available qty
+    total_quantity      = Column(Integer, nullable=True)      # original total qty
+    location            = Column(String, nullable=True)
+    gauge               = Column(String, nullable=True)
+    remarks             = Column(Text, nullable=True)
+    amount              = Column(Float, nullable=True)
+    ref_ledger          = Column(String, nullable=True)
+    type                = Column(String, nullable=True)       # CONSUMABLES / NON-CONSUMABLES
+    issues_qty          = Column(Integer, nullable=True)      # aggregate issued qty
+    category            = Column(String, nullable=True)       # "Tools" / "Instruments" / "Misc"
+    sub_category        = Column(String, nullable=True)       # "Drills", "Micrometers", etc.
 
 
 # =======================
@@ -83,7 +85,7 @@ class InventoryRequest(Base):
     inventory_supervisor = relationship("AccessUser", foreign_keys=[inventory_supervisor_id])
     project = relationship("Order")
     part = relationship("Part")
-    return_requests = relationship("InventoryReturnRequest", back_populates="inventory_request")
+    return_requests = relationship("InventoryReturnRequest", back_populates="inventory_request", cascade="all, delete-orphan")
 
 
 # =======================
@@ -94,7 +96,7 @@ class InventoryReturnRequest(Base):
     __table_args__ = {'schema': 'inventory'}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    requested_id = Column(Integer, ForeignKey("inventory.inventory_requests.id"), nullable=False)
+    requested_id = Column(Integer, ForeignKey("inventory.inventory_requests.id", ondelete="CASCADE"), nullable=False)
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     total_requested_qty = Column(Integer, nullable=False)
     returned_qty = Column(Integer, nullable=False, default=0)
@@ -119,7 +121,7 @@ class ToolIssue(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     tool_id = Column(Integer, ForeignKey("inventory.tools_list.id"), nullable=False)
-    request_id = Column(Integer, ForeignKey("inventory.inventory_requests.id"), nullable=False)
+    request_id = Column(Integer, ForeignKey("inventory.inventory_requests.id", ondelete="CASCADE"), nullable=False)
     tool_issue_qty = Column(Integer, nullable=False)
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     inventory_supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
@@ -148,7 +150,7 @@ class ToolIssueDocument(Base):
     __table_args__ = {'schema': 'inventory'}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    tool_issue_id = Column(Integer, ForeignKey("inventory.tool_issues.id"), nullable=False)
+    tool_issue_id = Column(Integer, ForeignKey("inventory.tool_issues.id", ondelete="CASCADE"), nullable=False)
     document_url = Column(String, nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

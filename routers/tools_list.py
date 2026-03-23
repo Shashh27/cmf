@@ -1,36 +1,84 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
 import pandas as pd
 import io
 
 from DB.database import get_db
 from DB.models.inventory import ToolsList as ToolsListModel
-from DB.schemas.inventory import ToolsList, ToolsListCreate, ToolsListUpdate
-
-router = APIRouter(
-    prefix="/tools-list",
-    tags=["tools-list"]
+from DB.schemas.inventory import (
+    ToolsList,
+    ToolsListCreate,
+    ToolsListUpdate,
+    ItemNode,
+    SubCategoryNode,
+    CategoryTree,
 )
+from DB.utils.category_map import resolve_category
 
+router = APIRouter(prefix="/tools-list", tags=["tools-list"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def safe_str(value, default=None):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return default
+    val = str(value).strip()
+    return None if val.lower() in ['nan', 'none', 'null', ''] else val
+
+def safe_int(value, default=0):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return default
+    try:
+        return int(float(str(value).strip()))
+    except Exception:
+        return default
+
+def safe_float(value, default=None):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return default
+    try:
+        return float(str(value).strip())
+    except Exception:
+        return default
+
+def find_col(df, possible_names):
+    cols = {str(c).lower().strip(): c for c in df.columns}
+    for p in possible_names:
+        if p.lower() in cols:
+            return cols[p.lower()]
+    for p in possible_names:
+        for c_lower, original in cols.items():
+            if p.lower() in c_lower:
+                return original
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CREATE
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/", response_model=ToolsList, status_code=status.HTTP_201_CREATED)
 def create_tool(tool: ToolsListCreate, db: Session = Depends(get_db)):
-    """Create a new tool"""
-    existing_tool = db.query(ToolsListModel).filter(
+    existing = db.query(ToolsListModel).filter(
         ToolsListModel.identification_code == tool.identification_code
     ).first()
-    if existing_tool:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Tool with identification code {tool.identification_code} already exists"
-        )
-    
-    # Ensure total_quantity is set to quantity if not provided
+    if existing:
+        raise HTTPException(status_code=400,
+            detail=f"Tool with identification code '{tool.identification_code}' already exists")
+
     tool_data = tool.model_dump()
-    if tool_data.get('total_quantity') is None:
-        tool_data['total_quantity'] = tool_data.get('quantity', 0)
-    
+    if not tool_data.get("category"):
+        cat, sub = resolve_category(tool_data.get("item_description", ""))
+        tool_data["category"]     = cat
+        tool_data["sub_category"] = sub
+    if tool_data.get("total_quantity") is None:
+        tool_data["total_quantity"] = tool_data.get("quantity", 0)
+
     db_tool = ToolsListModel(**tool_data)
     db.add(db_tool)
     db.commit()
@@ -38,224 +86,305 @@ def create_tool(tool: ToolsListCreate, db: Session = Depends(get_db)):
     return db_tool
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# BULK UPLOAD
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.post("/upload-excel", response_model=List[ToolsList], status_code=status.HTTP_201_CREATED)
 async def upload_tools_excel(
-    file: UploadFile = File(..., description="Excel file containing tools data"),
+    file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """Upload tools data from Excel file - accepts ANY data, uses defaults for missing required fields"""
-    
-    if not (file.filename.endswith('.xlsx') or file.filename.endswith('.xls')):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only Excel files (.xlsx, .xls) are allowed"
-        )
-    
+    if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls")):
+        raise HTTPException(status_code=400, detail="Only .xlsx / .xls files allowed")
+
     try:
         contents = await file.read()
-        
-        # Detect if it's a valid Excel file
         try:
-            # Read first few rows to inspect structure
             df_inspect = pd.read_excel(io.BytesIO(contents), header=None, nrows=10)
-        except Exception as excel_err:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid Excel file: {str(excel_err)}"
-            )
-        
-        # Header detection logic
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid Excel file: {e}")
+
+        header_keywords = [
+            'item description', 'identification code', 'item_description',
+            'identification_code', 'id code', 'range', 'description', 'make',
+            'category', 'sub_category', 'sub category'
+        ]
         header_row_idx = 0
-        header_keywords = ['item description', 'identification code', 'item_description', 'identification_code', 'id code', 'range', 'description', 'make']
-        
         for i in range(len(df_inspect)):
-            row_values = [str(val).lower().strip() for val in df_inspect.iloc[i].values if not pd.isna(val)]
-            # Check if this row contains at least two of our keywords
-            matches = sum(1 for kw in header_keywords if any(kw in val for val in row_values))
-            if matches >= 2:
+            row_values = [str(v).lower().strip() for v in df_inspect.iloc[i].values if not pd.isna(v)]
+            if sum(1 for kw in header_keywords if any(kw in v for v in row_values)) >= 2:
                 header_row_idx = i
                 break
-        
-        # Read the actual data
+
         df = pd.read_excel(io.BytesIO(contents), header=header_row_idx)
-        
-        # Data conversion helpers
-        def safe_str(value, default=None):
-            if value is None or pd.isna(value): return default
-            val = str(value).strip()
-            return None if val.lower() in ['nan', 'none', 'null', ''] else val
-            
-        def safe_int(value, default=0):
-            if value is None or pd.isna(value): return default
-            try: return int(float(str(value).strip()))
-            except: return default
-            
-        def safe_float(value, default=None):
-            if value is None or pd.isna(value): return default
-            try: return float(str(value).strip())
-            except: return default
 
-        # Improved column mapping
-        def find_col(possible_names):
-            cols = {str(c).lower().strip(): c for c in df.columns}
-            # Try exact match first
-            for p in possible_names:
-                if p.lower() in cols: return cols[p.lower()]
-            # Try partial match
-            for p in possible_names:
-                for c_lower, original in cols.items():
-                    if p.lower() in c_lower: return original
-            return None
-
-        # Map all columns
-        col_map = {
-            'item_description': find_col(['item description', 'item_description', 'item', 'description']),
-            'range': find_col(['range', 'range in mm']),
-            'identification_code': find_col(['identification code', 'identification_code', 'id code', 'code', 'id']),
-            'make': find_col(['make', 'brand', 'manufacturer']),
-            'quantity': find_col(['quantity', 'qty', 'stock', 'available']),
-            'location': find_col(['location', 'rack', 'bin']),
-            'gauge': find_col(['gauge', 'size']),
-            'remarks': find_col(['remarks', 'remark', 'note']),
-            'amount': find_col(['amount', 'price', 'cost']),
-            'ref_ledger': find_col(['ref ledger', 'ref_ledger', 'reference']),
-            'type': find_col(['type', 'category'])
+        col = {
+            'item_description':    find_col(df, ['item description', 'item_description', 'description']),
+            'range':               find_col(df, ['range', 'range in mm', 'range / size']),
+            'identification_code': find_col(df, ['identification code', 'identification_code', 'id code', 'code']),
+            'make':                find_col(df, ['make', 'brand', 'manufacturer']),
+            'quantity':            find_col(df, ['quantity', 'qty', 'stock', 'available']),
+            'location':            find_col(df, ['location', 'rack', 'bin']),
+            'gauge':               find_col(df, ['gauge', 'size']),
+            'remarks':             find_col(df, ['remarks', 'remark', 'note']),
+            'amount':              find_col(df, ['amount', 'price', 'cost']),
+            'ref_ledger':          find_col(df, ['ref ledger', 'ref_ledger', 'reference']),
+            'type':                find_col(df, ['type', 'TYPE', 'category type']),
+            'category':            find_col(df, ['category']),
+            'sub_category':        find_col(df, ['sub category', 'sub_category']),
         }
 
-        if not col_map['item_description']:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Could not find 'Item Description' column. Please check your Excel headers."
-            )
+        if not col['item_description']:
+            raise HTTPException(status_code=400, detail="Could not find 'Item Description' column.")
 
-        processed_count = 0
+        processed = 0
         for _, row in df.iterrows():
-            item_desc = safe_str(row.get(col_map['item_description']))
-            ident_code = safe_str(row.get(col_map['identification_code']))
-            
-            if not item_desc and not ident_code: continue
-            
-            # Use item_desc as ident_code if missing, or vice versa
-            if not ident_code: ident_code = item_desc
-            if not item_desc: item_desc = ident_code
+            item_desc  = safe_str(row.get(col['item_description']))
+            ident_code = safe_str(row.get(col['identification_code'])) if col['identification_code'] else None
 
-            quantity_val = safe_int(row.get(col_map['quantity']), 0)
-            
-            # Check for existing
+            if not item_desc and not ident_code:
+                continue
+            if not ident_code: ident_code = item_desc
+            if not item_desc:  item_desc  = ident_code
+
+            qty = safe_int(row.get(col['quantity']), 0) if col['quantity'] else 0
+
+            cat_from_file = safe_str(row.get(col['category'])) if col['category'] else None
+            sub_from_file = safe_str(row.get(col['sub_category'])) if col['sub_category'] else None
+            if cat_from_file:
+                category     = cat_from_file
+                sub_category = sub_from_file or resolve_category(item_desc)[1]
+            else:
+                category, sub_category = resolve_category(item_desc)
+
+            tool_data = {
+                'item_description': item_desc,
+                'range':            safe_str(row.get(col['range'])) if col['range'] else None,
+                'make':             safe_str(row.get(col['make'])) if col['make'] else None,
+                'quantity':         qty,
+                'total_quantity':   qty,
+                'location':         safe_str(row.get(col['location'])) if col['location'] else None,
+                'gauge':            safe_str(row.get(col['gauge'])) if col['gauge'] else None,
+                'remarks':          safe_str(row.get(col['remarks'])) if col['remarks'] else None,
+                'amount':           safe_float(row.get(col['amount'])) if col['amount'] else None,
+                'ref_ledger':       safe_str(row.get(col['ref_ledger'])) if col['ref_ledger'] else None,
+                'type':             safe_str(row.get(col['type']), "NON-CONSUMABLES") if col['type'] else "NON-CONSUMABLES",
+                'category':         category,
+                'sub_category':     sub_category,
+            }
+
             existing = db.query(ToolsListModel).filter(
                 ToolsListModel.identification_code == ident_code
             ).first()
-            
-            tool_data = {
-                'item_description': item_desc,
-                'range': safe_str(row.get(col_map['range'])),
-                'make': safe_str(row.get(col_map['make'])),
-                'quantity': quantity_val,
-                'total_quantity': quantity_val,
-                'location': safe_str(row.get(col_map['location'])),
-                'gauge': safe_str(row.get(col_map['gauge'])),
-                'remarks': safe_str(row.get(col_map['remarks'])),
-                'amount': safe_float(row.get(col_map['amount'])),
-                'ref_ledger': safe_str(row.get(col_map['ref_ledger'])),
-                'type': safe_str(row.get(col_map['type']), "NON-CONSUMABLES")
-            }
-            
+
             if existing:
-                for key, value in tool_data.items():
-                    setattr(existing, key, value)
+                for k, v in tool_data.items():
+                    setattr(existing, k, v)
             else:
-                new_tool = ToolsListModel(identification_code=ident_code, **tool_data)
-                db.add(new_tool)
-            
-            processed_count += 1
-            if processed_count % 50 == 0:
-                db.flush() # Flush every 50 rows for performance and consistency
+                db.add(ToolsListModel(identification_code=ident_code, **tool_data))
+
+            processed += 1
+            if processed % 50 == 0:
+                db.flush()
 
         db.commit()
-        return db.query(ToolsListModel).order_by(ToolsListModel.id.desc()).limit(processed_count).all()
-        
-    except HTTPException: raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=400, detail=f"Error processing Excel file: {str(e)}")
+        return db.query(ToolsListModel).order_by(ToolsListModel.id.desc()).limit(processed).all()
 
-        
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error processing Excel file: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Error processing Excel: {e}")
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3-LEVEL TREE  ←  SIDEBAR ENDPOINT
+#
+# Structure returned:
+# [
+#   {
+#     "category": "Tools",
+#     "total_count": 2355,
+#     "sub_categories": [
+#       {
+#         "sub_category": "Keys & Wrenches",
+#         "count": 237,
+#         "items": [
+#           { "item_description": "Allen Key",   "count": 36 },
+#           { "item_description": "Box Spanner", "count": 32 },
+#           ...
+#         ]
+#       }
+#     ]
+#   }
+# ]
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/categories/tree", response_model=List[CategoryTree])
+def get_category_tree(db: Session = Depends(get_db)):
+    rows = (
+        db.query(
+            ToolsListModel.category,
+            ToolsListModel.sub_category,
+            ToolsListModel.item_description,
+            func.count(ToolsListModel.id).label("count"),
+        )
+        .group_by(
+            ToolsListModel.category,
+            ToolsListModel.sub_category,
+            ToolsListModel.item_description,
+        )
+        .order_by(
+            ToolsListModel.category,
+            ToolsListModel.sub_category,
+            ToolsListModel.item_description,
+        )
+        .all()
+    )
+
+    tree: dict[str, dict] = {}
+
+    for row in rows:
+        cat  = row.category         or "Misc"
+        sub  = row.sub_category     or "General"
+        item = row.item_description or "Unknown"
+        cnt  = row.count
+
+        if cat not in tree:
+            tree[cat] = {"category": cat, "total_count": 0, "sub_categories": {}}
+
+        if sub not in tree[cat]["sub_categories"]:
+            tree[cat]["sub_categories"][sub] = {
+                "sub_category": sub,
+                "count": 0,
+                "items": [],
+            }
+
+        tree[cat]["sub_categories"][sub]["items"].append(
+            ItemNode(item_description=item, count=cnt)
+        )
+        tree[cat]["sub_categories"][sub]["count"] += cnt
+        tree[cat]["total_count"] += cnt
+
+    display_order = ["Tools", "Instruments", "Misc"]
+    result = []
+    for cat_key in sorted(tree.keys(), key=lambda x: display_order.index(x) if x in display_order else 99):
+        d = tree[cat_key]
+        result.append(CategoryTree(
+            category=d["category"],
+            total_count=d["total_count"],
+            sub_categories=[SubCategoryNode(**s) for s in d["sub_categories"].values()],
+        ))
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FETCH BY ITEM DESCRIPTION  ←  fills the table when user clicks a leaf node
+# GET /tools-list/by-item?item_description=Allen Key
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/item/{item_description}", response_model=List[ToolsList])
+def get_tools_by_item_description(item_description: str, db: Session = Depends(get_db)):
+    """
+    Called when user clicks e.g. 'Allen Key' in the sidebar.
+    Returns all 36 Allen Key rows.
+    """
+    return (
+        db.query(ToolsListModel)
+        .filter(func.lower(ToolsListModel.item_description) == item_description.strip().lower())
+        .order_by(ToolsListModel.id)
+        .all()
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FETCH BY SUB-CATEGORY  (all items in a group, optional)
+# GET /tools-list/category/Tools/sub/Keys & Wrenches
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/category/{category}/sub/{sub_category}", response_model=List[ToolsList])
+def get_tools_by_sub_category(category: str, sub_category: str, db: Session = Depends(get_db)):
+    return (
+        db.query(ToolsListModel)
+        .filter(
+            func.lower(ToolsListModel.category)     == category.lower(),
+            func.lower(ToolsListModel.sub_category) == sub_category.lower(),
+        )
+        .order_by(ToolsListModel.item_description, ToolsListModel.id)
+        .all()
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STANDARD CRUD
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=List[ToolsList])
-def get_tools(db: Session = Depends(get_db)):
-    """Get all tools"""
-    tools = db.query(ToolsListModel).all()
-    return tools
+def get_tools(
+    category:     Optional[str] = None,
+    sub_category: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(ToolsListModel)
+    if category:
+        query = query.filter(func.lower(ToolsListModel.category) == category.lower())
+    if sub_category:
+        query = query.filter(func.lower(ToolsListModel.sub_category) == sub_category.lower())
+    return query.all()
 
 
-@router.get("/{tool_id}", response_model=ToolsList)
-def get_tool(tool_id: int, db: Session = Depends(get_db)):
-    """Get a specific tool by ID"""
-    tool = db.query(ToolsListModel).filter(ToolsListModel.id == tool_id).first()
-    if not tool:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tool with id {tool_id} not found"
-        )
-    return tool
+@router.get("/type/{tool_type}", response_model=List[ToolsList])
+def get_tools_by_type(tool_type: str, db: Session = Depends(get_db)):
+    return db.query(ToolsListModel).filter(ToolsListModel.type == tool_type).all()
+
+
+@router.get("/location/{location}", response_model=List[ToolsList])
+def get_tools_by_location(location: str, db: Session = Depends(get_db)):
+    return db.query(ToolsListModel).filter(ToolsListModel.location == location).all()
 
 
 @router.get("/identification/{identification_code}", response_model=ToolsList)
 def get_tool_by_identification_code(identification_code: str, db: Session = Depends(get_db)):
-    """Get a tool by identification code"""
     tool = db.query(ToolsListModel).filter(
         ToolsListModel.identification_code == identification_code
     ).first()
     if not tool:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tool with identification code {identification_code} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Tool '{identification_code}' not found")
+    return tool
+
+
+@router.get("/{tool_id}", response_model=ToolsList)
+def get_tool(tool_id: int, db: Session = Depends(get_db)):
+    tool = db.query(ToolsListModel).filter(ToolsListModel.id == tool_id).first()
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Tool id {tool_id} not found")
     return tool
 
 
 @router.put("/{tool_id}", response_model=ToolsList)
 def update_tool(tool_id: int, tool_update: ToolsListUpdate, db: Session = Depends(get_db)):
-    """Update a tool"""
     db_tool = db.query(ToolsListModel).filter(ToolsListModel.id == tool_id).first()
     if not db_tool:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tool with id {tool_id} not found"
-        )
-    
-    if tool_update.identification_code is not None and tool_update.identification_code != db_tool.identification_code:
-        existing_tool = db.query(ToolsListModel).filter(
+        raise HTTPException(status_code=404, detail=f"Tool id {tool_id} not found")
+
+    if (tool_update.identification_code is not None
+            and tool_update.identification_code != db_tool.identification_code):
+        clash = db.query(ToolsListModel).filter(
             ToolsListModel.identification_code == tool_update.identification_code
         ).first()
-        if existing_tool:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Tool with identification code {tool_update.identification_code} already exists"
-            )
-    
+        if clash:
+            raise HTTPException(status_code=400, detail="Identification code already exists")
+
     update_data = tool_update.model_dump(exclude_unset=True)
-    
-    # Handle total_quantity logic
-    if 'quantity' in update_data and 'total_quantity' not in update_data:
-        # If quantity is being updated but total_quantity is not provided, keep existing total_quantity
-        pass  # Don't modify total_quantity
-    elif 'total_quantity' in update_data:
-        # If total_quantity is explicitly provided, use it
-        pass  # Use the provided total_quantity
-    
+    if "item_description" in update_data and "category" not in update_data:
+        cat, sub = resolve_category(update_data["item_description"])
+        update_data["category"]     = cat
+        update_data["sub_category"] = sub
+
     for field, value in update_data.items():
         setattr(db_tool, field, value)
-    
+
     db.commit()
     db.refresh(db_tool)
     return db_tool
@@ -263,48 +392,30 @@ def update_tool(tool_id: int, tool_update: ToolsListUpdate, db: Session = Depend
 
 @router.delete("/{tool_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tool(tool_id: int, db: Session = Depends(get_db)):
-    """Delete a tool"""
     tool = db.query(ToolsListModel).filter(ToolsListModel.id == tool_id).first()
     if not tool:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tool with id {tool_id} not found"
-        )
-    
+        raise HTTPException(status_code=404, detail=f"Tool id {tool_id} not found")
     db.delete(tool)
     db.commit()
-    return None
 
 
-@router.get("/type/{tool_type}", response_model=List[ToolsList])
-def get_tools_by_type(tool_type: str, db: Session = Depends(get_db)):
-    """Get all tools by type"""
-    tools = db.query(ToolsListModel).filter(ToolsListModel.type == tool_type).all()
-    return tools
+# @router.post("/migrate-total-quantity", response_model=dict)
+# def migrate_total_quantity(db: Session = Depends(get_db)):
+#     tools = db.query(ToolsListModel).filter(ToolsListModel.total_quantity.is_(None)).all()
+#     for t in tools:
+#         t.total_quantity = t.quantity or 0
+#     db.commit()
+#     return {"message": f"Migrated {len(tools)} records", "updated_count": len(tools)}
 
 
-@router.post("/migrate-total-quantity", response_model=dict)
-def migrate_total_quantity(db: Session = Depends(get_db)):
-    """Migrate existing tools to set total_quantity = quantity for null values"""
-    tools_to_update = db.query(ToolsListModel).filter(
-        ToolsListModel.total_quantity.is_(None)
-    ).all()
-    
-    updated_count = 0
-    for tool in tools_to_update:
-        tool.total_quantity = tool.quantity if tool.quantity is not None else 0
-        updated_count += 1
-    
-    db.commit()
-    
-    return {
-        "message": f"Successfully migrated {updated_count} tools",
-        "updated_count": updated_count
-    }
-
-
-@router.get("/location/{location}", response_model=List[ToolsList])
-def get_tools_by_location(location: str, db: Session = Depends(get_db)):
-    """Get all tools by location"""
-    tools = db.query(ToolsListModel).filter(ToolsListModel.location == location).all()
-    return tools
+# @router.post("/migrate-categories", response_model=dict)
+# def migrate_categories(db: Session = Depends(get_db)):
+#     tools = db.query(ToolsListModel).filter(ToolsListModel.category.is_(None)).all()
+#     updated = 0
+#     for t in tools:
+#         cat, sub = resolve_category(t.item_description or "")
+#         t.category     = cat
+#         t.sub_category = sub
+#         updated += 1
+#     db.commit()
+#     return {"message": f"Categorised {updated} records", "updated_count": updated}

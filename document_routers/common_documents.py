@@ -135,7 +135,7 @@ async def create_common_folder(
             detail="Folder with this name already exists under the specified parent"
         )
     
-    db_folder = CommonFolder(**folder.dict())
+    db_folder = CommonFolder(**folder.model_dump())
     db.add(db_folder)
     db.commit()
     db.refresh(db_folder)
@@ -220,7 +220,7 @@ async def update_common_folder(
             )
     
     # Update folder
-    update_data = folder_update.dict(exclude_unset=True)
+    update_data = folder_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(folder, field, value)
     
@@ -270,6 +270,7 @@ async def upload_common_document(
     file: UploadFile = File(...),
     folder_id: Optional[int] = Form(None),
     parent_id: Optional[int] = Form(None),
+    user_id: int = Form(...),
     db: Session = Depends(get_db)
 ):
     """
@@ -334,7 +335,8 @@ async def upload_common_document(
             document_url=document_url,
             version=version,
             folder_id=folder_id,
-            parent_id=parent_id
+            parent_id=parent_id,
+            user_id=user_id
         )
         
         db.add(db_document)

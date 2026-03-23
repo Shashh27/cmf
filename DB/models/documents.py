@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime, timezone, timedelta
 from DB.database import Base
+from DB.models.access_control import AccessUser
 
 # IST timezone (UTC+5:30)
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -20,6 +21,10 @@ class GeneralFolder(Base):
     parent_id = Column(Integer, ForeignKey("documents.general_folders.id"), nullable=True)
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+
+    # Relationship with user
+    user = relationship("AccessUser")
 
     # Self-referential relationship for parent-child folder relationships
     parent = relationship("GeneralFolder", remote_side=[id], back_populates="children")
@@ -40,6 +45,10 @@ class GeneralDocument(Base):
     parent_id = Column(Integer, ForeignKey("documents.general_documents.id"), nullable=True)
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+
+    # Relationship with user
+    user = relationship("AccessUser")
 
     # Relationship with folder
     folder = relationship("GeneralFolder", back_populates="documents")
@@ -58,6 +67,10 @@ class MachineFolder(Base):
     parent_id = Column(Integer, ForeignKey("documents.machine_folders.id"), nullable=True)
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+
+    # Relationship with user
+    user = relationship("AccessUser")
 
     # Self-referential relationship for parent-child folder relationships
     parent = relationship("MachineFolder", remote_side=[id], back_populates="children")
@@ -79,6 +92,10 @@ class MachineDocument(Base):
     parent_id = Column(Integer, ForeignKey("documents.machine_documents.id"), nullable=True)
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+
+    # Relationship with user
+    user = relationship("AccessUser")
 
     # Relationship with folder
     folder = relationship("MachineFolder", back_populates="machine_documents")
@@ -96,6 +113,10 @@ class CommonFolder(Base):
     parent_id = Column(Integer, ForeignKey("documents.common_folders.id"), nullable=True)
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+
+    # Relationship with user
+    user = relationship("AccessUser")
 
     # Self-referential relationship for parent-child folder relationships
     parent = relationship("CommonFolder", remote_side=[id], back_populates="children")
@@ -116,6 +137,10 @@ class CommonDocument(Base):
     parent_id = Column(Integer, ForeignKey("documents.common_documents.id"), nullable=True)
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+
+    # Relationship with user
+    user = relationship("AccessUser")
 
     # Relationship with folder
     folder = relationship("CommonFolder", back_populates="documents")

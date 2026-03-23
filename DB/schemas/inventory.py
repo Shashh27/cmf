@@ -67,46 +67,73 @@ class RawMaterial(RawMaterialBase):
 # Tools List Schemas
 # =======================
 class ToolsListBase(BaseModel):
-    item_description: Optional[str] = None  # Changed to Optional
-    range: Optional[str] = None
-    identification_code: Optional[str] = None  # Changed to Optional
-    make: Optional[str] = None
-    quantity: Optional[int] = None  # Changed to Optional - Available quantity
-    total_quantity: Optional[int] = None  # New field - Total quantity
-    issues_qty: Optional[int] = None  # New field - Issued quantity aggregate
-    location: Optional[str] = None
-    gauge: Optional[str] = None
-    remarks: Optional[str] = None
-    amount: Optional[float] = None
-    ref_ledger: Optional[str] = None
-    type: Optional[str] = None  # Changed to Optional
-
-
+    item_description:    Optional[str]   = None
+    range:               Optional[str]   = None
+    identification_code: Optional[str]   = None
+    make:                Optional[str]   = None
+    quantity:            Optional[int]   = None
+    total_quantity:      Optional[int]   = None
+    issues_qty:          Optional[int]   = None
+    location:            Optional[str]   = None
+    gauge:               Optional[str]   = None
+    remarks:             Optional[str]   = None
+    amount:              Optional[float] = None
+    ref_ledger:          Optional[str]   = None
+    type:                Optional[str]   = None       # CONSUMABLES / NON-CONSUMABLES
+    category:            Optional[str]   = None       # Tools / Instruments / Misc
+    sub_category:        Optional[str]   = None       # Keys & Wrenches, Micrometers …
+ 
+ 
 class ToolsListCreate(ToolsListBase):
     pass
-
-
+ 
+ 
 class ToolsListUpdate(BaseModel):
-    item_description: Optional[str] = None
-    range: Optional[str] = None
-    identification_code: Optional[str] = None
-    make: Optional[str] = None
-    quantity: Optional[int] = None  # Available quantity
-    total_quantity: Optional[int] = None  # Total quantity
-    location: Optional[str] = None
-    gauge: Optional[str] = None
-    remarks: Optional[str] = None
-    amount: Optional[float] = None
-    ref_ledger: Optional[str] = None
-    type: Optional[str] = None
-
-
+    item_description:    Optional[str]   = None
+    range:               Optional[str]   = None
+    identification_code: Optional[str]   = None
+    make:                Optional[str]   = None
+    quantity:            Optional[int]   = None
+    total_quantity:      Optional[int]   = None
+    location:            Optional[str]   = None
+    gauge:               Optional[str]   = None
+    remarks:             Optional[str]   = None
+    amount:              Optional[float] = None
+    ref_ledger:          Optional[str]   = None
+    type:                Optional[str]   = None
+    category:            Optional[str]   = None
+    sub_category:        Optional[str]   = None
+ 
+ 
 class ToolsList(ToolsListBase):
     id: int
-
+ 
     class Config:
         from_attributes = True
-
+ 
+ 
+# =======================
+# 3-Level Sidebar Tree
+# =======================
+ 
+class ItemNode(BaseModel):
+    """Leaf node — a specific item_description e.g. 'Allen Key' with its row count"""
+    item_description: str
+    count: int
+ 
+ 
+class SubCategoryNode(BaseModel):
+    """Mid node — e.g. 'Keys & Wrenches' containing its items"""
+    sub_category: str
+    count: int
+    items: List[ItemNode] = []
+ 
+ 
+class CategoryTree(BaseModel):
+    """Root node — 'Tools' or 'Instruments'"""
+    category: str
+    total_count: int
+    sub_categories: List[SubCategoryNode] = []
 
 # =======================
 # Inventory Request Schemas
