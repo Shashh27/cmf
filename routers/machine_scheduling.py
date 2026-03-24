@@ -561,6 +561,60 @@ def get_buy_parts_for_order(
     }
 
 
+# =========================================================
+# ORDER PARTS METADATA FOR PROCESS PLAN
+# =========================================================
+@router.get("/order-parts-metadata/{sale_order_id}")
+def get_order_parts_metadata(
+    sale_order_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns Process Plan metadata for a selected order:
+      - total_inhouse_parts
+      - total_outsource_parts
+      - active_inhouse_parts
+      - inactive_inhouse_parts
+    """
+    order = db.query(Order).filter(
+        Order.id == sale_order_id
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    total_inhouse_parts = db.query(Part).join(PartType).filter(
+        Part.product_id == order.product_id,
+        PartType.type_name == "IN-House"
+    ).count()
+
+    total_outsource_parts = db.query(Part).join(PartType).filter(
+        Part.product_id == order.product_id,
+        PartType.type_name == "Out-Source"
+    ).count()
+
+    active_inhouse_parts = db.query(PartScheduleStatus).join(
+        Part, Part.id == PartScheduleStatus.part_id
+    ).join(
+        PartType, PartType.id == Part.type_id
+    ).filter(
+        PartScheduleStatus.sale_order_id == sale_order_id,
+        PartScheduleStatus.status == "active",
+        PartType.type_name == "IN-House"
+    ).count()
+
+    inactive_inhouse_parts = max(total_inhouse_parts - active_inhouse_parts, 0)
+
+    return {
+        "sale_order_id": sale_order_id,
+        "sale_order_number": order.sale_order_number,
+        "product_id": order.product_id,
+        "total_inhouse_parts": total_inhouse_parts,
+        "total_outsource_parts": total_outsource_parts,
+        "active_inhouse_parts": active_inhouse_parts,
+        "inactive_inhouse_parts": inactive_inhouse_parts
+    }
+
+
 
 # =========================================================
 # UPDATE PART STATUS FOR ORDER
