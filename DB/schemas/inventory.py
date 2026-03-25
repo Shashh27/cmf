@@ -17,7 +17,6 @@ class RawMaterialBase(BaseModel):
     quantity: Optional[int] = None
     stock_dimensions: Optional[str] = None
     status: Optional[str] = None
-    user_id: Optional[int] = None
 
     @field_validator('mass', 'density', 'volume', mode='before')
     @classmethod
@@ -44,7 +43,6 @@ class RawMaterialUpdate(BaseModel):
     quantity: Optional[int] = None
     stock_dimensions: Optional[str] = None
     status: Optional[str] = None
-    user_id: Optional[int] = None
 
     @field_validator('mass', 'density', 'volume', mode='before')
     @classmethod
@@ -198,7 +196,7 @@ class InventoryReturnRequestBase(BaseModel):
     total_requested_qty: int
     returned_qty: int = 0
     remarks: Optional[str] = None
-    inventory_supervisor_id: Optional[int] = None  # Set when status is updated to collected
+    inventory_supervisor_id: Optional[int] = None  # Only set by inventory supervisor during status update
     status: Optional[str] = "pending"
 
 
@@ -263,8 +261,7 @@ class ToolIssueBase(BaseModel):
     status: Optional[str] = "pending"
     issue_category: Optional[str] = None  # "wear and tear", "Calibration Drift", "other"
     description: Optional[str] = None  # Entered by operator
-    remarks: Optional[str] = None  # Entered by admin
-    document_url: Optional[str] = None  # URL to uploaded document in MinIO
+    remarks: Optional[str] = None  # Entered by supervisor
 
 
 class ToolIssueCreate(BaseModel):
@@ -274,7 +271,6 @@ class ToolIssueCreate(BaseModel):
     operator_id: int
     issue_category: Optional[str] = None  # "wear and tear", "Calibration Drift", "other"
     description: Optional[str] = None  # Entered by operator
-    # status remains pending on create
 
 
 class ToolIssueUpdate(BaseModel):
@@ -285,8 +281,16 @@ class ToolIssueUpdate(BaseModel):
     issue_category: Optional[str] = None
     description: Optional[str] = None
     remarks: Optional[str] = None
-    document_url: Optional[str] = None
-    # status and admin are managed via dedicated endpoint
+
+
+class ToolIssueDocument(BaseModel):
+    id: int
+    tool_issue_id: int
+    document_url: str
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class ToolIssue(ToolIssueBase):
@@ -294,6 +298,7 @@ class ToolIssue(ToolIssueBase):
     inventory_supervisor_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    documents: List[ToolIssueDocument] = []
 
     class Config:
         from_attributes = True

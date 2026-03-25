@@ -455,11 +455,11 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
         )
 
     # Get all assemblies for this product
-    all_assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).all()
+    all_assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).order_by(AssemblyModel.id.asc()).all()
     assembly_ids = [asm.id for asm in all_assemblies]
 
     # Get all parts for this product
-    all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).all()
+    all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
 
     # Get all work centers for mapping
     all_work_centers = db.query(WorkCenterModel).all()
