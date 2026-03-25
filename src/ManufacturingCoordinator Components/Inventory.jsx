@@ -102,13 +102,7 @@ const Inventory = () => {
             />
           </TabPane>
           
-          <TabPane tab="Instruments" key="instruments">
-            <InstrumentsList
-              onEdit={handleEditInstrument}
-              onDelete={handleDeleteInstrument}
-              onCreateNew={handleCreateInstrument}
-            />
-          </TabPane>
+        
         </Tabs>
       </div>
 

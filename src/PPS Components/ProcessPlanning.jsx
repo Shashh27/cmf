@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Card, Row, Col, Select, Table, Tag, Typography, Space, Spin, message, Tabs, Button, Modal, Input, DatePicker } from "antd";
-import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined } from "@ant-design/icons";
+import { Card, Row, Col, Select, Table, Tag, Typography, Space, Spin, message, Tabs, Button, Modal, Input, DatePicker, Tooltip } from "antd";
+import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import { API_BASE_URL } from "../Config/auth";
 import dayjs from "dayjs";
@@ -12,6 +12,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [orderDetails, setOrderDetails] = useState(null);
   const [orderSummary, setOrderSummary] = useState(null);
+  const [orderPartsMetadata, setOrderPartsMetadata] = useState(null);
   const [isActive, setIsActive] = useState(false);
 
   const [activeIds, setActiveIds] = useState([]);
@@ -22,6 +23,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
   }, [partStatuses]);
   const [outStatusMap, setOutStatusMap] = useState({});
   const [outEditing, setOutEditing] = useState({});
+
+  const [partOpDetails, setPartOpDetails] = useState({});
+  const [partOpLoading, setPartOpLoading] = useState({});
 
   // ================================
   // FETCH ORDERS
@@ -60,6 +64,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const fetchOrderDetails = async (id) => {
     if (!id) return;
     setDetailsLoading(true);
+    setOrderPartsMetadata(null);
     try {
       const res = await fetch(`${API_BASE_URL}/orders/${id}/hierarchical`);
       const data = await res.json();
@@ -81,6 +86,40 @@ const ProcessPlanning = ({ initialOrderId }) => {
         setIsActive(data.status === "active");
       }
     } catch {}
+  };
+
+  // ================================
+  // FETCH ORDER PARTS METADATA
+  // ================================
+  const fetchOrderPartsMetadata = async (orderId) => {
+    if (!orderId) return;
+    try {
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/order-parts-metadata/${orderId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setOrderPartsMetadata(data);
+      }
+    } catch {}
+  };
+
+  // ================================
+  // FETCH PART OPERATION DETAILS
+  // ================================
+  const fetchPartOperationDetails = async (partId) => {
+    if (!selectedOrderId || !partId) return;
+    if (partOpDetails[partId]) return;
+
+    setPartOpLoading(prev => ({ ...prev, [partId]: true }));
+    try {
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPartOpDetails(prev => ({ ...prev, [partId]: data.operations || [] }));
+      }
+    } catch {
+      // ignore
+    }
+    setPartOpLoading(prev => ({ ...prev, [partId]: false }));
   };
 
   // ================================
@@ -107,6 +146,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
     fetchOrderSummary(selectedOrderId);
     fetchActiveParts(selectedOrderId);
     fetchOutSourceStatuses(selectedOrderId);
+    fetchOrderPartsMetadata(selectedOrderId);
   }, [selectedOrderId]);
 
   // ================================
@@ -142,7 +182,12 @@ const ProcessPlanning = ({ initialOrderId }) => {
   };
 
   const allParts = useMemo(() => getAllParts(orderDetails), [orderDetails]);
-  const inHouseParts = useMemo(() => allParts.filter(p => p.type_name.includes("in")), [allParts]);
+  const inHouseParts = useMemo(() =>
+    allParts
+      .filter(p => p.type_name.includes("in"))
+      .sort((a, b) => String(a.part_number).localeCompare(String(b.part_number), undefined, { numeric: true, sensitivity: 'base' })),
+    [allParts]
+  );
   const outSourceParts = useMemo(() => allParts.filter(p => p.type_name.includes("out")), [allParts]);
 
   // ================================
@@ -241,6 +286,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
       }
       message.success("Out source status saved");
       await fetchOutSourceStatuses(selectedOrderId);
+      await fetchOrderPartsMetadata(selectedOrderId);
       setOutEditing(prev => {
         const next = { ...prev };
         delete next[part.id];
@@ -269,6 +315,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
       await fetchOrderSummary(selectedOrderId);
       await fetchActiveParts(selectedOrderId);
+      await fetchOrderPartsMetadata(selectedOrderId);
 
     } catch {
       message.error("Failed to update order status");
@@ -316,6 +363,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
       await fetchActiveParts(selectedOrderId);
       await fetchOrderSummary(selectedOrderId);
+      await fetchOrderPartsMetadata(selectedOrderId);
 
       setSelectedInIds([]);
     } catch {
@@ -425,19 +473,23 @@ const ProcessPlanning = ({ initialOrderId }) => {
         const st = outEditing[r.id];
         if (st?.editing) {
           return (
-            <Button
-              type="link"
-              icon={<SaveOutlined />}
-              onClick={() => handleSaveOutSource(r)}
-            />
+            <Tooltip title="Save">
+              <Button
+                type="link"
+                icon={<SaveOutlined />}
+                onClick={() => handleSaveOutSource(r)}
+              />
+            </Tooltip>
           );
         }
         return (
-          <Button
-            type="link"
-            icon={<EditOutlined />}
-            onClick={() => startEditOutSource(r)}
-          />
+          <Tooltip title="Edit">
+            <Button
+              type="link"
+              icon={<EditOutlined />}
+              onClick={() => startEditOutSource(r)}
+            />
+          </Tooltip>
         );
       }
     }
@@ -466,8 +518,11 @@ const ProcessPlanning = ({ initialOrderId }) => {
       startDate: dateOnly(order.order_date || order.start_date),
       dueDate: dateOnly(order.due_date),
       pdc: order.pdc || order.pdc_date || "Not yet scheduled",
+      totalActiveParts: orderPartsMetadata?.active_inhouse_parts ?? "-",
+      inactiveParts: orderPartsMetadata?.inactive_inhouse_parts ?? "-",
+      totalOutsourceParts: orderPartsMetadata?.total_outsource_parts ?? "-",
     };
-  }, [orderDetails]);
+  }, [orderDetails, orderPartsMetadata]);
 
   // ================================
   // UI
@@ -533,6 +588,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
                 ["PDC", (String(summary.pdc).toLowerCase().includes("not yet")
                   ? <span key="pdc-tag" style={{ color: "#555", fontWeight: 600 }}>{summary.pdc}</span>
                   : <span key="pdc-tag" style={{ color: "#1677FF", fontWeight: 600 }}>{summary.pdc}</span>)],
+                ["Total Active Parts", summary.totalActiveParts],
+                ["Inactive Parts", summary.inactiveParts],
+                ["Total Outsource Parts", summary.totalOutsourceParts],
               ].map(([label, value], idx) => (
                 <React.Fragment key={idx}>
                   <div
@@ -573,9 +631,54 @@ const ProcessPlanning = ({ initialOrderId }) => {
                 rowKey="id"
                 scroll={{ x: "max-content" }}
                 style={{ width: "100%" }}
+                pagination={{
+                  showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} parts`,
+                }}
                 rowSelection={{
                   selectedRowKeys: selectedInIds,
                   onChange: setSelectedInIds
+                }}
+                expandable={{
+                  expandIconColumnIndex: 4,
+                  expandIcon: ({ expanded, onExpand, record }) =>
+                    expanded ? (
+                      <UpOutlined onClick={e => onExpand(record, e)} style={{ fontSize: "14px", color: "#666", cursor: "pointer" }} />
+                    ) : (
+                      <DownOutlined onClick={e => onExpand(record, e)} style={{ fontSize: "14px", color: "#666", cursor: "pointer" }} />
+                    ),
+                  expandedRowRender: (record) => {
+                    const data = partOpDetails[record.id] || [];
+                    const loading = partOpLoading[record.id];
+                    const columns = [
+                      { title: "Operation Name", dataIndex: "operation" },
+                      { title: "Machine Name", dataIndex: "machine" },
+                      {
+                        title: "Start Time",
+                        dataIndex: "planned_start_time",
+                        render: (v) => v ? dayjs(v).format("DD-MM-YYYY HH:mm") : "-"
+                      },
+                      {
+                        title: "End Time",
+                        dataIndex: "planned_end_time",
+                        render: (v) => v ? dayjs(v).format("DD-MM-YYYY HH:mm") : "-"
+                      },
+                    ];
+                    return (
+                      <Table
+                        columns={columns}
+                        dataSource={data}
+                        pagination={false}
+                        loading={loading}
+                        size="small"
+                        rowKey="operation_id"
+                      />
+                    );
+                  },
+                  onExpand: (expanded, record) => {
+                    if (expanded) {
+                      fetchPartOperationDetails(record.id);
+                    }
+                  }
                 }}
               />
             </Tabs.TabPane>
@@ -586,6 +689,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
                 rowKey="id"
                 scroll={{ x: "max-content" }}
                 style={{ width: "100%" }}
+                pagination={{
+                  showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} parts`,
+                }}
               />
             </Tabs.TabPane>
           </Tabs>

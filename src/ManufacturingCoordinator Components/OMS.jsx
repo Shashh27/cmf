@@ -316,7 +316,7 @@ const OMS = () => {
           className="p-0 h-auto"
           onClick={() => {
             if (!productId) return;
-            navigate(`/manufacturing_coordinator/pdm?from=oms&productId=${productId}&orderId=${record.id}`);
+            navigate(`/manufacturing_coordinator/pdm/${productId}?from=oms&orderId=${record.id}`);
           }}
         >
           <Space className="text-gray-700">

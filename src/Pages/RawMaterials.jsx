@@ -1,11 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Tabs, Typography, App as AntApp } from "antd";
-import { 
-  ExperimentOutlined, 
-  LinkOutlined, 
-  SafetyCertificateOutlined
-} from "@ant-design/icons";
+import { ExperimentOutlined, LinkOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 

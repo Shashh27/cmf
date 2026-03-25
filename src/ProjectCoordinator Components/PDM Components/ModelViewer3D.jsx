@@ -6,7 +6,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { Spin, Empty, Typography } from "antd";
 import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
+import { API_BASE_URL } from "../../Config/auth";
 
 const { Text } = Typography;
 
@@ -105,7 +105,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
       // Add DRACOLoader for much faster loading of compressed meshes
       const dracoLoader = new DRACOLoader();
       // Using Google's hosted draco decoder for convenience and speed
-     dracoLoader.setDecoderPath('/static/draco/');
+      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
       loader.setDRACOLoader(dracoLoader);
 
       const loadModel = async () => {
@@ -117,44 +117,12 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
           if (modelCache.has(documentId)) {
             arrayBuffer = modelCache.get(documentId);
           } else {
-            try {
-              const response = await axios.get(
-                `${API_BASE_URL}/documents/${documentId}/3d`,
-                { responseType: "arraybuffer" }
-              );
-              arrayBuffer = response.data;
-              modelCache.set(documentId, arrayBuffer);
-            } catch (apiError) {
-              // Extract detailed error message from response
-              let errorMessage = "Unable to load 3D model";
-              if (apiError.response) {
-                // Try to parse JSON error response
-                if (apiError.response.data) {
-                  try {
-                    // If the response is ArrayBuffer (due to responseType), decode it
-                    if (apiError.response.data instanceof ArrayBuffer) {
-                      const decoder = new TextDecoder('utf-8');
-                      const jsonStr = decoder.decode(apiError.response.data);
-                      const errorData = JSON.parse(jsonStr);
-                      errorMessage = errorData.detail || errorData.message || `Error ${apiError.response.status}: ${apiError.response.statusText}`;
-                    } else if (typeof apiError.response.data === 'object') {
-                      // JSON response with detail field
-                      errorMessage = apiError.response.data.detail || apiError.response.data.message || apiError.message;
-                    } else {
-                      errorMessage = String(apiError.response.data);
-                    }
-                  } catch {
-                    // If JSON parsing fails, use status text
-                    errorMessage = apiError.response?.statusText || apiError.message;
-                  }
-                } else {
-                  errorMessage = apiError.message;
-                }
-              } else {
-                errorMessage = apiError.message;
-              }
-              throw new Error(errorMessage);
-            }
+            const response = await axios.get(
+              `${API_BASE_URL}/documents/${documentId}/3d`,
+              { responseType: "arraybuffer" }
+            );
+            arrayBuffer = response.data;
+            modelCache.set(documentId, arrayBuffer);
           }
 
           const blob = new Blob([arrayBuffer], { type: "model/gltf-binary" });
@@ -182,11 +150,6 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
                 if (node.isMesh) {
                   if (node.material) {
                     node.material.color.convertSRGBToLinear();
-                    // Enable polygon offset to prevent Z-fighting with edges
-                    node.material.polygonOffset = true;
-                    node.material.polygonOffsetFactor = 1;
-                    node.material.polygonOffsetUnits = 1;
-                    
                     if (node.material.metalness !== undefined) {
                       node.material.metalness = Math.min(node.material.metalness, 0.7);
                     }
@@ -195,18 +158,14 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
                     }
                   }
                   
-                  // Add edges for better visibility (Visible edges by default)
-                  // Use a threshold angle of 20 degrees to hide internal triangulation lines
-                  const edges = new THREE.EdgesGeometry(node.geometry, 20);
+                  // Add colored edges for better visibility
+                  const edges = new THREE.EdgesGeometry(node.geometry);
                   const edgeMaterial = new THREE.LineBasicMaterial({ 
-                    color: 0x333333, // Dark gray/black for professional look
-                    depthTest: true,
-                    transparent: true,
-                    opacity: 0.6
+                    color: 0x0066cc, // Blue color for edges
+                    linewidth: 2
                   });
                   const edgesMesh = new THREE.LineSegments(edges, edgeMaterial);
-                  edgesMesh.name = "modelEdges"; // Identify for toggling hidden edges
-                  edgesMesh.visible = true; // Always show visible edges
+                  edgesMesh.visible = false; // Initially hidden
                   node.add(edgesMesh);
                 }
               });
@@ -289,9 +248,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
             return;
           }
           setLoading(false);
-          // Display the specific error message if available
-          const errorMsg = e?.message || e?.response?.data?.detail || "Unable to load 3D model";
-          setError(errorMsg);
+          setError(e && e.message ? e.message : "Unable to load 3D model");
         }
       };
 
@@ -367,12 +324,8 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
   useEffect(() => {
     if (modelRef.current) {
       modelRef.current.traverse(node => {
-        if (node.isLineSegments && node.name === "modelEdges") {
-          // If showEdges is true, we disable depthTest to show "Hidden Edges"
-          // If showEdges is false, we enable depthTest to show only "Visible Edges"
-          node.material.depthTest = !showEdges;
-          node.material.opacity = showEdges ? 0.4 : 0.6; // Slightly fade hidden edges
-          node.material.needsUpdate = true;
+        if (node.isLineSegments) {
+          node.visible = showEdges;
         }
       });
     }
@@ -433,7 +386,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
             onClick={() => setShowEdges(!showEdges)}
             className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300"
           >
-            {showEdges ? 'Hide Hidden Edges' : 'Show Hidden Edges'}
+            {showEdges ? 'Hide Edges' : 'Show Edges'}
           </button>
         </div>
       )}
@@ -445,8 +398,8 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
         </div>
       )}
       {error && !loading && (
-        <div className="absolute left-0 right-0 top-0 bottom-0 flex items-center justify-center bg-white/80 p-4">
-          <Text type="danger" className="text-xs text-center break-words max-w-full block">
+        <div className="absolute inset-0 flex items-center justify-center bg-white/80">
+          <Text type="danger" className="text-xs">
             {error}
           </Text>
         </div>

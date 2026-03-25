@@ -200,7 +200,13 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       if (!selectedOrderId) return;
       setPartsLoading(true);
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/${selectedOrderId}/part-priorities`, {
+        const orderObj = orders.find(o => o.id === selectedOrderId);
+        const saleOrderNumber = orderObj?.sale_order_number || orderObj?.order_number || orderObj?.id;
+        if (!saleOrderNumber) {
+           setParts([]);
+           return;
+        }
+        const res = await fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, {
           headers: { accept: 'application/json' },
         });
         const data = await res.json();

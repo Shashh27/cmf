@@ -1,30 +1,20 @@
 import React, { useState } from "react";
-import { Layout, Drawer, Button, Tabs } from "antd";
+import { Layout, Drawer, Button } from "antd";
 import { MenuOutlined } from "@ant-design/icons";
-import { useNavigate, useSearchParams, useParams } from "react-router-dom";
-import BillOfMaterials from "../PDM Components/BillOfMaterials";
-import ProductDetails from "../PDM Components/ProductDetails";
-import ProductSummary from "../PDM Components/ProductSummary";
-import DocumentsPanel from "../PDM Components/DocumentsPanel";
-import AssemblyDocumentsPanel from "../PDM Components/AssemblyDocumentsPanel";
-import ProcessPlanning from "../PPS Components/ProcessPlanning";
+import BillOfMaterials from "./PDM Components/BillOfMaterials";
+import ProductDetails from "./PDM Components/ProductDetails";
+import ProductSummary from "./PDM Components/ProductSummary";
+import DocumentsPanel from "./PDM Components/DocumentsPanel";
+import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
 
 const { Sider, Content } = Layout;
 
 const PDM = () => {
-  const navigate = useNavigate();
-  const { productId: routeProductId } = useParams();
-  const [searchParams] = useSearchParams();
-  const fromOms = (searchParams.get("from") || "").toLowerCase() === "oms";
-  const initialProductId = routeProductId || searchParams.get("productId");
-  const initialOrderId = searchParams.get("orderId");
-
   const [selectedItem, setSelectedItem] = useState(null);
   const [partDocuments, setPartDocuments] = useState([]);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [productHierarchies, setProductHierarchies] = useState({});
-  const [activeTopTab, setActiveTopTab] = useState("pdm");
 
   // Detect screen size
   React.useEffect(() => {
@@ -63,29 +53,7 @@ const PDM = () => {
         }
       `}</style>
       
-      <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {fromOms && (
-          <div style={{ padding: '0 4px 10px 4px' }}>
-            <Button onClick={() => navigate("/admin/oms/orders")}>
-              Back to Orders
-            </Button>
-          </div>
-        )}
-        {fromOms && (
-          <div style={{ padding: "0 4px 10px 4px" }}>
-            <Tabs
-              activeKey={activeTopTab}
-              onChange={setActiveTopTab}
-              items={[
-                { key: "pdm", label: "PDM" },
-                { key: "pps", label: "PPS" },
-              ]}
-            />
-          </div>
-        )}
-
-      {(!fromOms || activeTopTab === "pdm") ? (
-      <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex' }}>
+      <Layout style={{ height: "100vh", overflow: "hidden" }}>
         {/* Mobile: Hamburger button */}
         {isMobile && (
           <Button
@@ -96,7 +64,7 @@ const PDM = () => {
           />
         )}
 
-        {/* Desktop: Fixed Sidebar - scrolls independently */}
+        {/* Desktop: Fixed Sidebar */}
         {!isMobile && (
           <Sider 
             width="33%" 
@@ -105,15 +73,12 @@ const PDM = () => {
               borderRight: "1px solid #f0f0f0", 
               overflow: 'auto',
               minWidth: 300,
-              maxWidth: 500,
-              height: '100%'
+              maxWidth: 500
             }}
           >
             <BillOfMaterials 
               onItemSelected={handleItemSelected} 
               onHierarchyLoaded={handleHierarchyLoaded}
-              disableProductCreate={fromOms}
-              initialProductId={fromOms ? initialProductId : null}
             />
           </Sider>
         )}
@@ -130,8 +95,6 @@ const PDM = () => {
             <BillOfMaterials 
               onItemSelected={handleItemSelected} 
               onHierarchyLoaded={handleHierarchyLoaded}
-              disableProductCreate={fromOms}
-              initialProductId={fromOms ? initialProductId : null}
             />
           </Drawer>
         )}
@@ -183,12 +146,6 @@ const PDM = () => {
           )}
         </Content>
       </Layout>
-      ) : (
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#f5f5f5" }}>
-          <ProcessPlanning initialOrderId={initialOrderId} />
-        </div>
-      )}
-      </div>
     </>
   );
 };

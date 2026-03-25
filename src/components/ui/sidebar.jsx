@@ -192,11 +192,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link>,
         icon: <ShoppingCartOutlined />,
       },
-      {
-        key: `${prefix}/pdm`,
-        label: <Link to={`${prefix}/pdm`} onClick={() => setMobileDrawerOpen(false)}>PDM</Link>,
-        icon: <DeploymentUnitOutlined />,
-      },
+      
     ];
   } else if (prefix === '/manufacturing_coordinator') {
     items = [
@@ -211,7 +207,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <ShoppingCartOutlined />,
         children: [
           { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
-          { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
+          // { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
         ],
       },
       {

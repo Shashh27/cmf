@@ -62,7 +62,13 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       setPartId(null);
       return;
     }
-    fetch(`${API_BASE_URL}/orders/${orderId}/part-priorities`, { headers: { accept: 'application/json' } })
+    const orderObj = orders.find(o => o.id === orderId);
+    const saleOrderNumber = orderObj?.sale_order_number || orderObj?.order_no || orderObj?.id;
+    if (!saleOrderNumber) {
+      setParts([]);
+      return;
+    }
+    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, { headers: { accept: 'application/json' } })
       .then(async (r) => {
         if (r.ok) {
           const data = await r.json();
@@ -89,7 +95,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
         }
       })
       .catch(() => setParts([]));
-  }, [orderId]);
+  }, [orderId, orders]);
   const resetAll = () => {
     setActiveTab('oee');
     setOeeCategory('Availability');
@@ -238,7 +244,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
           key="oee"
           tab={
             <span>
-              <WarningOutlined style={{ color: '#1677ff', marginRight: 6 }} />
+              <WarningOutlined style={{ marginRight: 6 }} />
               OEE Issue
             </span>
           }
@@ -274,7 +280,13 @@ const ReportIssue = ({ open, onClose, machineId }) => {
               <DatePicker
                 showTime
                 value={oeeTimes[0]}
-                onChange={(v) => setOeeTimes([v, oeeTimes[1]])}
+                onChange={(v) => {
+                  if (oeeTimes[1] && v && v.isAfter(oeeTimes[1])) {
+                    setOeeTimes([v, null]);
+                  } else {
+                    setOeeTimes([v, oeeTimes[1]]);
+                  }
+                }}
                 style={{ width: 280 }}
               />
               <DatePicker
@@ -282,6 +294,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
                 value={oeeTimes[1]}
                 onChange={(v) => setOeeTimes([oeeTimes[0], v])}
                 style={{ width: 280 }}
+                disabledDate={(current) => oeeTimes[0] && current && current.isBefore(oeeTimes[0], 'day')}
               />
             </Space>
             <Button

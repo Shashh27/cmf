@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import { API_BASE_URL } from "../Config/auth";
+import { API_BASE_URL } from "../../Config/auth";
 import { Modal, Form, Input, Select, Button, message, Badge } from "antd";
 
 const CreateProductModal = ({ 
@@ -30,6 +30,7 @@ const CreateProductModal = ({
     }
   })();
   const [formData, setFormData] = useState({
+    product_number: '',
     product_name: '',
     product_version: '1.0',
     user_name_display: storedUser?.user_name || '',
@@ -40,7 +41,6 @@ const CreateProductModal = ({
     part_name: '',
     type_id: 1,
     raw_material_id: null,
-    part_detail: null,
     assembly_id: null,
     product_id: ''
   });
@@ -53,6 +53,7 @@ const CreateProductModal = ({
       // Pre-fill form based on what we're editing
       if (createType === 'product') {
         newValues = {
+          product_number: editingItem.product_number || '',
           product_name: editingItem.product_name || '',
           product_version: editingItem.product_version || '1.0',
         };
@@ -67,28 +68,17 @@ const CreateProductModal = ({
           part_name: editingItem.part_name || '',
           type_id: editingItem.type_id || 1,
           raw_material_id: editingItem.raw_material_id,
-          part_detail: editingItem.part_detail ?? null,
         };
       }
     } else {
       // Default behavior for create mode
       if (createType === 'product') {
         newValues = {
-          product_name: '',
           product_version: '1.0',
-        };
-      } else if (createType === 'assembly') {
-        newValues = {
-          assembly_number: '',
-          assembly_name: '',
         };
       } else if (createType === 'part') {
         newValues = {
-          part_number: '',
-          part_name: '',
           type_id: 1,
-          raw_material_id: null,
-          part_detail: null,
         };
       }
     }
@@ -105,6 +95,7 @@ const CreateProductModal = ({
       // Pre-fill form based on what we're editing
       if (createType === 'product') {
         newValues = {
+          product_number: editingItem.product_number || '',
           product_name: editingItem.product_name || '',
           product_version: editingItem.product_version || '1.0',
         };
@@ -119,28 +110,17 @@ const CreateProductModal = ({
           part_name: editingItem.part_name || '',
           type_id: editingItem.type_id || 1,
           raw_material_id: editingItem.raw_material_id,
-          part_detail: editingItem.part_detail ?? null,
         };
       }
     } else {
       // Default behavior for create mode
       if (createType === 'product') {
         newValues = {
-          product_name: '',
           product_version: '1.0',
-        };
-      } else if (createType === 'assembly') {
-        newValues = {
-          assembly_number: '',
-          assembly_name: '',
         };
       } else if (createType === 'part') {
         newValues = {
-          part_number: '',
-          part_name: '',
           type_id: 1,
-          raw_material_id: null,
-          part_detail: null,
         };
       }
     }
@@ -242,6 +222,7 @@ const CreateProductModal = ({
         method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
         const uid = getCurrentUserId();
         payload = {
+          product_number: values.product_number,
           product_name: values.product_name,
           product_version: (mode === 'edit' && editingItem)
             ? (editingItem?.product_version ?? values.product_version ?? '1.0')
@@ -261,13 +242,11 @@ const CreateProductModal = ({
       } else if (createType === 'part') {
         url = `${API_BASE_URL}/parts${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
         method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
-        const partDetail = values.part_detail || null;
         payload = {
           part_number: values.part_number,
           part_name: values.part_name,
           type_id: values.type_id,
-          raw_material_id: values.raw_material_id || null,
-          part_detail: partDetail,
+          raw_material_id: values.raw_material_id,
           assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
           product_id: editingItem?.product_id || selectedProduct?.id,
           user_id: getCurrentUserId(),
@@ -303,16 +282,11 @@ const CreateProductModal = ({
     return `${mode === 'edit' ? 'Edit' : 'Create New'} ${createType === 'product' ? 'Product' : createType === 'assembly' ? 'Assembly' : 'Part'}`;
   };
 
-  const handleCancel = () => {
-    form.resetFields();
-    onCancel();
-  };
-
   return (
     <Modal
       title={getTitle()}
       open={open}
-      onCancel={handleCancel}
+      onCancel={onCancel}
       maskClosable={false}
       keyboard={false}
       footer={null}
@@ -369,6 +343,14 @@ const CreateProductModal = ({
                   borderColor: '#e5e7eb' 
                 }} 
               />
+            </Form.Item>
+            <Form.Item
+              name="product_number"
+              label={<span className="text-xs sm:text-sm">Product Number</span>}
+              rules={[{ required: true, message: 'Please input product number!' }]}
+              getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9-_]/g, '').slice(0, 30)}
+            >
+              <Input placeholder="e.g., PRD-001" autoComplete="off" size="large" maxLength={30} />
             </Form.Item>
             <Form.Item
               name="product_name"
@@ -452,72 +434,24 @@ const CreateProductModal = ({
               </Select>
             </Form.Item>
 
-            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.type_id !== curr.type_id}>
-              {({ getFieldValue }) => {
-                const typeId = getFieldValue('type_id');
-                const isOutSource = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('out');
-                if (!isOutSource) return null;
-                return (
-                  <Form.Item
-                    name="part_detail"
-                    label={<span className="text-xs sm:text-sm">Part Details</span>}
-                    rules={[{ required: true, message: 'Please select part details!' }]}
-                  >
-                    <Select placeholder="Select part details" size="large">
-                      <Select.Option value="WITH_RAW_MATERIAL">With Raw Material</Select.Option>
-                      <Select.Option value="WITHOUT_RAW_MATERIAL">Without Raw Material</Select.Option>
-                    </Select>
-                  </Form.Item>
-                );
-              }}
-            </Form.Item>
-
-            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.type_id !== curr.type_id || prev.part_detail !== curr.part_detail}>
-              {({ getFieldValue }) => {
-                const typeId = getFieldValue('type_id');
-                const partDetail = getFieldValue('part_detail');
-                const isOutSource = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('out');
-                const isRequiredRawMaterial = isOutSource && partDetail === 'WITH_RAW_MATERIAL';
-                const isInHouse = !isOutSource;
-                if (isInHouse) {
-                  return (
-                    <Form.Item
-                      name="raw_material_id"
-                      label={<span className="text-xs sm:text-sm">Raw Material</span>}
-                      rules={[{ required: false }]}
-                    >
-                      <Select placeholder="Select raw material " allowClear showSearch optionFilterProp="children" size="large">
-                        {rawMaterials.map(material => (
-                          <Select.Option key={material.id} value={material.id}>
-                            {material.material_name}
-                          </Select.Option>
-                        ))}
-                      </Select>
-                    </Form.Item>
-                  );
-                }
-                return (
-                  <Form.Item
-                    name="raw_material_id"
-                    label={<span className="text-xs sm:text-sm">Raw Material</span>}
-                    rules={isRequiredRawMaterial ? [{ required: true, message: 'Please select raw material!' }] : [{ required: false }]}
-                  >
-                    <Select placeholder={isRequiredRawMaterial ? 'Select raw material' : 'Select raw material (optional)'} allowClear showSearch optionFilterProp="children" size="large">
-                      {rawMaterials.map(material => (
-                        <Select.Option key={material.id} value={material.id}>
-                          {material.material_name}
-                        </Select.Option>
-                      ))}
-                    </Select>
-                  </Form.Item>
-                );
-              }}
+            <Form.Item
+              name="raw_material_id"
+              label={<span className="text-xs sm:text-sm">Raw Material</span>}
+              rules={[{ required: false, message: 'Please select raw material!' }]}
+            >
+              <Select placeholder="Select raw material" allowClear showSearch optionFilterProp="children" size="large">
+                {rawMaterials.map(material => (
+                  <Select.Option key={material.id} value={material.id}>
+                    {material.material_name}
+                  </Select.Option>
+                ))}
+              </Select>
             </Form.Item>
           </>
         )}
 
         <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 mt-6">
-          <Button onClick={handleCancel} size="large" className="w-full sm:w-auto">
+          <Button onClick={onCancel} size="large" className="w-full sm:w-auto">
             Cancel
           </Button>
           <Button type="primary" htmlType="submit" loading={loading} className="no-hover-btn w-full sm:w-auto" size="large">
