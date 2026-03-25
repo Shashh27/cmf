@@ -37,7 +37,6 @@ def _linkage_to_dict(linkage: OrderPartsRawMaterialLinked) -> dict:
         "mass": linkage.mass if linkage.mass is not None else (rm.mass if rm else None),
         "sale_order_number": od.sale_order_number if od else None,
         "product_name": product.product_name if product else None,
-        "product_number": product.product_number if product else None,
         "material_status": linkage.material_status if linkage.material_status is not None else (rm.status if rm else None),
     }
 
@@ -173,35 +172,42 @@ def create_bulk_linkages(request: BulkCreateRequest, db: Session = Depends(get_d
 
 @router.get("/", response_model=List[OrderPartsRawMaterialLinkedWithDetails])
 def get_all_linkages(
-    user_id: Optional[int] = Query(None, description="Filter by linkage user_id"),
+    user_id: Optional[int] = Query(None, description="Filter by linkage.user_id (creator)"),
     admin_id: Optional[int] = Query(
         None,
-        description="Filter by admin / coordinator related to the order "
-        "(matches Order.admin_id, Order.manufacturing_coordinator_id, or Order.project_coordinator_id)",
+        description="Filter by orders where this user is admin",
+    ),
+    manufacturing_coordinator_id: Optional[int] = Query(
+        None,
+        description="Filter by orders where this user is manufacturing coordinator",
+    ),
+    project_coordinator_id: Optional[int] = Query(
+        None,
+        description="Filter by orders where this user is project coordinator",
     ),
     db: Session = Depends(get_db),
 ):
     """Get all order-parts-raw-material linkages with details (single JOIN query).
 
     - If user_id is provided, filter by linkage.user_id (who created it).
-    - If admin_id is provided, filter by orders where this user is admin, project coordinator,
-      or manufacturing coordinator.
-    - If both are provided, both filters are applied (AND).
+    - If admin_id is provided, filter by orders where this user is admin.
+    - If manufacturing_coordinator_id is provided, filter by orders where this user is manufacturing coordinator.
+    - If project_coordinator_id is provided, filter by orders where this user is project coordinator.
+    - Multiple filters are ANDed together.
     """
     query = db.query(OrderPartsRawMaterialLinked)
     if user_id is not None:
         query = query.filter(OrderPartsRawMaterialLinked.user_id == user_id)
-    if admin_id is not None:
-        query = (
-            query.join(Order, Order.id == OrderPartsRawMaterialLinked.order_id)
-            .filter(
-                or_(
-                    Order.admin_id == admin_id,
-                    Order.manufacturing_coordinator_id == admin_id,
-                    Order.project_coordinator_id == admin_id,
-                )
-            )
-        )
+
+    # Apply role-based filters on Order if any of them are provided
+    if any(v is not None for v in (admin_id, manufacturing_coordinator_id, project_coordinator_id)):
+        query = query.join(Order, Order.id == OrderPartsRawMaterialLinked.order_id)
+        if admin_id is not None:
+            query = query.filter(Order.admin_id == admin_id)
+        if manufacturing_coordinator_id is not None:
+            query = query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+        if project_coordinator_id is not None:
+            query = query.filter(Order.project_coordinator_id == project_coordinator_id)
     linkages = _load_linkages(query.order_by(OrderPartsRawMaterialLinked.id.asc())).all()
     return [_linkage_to_dict(l) for l in linkages]
 

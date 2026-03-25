@@ -28,6 +28,14 @@ from .maintenance import (
     MachineBreakdown,
     ComponentIssue
 )
+from .documents import (
+    GeneralFolder,
+    GeneralDocument,
+    MachineFolder,
+    MachineDocument,
+    CommonFolder,
+    CommonDocument
+)
 
 __all__ = [
     "Product",
@@ -51,5 +59,11 @@ __all__ = [
     "OEEIssue",
     "MachineBreakdown",
     "ComponentIssue",
+    "GeneralFolder",
+    "GeneralDocument",
+    "MachineFolder",
+    "MachineDocument",
+    "CommonFolder",
+    "CommonDocument",
     "Base"
 ]

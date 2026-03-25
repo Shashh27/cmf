@@ -6,6 +6,7 @@ from typing import Optional, List
 class GeneralFolderBase(BaseModel):
     folder_name: str
     parent_id: Optional[int] = None
+    user_id: int
 
 class GeneralDocumentBase(BaseModel):
     file_name: str
@@ -13,6 +14,7 @@ class GeneralDocumentBase(BaseModel):
     version: float
     general_folder_id: int
     parent_id: Optional[int] = None
+    user_id: int
 
 # Response schemas
 class GeneralFolder(GeneralFolderBase):
@@ -42,11 +44,13 @@ class GeneralDocumentCreate(GeneralDocumentBase):
 class GeneralFolderUpdate(BaseModel):
     folder_name: Optional[str] = None
     parent_id: Optional[int] = None
+    user_id: int
 
 class GeneralDocumentUpdate(BaseModel):
     file_name: Optional[str] = None
     url: Optional[str] = None
     general_folder_id: Optional[int] = None
+    user_id: int
 
 # Response with nested data
 class GeneralFolderWithChildren(GeneralFolder):
@@ -84,6 +88,7 @@ class MachineFolderBase(BaseModel):
     folder_name: str
     machine_id: int
     parent_id: Optional[int] = None
+    user_id: int
 
 class MachineDocumentBase(BaseModel):
     document_name: str
@@ -92,6 +97,7 @@ class MachineDocumentBase(BaseModel):
     machine_folder_id: Optional[int] = None
     machine_id: Optional[int] = None
     parent_id: Optional[int] = None
+    user_id: int
 
 # Machine Folder Response schemas
 class MachineFolder(MachineFolderBase):
@@ -122,12 +128,14 @@ class MachineFolderUpdate(BaseModel):
     folder_name: Optional[str] = None
     machine_id: Optional[int] = None
     parent_id: Optional[int] = None
+    user_id: int
 
 class MachineDocumentUpdate(BaseModel):
     document_name: Optional[str] = None
     document_url: Optional[str] = None
     machine_folder_id: Optional[int] = None
     machine_id: Optional[int] = None
+    user_id: int
 
 # Machine Folder Response with nested data
 class MachineFolderWithChildren(MachineFolder):
@@ -166,6 +174,7 @@ class MachineWithFolders(BaseModel):
 class CommonFolderBase(BaseModel):
     folder_name: str
     parent_id: Optional[int] = None
+    user_id: int
 
 class CommonDocumentBase(BaseModel):
     document_name: str
@@ -173,6 +182,7 @@ class CommonDocumentBase(BaseModel):
     version: float
     folder_id: Optional[int] = None
     parent_id: Optional[int] = None
+    user_id: int
 
 # Common Folder Response schemas
 class CommonFolder(CommonFolderBase):
@@ -202,11 +212,13 @@ class CommonDocumentCreate(CommonDocumentBase):
 class CommonFolderUpdate(BaseModel):
     folder_name: Optional[str] = None
     parent_id: Optional[int] = None
+    user_id: int
 
 class CommonDocumentUpdate(BaseModel):
     document_name: Optional[str] = None
     document_url: Optional[str] = None
     folder_id: Optional[int] = None
+    user_id: int
 
 # Common Folder Response with nested data
 class CommonFolderWithChildren(CommonFolder):

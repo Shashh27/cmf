@@ -99,6 +99,96 @@ async def upload_order_document(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to upload document: {str(e)}")
 
+@router.post("/upload-bulk/{order_id}", response_model=List[OrderDocumentResponse])
+async def upload_order_documents_bulk(
+    order_id: int,
+    files: List[UploadFile] = File(...),
+    document_type: List[str] = Form([]),
+    document_version: List[str] = Form([]),
+    document_name: List[str] = Form([]),
+    parent_id: Optional[int] = Form(None),
+    user_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload multiple order documents in a single request (multipart/form-data).
+
+    Send repeated fields (same key multiple times) to build lists, e.g.
+    - files: <file1>, <file2>, ...
+    - document_type: <type1>, <type2>, ...
+    - document_version: <ver1>, <ver2>, ...
+    - document_name: <name1>, <name2>, ...
+    """
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if not _can_upload_order_document(order, user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only project coordinator, admin, or manufacturing coordinator for this order can upload order documents.",
+        )
+
+    if parent_id:
+        parent = db.query(OrderDocument).filter(OrderDocument.id == parent_id).first()
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent document not found")
+
+    if not files:
+        return []
+
+    minio_client = get_minio_client()
+    created_docs: List[OrderDocument] = []
+
+    try:
+        for idx, file in enumerate(files):
+            file_extension = os.path.splitext(file.filename)[1]
+            unique_filename = f"{uuid.uuid4()}{file_extension}"
+            object_name = f"order_documents/{order_id}/{unique_filename}"
+
+            file_content = await file.read()
+            file_stream = io.BytesIO(file_content)
+
+            url = minio_client.upload_file(
+                file_data=file_stream,
+                object_name=object_name,
+                content_type=file.content_type,
+            )
+
+            effective_type = ""
+            if idx < len(document_type) and document_type[idx] is not None:
+                effective_type = (document_type[idx] or "").strip()
+            if not effective_type:
+                effective_type = file.content_type or ""
+
+            effective_version = "1.0"
+            if idx < len(document_version) and document_version[idx]:
+                effective_version = str(document_version[idx]).strip() or "1.0"
+
+            effective_name = file.filename
+            if idx < len(document_name) and document_name[idx]:
+                effective_name = str(document_name[idx]).strip() or file.filename
+
+            db_document = OrderDocument(
+                order_id=order_id,
+                document_name=effective_name,
+                document_url=url,
+                document_type=effective_type,
+                document_version=effective_version,
+                parent_id=parent_id,
+                user_id=user_id,
+            )
+            db.add(db_document)
+            created_docs.append(db_document)
+
+        db.commit()
+        for d in created_docs:
+            db.refresh(d)
+        return created_docs
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to upload documents: {str(e)}")
+
 @router.put("/replace/{document_id}", response_model=OrderDocumentResponse)
 async def replace_order_document(
     document_id: int,
@@ -115,12 +205,12 @@ async def replace_order_document(
         # Get MinIO client
         minio_client = get_minio_client()
         
-        # Delete old file from MinIO
-        old_object_name = existing_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        # Store old object name for later deletion
+        old_object_name = None
         try:
-            minio_client.delete_file(old_object_name)
-        except Exception as e:
-            print(f"Warning: Failed to delete old file from MinIO: {str(e)}")
+            old_object_name = existing_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        except Exception:
+            pass
         
         # Generate unique filename
         file_extension = os.path.splitext(file.filename)[1]
@@ -144,10 +234,16 @@ async def replace_order_document(
         existing_document.document_name = file.filename
         existing_document.document_url = new_document_url
         existing_document.document_type = file.content_type  # Auto-detect from file
-        # Keep existing document_version unchanged
         
         db.commit()
         db.refresh(existing_document)
+        
+        # Only delete old file after successful database commit
+        if old_object_name:
+            try:
+                minio_client.delete_file(old_object_name)
+            except Exception as e:
+                print(f"Warning: Failed to delete old file from MinIO: {str(e)}")
         
         return existing_document
         
@@ -161,15 +257,27 @@ def delete_order_document(document_id: int, db: Session = Depends(get_db)):
     db_document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
     if not db_document:
         raise HTTPException(status_code=404, detail="Document not found")
+    
     try:
+        # Get object name before deleting from DB
         minio_client = get_minio_client()
+        object_key = None
         try:
             object_key = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
-            minio_client.delete_file(object_key)
         except Exception:
             pass
+            
+        # Delete from database first
         db.delete(db_document)
         db.commit()
+
+        # Only delete from MinIO after successful database commit
+        if object_key:
+            try:
+                minio_client.delete_file(object_key)
+            except Exception as e:
+                print(f"Warning: Failed to delete document from MinIO: {str(e)}")
+        
         return {"message": "Document deleted successfully"}
     except Exception as e:
         db.rollback()
@@ -193,12 +301,12 @@ async def replace_order_document_with_metadata(
         # Get MinIO client
         minio_client = get_minio_client()
         
-        # Delete old file from MinIO
-        old_object_name = existing_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        # Store old object name for later deletion
+        old_object_name = None
         try:
-            minio_client.delete_file(old_object_name)
-        except Exception as e:
-            print(f"Warning: Failed to delete old file from MinIO: {str(e)}")
+            old_object_name = existing_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        except Exception:
+            pass
         
         # Generate unique filename
         file_extension = os.path.splitext(file.filename)[1]
@@ -226,6 +334,13 @@ async def replace_order_document_with_metadata(
         
         db.commit()
         db.refresh(existing_document)
+        
+        # Only delete old file after successful database commit
+        if old_object_name:
+            try:
+                minio_client.delete_file(old_object_name)
+            except Exception as e:
+                print(f"Warning: Failed to delete old file from MinIO: {str(e)}")
         
         return existing_document
         

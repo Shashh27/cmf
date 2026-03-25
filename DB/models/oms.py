@@ -151,6 +151,7 @@ class Operation(Base):
     machine = relationship("DB.models.configuration.Machine")
     user = relationship("AccessUser")
     operation_documents = relationship("OperationDocument", back_populates="operation", cascade="all, delete-orphan")
+    tools = relationship("ToolWithPart", back_populates="operation", cascade="all, delete-orphan")
 
     @property
     def user_name(self):
@@ -202,7 +203,7 @@ class ToolWithPart(Base):
 
     part = relationship("Part", back_populates="tools")
     tool = relationship("DB.models.inventory.ToolsList")
-    operation = relationship("Operation")
+    operation = relationship("Operation", back_populates="tools")
     user = relationship("AccessUser")
 
 

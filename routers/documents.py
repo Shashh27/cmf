@@ -292,6 +292,158 @@ async def create_document(
         )
 
 
+@router.post("/bulk", response_model=List[Document], status_code=status.HTTP_201_CREATED)
+async def create_documents_bulk(
+        files: List[UploadFile] = File(...),
+        document_name: List[str] = Form([]),
+        document_type: List[str] = Form([]),
+        document_version: List[str] = Form([]),
+        parent_id: List[Optional[int]] = Form([]),
+        part_id: Optional[int] = Form(None),
+        assembly_id: Optional[int] = Form(None),
+        user_id: Optional[int] = Form(None),
+        db: Session = Depends(get_db)
+):
+    """
+    Bulk create documents with file upload to MinIO (multipart/form-data).
+
+    Send repeated form fields (same key multiple times) to build lists:
+    - files: <file1>, <file2>, ...
+    - document_name: <name1>, <name2>, ...
+    - document_type: <type1>, <type2>, ...
+    - document_version: <ver1>, <ver2>, ...
+    - parent_id: <pid1>, <pid2>, ... (optional per file)
+    """
+    # Ensure at least one of part_id or assembly_id is provided
+    if part_id is None and assembly_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either part_id or assembly_id must be provided"
+        )
+
+    if not files:
+        return []
+
+    # Validate file extensions
+    for f in files:
+        if not is_allowed_file(f.filename):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+            )
+
+    minio_client = get_minio_client()
+
+    # Determine owning entity (part or assembly) for storage path
+    owner_prefix = "part"
+    owner_id = part_id
+    if part_id is None and assembly_id is not None:
+        owner_prefix = "assembly"
+        owner_id = assembly_id
+
+    created_docs: List[DocumentModel] = []
+
+    try:
+        for idx, file in enumerate(files):
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_extension = get_file_extension(file.filename)
+
+            effective_name = None
+            if idx < len(document_name) and document_name[idx]:
+                effective_name = str(document_name[idx]).strip()
+            if not effective_name:
+                effective_name = os.path.splitext(file.filename)[0]
+
+            effective_type = None
+            if idx < len(document_type) and document_type[idx]:
+                effective_type = str(document_type[idx]).strip()
+            if not effective_type:
+                effective_type = "Document"
+
+            effective_version = None
+            if idx < len(document_version) and document_version[idx]:
+                effective_version = str(document_version[idx]).strip()
+            if not effective_version:
+                effective_version = "v1.0"
+
+            effective_parent = None
+            if idx < len(parent_id):
+                pid = parent_id[idx]
+                if pid not in (0, None):
+                    effective_parent = pid
+
+            object_name = f"documents/{owner_prefix}_{owner_id}/{ts}_{effective_name}{file_extension}"
+
+            file_content = await file.read()
+            file_stream = io.BytesIO(file_content)
+
+            content_type = get_content_type_from_detection(file_content, file.filename)
+
+            document_url = minio_client.upload_file(
+                file_data=file_stream,
+                object_name=object_name,
+                content_type=content_type,
+                metadata={
+                    'document_name': effective_name,
+                    'document_type': effective_type,
+                    'document_version': effective_version,
+                    'part_id': str(part_id) if part_id is not None else '',
+                    'assembly_id': str(assembly_id) if assembly_id is not None else '',
+                    'original_filename': file.filename
+                }
+            )
+
+            db_document = DocumentModel(
+                document_name=effective_name,
+                document_url=document_url,
+                document_type=effective_type,
+                document_version=effective_version,
+                part_id=part_id,
+                assembly_id=assembly_id,
+                parent_id=effective_parent,
+                user_id=user_id
+            )
+            db.add(db_document)
+            # Ensure db_document.id is available for extracted-data insert
+            db.flush()
+            created_docs.append(db_document)
+
+            # Extract data from PDF if applicable (2D files) - currently only for part documents
+            if (
+                part_id is not None
+                and file_extension.lower() == '.pdf'
+                and str(effective_type).lower() in ['2d', '2d drawing', 'drawing']
+            ):
+                try:
+                    extracted = extract_pdf_data(file_content)
+                    if extracted:
+                        db.add(DocumentExtractedDataModel(
+                            document_id=db_document.id,
+                            part_id=part_id,
+                            note=extracted.get("Note"),
+                            title=extracted.get("Title"),
+                            stock_size=extracted.get("Stock Size"),
+                            material=extracted.get("Material"),
+                            stocksize_kg=extracted.get("Stocksize KG"),
+                            net_wt_kg=extracted.get("Net WT KG"),
+                        ))
+                except Exception as extract_error:
+                    print(f"Error extracting data from PDF: {str(extract_error)}")
+
+        db.commit()
+        for d in created_docs:
+            db.refresh(d)
+
+        return created_docs
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload documents: {str(e)}"
+        )
+
+
 @router.get("/", response_model=List[Document])
 def get_documents(user_id: int | None = None, db: Session = Depends(get_db)):
     """Get all documents. Filter by user_id (uploader) for module-specific views."""
@@ -531,10 +683,6 @@ async def replace_document_file(
     try:
         minio_client = get_minio_client()
 
-        # Delete old file from MinIO
-        old_object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
-        minio_client.delete_file(old_object_name)
-
         # Determine owning entity (part or assembly) for storage path
         owner_prefix = "part"
         owner_id = db_document.part_id
@@ -552,6 +700,14 @@ async def replace_document_file(
         file_stream = io.BytesIO(file_content)
         content_type = get_content_type(file.filename)
 
+        # Store old object name for deletion after successful DB update
+        old_object_name = None
+        try:
+            old_object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        except Exception:
+            pass
+
+        # Upload new file to MinIO
         document_url = minio_client.upload_file(
             file_data=file_stream,
             object_name=object_name,
@@ -566,10 +722,17 @@ async def replace_document_file(
             }
         )
 
-        # Update document URL
+        # Update document URL in database
         db_document.document_url = document_url
         db.commit()
         db.refresh(db_document)
+
+        # Only delete old file after successful database commit
+        if old_object_name:
+            try:
+                minio_client.delete_file(old_object_name)
+            except Exception as e:
+                print(f"Warning: Failed to delete old file from MinIO: {str(e)}")
 
         return {
             "message": "Document file replaced successfully",
@@ -595,19 +758,29 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
         )
 
     try:
-        # Delete file from MinIO
+        # Get object name before deleting from database
         minio_client = get_minio_client()
-        object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
-        minio_client.delete_file(object_name)
+        object_name = None
+        try:
+            object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        except Exception:
+            pass
 
         # Delete extracted data if exists
         db.query(DocumentExtractedDataModel).filter(
             DocumentExtractedDataModel.document_id == document_id
         ).delete()
 
-        # Delete from database
+        # Delete from database first
         db.delete(db_document)
         db.commit()
+
+        # Only delete from MinIO after successful database commit
+        if object_name:
+            try:
+                minio_client.delete_file(object_name)
+            except Exception as e:
+                print(f"Warning: Failed to delete file from MinIO: {str(e)}")
 
         return None
 

@@ -8,7 +8,7 @@ import io
 import csv
 from pydantic import BaseModel
 import pdfplumber
-from docx import Document as DocxDocument
+
 
 from DB.database import get_db
 from DB.minio_client import get_minio_client
@@ -212,6 +212,129 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
     return db_operation
 
 
+@router.post("/bulk", response_model=List[Operation], status_code=status.HTTP_201_CREATED)
+def create_operations_bulk(operations: List[OperationCreate], db: Session = Depends(get_db)):
+    """Create many operations in one request (same validations as single create)."""
+    if not operations:
+        return []
+
+    # All operations must be for the same part_id (UI creates for one selected part)
+    part_ids = {op.part_id for op in operations if op.part_id}
+    if not part_ids or len(part_ids) != 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="bulk create requires exactly one part_id across all operations",
+        )
+    part_id = next(iter(part_ids))
+
+    # Precompute next auto op-number (steps of 10) for blank operation_number entries
+    existing_ops = db.query(OperationModel).filter(OperationModel.part_id == part_id).all()
+    max_num = 0
+    for op in existing_ops:
+        try:
+            n = int(str(op.operation_number).strip())
+        except (TypeError, ValueError):
+            continue
+        max_num = max(max_num, n)
+    next_num = max_num + 10 if max_num > 0 else 10
+
+    # Track uniqueness inside this bulk request
+    requested_numbers: set[str] = set()
+    created_ids: List[int] = []
+
+    try:
+        for op_in in operations:
+            data = op_in.model_dump()
+            pt_id = data.get("part_type_id") or 1
+            data["part_type_id"] = pt_id
+
+            # Validate required times only for non Out-Source operations
+            setup_time_val = data.get("setup_time")
+            cycle_time_val = data.get("cycle_time")
+            zero_time = time(0, 0, 0)
+            if pt_id != 2:
+                if (
+                    not setup_time_val
+                    or not cycle_time_val
+                    or setup_time_val == zero_time
+                    or cycle_time_val == zero_time
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="setup_time and cycle_time are mandatory and cannot be 00:00:00 for non Out-Source operations",
+                    )
+
+            if not data.get("part_id"):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="part_id is required for operations")
+
+            # Out-Source requires from/to
+            if pt_id == 2:
+                if not data.get("from_date") or not data.get("to_date"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Outsource operations require from_date and to_date",
+                    )
+
+            op_number_raw = data.get("operation_number")
+            op_number = op_number_raw.strip() if isinstance(op_number_raw, str) else None
+            if op_number:
+                # Validate uniqueness vs DB and within request
+                if op_number in requested_numbers:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Duplicate operation number '{op_number}' in bulk request",
+                    )
+                existing = (
+                    db.query(OperationModel)
+                    .filter(OperationModel.part_id == part_id, OperationModel.operation_number == op_number)
+                    .first()
+                )
+                if existing:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Operation number '{op_number}' already exists for this part",
+                    )
+                data["operation_number"] = op_number
+                requested_numbers.add(op_number)
+            else:
+                # Assign next available number, ensuring we don't clash with explicit numbers
+                while str(next_num) in requested_numbers:
+                    next_num += 10
+                data["operation_number"] = str(next_num)
+                requested_numbers.add(str(next_num))
+                next_num += 10
+
+            db_operation = OperationModel(**data)
+            db.add(db_operation)
+            db.flush()
+            created_ids.append(db_operation.id)
+
+        db.commit()
+
+        created = (
+            db.query(OperationModel)
+            .options(joinedload(OperationModel.user))
+            .filter(OperationModel.id.in_(created_ids))
+            .order_by(OperationModel.id.asc())
+            .all()
+        )
+        pt_ids = {o.part_type_id for o in created if o.part_type_id is not None}
+        pt_map = {}
+        if pt_ids:
+            pts = db.query(PartTypeModel).filter(PartTypeModel.id.in_(pt_ids)).all()
+            pt_map = {p.id: p.type_name for p in pts}
+        for op in created:
+            op.part_type_name = pt_map.get(op.part_type_id)
+        return created
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create operations: {str(e)}")
+
+
 @router.get("/", response_model=List[Operation])
 def get_operations(user_id: int | None = None, db: Session = Depends(get_db)):
     """Get all operations with user_name. Filter by user_id for module-specific views."""
@@ -285,10 +408,14 @@ def get_operation(operation_id: int, db: Session = Depends(get_db)):
 
 @router.get("/part/{part_id}", response_model=List[Operation])
 def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all operations for a specific part (FIFO by id) with user_name. Filter by user_id for module-specific views."""
+    """Get all operations for a specific part (FIFO by id) with user_name, tools, and documents."""
     query = (
         db.query(OperationModel)
-        .options(joinedload(OperationModel.user))
+        .options(
+            joinedload(OperationModel.user),
+            joinedload(OperationModel.operation_documents),
+            joinedload(OperationModel.tools).joinedload(ToolWithPartModel.tool)
+        )
         .filter(OperationModel.part_id == part_id)
         .order_by(OperationModel.id.asc())
     )
@@ -316,6 +443,9 @@ def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session
         op.work_center_name = work_center_map.get(op.workcenter_id)
         op.machine_name = machine_map.get(op.machine_id)
         op.part_type_name = part_type_map.get(op.part_type_id)
+        # Ensure tools are sorted by ID (FIFO)
+        if op.tools:
+            op.tools.sort(key=lambda x: x.id)
 
     return operations
 

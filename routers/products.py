@@ -16,6 +16,8 @@ from DB.models.oms import (
     OperationDocument as OperationDocumentModel,
     OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
     DocumentExtractedData as DocumentExtractedDataModel,
+    OrderPartPriority as OrderPartPriorityModel,
+    OutSourcePartStatus as OutSourcePartStatusModel,
 )
 from DB.models.configuration import (
     WorkCenter as WorkCenterModel,
@@ -237,6 +239,12 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
 
         db.flush()
 
+        # Delete from scheduling.part_schedule_status to avoid FK violation
+        db.execute(
+            text("DELETE FROM scheduling.part_schedule_status WHERE part_id IN :pids"),
+            {"pids": tuple(part_ids)}
+        )
+
         # Get all operations for these parts
         operations = db.query(OperationModel).filter(
             OperationModel.part_id.in_(part_ids)
@@ -265,6 +273,12 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
         
         # Delete tools associated with these operations (must be before deleting operations)
         if operation_ids:
+            # Delete from scheduling.planned_schedule_items to avoid FK violation
+            db.execute(
+                text("DELETE FROM scheduling.planned_schedule_items WHERE operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
             db.query(ToolWithPartModel).filter(
                 ToolWithPartModel.operation_id.in_(operation_ids)
             ).delete(synchronize_session=False)
@@ -303,6 +317,16 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
             synchronize_session=False
         )
 
+        # Delete part priorities
+        db.query(OrderPartPriorityModel).filter(
+            OrderPartPriorityModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # Delete out source part status records
+        db.query(OutSourcePartStatusModel).filter(
+            OutSourcePartStatusModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
         # Delete raw material links
         db.query(OrderPartsRawMaterialLinkedModel).filter(
             OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
@@ -333,6 +357,13 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
                     {"pid": pid},
                 )
             db.flush()
+
+        # Delete component_issues records that reference these parts
+        if part_ids:
+            db.execute(
+                text("DELETE FROM maintenance.component_issues WHERE part_id IN :pids"),
+                {"pids": tuple(part_ids)}
+            )
 
         # Delete parts
         db.query(PartModel).filter(PartModel.id.in_(part_ids)).delete(

@@ -255,6 +255,7 @@ async def upload_document(
     folder_id: int = Form(...),
     file_name: str = Form(...),
     parent_id: Optional[int] = Form(None),
+    user_id: int = Form(...),
     db: Session = Depends(get_db)
 ):
     """
@@ -318,7 +319,8 @@ async def upload_document(
             url=document_url,
             version=version,
             general_folder_id=folder_id,
-            parent_id=parent_id
+            parent_id=parent_id,
+            user_id=user_id
         )
         
         db.add(db_document)
@@ -501,9 +503,9 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
             detail=f"Failed to download document: {str(e)}"
         )
 
-@router.patch("/documents/{document_id}", response_model=GeneralDocumentSchema)
-def update_document(document_id: int, document_update: dict, db: Session = Depends(get_db)):
-    """Update document details (currently only file_name)"""
+@router.put("/documents/{document_id}", response_model=GeneralDocumentSchema)
+def update_document(document_id: int, document_update: GeneralDocumentUpdate, db: Session = Depends(get_db)):
+    """Update document details"""
     document = db.query(GeneralDocument).filter(GeneralDocument.id == document_id).first()
     if not document:
         raise HTTPException(
@@ -511,14 +513,9 @@ def update_document(document_id: int, document_update: dict, db: Session = Depen
             detail=f"Document with id {document_id} not found"
         )
     
-    # Update allowed fields
-    if 'file_name' in document_update:
-        document.file_name = document_update['file_name']
-    
-    # Update timestamp
-    from datetime import datetime, timezone, timedelta
-    IST = timezone(timedelta(hours=5, minutes=30))
-    document.updated_at = datetime.now(IST)
+    update_data = document_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(document, field, value)
     
     db.commit()
     db.refresh(document)
@@ -576,4 +573,3 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete document: {str(e)}"
         )
-

@@ -325,6 +325,9 @@ def get_all_transactions(db: Session = Depends(get_db)):
     # Fetch all tool issues
     all_tool_issues = db.query(ToolIssue).all()
     
+    # Fetch all tools for quantity calculations
+    all_tools = db.query(ToolsList).all()
+    
     tool_issues_approved = []
     tool_issues_pending = []
     # Aggregate quantities across all tools/requests
@@ -334,24 +337,26 @@ def get_all_transactions(db: Session = Depends(get_db)):
     total_returned_qty = 0
     issues_qty = 0
     
-    # Compute total and available across the entire tools list
-    all_tools = db.query(ToolsList).all()
+    # Calculate global quantities by summing up values from all tools
+    total_qty = 0
+    available_qty = 0
+    issues_qty = 0
     for t in all_tools:
         total_qty += (t.total_quantity or t.quantity or 0)
         available_qty += (t.quantity or 0)
-    
-    # Sum approved requested quantities across all inventory requests
+        issues_qty += (t.issues_qty or 0)
+
+    # Re-calculate metadata quantities for AllTransactionsResponse
+    total_requested_approved_qty = 0
     for req in all_inventory_requests:
         if (req.status or '').lower() == 'approved':
             total_requested_approved_qty += (req.quantity or 0)
     
-    # Sum all returned quantities
     all_returns = db.query(InventoryReturnRequest).all()
-    for ret in all_returns:
-        total_returned_qty += (ret.returned_qty or 0)
+    total_returned_qty = sum(ret.returned_qty or 0 for ret in all_returns)
     
+    # Populate tool_issues lists for the response
     for issue in all_tool_issues:
-        # Get related details
         tool_detail = db.query(ToolsList).filter(ToolsList.id == issue.tool_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == issue.operator_id).first()
         inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == issue.inventory_supervisor_id).first()
@@ -394,12 +399,11 @@ def get_all_transactions(db: Session = Depends(get_db)):
         
         if issue.status == 'approved':
             tool_issues_approved.append(issue_details)
-            issues_qty += (issue.tool_issue_qty or 0)
         elif issue.status == 'pending':
             tool_issues_pending.append(issue_details)
     
-    # Calculate in-use qty across all tools: approved requests - returned - issues
-    in_use_qty = max(0, total_requested_approved_qty - total_returned_qty - issues_qty)
+    # In-use is the remainder: total - available - issues
+    in_use_qty = max(0, total_qty - available_qty - issues_qty)
     
     quantities = ToolQuantities(
         total_qty=total_qty,
@@ -571,18 +575,22 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
         elif issue.status == 'pending':
             tool_issues_pending.append(issue_details)
     
-    # Calculate available quantity: Total - In Use - Issues
-    # Note: issues_qty is stored separately but also deducted from in_use
-    in_use_qty = max(0, in_use_qty - issues_qty)
-    available_qty = max(0, total_qty - in_use_qty - issues_qty)
+    # Calculate quantities using values directly from ToolsList table
+    # This ensures consistency with the ToolsList view
+    total_qty_val = tool.total_quantity if tool.total_quantity is not None else (tool.quantity or 0)
+    available_qty_val = tool.quantity or 0
+    issues_qty_val = tool.issues_qty or 0
+    
+    # In-use is the remainder: total - available - issues
+    in_use_qty_val = max(0, total_qty_val - available_qty_val - issues_qty_val)
     
     # Create quantities object
     quantities = ToolQuantities(
-        total_qty=total_qty,
-        available_qty=available_qty,
-        in_use_qty=in_use_qty,
-        issues_qty=issues_qty,
-        requested_qty=total_requested_approved_qty,  # Only approved requests
+        total_qty=total_qty_val,
+        available_qty=available_qty_val,
+        in_use_qty=in_use_qty_val,
+        issues_qty=issues_qty_val,
+        requested_qty=total_requested_approved_qty,  # Keeping these for metadata
         returned_qty=total_returned_qty
     )
     

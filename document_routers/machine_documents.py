@@ -167,7 +167,7 @@ async def create_machine_folder(
             detail="Folder with this name already exists under the specified parent"
         )
     
-    db_folder = MachineFolder(**folder.dict())
+    db_folder = MachineFolder(**folder.model_dump())
     db.add(db_folder)
     db.commit()
     db.refresh(db_folder)
@@ -273,7 +273,7 @@ async def update_machine_folder(
             )
     
     # Update folder
-    update_data = folder_update.dict(exclude_unset=True)
+    update_data = folder_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(folder, field, value)
     
@@ -324,6 +324,7 @@ async def upload_machine_document(
     folder_id: Optional[int] = Form(None),
     machine_id: Optional[int] = Form(None),
     parent_id: Optional[int] = Form(None),
+    user_id: int = Form(...),
     db: Session = Depends(get_db)
 ):
     """
@@ -421,7 +422,8 @@ async def upload_machine_document(
             version=version,
             machine_folder_id=folder_id,
             machine_id=machine_id,
-            parent_id=parent_id
+            parent_id=parent_id,
+            user_id=user_id
         )
         
         db.add(db_document)

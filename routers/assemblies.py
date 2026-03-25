@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import text
 from typing import List
 
 from DB.database import get_db
@@ -13,7 +14,9 @@ from DB.models.oms import (
     OrderPartPriority as OrderPartPriorityModel,
     Order as OrderModel,
     OperationDocument as OperationDocumentModel,
+    OutSourcePartStatus as OutSourcePartStatusModel,
 )
+from DB.models.configuration import PokayokeCompletedLog
 from DB.schemas.oms import Assembly, AssemblyCreate, AssemblyUpdate
 
 router = APIRouter(
@@ -154,25 +157,42 @@ def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
     part_ids = [p.id for p in parts_under_assemblies]
 
     if part_ids:
-        linked_priorities = (
-            db.query(OrderPartPriorityModel)
-            .filter(OrderPartPriorityModel.part_id.in_(part_ids))
-            .all()
-        )
-        if linked_priorities:
-            order_ids = {p.order_id for p in linked_priorities}
-            orders = db.query(OrderModel).filter(OrderModel.id.in_(order_ids)).all()
-            order_numbers = [o.sale_order_number for o in orders]
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "This assembly cannot be deleted because its parts are linked to "
-                    f"orders: {', '.join(order_numbers)}. Please delete or update the "
-                    "related orders first."
+        # Delete pokayoke logs for parts
+        for pid in part_ids:
+            result = db.execute(
+                text(
+                    "SELECT id FROM configuration.pokayoke_completed_logs "
+                    "WHERE part_id = :pid"
                 ),
+                {"pid": pid},
             )
+            log_ids = [row[0] for row in result]
+            for log_id in log_ids:
+                log_obj = (
+                    db.query(PokayokeCompletedLog)
+                    .filter(PokayokeCompletedLog.id == log_id)
+                    .first()
+                )
+                if log_obj:
+                    db.delete(log_obj)
+        db.flush()
 
-    if part_ids:
+        # Delete part priorities
+        db.query(OrderPartPriorityModel).filter(
+            OrderPartPriorityModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # Delete out source part status records
+        db.query(OutSourcePartStatusModel).filter(
+            OutSourcePartStatusModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # Delete from scheduling.part_schedule_status to avoid FK violation
+        db.execute(
+            text("DELETE FROM scheduling.part_schedule_status WHERE part_id IN :pids"),
+            {"pids": tuple(part_ids)}
+        )
+
         operations = (
             db.query(OperationModel)
             .filter(OperationModel.part_id.in_(part_ids))
@@ -181,6 +201,12 @@ def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
         operation_ids = [op.id for op in operations]
 
         if operation_ids:
+            # Delete from scheduling.planned_schedule_items to avoid FK violation
+            db.execute(
+                text("DELETE FROM scheduling.planned_schedule_items WHERE operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
             db.query(OperationDocumentModel).filter(
                 OperationDocumentModel.operation_id.in_(operation_ids)
             ).delete(synchronize_session=False)
