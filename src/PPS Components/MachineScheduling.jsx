@@ -7,7 +7,7 @@ import "vis-timeline/styles/vis-timeline-graph2d.css";
 import moment from 'moment';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth.js';
-import config from '../Config/config.js';
+import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 
 const { Content } = Layout;
 const { Option } = Select;
@@ -142,13 +142,13 @@ const MachineScheduling = () => {
 
   const fetchSchedule = async () => {
     try {
-      const res = await fetch(`${config.API_BASE_URL}/scheduling/gantt-data`);
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/gantt-data`);
       if (!res.ok) return;
       const data = await res.json();
       const ops = [];
       const gantt = Array.isArray(data?.gantt) ? data.gantt : [];
       gantt.forEach(g => {
-        const machineName = [g.machine_make, g.machine_model].filter(Boolean).join(' ').trim();
+        const machineName = g.machine_make && g.machine_model ? `(${g.machine_make}) ${g.machine_model}` : (g.machine_make || g.machine_model || '').trim();
         const tasks = Array.isArray(g.tasks) ? g.tasks : [];
         tasks.forEach(t => {
           if (g.machine_id != null) {
@@ -175,7 +175,7 @@ const MachineScheduling = () => {
   const handleUpdateSchedule = async () => {
     setUpdateScheduleLoading(true);
     try {
-      const res = await fetch(`${config.API_BASE_URL}/scheduling/generate-schedule`, {
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/generate-schedule`, {
         method: 'POST',
         headers: { 'accept': 'application/json' },
       });
@@ -224,7 +224,7 @@ const MachineScheduling = () => {
         const mRes = await fetch(`${API_BASE_URL}/machines/`);
         const machines = mRes.ok ? await mRes.json() : [];
         const formatted = (machines || []).map(m => {
-          const modelName = [m.make, m.model].filter(Boolean).join(' ').trim() || m.model || m.make || `Machine-${m.id}`;
+          const modelName = m.make && m.model ? `(${m.make}) ${m.model}` : (m.make || m.model || `Machine-${m.id}`);
           return {
             id: m.id,
             name: modelName,
@@ -324,8 +324,8 @@ const MachineScheduling = () => {
 
         const groups = new DataSet(groupsArr);
         const groupCount = groupsArr.length;
-        const rowHeight = 40;
-        const timelineHeightPx = Math.max(560, groupCount * rowHeight);
+        const rowHeight = 34; // Reduced from 40 for more compact view
+        const timelineHeightPx = Math.max(300, groupCount * rowHeight + 45); // Added 45 for timeline header and reduced min-height from 560
 
         // 5. Dynamic styles
         if (styleElementRef.current) styleElementRef.current.remove();
@@ -355,7 +355,7 @@ const MachineScheduling = () => {
           zoomable:    true,
           zoomKey:     '',
           orientation: 'top',
-          height:           `${timelineHeightPx}px`,
+          height:      `${timelineHeightPx}px`,
           margin: {
             item:  { horizontal:10, vertical: 4 },
             axis:  5,
@@ -567,7 +567,7 @@ const MachineScheduling = () => {
                   <div
                     ref={timelineContainerRef}
                     style={{
-                      minHeight: 560,
+                      minHeight: 300,
                       background: '#fff',
                     }}
                   />

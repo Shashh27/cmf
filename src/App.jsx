@@ -78,7 +78,7 @@ function App() {
           <Route path="/project_coordinator/oms" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
           <Route path="/project_coordinator/oms/orders" element={<ProjectCoordinatorDashboard />} />
           <Route path="/project_coordinator/oms/product/:productId" element={<ProjectCoordinatorDashboard />} />
-          <Route path="/project_coordinator/pdm" element={<ProjectCoordinatorDashboard />} />
+          <Route path="/project_coordinator/pdm" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
          
           {/* Manufacturing Coordinator */}
           <Route path="/manufacturing_coordinator" element={<Navigate to="/manufacturing_coordinator/dashboard" replace />} />
