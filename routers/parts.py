@@ -70,20 +70,21 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_part)
 
-    if db_part.product_id and db_part.type_id:
-        part_type = db.query(PartType).filter(PartType.id == db_part.type_id).first()
-        if part_type and part_type.type_name and part_type.type_name.lower() == "in-house":
-            orders = db.query(Order).filter(Order.product_id == db_part.product_id).all()
-            max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
-            for index, order in enumerate(orders):
-                priority_entry = OrderPartPriority(
-                    order_id=order.id,
-                    product_id=db_part.product_id,
-                    part_id=db_part.id,
-                    priority=max_priority + 1 + index,
-                )
-                db.add(priority_entry)
-            db.commit()
+    # Automatic OrderPartPriority creation disabled
+    # if db_part.product_id and db_part.type_id:
+    #     part_type = db.query(PartType).filter(PartType.id == db_part.type_id).first()
+    #     if part_type and part_type.type_name and part_type.type_name.lower() == "in-house":
+    #         orders = db.query(Order).filter(Order.product_id == db_part.product_id).all()
+    #         max_priority = db.query(func.max(OrderPartPriority.priority)).scalar() or 0
+    #         for index, order in enumerate(orders):
+    #             priority_entry = OrderPartPriority(
+    #                 order_id=order.id,
+    #                 product_id=db_part.product_id,
+    #                 part_id=db_part.id,
+    #                 priority=max_priority + 1 + index,
+    #             )
+    #             db.add(priority_entry)
+    #         db.commit()
 
     type_map, rm_map, user_map = _build_part_maps(db)
     return _part_to_dict(db_part, type_map, rm_map, user_map)

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 import os
 import io
+import uuid
 from urllib.parse import urlparse
 from datetime import datetime
 
@@ -123,11 +124,12 @@ async def upload_operation_documents(
     
     try:
         for file in files:
-            # Generate unique object name
+            # Generate unique object name with timestamp and UUID
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_id = uuid.uuid4().hex[:8]
             file_extension = get_file_extension(file.filename)
-            # Structure: cmf/operation_documents/operation_{id}/{timestamp}_{filename}
-            object_name = f"operation_documents/operation_{operation_id}/{timestamp}_{file.filename}"
+            # Structure: cmf/operation_documents/operation_{id}/{timestamp}_{unique_id}_{filename}
+            object_name = f"operation_documents/operation_{operation_id}/{timestamp}_{unique_id}_{file.filename}"
             
             # Read file content
             file_content = await file.read()
@@ -216,8 +218,9 @@ async def upload_operation_documents_bulk(
     try:
         for idx, file in enumerate(files):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_id = uuid.uuid4().hex[:8]
             file_extension = get_file_extension(file.filename)
-            object_name = f"operation_documents/operation_{operation_id}/{timestamp}_{file.filename}"
+            object_name = f"operation_documents/operation_{operation_id}/{timestamp}_{unique_id}_{file.filename}"
 
             file_content = await file.read()
             file_stream = io.BytesIO(file_content)
@@ -326,8 +329,9 @@ async def upload_operation_documents_bulk_multi(
         for idx, file in enumerate(files):
             op_id = operation_id[idx]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_id = uuid.uuid4().hex[:8]
             file_extension = get_file_extension(file.filename)
-            object_name = f"operation_documents/operation_{op_id}/{timestamp}_{file.filename}"
+            object_name = f"operation_documents/operation_{op_id}/{timestamp}_{unique_id}_{file.filename}"
 
             file_content = await file.read()
             file_stream = io.BytesIO(file_content)

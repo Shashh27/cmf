@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
+import uuid
 from datetime import datetime
 import io
 import mimetypes
@@ -214,10 +215,11 @@ async def create_document(
             owner_prefix = "assembly"
             owner_id = assembly_id
 
-        # Generate unique object name
+        # Generate unique object name with timestamp and UUID for descriptive safety
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = uuid.uuid4().hex[:8]
         file_extension = get_file_extension(file.filename)
-        object_name = f"documents/{owner_prefix}_{owner_id}/{timestamp}_{document_name}{file_extension}"
+        object_name = f"documents/{owner_prefix}_{owner_id}/{timestamp}_{unique_id}_{file.filename}"
 
         # Read file content
         file_content = await file.read()
@@ -346,6 +348,7 @@ async def create_documents_bulk(
     try:
         for idx, file in enumerate(files):
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_id = uuid.uuid4().hex[:8]
             file_extension = get_file_extension(file.filename)
 
             effective_name = None
@@ -372,7 +375,7 @@ async def create_documents_bulk(
                 if pid not in (0, None):
                     effective_parent = pid
 
-            object_name = f"documents/{owner_prefix}_{owner_id}/{ts}_{effective_name}{file_extension}"
+            object_name = f"documents/{owner_prefix}_{owner_id}/{ts}_{unique_id}_{file.filename}"
 
             file_content = await file.read()
             file_stream = io.BytesIO(file_content)
@@ -529,11 +532,9 @@ async def preview_document_3d(document_id: int, db: Session = Depends(get_db)):
         error_detail = None
 
         if file_extension in [".step", ".stp"]:
-            glb_data = StepConverter.convert_step_to_glb(file_data)
-            error_detail = "STEP file contains no 3D geometry (empty mesh) or cannot be converted"
+            glb_data, error_detail = StepConverter.convert_step_to_glb(file_data)
         elif file_extension == ".stl":
-            glb_data = StepConverter.convert_stl_to_glb(file_data)
-            error_detail = "STL file is empty or invalid (empty mesh)"
+            glb_data, error_detail = StepConverter.convert_stl_to_glb(file_data)
         else:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -541,9 +542,13 @@ async def preview_document_3d(document_id: int, db: Session = Depends(get_db)):
             )
 
         if not glb_data:
+            # Clean up the error message for display (remove emoji prefixes)
+            clean_error = error_detail or "No 3D geometry in file or conversion failed"
+            if clean_error.startswith("❌ "):
+                clean_error = clean_error[2:]  # Remove the ❌ prefix (emoji + space = 2 chars)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=error_detail or "No 3D geometry in file or conversion failed"
+                detail=clean_error
             )
 
         filename = f"{document.document_name}.glb"
@@ -690,10 +695,11 @@ async def replace_document_file(
             owner_prefix = "assembly"
             owner_id = db_document.assembly_id
 
-        # Generate new object name
+        # Generate new object name with timestamp and UUID for descriptive safety
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = uuid.uuid4().hex[:8]
         file_extension = get_file_extension(file.filename)
-        object_name = f"documents/{owner_prefix}_{owner_id}/{timestamp}_{db_document.document_name}{file_extension}"
+        object_name = f"documents/{owner_prefix}_{owner_id}/{timestamp}_{unique_id}_{file.filename}"
 
         # Read and upload new file
         file_content = await file.read()

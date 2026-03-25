@@ -5,6 +5,8 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install only essential system dependencies
+# WARNING: Do not change this block — any change busts the Docker cache
+# and forces a full re-download of freecad (~20 min)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     freecad \
@@ -34,7 +36,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Expose port 
+# Expose port
 EXPOSE 3000
 
 # Run the application
