@@ -150,6 +150,11 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
                 if (node.isMesh) {
                   if (node.material) {
                     node.material.color.convertSRGBToLinear();
+                    // Enable polygon offset to prevent Z-fighting with edges
+                    node.material.polygonOffset = true;
+                    node.material.polygonOffsetFactor = 1;
+                    node.material.polygonOffsetUnits = 1;
+                    
                     if (node.material.metalness !== undefined) {
                       node.material.metalness = Math.min(node.material.metalness, 0.7);
                     }
@@ -158,14 +163,18 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
                     }
                   }
                   
-                  // Add colored edges for better visibility
-                  const edges = new THREE.EdgesGeometry(node.geometry);
+                  // Add edges for better visibility (Visible edges by default)
+                  // Use a threshold angle of 20 degrees to hide internal triangulation lines
+                  const edges = new THREE.EdgesGeometry(node.geometry, 20);
                   const edgeMaterial = new THREE.LineBasicMaterial({ 
-                    color: 0x0066cc, // Blue color for edges
-                    linewidth: 2
+                    color: 0x333333, // Dark gray/black for professional look
+                    depthTest: true,
+                    transparent: true,
+                    opacity: 0.6
                   });
                   const edgesMesh = new THREE.LineSegments(edges, edgeMaterial);
-                  edgesMesh.visible = false; // Initially hidden
+                  edgesMesh.name = "modelEdges"; // Identify for toggling hidden edges
+                  edgesMesh.visible = true; // Always show visible edges
                   node.add(edgesMesh);
                 }
               });
@@ -324,8 +333,12 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
   useEffect(() => {
     if (modelRef.current) {
       modelRef.current.traverse(node => {
-        if (node.isLineSegments) {
-          node.visible = showEdges;
+        if (node.isLineSegments && node.name === "modelEdges") {
+          // If showEdges is true, we disable depthTest to show "Hidden Edges"
+          // If showEdges is false, we enable depthTest to show only "Visible Edges"
+          node.material.depthTest = !showEdges;
+          node.material.opacity = showEdges ? 0.4 : 0.6; // Slightly fade hidden edges
+          node.material.needsUpdate = true;
         }
       });
     }
@@ -386,7 +399,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
             onClick={() => setShowEdges(!showEdges)}
             className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300"
           >
-            {showEdges ? 'Hide Edges' : 'Show Edges'}
+            {showEdges ? 'Hide Hidden Edges' : 'Show Hidden Edges'}
           </button>
         </div>
       )}

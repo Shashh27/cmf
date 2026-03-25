@@ -3,7 +3,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, Checkbox, Button, message } from "antd";
 
-const WorkCenterModal = ({ workCenter, isOpen, onClose, onSave }) => {
+const WorkCenterModal = ({ workCenter, isOpen, userId, onClose, onSave }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -40,7 +40,7 @@ const WorkCenterModal = ({ workCenter, isOpen, onClose, onSave }) => {
         headers: {
           "Content-Type": "application/json",
         },
-        data: values,
+        data: { ...values, user_id: userId },
       });
 
       onSave();

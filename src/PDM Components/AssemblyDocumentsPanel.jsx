@@ -1,11 +1,50 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {PlusOutlined,DownloadOutlined,EyeOutlined,SyncOutlined,InboxOutlined,FilePdfOutlined,DeleteOutlined,UploadOutlined,} from "@ant-design/icons";
-import {Badge,Button,Empty,Input,Modal,Popconfirm,Select,Table,Tag,Typography,Upload,message,} from "antd";
+import {
+  PlusOutlined,
+  DownloadOutlined,
+  EyeOutlined,
+  SyncOutlined,
+  InboxOutlined,
+  FilePdfOutlined,
+  FileTextOutlined,
+  DeleteOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
+import {
+  Badge,
+  Button,
+  Empty,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Table,
+  Tag,
+  Typography,
+  Upload,
+  message,
+} from "antd";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
+
+const sanitizeDeleteError = (e) => {
+  const raw =
+    e?.response?.data?.detail ||
+    e?.response?.data?.message ||
+    e?.message ||
+    "";
+  const msg = String(raw || "");
+  if (!msg) return "Failed to delete document";
+  // Foreign key: trying to delete a document that has versions/children
+  if (msg.toLowerCase().includes("foreignkeyviolation") || msg.toLowerCase().includes("violates foreign key")) {
+    return "Cannot delete this document because it has versions (child documents). Delete the versions first.";
+  }
+  // Keep it short if backend sends SQL
+  return msg.length > 160 ? `${msg.slice(0, 160)}...` : msg;
+};
 
 const AssemblyDocumentsPanel = ({ selectedItem }) => {
   const [documents, setDocuments] = useState([]);
@@ -136,37 +175,49 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
 
   const latestDocs = useMemo(() => {
     return Object.values(groupedDocs).map((group) =>
-      [...group].sort(
-        (a, b) =>
-          parseFloat(String(b.document_version).replace(/^v/i, "")) -
-          parseFloat(String(a.document_version).replace(/^v/i, ""))
-      )[0]
+      [...group].sort((a, b) => a.id - b.id)[0]
     );
   }, [groupedDocs]);
 
   const [selectedVersions, setSelectedVersions] = useState({});
 
   useEffect(() => {
-    const updated = { ...selectedVersions };
-    let changed = false;
-
-    latestDocs.forEach((doc) => {
-      const rootId = doc.parent_id || doc.id;
-      if (!updated[rootId]) {
-        updated[rootId] = doc;
-        changed = true;
+    const parseV = (v) => parseFloat(String(v || "").replace(/^v/i, "")) || 0;
+    setSelectedVersions((prev) => {
+      const next = {};
+      for (const [rootId, group] of Object.entries(groupedDocs)) {
+        const sorted = [...group].sort((a, b) => a.id - b.id);
+        const current = prev[rootId];
+        const exists = current && group.some((d) => d.id === current.id);
+        next[rootId] = exists ? current : sorted[0];
       }
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (prevKeys.length !== nextKeys.length) return next;
+      for (const k of nextKeys) {
+        if (prev[k]?.id !== next[k]?.id) return next;
+      }
+      return prev;
     });
+  }, [groupedDocs]);
 
-    if (changed) setSelectedVersions(updated);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestDocs]);
+  const getDocumentDisplayName = (doc) => {
+    if (!doc) return "";
+    if (doc.document_url) {
+      const segment = doc.document_url.split("/").filter(Boolean).pop();
+      if (segment) return segment.replace(/^\d+_\d+_/, ""); // strip leading timestamp e.g. 20260312_155636_
+    }
+    return doc.document_name || "";
+  };
+
+  const getPreviewType = (name) => {
+    const ext = (name || "").split(".").pop().toLowerCase();
+    if (["jpg", "jpeg", "png", "gif", "svg"].includes(ext)) return "image";
+    if (ext === "pdf") return "pdf";
+    return "other";
+  };
 
   const handlePreview = (doc) => {
-    if (!doc?.document_url) {
-      message.error("Document URL not found");
-      return;
-    }
     setPreviewDocument(doc);
     setIsPreviewModalOpen(true);
   };
@@ -185,14 +236,12 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
     try {
       await axios.delete(`${API_BASE_URL}/documents/${documentId}`);
       message.success("Document deleted");
+      // Optimistic UI update so it disappears immediately
+      setDocuments((prev) => prev.filter((d) => d.id !== documentId));
       fetchDocuments();
     } catch (e) {
       console.error("Error deleting document", e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        "Failed to delete document";
-      message.error(detail);
+      message.error(sanitizeDeleteError(e));
     }
   };
 
@@ -209,7 +258,8 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
     setUploadRows([{
       id: Date.now(),
       fileList: [],
-      docName: doc.document_name || "",
+      // For new versions: leave empty until user selects file
+      docName: "",
       docType: doc.document_type || "2D",
       docTypeOther: "",
       version: nextVer
@@ -248,42 +298,37 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
     }
 
     setUploading(true);
-    let successCount = 0;
 
     try {
+      // Bulk upload: one request for all upload rows
+      const formData = new FormData();
+      formData.append("assembly_id", String(selectedItem.id));
+
+      const uid = getCurrentUserId();
+      if (uid != null) formData.append("user_id", String(uid));
+
       for (const row of uploadRows) {
-        const formData = new FormData();
-        formData.append("file", row.fileList[0]);
+        const file = row.fileList?.[0];
+        if (!file) continue;
+
+        formData.append("files", file);
         formData.append("document_name", row.docName.trim());
-        
+
         const effectiveType = row.docType === "Other" ? row.docTypeOther.trim() : row.docType;
         formData.append("document_type", effectiveType);
         formData.append("document_version", row.version || "v1.0");
-        formData.append("assembly_id", String(selectedItem.id));
-        
-        if (uploadParentId) {
-          formData.append("parent_id", String(uploadParentId));
-        }
-        const uid = getCurrentUserId();
-        if (uid != null) {
-          formData.append("user_id", String(uid));
-        }
 
-        await axios.post(`${API_BASE_URL}/documents/`, formData);
-        successCount++;
+        // For new version upload, backend expects parent_id aligned per file
+        if (uploadParentId) formData.append("parent_id", String(uploadParentId));
       }
 
-      if (successCount === uploadRows.length) {
-        message.success(`${successCount} document(s) uploaded successfully`);
-        resetUploadState();
-        setIsUploadModalOpen(false);
-        fetchDocuments();
-      } else if (successCount > 0) {
-        message.warning(`${successCount} of ${uploadRows.length} documents uploaded. Some failed.`);
-        fetchDocuments();
-      } else {
-        message.error("Failed to upload documents");
-      }
+      const resp = await axios.post(`${API_BASE_URL}/documents/bulk`, formData);
+      const created = Array.isArray(resp.data) ? resp.data : [];
+      message.success(`${created.length} document(s) uploaded successfully`);
+
+      resetUploadState();
+      setIsUploadModalOpen(false);
+      fetchDocuments();
     } catch (e) {
       console.error("Error uploading documents", e);
       message.error("Error uploading documents");
@@ -307,7 +352,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
             </div>
             <div className="flex flex-col min-w-0">
               <Text strong className="text-sm truncate max-w-[300px]">
-                {currentDoc.document_name}
+                {getDocumentDisplayName(currentDoc) || currentDoc.document_name}
               </Text>
               {!isLatest && (
                 <span className="text-[10px] text-gray-400">
@@ -341,13 +386,28 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
         const rootId = record.parent_id || record.id;
         const group = groupedDocs[rootId] || [];
         const currentDoc = selectedVersions[rootId] || record;
-        const latestDoc = record;
+        const versionWidth = 88;
+        const fmtV = (v) => (String(v || "1.0").startsWith("v") ? String(v || "1.0") : `v${v || "1.0"}`);
+
+        if (group.length <= 1) {
+          const ver = currentDoc.document_version || "1.0";
+          return (
+            <Select
+              size="small"
+              value={currentDoc.id}
+              disabled
+              suffixIcon={null}
+              variant="filled"
+              style={{ width: versionWidth }}
+              options={[{ value: currentDoc.id, label: fmtV(ver) }]}
+            />
+          );
+        }
 
         return (
           <Select
             size="small"
             value={currentDoc.id}
-            className="w-full"
             labelInValue={false}
             optionLabelProp="label"
             onChange={(val) => {
@@ -356,41 +416,20 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
                 setSelectedVersions((prev) => ({ ...prev, [rootId]: selected }));
               }
             }}
+            variant="filled"
+            style={{ width: versionWidth }}
+            popupMatchSelectWidth={false}
+            styles={{ popup: { root: { minWidth: 120, padding: 4 } } }}
           >
-            {group
-              .sort(
-                (a, b) =>
-                  parseFloat(String(b.document_version).replace(/^v/i, "")) -
-                  parseFloat(String(a.document_version).replace(/^v/i, ""))
-              )
+            {[...group]
+              .sort((a, b) => a.id - b.id)
               .map((ver) => {
-                const verLabel = ver.document_version?.startsWith("v")
-                  ? ver.document_version
-                  : `v${ver.document_version || "1.0"}`;
-                
+                const verLabel = fmtV(ver.document_version || "1.0");
                 return (
                   <Select.Option key={ver.id} value={ver.id} label={verLabel}>
-                    <div className="flex justify-between items-center w-full py-1">
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          status={ver.id === latestDoc.id ? "success" : "default"}
-                        />
-                        <span
-                          className={`font-bold ${
-                            ver.id === currentDoc.id
-                              ? "text-blue-600"
-                              : "text-gray-600"
-                          }`}
-                        >
-                          {verLabel}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-gray-400 bg-gray-50 px-1 rounded">
-                        {new Date(
-                          ver.created_at || Date.now()
-                        ).toLocaleDateString()}
-                      </span>
-                    </div>
+                    <span className={`font-bold ${ver.id === currentDoc.id ? "text-blue-600" : "text-gray-600"}`}>
+                      {verLabel}
+                    </span>
                   </Select.Option>
                 );
               })}
@@ -403,6 +442,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
       key: "actions",
       width: 220,
       align: "center",
+      fixed: "right",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
         const currentDoc = selectedVersions[rootId] || record;
@@ -513,7 +553,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
             />
           ),
         }}
-        scroll={{ x: 600, y: "calc(100vh - 260px)" }}
+        scroll={{ x: "max-content", y: "calc(100vh - 280px)" }}
       />
     </div>
 
@@ -573,12 +613,11 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
                     fileList={row.fileList}
                     beforeUpload={(file) => {
                       updateUploadRow(row.id, 'fileList', [file]);
-                      if (!row.docName) {
-                        const base = file.name.includes(".")
-                          ? file.name.slice(0, file.name.lastIndexOf("."))
-                          : file.name;
-                        updateUploadRow(row.id, 'docName', base);
-                      }
+                      // Same behavior as DocumentsPanel: always derive document name from selected file
+                      const base = file.name.includes(".")
+                        ? file.name.slice(0, file.name.lastIndexOf("."))
+                        : file.name;
+                      updateUploadRow(row.id, 'docName', base);
                       return false;
                     }}
                     onRemove={() => updateUploadRow(row.id, 'fileList', [])}
@@ -703,7 +742,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
     </Modal>
 
       <Modal
-        title={previewDocument?.document_name || "Document Preview"}
+        title={getDocumentDisplayName(previewDocument) || previewDocument?.document_name || "Document Preview"}
         open={isPreviewModalOpen}
         onCancel={() => {
           setIsPreviewModalOpen(false);
@@ -711,21 +750,35 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
         }}
         width="95%"
         style={{ maxWidth: 1000, top: 20 }}
-        footer={null}
         destroyOnHidden
-        styles={{ body: { height: "75vh", padding: 0, overflow: "hidden" } }}
+        styles={{ body: { height: "75vh", padding: 0, minHeight: 200 } }}
+        footer={[
+          <Button key="dl" icon={<DownloadOutlined />} onClick={() => { if (previewDocument?.id) { const a = document.createElement("a"); a.href = `${API_BASE_URL}/documents/${previewDocument.id}/download`; a.setAttribute("download", previewDocument.document_name); document.body.appendChild(a); a.click(); a.remove(); } setIsPreviewModalOpen(false); setPreviewDocument(null); }}>Download</Button>,
+          <Button key="cl" type="primary" onClick={() => { setIsPreviewModalOpen(false); setPreviewDocument(null); }}>Close</Button>
+        ]}
       >
-        <div className="w-full h-full bg-gray-50 flex items-center justify-center">
-          {previewDocument?.document_url ? (
-            <iframe
-              src={previewDocument.document_url}
-              className="w-full h-full border-0"
-              title={previewDocument.document_name}
-            />
-          ) : (
-            <Empty description="No preview available" />
-          )}
-        </div>
+        {previewDocument && (() => {
+          const previewUrl = `${API_BASE_URL}/documents/${previewDocument.id}/preview`;
+          const displayName = getDocumentDisplayName(previewDocument) || previewDocument.document_name;
+          const type = getPreviewType(displayName);
+          if (type === "image") {
+            return (
+              <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+                <img src={previewUrl} alt={displayName} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
+              </div>
+            );
+          }
+          if (type === "pdf") {
+            return <iframe src={`${previewUrl}#toolbar=0`} title={displayName} width="100%" height="100%" style={{ border: "none" }} />;
+          }
+          return (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+              <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
+              <p className="text-gray-700 font-medium mb-2">Preview is not available for this file type.</p>
+              <p className="text-gray-500">Please download the file to view it.</p>
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

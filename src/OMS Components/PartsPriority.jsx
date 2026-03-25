@@ -151,7 +151,6 @@ const PartsPriority = () => {
     
     // Product Name & Number
     const prod = String(row.product_name || "").toLowerCase();
-    const prodNum = String(row.product_number || "").toLowerCase();
     
     // Part Name & Number
     const part = String(row.part_name || "").toLowerCase();
@@ -165,7 +164,6 @@ const PartsPriority = () => {
       pn.includes(q) ||
       so.includes(q) ||
       prod.includes(q) ||
-      prodNum.includes(q) ||
       part.includes(q) ||
       partNum.includes(q) ||
       priority.includes(q)
@@ -185,7 +183,6 @@ const PartsPriority = () => {
     
     // Product Name & Number
     const prod = String(row.product_name || "").toLowerCase();
-    const prodNum = String(row.product_number || "").toLowerCase();
     
     // Priority Range
     const range = `${row.min_priority} - ${row.max_priority}`;
@@ -198,7 +195,6 @@ const PartsPriority = () => {
       pn.includes(q) ||
       so.includes(q) ||
       prod.includes(q) ||
-      prodNum.includes(q) ||
       range.includes(q) ||
       count.includes(q)
     );
@@ -332,13 +328,6 @@ const PartsPriority = () => {
       render: (text) => <span className="text-blue-600 font-medium">{text || "-"}</span>,
     },
     {
-      title: <span className="font-semibold text-gray-700">Product Number</span>,
-      dataIndex: "product_number",
-      key: "product_number",
-      ellipsis: true,
-      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
-    },
-    {
       title: <span className="font-semibold text-gray-700">Part Name</span>,
       dataIndex: "part_name",
       key: "part_name",
@@ -464,13 +453,6 @@ const PartsPriority = () => {
       key: "product_name",
       ellipsis: true,
       render: (text) => <span className="text-blue-600 font-medium">{text || "-"}</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Product Number</span>,
-      dataIndex: "product_number",
-      key: "product_number",
-      ellipsis: true,
-      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Priority Range</span>,

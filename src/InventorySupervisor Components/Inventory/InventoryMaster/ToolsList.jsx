@@ -313,7 +313,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   ].filter(Boolean);
 
   return (
-    <div style={{ display: 'flex', height: 'calc(100vh - 40px)', background: '#f5f6fa', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', height: '100%', background: '#f5f6fa', overflow: 'hidden' }}>
       <div style={{ width: collapsed ? 0 : 320, minWidth: collapsed ? 0 : 320, background: '#fff', borderRight: '1px solid #e8eaed', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', zIndex: 10 }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>Categories</span>

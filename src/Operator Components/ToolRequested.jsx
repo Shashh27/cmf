@@ -18,7 +18,7 @@ const KpiCard = ({ title, count, label, icon, color, bgColor }) => {
         transform: isHovered ? 'translateY(-5px)' : 'none',
         boxShadow: isHovered ? '0 8px 16px rgba(0,0,0,0.1)' : 'none',
       }}
-      bodyStyle={{ padding: 0 }}
+      styles={{ body: { padding: 0 } }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >

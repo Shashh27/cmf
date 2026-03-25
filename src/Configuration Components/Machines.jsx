@@ -5,7 +5,7 @@ import { Table, Button, message, Popconfirm, Space, Card, Tooltip } from "antd";
 import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
 import MachineModal from "../Configuration Components/MachineModal";
 
-const Machines = ({ workCenter, onBack }) => {
+const Machines = ({ workCenter, onBack, userId }) => {
   const [machines, setMachines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [machineModalOpen, setMachineModalOpen] = useState(false);
@@ -20,7 +20,9 @@ const Machines = ({ workCenter, onBack }) => {
 
   const fetchMachines = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/machines/work-center/${workCenter.id}`);
+      const response = await axios.get(`${API_BASE_URL}/machines/work-center/${workCenter.id}`, {
+        params: userId != null ? { user_id: userId } : undefined,
+      });
       setMachines(response.data);
     } catch (error) {
       console.error("Error fetching machines:", error);
@@ -55,7 +57,9 @@ const Machines = ({ workCenter, onBack }) => {
 
   const handleDeleteMachine = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/machines/${id}`);
+      await axios.delete(`${API_BASE_URL}/machines/${id}`, {
+        params: userId != null ? { user_id: userId } : undefined,
+      });
       message.success("Machine deleted successfully");
       fetchMachines();
     } catch (error) {
@@ -282,6 +286,7 @@ const Machines = ({ workCenter, onBack }) => {
         <MachineModal
           machine={editingMachine}
           workCenterId={workCenter?.id}
+          userId={userId}
           isOpen={machineModalOpen}
           onClose={() => setMachineModalOpen(false)}
           onSave={handleMachineSaved}

@@ -8,8 +8,11 @@ import {
   Text,
   View,
   StyleSheet,
+  Font,
 } from "@react-pdf/renderer";
 import * as XLSX from "xlsx";
+
+Font.registerHyphenationCallback((word) => [word]);
 
 const styles = StyleSheet.create({
   page: {
@@ -54,6 +57,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e5e7eb",
     borderStyle: "solid",
+    width: "100%",
   },
   tableHeader: {
     flexDirection: "row",
@@ -92,16 +96,16 @@ const styles = StyleSheet.create({
 });
 
 const columnWidths = {
-  slNo: 32,
-  projectNumber: 80,
-  projectName: 140,
-  customer: 120,
-  product: 120,
-  qty: 40,
-  orderDate: 70,
-  dueDate: 70,
-  status: 60,
-  coordinator: 90,
+  slNo: 25,
+  projectNumber: 70,
+  projectName: 120,
+  customer: 100,
+  product: 100,
+  qty: 30,
+  orderDate: 65,
+  dueDate: 65,
+  status: 55,
+  coordinator: 80,
 };
 
 const OMSOrdersPdfDocument = ({
@@ -182,7 +186,7 @@ const OMSOrdersPdfDocument = ({
               <Text
                 style={[styles.cell, { width: columnWidths.projectName }]}
               >
-                {order.project_name || "-"}
+                {order.product_name || order.product || order.project_name || "-"}
               </Text>
               <Text style={[styles.cell, { width: columnWidths.customer }]}>
                 {order.customer_name || order.customer || "-"}
@@ -287,7 +291,7 @@ const OMSOrdersPdfDownload = ({
     const excelData = orders.map((order, index) => [
       index + 1,
       order.sale_order_number || "-",
-      order.project_name || "-",
+      order.product_name || order.product || order.project_name || "-",
       order.customer_name || order.customer || "-",
       order.product_name || order.product || "-",
       order.quantity != null ? order.quantity : "-",

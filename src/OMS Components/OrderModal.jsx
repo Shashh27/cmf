@@ -21,6 +21,18 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   const [projectCoordinators, setProjectCoordinators] = useState([]);
   const [manufacturingCoordinators, setManufacturingCoordinators] = useState([]);
   const [decimalWarnings, setDecimalWarnings] = useState({});
+
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u?.id == null) return null;
+      return u.id;
+    } catch {
+      return null;
+    }
+  };
   const orderDateWatch = Form.useWatch('order_date', form);
 
   const limitDecimals = (value, fieldName, precision = 3) => {
@@ -183,7 +195,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         `${API_BASE_URL}/products/`,
         {
           product_name: values.product_name?.trim() || "",
-          product_number: values.product_number?.trim() || "",
           product_version: values.product_version?.trim() || "1.0",
           user_id: parseInt(userId, 10),
         },
@@ -196,7 +207,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       form.setFieldsValue({ product_id: newProduct.id.toString() });
       setCreateProductModalOpen(false);
       createProductForm.resetFields();
-      message.success(`Product "${newProduct.product_name || newProduct.product_number}" created and selected.`);
+      message.success(`Product "${newProduct.product_name || `Product ${newProduct.id}`}" created and selected.`);
     } catch (error) {
       console.error("Error creating product:", error);
       const detail =
@@ -383,7 +394,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         document_type: "Other",
         document_type_other: "",
         document_version: "v1.0",
-        
       },
     ]);
   };
@@ -400,27 +410,41 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   };
 
   const uploadDocumentsForOrder = async (orderId) => {
-    for (const doc of documents) {
-      if (doc.file) {
-        const uploadFormData = new FormData();
-        uploadFormData.append("file", doc.file);
-        uploadFormData.append("document_name", doc.document_name || doc.file?.name || "Document");
-        let docType = doc.document_type || "Document";
-        if (docType === "Other" && doc.document_type_other && doc.document_type_other.trim()) {
-          docType = doc.document_type_other.trim();
-        }
-        uploadFormData.append("document_type", docType);
-        uploadFormData.append("document_version", "v1.0"); // Hardcoded to v1.0 for new order creation
+    if (!documents || documents.length === 0) return;
+    const currentUserId = getCurrentUserId();
+    if (currentUserId == null) {
+      // Without a logged-in user, backend will reject uploads; skip quietly.
+      return;
+    }
 
-        try {
-          await axios.post(
-            `${API_BASE_URL}/order-documents/upload/${orderId}`,
-            uploadFormData
-          );
-        } catch (error) {
-          console.error("Error uploading document:", error);
-        }
+    // Bulk upload: one request for all selected documents
+    const uploadFormData = new FormData();
+    uploadFormData.append("user_id", String(currentUserId));
+
+    for (const doc of documents) {
+      if (!doc.file) continue;
+
+      let docType = doc.document_type || "Document";
+      if (docType === "Other" && doc.document_type_other && doc.document_type_other.trim()) {
+        docType = doc.document_type_other.trim();
       }
+
+      uploadFormData.append("files", doc.file);
+      uploadFormData.append("document_name", doc.document_name || doc.file?.name || "Document");
+      uploadFormData.append("document_type", docType);
+      uploadFormData.append("document_version", "v1.0"); // Hardcoded to v1.0 for new order creation
+    }
+
+    // If user added rows but did not choose any file, skip the upload call
+    if (!uploadFormData.getAll("files")?.length) return;
+
+    try {
+      await axios.post(
+        `${API_BASE_URL}/order-documents/upload-bulk/${orderId}`,
+        uploadFormData
+      );
+    } catch (error) {
+      console.error("Error uploading documents:", error);
     }
   };
 
@@ -528,7 +552,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 >
                   {products.map((product) => (
                     <Option key={product.id} value={product.id.toString()}>
-                      {product.product_name || product.product_number || `Project ${product.id}`}
+                      {product.product_name || `Project ${product.id}`}
                     </Option>
                   ))}
                   {editingOrder && editingOrder.product_id && !products.find(p => p.id === editingOrder.product_id) && (
@@ -888,13 +912,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           rules={[{ required: true, message: "Required" }]}
         >
           <Input placeholder="e.g. Widget A" />
-        </Form.Item>
-        <Form.Item
-          name="product_number"
-          label="Project number"
-          rules={[{ required: true, message: "Required" }]}
-        >
-          <Input placeholder="e.g. PRD-001" />
         </Form.Item>
         <Form.Item
           name="product_version"

@@ -9,7 +9,7 @@ import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../DownloadReports/ProductBOMPdfDownload";
 
-const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
+const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
   
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
@@ -87,9 +87,37 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
   useEffect(() => {
     if (!hasFetchedData.current) {
       hasFetchedData.current = true;
-      fetchProducts().finally(() => setLoading(false));
+      const pid = initialProductId != null ? Number(initialProductId) : null;
+      if (pid) {
+        // Opened from OMS: load only the selected product via hierarchy (no /products list call)
+        (async () => {
+          try {
+            const data = await fetchProductHierarchy(pid);
+            if (data?.product) setProducts([data.product]);
+          } finally {
+            setLoading(false);
+          }
+        })();
+      } else {
+        // Standalone PDM access is no longer supported for Admin/MC roles.
+        // We set loading to false but don't fetch anything.
+        setLoading(false);
+      }
     }
   }, []);
+
+  // If opened with an initial product id (e.g., from OMS), auto-select it (do not auto-expand).
+  useEffect(() => {
+    const pid = initialProductId != null ? Number(initialProductId) : null;
+    if (!pid || loading) return;
+    const product = hierarchicalData[pid]?.product || products.find(p => Number(p.id) === pid);
+    if (!product) return;
+    setActiveItemId(pid);
+    if (onItemSelected) {
+      onItemSelected({ ...product, itemType: 'product', productId: pid });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialProductId, loading, products, hierarchicalData]);
 
   const fetchProducts = async () => {
     try {
@@ -283,7 +311,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
     setShowCreateModal(true);
   };
 
-  const handleCreateProduct = () => openModal('product');
+  const handleCreateProduct = () => {
+    if (disableProductCreate) return;
+    openModal('product');
+  };
   const handleCreateAssembly = (product) => openModal('assembly', product);
   const handleCreatePart = (product, assembly = null) => {
     if (!product) return;
@@ -482,7 +513,24 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
               </Tag>
             </span>
           )}
-          {buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
+          {type === 'part' ? (
+            <>
+              {buttons.part.map(({ icon: Icon, onClick, danger, title }, idx) => (
+                <Tooltip key={idx} title={title}>
+                  <Button 
+                    type="text" 
+                    size="small" 
+                    danger={danger}
+                    onClick={(e) => { e.stopPropagation(); onClick(); }} 
+                    icon={<Icon style={{ fontSize: '14px' }} />}
+                    style={{ padding: 4, minWidth: 24, height: 24 }}
+                  />
+                </Tooltip>
+              ))}
+              {getRawMaterialStatusTag(item.raw_material_status)}
+            </>
+          ) : (
+          buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
             <Tooltip key={idx} title={title}>
               <Button 
                 type="text" 
@@ -493,13 +541,21 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
                 style={{ padding: 4, minWidth: 24, height: 24 }}
               />
             </Tooltip>
-          ))}
+          ))
+          )}
           {type === 'product' && (
             <ProductBOMPdfDownload product={item} bomExport={bomExport} />
           )}
         </div>
       </div>
     );
+  };
+
+  const getRawMaterialStatusTag = (status) => {
+    const s = (status || "N/A").toString().toLowerCase();
+    if (s === "available") return <Tag className="m-0 text-[10px] shrink-0" color="success">Available</Tag>;
+    if (s === "not available") return <Tag className="m-0 text-[10px] shrink-0" color="error">Not Available</Tag>;
+    return <Tag className="m-0 text-[10px] shrink-0">N/A</Tag>;
   };
 
   const renderPartInTree = (part, level = 0) => {
@@ -625,10 +681,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
     );
   };
 
-  const filteredProducts = products.filter(product =>
-    // product.product_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.product_name.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredProductsBase = products.filter(product =>
+    (product.product_name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const initialPid = initialProductId != null ? Number(initialProductId) : null;
+  const filteredProducts = initialPid
+    ? filteredProductsBase.filter(p => Number(p.id) === initialPid)
+    : filteredProductsBase;
 
   if (loading) {
     return (
@@ -660,31 +720,35 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
                 <span className="sm:hidden">BOM</span>
               </h2>
             </div>
-            <Button
-              type="primary"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={handleCreateProduct}
-              className="bom-primary-btn shrink-0"
-            >
-              <span className="hidden sm:inline">New Product</span>
-              <span className="sm:hidden">New</span>
-            </Button>
+            {!disableProductCreate && (
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={handleCreateProduct}
+                className="bom-primary-btn shrink-0"
+              >
+                <span className="hidden sm:inline">New Product</span>
+                <span className="sm:hidden">New</span>
+              </Button>
+            )}
           </div>
-          <Input 
-            prefix={<SearchOutlined className="text-slate-400" />} 
-            placeholder="Search products..." 
-            value={searchTerm}
-            onChange={(e) => {
-              const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
-              setSearchTerm(filteredValue);
-            }} 
-            maxLength={30}
-            className="rounded-md text-sm border-slate-200" 
-            allowClear 
-          />
+          {!initialPid && (
+            <Input 
+              prefix={<SearchOutlined className="text-slate-400" />} 
+              placeholder="Search products..." 
+              value={searchTerm}
+              onChange={(e) => {
+                const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
+                setSearchTerm(filteredValue);
+              }} 
+              maxLength={30}
+              className="rounded-md text-sm border-slate-200" 
+              allowClear 
+            />
+          )}
         </div>
-        <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 bom-scroll min-h-0">
           {filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
             <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
               <Empty description={searchTerm ? 'No matches' : 'No products'} image={Empty.PRESENTED_IMAGE_SIMPLE} />

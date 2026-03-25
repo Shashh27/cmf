@@ -5,7 +5,7 @@ import { Modal, Form, Input, Button, Typography, message } from "antd";
 
 const { Title } = Typography;
 
-const CustomerModal = ({ isOpen, onClose, onCustomerCreated, editingCustomer }) => {
+const CustomerModal = ({ isOpen, onClose, userId, onCustomerCreated, editingCustomer }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -48,7 +48,7 @@ const CustomerModal = ({ isOpen, onClose, onCustomerCreated, editingCustomer }) 
         headers: {
           "Content-Type": "application/json",
         },
-        data: payload,
+        data: { ...payload, user_id: userId },
       });
 
       const result = response.data;

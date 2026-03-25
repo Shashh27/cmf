@@ -4,7 +4,7 @@ import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, DatePicker, Button, message, InputNumber } from "antd";
 import dayjs from "dayjs";
 
-const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
+const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -64,7 +64,7 @@ const MachineModal = ({ machine, workCenterId, isOpen, onClose, onSave }) => {
         headers: {
           "Content-Type": "application/json",
         },
-        data: submitData,
+        data: { ...submitData, user_id: userId },
       });
 
       onSave();

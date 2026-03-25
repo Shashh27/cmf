@@ -332,14 +332,40 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       value !== null && value !== undefined && 
       String(value).toLowerCase().includes(orderSearchText.toLowerCase())
     )
-  );
+  ).sort((a, b) => (a.id || 0) - (b.id || 0));
 
   const filteredMaterials = (rawMaterials || []).filter((item) => 
     !orderSearchText || Object.values(item).some(value => 
       value !== null && value !== undefined && 
       String(value).toLowerCase().includes(orderSearchText.toLowerCase())
     )
-  );
+  ).sort((a, b) => (a.id || 0) - (b.id || 0));
+
+  const collectAssemblyPartIds = (assemblyDetails, acc = []) => {
+    if (!assemblyDetails) return acc;
+    const parts = assemblyDetails.parts || [];
+    const subassemblies = assemblyDetails.subassemblies || [];
+    parts.forEach((p) => {
+      const part = p.part || p;
+      if (part && part.id && part.type_name !== "Out-Source") {
+        acc.push(part.id);
+      }
+    });
+    subassemblies.forEach((s) => collectAssemblyPartIds(s, acc));
+    return acc;
+  };
+
+  const toggleAssemblySelection = (orderId, assemblyDetails, checked) => {
+    const partIds = collectAssemblyPartIds(assemblyDetails, []);
+    if (!partIds.length) return;
+    setSelectedPartsByOrder((prev) => {
+      const current = { ...(prev[orderId] || {}) };
+      partIds.forEach((id) => {
+        current[id] = checked;
+      });
+      return { ...prev, [orderId]: current };
+    });
+  };
 
   const renderPart = (partDetails, level = 0, orderId) => {
     const part = partDetails.part || partDetails;
@@ -364,12 +390,50 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
     const subassemblies = assemblyDetails.subassemblies || [];
     const hasChildren = parts.length > 0 || subassemblies.length > 0;
     const isExpanded = expandedAssemblies[assembly.id];
+
+    const descendantPartIds = collectAssemblyPartIds(assemblyDetails, []);
+    const orderSelection = selectedPartsByOrder[orderId] || {};
+    const allSelected =
+      descendantPartIds.length > 0 &&
+      descendantPartIds.every((pid) => orderSelection[pid]);
+    const someSelected =
+      descendantPartIds.length > 0 &&
+      descendantPartIds.some((pid) => orderSelection[pid]) &&
+      !allSelected;
+
     return (
       <div key={assembly.id} className="mb-1">
-        <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 ${hasChildren && isExpanded ? 'bg-gradient-to-r from-gray-50 to-gray-100 border-l-4 border-gray-400' : 'hover:bg-gray-50 border-l-4 border-transparent'}`} style={{ marginLeft: `${level * 20}px` }} onClick={() => hasChildren && toggleAssemblyExpand(assembly.id)}>
+        <div
+          className={`flex items-center gap-2 px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-200 ${
+            hasChildren && isExpanded
+              ? 'bg-gradient-to-r from-gray-50 to-gray-100 border-l-4 border-gray-400'
+              : 'hover:bg-gray-50 border-l-4 border-transparent'
+          }`}
+          style={{ marginLeft: `${level * 20}px` }}
+        >
           <div className="flex-shrink-0 w-6">
-            {hasChildren && <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />} className="text-blue-500 hover:bg-blue-100 rounded-md" />}
+            {hasChildren && (
+              <Button
+                type="text"
+                size="small"
+                icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
+                className="text-blue-500 hover:bg-blue-100 rounded-md"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleAssemblyExpand(assembly.id);
+                }}
+              />
+            )}
           </div>
+          <Checkbox
+            checked={allSelected}
+            indeterminate={someSelected}
+            onChange={(e) => {
+              e.stopPropagation();
+              toggleAssemblySelection(orderId, assemblyDetails, e.target.checked);
+            }}
+            className="mr-1"
+          />
           <BlockOutlined className="text-blue-500" />
           <div className="flex flex-col">
             <Text className="font-medium text-gray-800 leading-tight">{assembly.assembly_number}</Text>
@@ -390,8 +454,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         {bomData.product && (
           <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 mb-2">
             <AppstoreOutlined className="text-indigo-600" />
-            <Text className="font-bold text-gray-800">{bomData.product.product_number}</Text>
-            <Text className="text-gray-500 text-sm">{bomData.product.product_name}</Text>
+            <Text className="font-bold text-gray-800">{bomData.product.product_name || `Product ${bomData.product.id}`}</Text>
           </div>
         )}
         {(bomData.assemblies || []).map((a) => renderAssembly(a, 0, order.id))}

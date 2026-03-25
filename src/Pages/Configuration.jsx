@@ -15,13 +15,29 @@ const Configuration = () => {
   const [selectedWorkCenter, setSelectedWorkCenter] = useState(null);
   const [showMachines, setShowMachines] = useState(false);
 
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u?.id == null) return null;
+      return u.id;
+    } catch {
+      return null;
+    }
+  };
+
+  const userId = getCurrentUserId();
+
   useEffect(() => {
     fetchWorkCenters();
   }, []);
 
   const fetchWorkCenters = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/workcenters/`);
+      const response = await axios.get(`${API_BASE_URL}/workcenters/`, {
+        params: userId != null ? { user_id: userId } : undefined,
+      });
       setWorkCenters(response.data);
     } catch (error) {
       console.error("Error fetching work centers:", error);
@@ -38,7 +54,9 @@ const Configuration = () => {
 
   const handleDelete = async (id) => {
     try {
-      await axios.delete(`${API_BASE_URL}/workcenters/${id}`);
+      await axios.delete(`${API_BASE_URL}/workcenters/${id}`, {
+        params: userId != null ? { user_id: userId } : undefined,
+      });
       message.success("Work center deleted successfully");
       fetchWorkCenters();
     } catch (error) {
@@ -147,6 +165,7 @@ const Configuration = () => {
       <div className="p-4 sm:p-6 lg:p-8">
         <Machines 
           workCenter={selectedWorkCenter}
+          userId={userId}
           onBack={handleBackToWorkCenters}
         />
       </div>
@@ -199,7 +218,7 @@ const Configuration = () => {
     {
       key: 'customers',
       label: 'Customers',
-      children: <CustomersTable />,
+      children: <CustomersTable userId={userId} />,
     },
   ];
 
@@ -246,6 +265,7 @@ const Configuration = () => {
       <WorkCenterModal
         workCenter={editingWorkCenter}
         isOpen={workCenterModalOpen}
+        userId={userId}
         onClose={() => setWorkCenterModalOpen(false)}
         onSave={() => {
           setWorkCenterModalOpen(false);
