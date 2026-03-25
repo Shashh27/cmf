@@ -49,13 +49,6 @@ const ReturnRequestsTable = () => {
       }
       const data = await response.json();
       
-      // Debug: Log the fetched data to check inventory_supervisor_name values
-      console.log('=== FETCHED RETURN REQUESTS ===');
-      data.forEach((req, index) => {
-        console.log(`Request ${index + 1}: ID=${req.id}, Status=${req.status}, Inventory_Supervisor_Name=${req.inventory_supervisor_name}`);
-      });
-      console.log('===============================');
-      
       setReturnRequests(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('Failed to fetch return requests:', error);
