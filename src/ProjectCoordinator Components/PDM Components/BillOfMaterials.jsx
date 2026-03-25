@@ -9,7 +9,7 @@ import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
 
-const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
+const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = null }) => {
   
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
@@ -27,6 +27,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [partActionType, setPartActionType] = useState('');
   const [activeItemId, setActiveItemId] = useState(null);
   const hasFetchedData = useRef(false);
+  const singleProductFetched = useRef(false);
 
   const getExpandKey = (type, id) => `${type}-${id}`;
 
@@ -85,73 +86,46 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   useEffect(() => {
+    if (singleProductId != null) {
+      if (singleProductFetched.current) return;
+      singleProductFetched.current = true;
+      setLoading(true);
+      const loadSingle = async () => {
+        try {
+          const productRes = await axios.get(`${API_BASE_URL}/products/${singleProductId}`);
+          const product = productRes.data;
+          setProducts([{ id: product.id, product_name: product.product_name || product.product_number || `Product ${product.id}` }]);
+          const transformedData = await fetchProductHierarchy(singleProductId);
+          if (transformedData) {
+            setExpandedItems(prev => ({ ...prev, [getExpandKey('product', singleProductId)]: true }));
+          }
+        } catch (e) {
+          console.error('Error loading single product:', e);
+          message.error('Failed to load product');
+        } finally {
+          setLoading(false);
+        }
+      };
+      loadSingle();
+      return;
+    }
     if (!hasFetchedData.current) {
       hasFetchedData.current = true;
-      const pid = initialProductId != null ? Number(initialProductId) : null;
-      if (pid) {
-        // Opened from OMS: load only the selected product via hierarchy (no extra product list call)
-        (async () => {
-          try {
-            const data = await fetchProductHierarchy(pid);
-            if (data?.product) setProducts([data.product]);
-          } finally {
-            setLoading(false);
-          }
-        })();
-      } else {
-        // Standalone PDM access is no longer supported for Admin/MC roles.
-        setLoading(false);
-      }
+      fetchProducts().finally(() => setLoading(false));
     }
-  }, []);
-
-  // If opened with an initial product id (from OMS), auto-select it (do not auto-expand).
-  useEffect(() => {
-    const pid = initialProductId != null ? Number(initialProductId) : null;
-    if (!pid || loading) return;
-    const product = hierarchicalData[pid]?.product || products.find(p => Number(p.id) === pid);
-    if (!product) return;
-    setActiveItemId(pid);
-    if (onItemSelected) {
-      onItemSelected({ ...product, itemType: 'product', productId: pid });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialProductId, loading, products, hierarchicalData]);
+  }, [singleProductId]);
 
   const fetchProducts = async () => {
     try {
-      const mcId = getCurrentUserId();
-
-      // 1) Get orders where this user is the manufacturing coordinator
-      const ordersRes = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: mcId != null ? { manufacturing_coordinator_id: mcId } : undefined,
+      // Filter by user_id: each admin sees only their own products. For those products, operations/documents from project coordinator and manufacturing coordinator are still shown (no filter when fetching by part/operation).
+      const adminId = getCurrentUserId();
+      const response = await axios.get(`${API_BASE_URL}/products/`, {
+        params: adminId != null ? { user_id: adminId } : undefined,
       });
-      const orders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
-
-      // 2) Collect unique product_ids from those orders
-      const productIds = [
-        ...new Set(
-          orders
-            .map(o => o.product_id)
-            .filter(id => id != null)
-        ),
-      ];
-
-      if (!productIds.length) {
-        setProducts([]);
-        return;
-      }
-
-      // 3) Fetch all products and keep only those that belong to the MC's orders
-      //    (products API is still admin-based, so we filter client-side by id)
-      const productsRes = await axios.get(`${API_BASE_URL}/products/`);
-      const allProducts = Array.isArray(productsRes.data) ? productsRes.data : [];
-      const filtered = allProducts.filter(p => productIds.includes(p.id));
-
-      setProducts(filtered);
+      setProducts(response.data);
     } catch (error) {
-      console.error('Error fetching products for manufacturing coordinator:', error);
-      message.error('Failed to fetch products for manufacturing coordinator');
+      console.error('Error fetching products:', error);
+      message.error('Failed to fetch products');
     }
   };
 
@@ -254,15 +228,21 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         const transformedData = {
           ...data,
           parts: (data.direct_parts || [])
+            .slice()
+            .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
             .map(item => ({
               ...item.part,
               extracted_data: item.extracted_data || [],
               documents: item.documents || []
             })),
           assemblies: (data.assemblies || [])
+            .slice()
+            .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
             .map(assembly => ({
               ...assembly.assembly,
               parts: (assembly.parts || [])
+                .slice()
+                .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
                 .map(part => ({
                   ...part.part,
                   extracted_data: part.extracted_data || [],
@@ -291,9 +271,13 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
   const transformSubassemblies = (subassemblies) => {
     return (subassemblies || [])
+      .slice()
+      .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
       .map(sub => ({
         ...sub.assembly,
         parts: (sub.parts || [])
+          .slice()
+          .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
           .map(part => ({
             ...part.part,
             extracted_data: part.extracted_data || [],
@@ -323,10 +307,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     setShowCreateModal(true);
   };
 
-  const handleCreateProduct = () => {
-    if (disableProductCreate) return;
-    openModal('product');
-  };
+  const handleCreateProduct = () => openModal('product');
   const handleCreateAssembly = (product) => openModal('assembly', product);
   const handleCreatePart = (product, assembly = null) => {
     if (!product) return;
@@ -525,24 +506,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               </Tag>
             </span>
           )}
-          {type === 'part' ? (
-            <>
-              {buttons.part.map(({ icon: Icon, onClick, danger, title }, idx) => (
-                <Tooltip key={idx} title={title}>
-                  <Button 
-                    type="text" 
-                    size="small" 
-                    danger={danger}
-                    onClick={(e) => { e.stopPropagation(); onClick(); }} 
-                    icon={<Icon style={{ fontSize: '14px' }} />}
-                    style={{ padding: 4, minWidth: 24, height: 24 }}
-                  />
-                </Tooltip>
-              ))}
-              {getRawMaterialStatusTag(item.raw_material_status)}
-            </>
-          ) : (
-          buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
+          {buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
             <Tooltip key={idx} title={title}>
               <Button 
                 type="text" 
@@ -553,21 +517,13 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                 style={{ padding: 4, minWidth: 24, height: 24 }}
               />
             </Tooltip>
-          ))
-          )}
+          ))}
           {type === 'product' && (
             <ProductBOMPdfDownload product={item} bomExport={bomExport} />
           )}
         </div>
       </div>
     );
-  };
-
-  const getRawMaterialStatusTag = (status) => {
-    const s = (status || "N/A").toString().toLowerCase();
-    if (s === "available") return <Tag className="m-0 text-[10px] shrink-0" color="success">Available</Tag>;
-    if (s === "not available") return <Tag className="m-0 text-[10px] shrink-0" color="error">Not Available</Tag>;
-    return <Tag className="m-0 text-[10px] shrink-0">N/A</Tag>;
   };
 
   const renderPartInTree = (part, level = 0) => {
@@ -599,11 +555,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const combinedChildren = [
       ...assemblyParts.map(p => ({ ...p, __childType: 'part' })),
       ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
-    ].sort((a, b) => {
-      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return timeA - timeB || (a.id || 0) - (b.id || 0);
-    });
+    ].sort((a, b) => (a.id || 0) - (b.id || 0));
     const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
     const hasChildren = combinedChildren.length > 0;
     const isSelected = activeItemId === assembly.id;
@@ -654,11 +606,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const combinedChildren = [
       ...directParts.map(p => ({ ...p, __childType: 'part' })),
       ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
-    ].sort((a, b) => {
-      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return timeA - timeB || (a.id || 0) - (b.id || 0);
-    });
+    ].sort((a, b) => (a.id || 0) - (b.id || 0));
     const isExpanded = expandedItems[getExpandKey('product', product.id)];
     const hasChildren = combinedChildren.length > 0;
     const showArrow = !hasData || hasChildren;
@@ -701,13 +649,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
-  const filteredProductsBase = products.filter(product =>
-    (product.product_name || '').toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredProducts = products.filter(product =>
+    // product.product_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    product.product_name.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  const initialPid = initialProductId != null ? Number(initialProductId) : null;
-  const filteredProducts = initialPid
-    ? filteredProductsBase.filter(p => Number(p.id) === initialPid)
-    : filteredProductsBase;
 
   if (loading) {
     return (
@@ -739,10 +684,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                 <span className="sm:hidden">BOM</span>
               </h2>
             </div>
-
-
-
-            {/* <Button
+            {!singleProductId && (
+            <Button
               type="primary"
               size="small"
               icon={<PlusOutlined />}
@@ -751,28 +694,23 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             >
               <span className="hidden sm:inline">New Product</span>
               <span className="sm:hidden">New</span>
-            </Button> */}
-
-
-
-
+            </Button>
+            )}
           </div>
-          {!initialPid && (
-            <Input 
-              prefix={<SearchOutlined className="text-slate-400" />} 
-              placeholder="Search products..." 
-              value={searchTerm}
-              onChange={(e) => {
-                const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
-                setSearchTerm(filteredValue);
-              }} 
-              maxLength={30}
-              className="rounded-md text-sm border-slate-200" 
-              allowClear 
-            />
-          )}
+          <Input 
+            prefix={<SearchOutlined className="text-slate-400" />} 
+            placeholder="Search products..." 
+            value={searchTerm}
+            onChange={(e) => {
+              const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
+              setSearchTerm(filteredValue);
+            }} 
+            maxLength={30}
+            className="rounded-md text-sm border-slate-200" 
+            allowClear 
+          />
         </div>
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 bom-scroll min-h-0">
+        <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">
           {filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
             <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
               <Empty description={searchTerm ? 'No matches' : 'No products'} image={Empty.PRESENTED_IMAGE_SIMPLE} />

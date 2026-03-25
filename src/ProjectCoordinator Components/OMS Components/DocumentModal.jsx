@@ -251,23 +251,12 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   };
 
   const groupDocuments = () => {
-    // Version ordering inside each root:
-    // - FIFO  : smaller `id` (earlier inserted) first
-    // - LIFO  : larger `id` (latest inserted) first
-    // We sort by `id` because `document_version` is stored like "v1.0" which caused NaN sorting.
-    const VERSION_ORDER = "FIFO"; // oldest first
-    const rootSort = (a, b) => (VERSION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
-    const versionSort = (a, b) => (VERSION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
-
-    const roots = documents
-      .filter((d) => !d.parent_id)
-      .sort(rootSort);
-
-    return roots.map((root) => ({
+    const roots = documents.filter(d => !d.parent_id);
+    const versions = documents.filter(d => d.parent_id);
+    
+    return roots.map(root => ({
       ...root,
-      versions: documents
-        .filter((v) => v.parent_id === root.id)
-        .sort(versionSort),
+      versions: versions.filter(v => v.parent_id === root.id).sort((a, b) => parseFloat(b.document_version) - parseFloat(a.document_version))
     }));
   };
 

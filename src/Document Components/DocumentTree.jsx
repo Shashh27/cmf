@@ -778,7 +778,7 @@ const buildMachineFoldersTree = (folders, machine) => {
       setParentFolderId(null);
       
       await fetchGeneralFolders();
-      initializeTreeData(orders, parts, machines);
+      initializeTreeData(orders, machines);
       if (onDocumentsChange && typeof onDocumentsChange === 'function') {
         onDocumentsChange();
       }
@@ -821,7 +821,7 @@ const buildMachineFoldersTree = (folders, machine) => {
       setCommonParentFolderId(null);
       
       await fetchCommonFolders();
-      initializeTreeData(orders, parts, machines);
+      initializeTreeData(orders, machines);
       if (onDocumentsChange && typeof onDocumentsChange === 'function') {
         onDocumentsChange();
       }
@@ -854,7 +854,7 @@ const buildMachineFoldersTree = (folders, machine) => {
       setFolderToDelete(null);
       
       await fetchGeneralFolders();
-      initializeTreeData(orders, parts, machines);
+      initializeTreeData(orders, machines);
       if (onDocumentsChange && typeof onDocumentsChange === 'function') {
         onDocumentsChange();
       }
@@ -881,7 +881,7 @@ const buildMachineFoldersTree = (folders, machine) => {
       setCommonFolderToDelete(null);
       
       await fetchCommonFolders();
-      initializeTreeData(orders, parts, machines);
+      initializeTreeData(orders, machines);
       if (onDocumentsChange && typeof onDocumentsChange === 'function') {
         onDocumentsChange();
       }
@@ -967,7 +967,7 @@ const buildMachineFoldersTree = (folders, machine) => {
       await fetchGeneralFolders();
       
       // Reinitialize tree data
-      initializeTreeData(orders, parts, machines);
+      initializeTreeData(orders, machines);
     } catch (error) {
       console.error('Upload error:', error);
       message.error('Failed to upload document: ' + error.message);
@@ -1032,7 +1032,7 @@ const buildMachineFoldersTree = (folders, machine) => {
       setCommonUploadFolderId(null);
       
       await fetchCommonFolders();
-      initializeTreeData(orders, parts, machines);
+      initializeTreeData(orders, machines);
       if (onDocumentsChange && typeof onDocumentsChange === 'function') {
         onDocumentsChange();
       }

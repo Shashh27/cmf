@@ -554,11 +554,18 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
     }
   ];
 
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    // Allow only letters, numbers, and spaces
+    const sanitizedValue = value.replace(/[^a-zA-Z0-9 ]/g, '');
+    setOrderSearchText(sanitizedValue);
+  };
+
   return (
     <div className="mt-2 sm:mt-4">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
         <div className="lg:col-span-1">
-            <Card title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"><div className="flex items-center gap-2"><BlockOutlined className="text-blue-600" /><span className="font-bold text-gray-800 text-sm sm:text-base">Order Structure</span></div><Input.Search placeholder="Search..." allowClear onSearch={setOrderSearchText} onChange={(e) => setOrderSearchText(e.target.value)} value={orderSearchText} maxLength={20} className="w-full sm:w-48" size="small" /></div>} className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100 h-full" styles={{ body: { padding: 'clamp(8px, 2vw, 12px)', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }, header: { padding: 'clamp(12px, 2vw, 16px)' } }}>
+            <Card title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"><div className="flex items-center gap-2"><BlockOutlined className="text-blue-600" /><span className="font-bold text-gray-800 text-sm sm:text-base">Order Structure</span></div><Input.Search placeholder="Search..." allowClear onSearch={setOrderSearchText} onChange={handleSearchChange} value={orderSearchText} maxLength={20} className="w-full sm:w-48" size="small" /></div>} className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100 h-full" styles={{ body: { padding: 'clamp(8px, 2vw, 12px)', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }, header: { padding: 'clamp(12px, 2vw, 16px)' } }}>
                 <div className="p-2 space-y-1">
                   {filteredOrders.map((order) => (
                     <div key={order.id} className="mb-1">
@@ -576,7 +583,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
             </Card>
         </div>
         <div className="lg:col-span-2 space-y-3 sm:space-y-4">
-            <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3"><div className="flex items-center gap-2"><ExperimentOutlined className="text-purple-600" /><span className="font-bold text-gray-800 text-sm sm:text-base">Raw Materials Inventory</span></div><Input.Search placeholder="Search..." allowClear onSearch={setOrderSearchText} onChange={(e) => setOrderSearchText(e.target.value)} value={orderSearchText} maxLength={20} className="w-full sm:w-64" size="middle" /></div>}>
+            <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3"><div className="flex items-center gap-2"><ExperimentOutlined className="text-purple-600" /><span className="font-bold text-gray-800 text-sm sm:text-base">Raw Materials Inventory</span></div><Input.Search placeholder="Search..." allowClear onSearch={setOrderSearchText} onChange={handleSearchChange} value={orderSearchText} maxLength={20} className="w-full sm:w-64" size="middle" /></div>}>
               <Table columns={columns} dataSource={filteredMaterials} rowKey="id" size="small" bordered rowSelection={{ selectedRowKeys: Object.keys(selectedRawMaterialIds).filter(id => selectedRawMaterialIds[id]).map(Number), onChange: (keys) => { const next = {}; keys.forEach(k => next[k] = true); setSelectedRawMaterialIds(next); }}} scroll={{ x: 1200 }} pagination={{ current: rawMaterialsPagination.current, pageSize: rawMaterialsPagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={(p) => setRawMaterialsPagination({ current: p.current, pageSize: p.pageSize })} locale={{ emptyText: <Empty description={orderSearchText ? "No raw materials found matching your search" : "No raw materials found"} /> }} className="modern-table" loading={loading} />
             </Card>
             <div className="flex justify-end pt-2"><Button type="primary" icon={<LinkOutlined />} onClick={handleSubmitLinks} loading={linking} size="large" style={{ backgroundColor: '#2563eb' }} className="border-none shadow-md no-hover-btn px-6 sm:px-8 w-full sm:w-auto"><span className="hidden sm:inline">Submit Selections</span><span className="sm:hidden">Submit</span></Button></div>

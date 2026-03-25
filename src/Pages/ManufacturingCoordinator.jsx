@@ -8,7 +8,7 @@ import MCProductionMonitoring from "../ManufacturingCoordinator Components/Produ
 import MCInventory from "../ManufacturingCoordinator Components/Inventory";
 import MCOverviewData from "../ManufacturingCoordinator Components/OverviewData";
 import MCRawMaterials from "../ManufacturingCoordinator Components/RawMaterials";
-import MCPartsPriority from "../ManufacturingCoordinator Components/OMS Components/PartsPriority";
+
 import MCDocument from "../ManufacturingCoordinator Components/Document";
 import MCNotification from "../ManufacturingCoordinator Components/Notification";
 import MCAccessControl from "../ManufacturingCoordinator Components/AccessControl";
@@ -17,9 +17,6 @@ const ManufacturingCoordinator = () => {
   const location = useLocation();
   const path = location.pathname || "";
 
-  if (path.startsWith("/manufacturing_coordinator/oms/parts-priority")) {
-    return <MCPartsPriority />;
-  }
   if (path.startsWith("/manufacturing_coordinator/oms/rawmaterials")) {
     return <MCRawMaterials />;
   }

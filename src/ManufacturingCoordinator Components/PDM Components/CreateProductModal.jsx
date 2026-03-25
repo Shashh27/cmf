@@ -74,11 +74,20 @@ const CreateProductModal = ({
       // Default behavior for create mode
       if (createType === 'product') {
         newValues = {
+          product_name: '',
           product_version: '1.0',
+        };
+      } else if (createType === 'assembly') {
+        newValues = {
+          assembly_number: '',
+          assembly_name: '',
         };
       } else if (createType === 'part') {
         newValues = {
+          part_number: '',
+          part_name: '',
           type_id: 1,
+          raw_material_id: null,
           part_detail: null,
         };
       }
@@ -117,11 +126,20 @@ const CreateProductModal = ({
       // Default behavior for create mode
       if (createType === 'product') {
         newValues = {
+          product_name: '',
           product_version: '1.0',
+        };
+      } else if (createType === 'assembly') {
+        newValues = {
+          assembly_number: '',
+          assembly_name: '',
         };
       } else if (createType === 'part') {
         newValues = {
+          part_number: '',
+          part_name: '',
           type_id: 1,
+          raw_material_id: null,
           part_detail: null,
         };
       }
@@ -285,11 +303,16 @@ const CreateProductModal = ({
     return `${mode === 'edit' ? 'Edit' : 'Create New'} ${createType === 'product' ? 'Product' : createType === 'assembly' ? 'Assembly' : 'Part'}`;
   };
 
+  const handleCancel = () => {
+    form.resetFields();
+    onCancel();
+  };
+
   return (
     <Modal
       title={getTitle()}
       open={open}
-      onCancel={onCancel}
+      onCancel={handleCancel}
       maskClosable={false}
       keyboard={false}
       footer={null}
@@ -494,7 +517,7 @@ const CreateProductModal = ({
         )}
 
         <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 mt-6">
-          <Button onClick={onCancel} size="large" className="w-full sm:w-auto">
+          <Button onClick={handleCancel} size="large" className="w-full sm:w-auto">
             Cancel
           </Button>
           <Button type="primary" htmlType="submit" loading={loading} className="no-hover-btn w-full sm:w-auto" size="large">
