@@ -6,6 +6,7 @@ from DB.models.maintenance import OEEIssue as OEEIssueModel, MachineBreakdown as
 from DB.models.configuration import Machine as MachineModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Order as OrderModel, Part as PartModel
+from DB.models.notifications import MachineNotification as MachineNotificationModel, ComponentIssuesNotification as ComponentIssuesNotificationModel
 from DB.schemas.maintenance import (
     OEEIssue as OEEIssueSchema,
     OEEIssueCreate,
@@ -147,6 +148,16 @@ def create_machine_breakdown(payload: MachineBreakdownCreate, db: Session = Depe
     db.add(obj)
     db.commit()
     db.refresh(obj)
+    # Trigger notification only if creator is operator
+    try:
+        creator = db.query(AccessUserModel).filter(AccessUserModel.id == obj.reported_by).first()
+        role = (creator.role or "").strip().lower() if creator and creator.role else ""
+        if "operator" in role:
+            notif = MachineNotificationModel(machine_breakdown_id=obj.id, is_ack=False)
+            db.add(notif)
+            db.commit()
+    except Exception:
+        db.rollback()
     return {
         "id": obj.id,
         "machine_id": obj.machine_id,
@@ -244,6 +255,16 @@ def create_component_issue(payload: ComponentIssueCreate, db: Session = Depends(
     db.add(obj)
     db.commit()
     db.refresh(obj)
+    # Trigger notification only if creator is operator
+    try:
+        creator = db.query(AccessUserModel).filter(AccessUserModel.id == obj.reported_by).first()
+        role = (creator.role or "").strip().lower() if creator and creator.role else ""
+        if "operator" in role:
+            notif = ComponentIssuesNotificationModel(comp_issues_id=obj.id, is_ack=False)
+            db.add(notif)
+            db.commit()
+    except Exception:
+        db.rollback()
     return {
         "id": obj.id,
         "machine_id": obj.machine_id,

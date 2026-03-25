@@ -38,11 +38,7 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-<<<<<<< HEAD
-VIRTUAL_ENV="C:\Users\SMPM\Desktop\backend\CMFbackend\venv"
-=======
 VIRTUAL_ENV="D:\vinod\CMF_DIGITIZATION\backend\venv"
->>>>>>> d0055ee5d8192713a148811568a64af40b989c24
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"

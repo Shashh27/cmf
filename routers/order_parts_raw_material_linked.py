@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 import uuid
@@ -20,6 +21,7 @@ def _linkage_to_dict(linkage: OrderPartsRawMaterialLinked) -> dict:
     rm = linkage.raw_material
     pt = linkage.part
     od = linkage.order
+    product = od.product if od is not None else None
     return {
         "id": linkage.id,
         "raw_material_id": linkage.raw_material_id,
@@ -34,7 +36,8 @@ def _linkage_to_dict(linkage: OrderPartsRawMaterialLinked) -> dict:
         "order_quantity": linkage.order_quantity if linkage.order_quantity is not None else (rm.quantity if rm else None),
         "mass": linkage.mass if linkage.mass is not None else (rm.mass if rm else None),
         "sale_order_number": od.sale_order_number if od else None,
-        "project_name": od.project_name if od else None,
+        "product_name": product.product_name if product else None,
+        "product_number": product.product_number if product else None,
         "material_status": linkage.material_status if linkage.material_status is not None else (rm.status if rm else None),
     }
 
@@ -44,7 +47,7 @@ def _load_linkages(query):
     return query.options(
         joinedload(OrderPartsRawMaterialLinked.raw_material),
         joinedload(OrderPartsRawMaterialLinked.part),
-        joinedload(OrderPartsRawMaterialLinked.order),
+        joinedload(OrderPartsRawMaterialLinked.order).joinedload(Order.product),
     )
 
 router = APIRouter(
@@ -61,6 +64,7 @@ class BulkCreateRequest(BaseModel):
     order_quantities: Optional[Dict[int, int]] = None
     order_masses: Optional[Dict[int, float]] = None
     linkage_group_id: Optional[str] = None  # If provided, same ID used for all orders in one Submit
+    user_id: Optional[int] = None  # creator/owner of these linkages
 
 
 class BulkStatusUpdateRequest(BaseModel):
@@ -135,6 +139,7 @@ def create_bulk_linkages(request: BulkCreateRequest, db: Session = Depends(get_d
                 mass=mass_map.get(raw_material_id, rm.mass),
                 material_status="purchase request",
                 linkage_group_id=linkage_group_id,
+                user_id=request.user_id,
             )
             db.add(db_linkage)
             new_linkages.append(db_linkage)
@@ -167,11 +172,37 @@ def create_bulk_linkages(request: BulkCreateRequest, db: Session = Depends(get_d
 
 
 @router.get("/", response_model=List[OrderPartsRawMaterialLinkedWithDetails])
-def get_all_linkages(db: Session = Depends(get_db)):
-    """Get all order-parts-raw-material linkages with details (single JOIN query)."""
-    linkages = _load_linkages(
-        db.query(OrderPartsRawMaterialLinked).order_by(OrderPartsRawMaterialLinked.id.asc())
-    ).all()
+def get_all_linkages(
+    user_id: Optional[int] = Query(None, description="Filter by linkage user_id"),
+    admin_id: Optional[int] = Query(
+        None,
+        description="Filter by admin / coordinator related to the order "
+        "(matches Order.admin_id, Order.manufacturing_coordinator_id, or Order.project_coordinator_id)",
+    ),
+    db: Session = Depends(get_db),
+):
+    """Get all order-parts-raw-material linkages with details (single JOIN query).
+
+    - If user_id is provided, filter by linkage.user_id (who created it).
+    - If admin_id is provided, filter by orders where this user is admin, project coordinator,
+      or manufacturing coordinator.
+    - If both are provided, both filters are applied (AND).
+    """
+    query = db.query(OrderPartsRawMaterialLinked)
+    if user_id is not None:
+        query = query.filter(OrderPartsRawMaterialLinked.user_id == user_id)
+    if admin_id is not None:
+        query = (
+            query.join(Order, Order.id == OrderPartsRawMaterialLinked.order_id)
+            .filter(
+                or_(
+                    Order.admin_id == admin_id,
+                    Order.manufacturing_coordinator_id == admin_id,
+                    Order.project_coordinator_id == admin_id,
+                )
+            )
+        )
+    linkages = _load_linkages(query.order_by(OrderPartsRawMaterialLinked.id.asc())).all()
     return [_linkage_to_dict(l) for l in linkages]
 
 

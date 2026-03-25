@@ -67,46 +67,73 @@ class RawMaterial(RawMaterialBase):
 # Tools List Schemas
 # =======================
 class ToolsListBase(BaseModel):
-    item_description: Optional[str] = None  # Changed to Optional
-    range: Optional[str] = None
-    identification_code: Optional[str] = None  # Changed to Optional
-    make: Optional[str] = None
-    quantity: Optional[int] = None  # Changed to Optional - Available quantity
-    total_quantity: Optional[int] = None  # New field - Total quantity
-    issues_qty: Optional[int] = None  # New field - Issued quantity aggregate
-    location: Optional[str] = None
-    gauge: Optional[str] = None
-    remarks: Optional[str] = None
-    amount: Optional[float] = None
-    ref_ledger: Optional[str] = None
-    type: Optional[str] = None  # Changed to Optional
-
-
+    item_description:    Optional[str]   = None
+    range:               Optional[str]   = None
+    identification_code: Optional[str]   = None
+    make:                Optional[str]   = None
+    quantity:            Optional[int]   = None
+    total_quantity:      Optional[int]   = None
+    issues_qty:          Optional[int]   = None
+    location:            Optional[str]   = None
+    gauge:               Optional[str]   = None
+    remarks:             Optional[str]   = None
+    amount:              Optional[float] = None
+    ref_ledger:          Optional[str]   = None
+    type:                Optional[str]   = None       # CONSUMABLES / NON-CONSUMABLES
+    category:            Optional[str]   = None       # Tools / Instruments / Misc
+    sub_category:        Optional[str]   = None       # Keys & Wrenches, Micrometers …
+ 
+ 
 class ToolsListCreate(ToolsListBase):
     pass
-
-
+ 
+ 
 class ToolsListUpdate(BaseModel):
-    item_description: Optional[str] = None
-    range: Optional[str] = None
-    identification_code: Optional[str] = None
-    make: Optional[str] = None
-    quantity: Optional[int] = None  # Available quantity
-    total_quantity: Optional[int] = None  # Total quantity
-    location: Optional[str] = None
-    gauge: Optional[str] = None
-    remarks: Optional[str] = None
-    amount: Optional[float] = None
-    ref_ledger: Optional[str] = None
-    type: Optional[str] = None
-
-
+    item_description:    Optional[str]   = None
+    range:               Optional[str]   = None
+    identification_code: Optional[str]   = None
+    make:                Optional[str]   = None
+    quantity:            Optional[int]   = None
+    total_quantity:      Optional[int]   = None
+    location:            Optional[str]   = None
+    gauge:               Optional[str]   = None
+    remarks:             Optional[str]   = None
+    amount:              Optional[float] = None
+    ref_ledger:          Optional[str]   = None
+    type:                Optional[str]   = None
+    category:            Optional[str]   = None
+    sub_category:        Optional[str]   = None
+ 
+ 
 class ToolsList(ToolsListBase):
     id: int
-
+ 
     class Config:
         from_attributes = True
-
+ 
+ 
+# =======================
+# 3-Level Sidebar Tree
+# =======================
+ 
+class ItemNode(BaseModel):
+    """Leaf node — a specific item_description e.g. 'Allen Key' with its row count"""
+    item_description: str
+    count: int
+ 
+ 
+class SubCategoryNode(BaseModel):
+    """Mid node — e.g. 'Keys & Wrenches' containing its items"""
+    sub_category: str
+    count: int
+    items: List[ItemNode] = []
+ 
+ 
+class CategoryTree(BaseModel):
+    """Root node — 'Tools' or 'Instruments'"""
+    category: str
+    total_count: int
+    sub_categories: List[SubCategoryNode] = []
 
 # =======================
 # Inventory Request Schemas
@@ -152,7 +179,7 @@ class InventoryRequestWithDetails(InventoryRequest):
     tool_name: Optional[str] = None
     tool_type: Optional[str] = None
     operator_name: Optional[str] = None
-    admin_name: Optional[str] = None
+    inventory_supervisor_name: Optional[str] = None
     project_name: Optional[str] = None
     part_name: Optional[str] = None
 
@@ -169,7 +196,7 @@ class InventoryReturnRequestBase(BaseModel):
     total_requested_qty: int
     returned_qty: int = 0
     remarks: Optional[str] = None
-    admin_id: Optional[int] = None  # Only set by admin during status update
+    inventory_supervisor_id: Optional[int] = None  # Only set by inventory supervisor during status update
     status: Optional[str] = "pending"
 
 
@@ -201,7 +228,7 @@ class InventoryReturnRequest(InventoryReturnRequestBase):
 
 class InventoryReturnRequestWithDetails(InventoryReturnRequest):
     operator_name: Optional[str] = None
-    admin_name: Optional[str] = None
+    inventory_supervisor_name: Optional[str] = None
     inventory_request_details: Optional[InventoryRequestWithDetails] = None
 
     class Config:
@@ -234,8 +261,7 @@ class ToolIssueBase(BaseModel):
     status: Optional[str] = "pending"
     issue_category: Optional[str] = None  # "wear and tear", "Calibration Drift", "other"
     description: Optional[str] = None  # Entered by operator
-    remarks: Optional[str] = None  # Entered by admin
-    document_url: Optional[str] = None  # URL to uploaded document in MinIO
+    remarks: Optional[str] = None  # Entered by supervisor
 
 
 class ToolIssueCreate(BaseModel):
@@ -245,7 +271,6 @@ class ToolIssueCreate(BaseModel):
     operator_id: int
     issue_category: Optional[str] = None  # "wear and tear", "Calibration Drift", "other"
     description: Optional[str] = None  # Entered by operator
-    # status remains pending on create
 
 
 class ToolIssueUpdate(BaseModel):
@@ -256,15 +281,24 @@ class ToolIssueUpdate(BaseModel):
     issue_category: Optional[str] = None
     description: Optional[str] = None
     remarks: Optional[str] = None
-    document_url: Optional[str] = None
-    # status and admin are managed via dedicated endpoint
+
+
+class ToolIssueDocument(BaseModel):
+    id: int
+    tool_issue_id: int
+    document_url: str
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class ToolIssue(ToolIssueBase):
     id: int
-    admin_id: Optional[int] = None
+    inventory_supervisor_id: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    documents: List[ToolIssueDocument] = []
 
     class Config:
         from_attributes = True
@@ -273,7 +307,7 @@ class ToolIssue(ToolIssueBase):
 class ToolIssueWithDetails(ToolIssue):
     tool_name: Optional[str] = None
     operator_name: Optional[str] = None
-    admin_name: Optional[str] = None
+    inventory_supervisor_name: Optional[str] = None
     sale_order_number: Optional[str] = None
 
     class Config:

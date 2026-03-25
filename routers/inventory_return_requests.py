@@ -100,7 +100,7 @@ def create_inventory_return_request(
         returned_qty=return_request.returned_qty,  # This is just for this specific return
         remarks=return_request.remarks,  # Optional remarks field
         status=return_request.status,  # Allow pending or collected initially
-        admin_id=None,  # admin_id will be set when status is updated to collected
+        inventory_supervisor_id=None,  # inventory_supervisor_id will be set when status is updated to collected
         created_at=datetime.now(IST).replace(tzinfo=None),
         updated_at=None
     )
@@ -121,7 +121,7 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
         # Get related details
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
+        inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == ret_req.inventory_supervisor_id).first()
         
         # Get inventory request details
         inventory_request_details = None
@@ -132,7 +132,7 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
             
             tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
             inv_operator = db.query(AdminUser).filter(AdminUser.id == inventory_request.operator_id).first()
-            inventory_admin = db.query(AdminUser).filter(AdminUser.id == inventory_request.admin_id).first()
+            inv_req_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.inventory_supervisor_id).first()
             project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
             part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
             
@@ -143,13 +143,13 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
                 "project_id": inventory_request.project_id,
                 "part_id": inventory_request.part_id,
                 "quantity": inventory_request.quantity,
-                "admin_id": inventory_request.admin_id,
+                "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
                 "status": inventory_request.status,
                 "created_at": inventory_request.created_at,
                 "updated_at": inventory_request.updated_at,
                 "tool_name": tool.item_description if tool else None,
                 "operator_name": inv_operator.user_name if inv_operator else None,
-                "admin_name": admin.user_name if admin else None,
+                "inventory_supervisor_name": inv_req_supervisor.user_name if inv_req_supervisor else None,
                 "project_name": project.sale_order_number if project else None,
                 "part_name": part.part_name if part else None
             }
@@ -165,7 +165,7 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
             "created_at": ret_req.created_at,
             "updated_at": ret_req.updated_at,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "inventory_request_details": inventory_request_details
         }
         result.append(InventoryReturnRequestWithDetailsSchema(**request_dict))
@@ -186,7 +186,7 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
     # Get related details
     inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == return_request.requested_id).first()
     operator = db.query(AccessUser).filter(AccessUser.id == return_request.operator_id).first()
-    admin = db.query(AccessUser).filter(AccessUser.id == return_request.admin_id).first()
+    inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == return_request.inventory_supervisor_id).first()
     
     # Get inventory request details
     inventory_request_details = None
@@ -197,7 +197,7 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
         
         tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
         inv_operator = db.query(AdminUser).filter(AdminUser.id == inventory_request.operator_id).first()
-        inventory_admin = db.query(AdminUser).filter(AdminUser.id == inventory_request.admin_id).first()
+        inv_req_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
         
@@ -208,13 +208,13 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
             "project_id": inventory_request.project_id,
             "part_id": inventory_request.part_id,
             "quantity": inventory_request.quantity,
-            "admin_id": inventory_request.admin_id,
+            "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
             "status": inventory_request.status,
             "created_at": inventory_request.created_at,
             "updated_at": inventory_request.updated_at,
             "tool_name": tool.item_description if tool else None,
             "operator_name": inv_operator.user_name if inv_operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "inventory_supervisor_name": inv_req_supervisor.user_name if inv_req_supervisor else None,
             "project_name": project.sale_order_number if project else None,
             "part_name": part.part_name if part else None
         }
@@ -230,7 +230,7 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
         "created_at": return_request.created_at,
         "updated_at": return_request.updated_at,
         "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+        "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
         "inventory_request_details": inventory_request_details
     }
     
@@ -295,12 +295,12 @@ def update_inventory_return_request(
 @router.put("/{return_request_id}/status")
 def update_inventory_return_request_status(
     return_request_id: int,
-    admin_id: int,  # This will come from authentication/session
+    inventory_supervisor_id: int,  # This will come from authentication/session
     status: str,    # "pending" or "collected"
     table_id: int = None,  # Additional parameter to track table ID
     db: Session = Depends(get_db)
 ):
-    """Update inventory return request status (admin action)"""
+    """Update inventory return request status (inventory supervisor action)"""
     # Validate status
     if status not in ['pending', 'collected']:
         raise HTTPException(
@@ -324,12 +324,12 @@ def update_inventory_return_request_status(
             detail=f"Cannot {status} return request with status '{db_return_request.status}'"
         )
     
-    # Verify admin exists
-    admin = db.query(AccessUser).filter(AccessUser.id == admin_id).first()
-    if not admin:
+    # Verify inventory supervisor exists
+    inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_supervisor_id).first()
+    if not inventory_supervisor:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Admin with id {admin_id} not found"
+            detail=f"Inventory Supervisor with id {inventory_supervisor_id} not found"
         )
     
     # Get the original inventory request to find the tool
@@ -362,26 +362,26 @@ def update_inventory_return_request_status(
             db.commit()
             print(f"DEBUG: Final tool quantity after commit: {tool.quantity}")
     
-    # Update the return request with admin_id, status, and updated_at
+    # Update the return request with inventory_supervisor_id, status, and updated_at
     if status == 'collected':
-        db_return_request.admin_id = admin_id
+        db_return_request.inventory_supervisor_id = inventory_supervisor_id
     db_return_request.status = status
     db_return_request.updated_at = datetime.now(IST).replace(tzinfo=None)
     
     db.commit()
     db.refresh(db_return_request)
     
-    # Get admin name for response
-    admin_name = None
-    if admin_id:
-        admin_user = db.query(AccessUser).filter(AccessUser.id == admin_id).first()
-        admin_name = admin_user.user_name if admin_user else None
+    # Get inventory supervisor name for response
+    inventory_supervisor_name = None
+    if inventory_supervisor_id:
+        inventory_supervisor_user = db.query(AccessUser).filter(AccessUser.id == inventory_supervisor_id).first()
+        inventory_supervisor_name = inventory_supervisor_user.user_name if inventory_supervisor_user else None
     
     action = "collected" if status == 'collected' else "marked as pending"
     return {
         "message": f"Inventory return request {action} successfully", 
         "request": db_return_request,
-        "admin_name": admin_name
+        "inventory_supervisor_name": inventory_supervisor_name
     }
 
 
@@ -420,8 +420,7 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
         # Get related details
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
+        supervisor = db.query(AccessUser).filter(AccessUser.id == ret_req.supervisor_id).first()
         
         # Get inventory request details
         inventory_request_details = None
@@ -432,7 +431,7 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
             
             tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
             inv_operator = db.query(AdminUser).filter(AdminUser.id == inventory_request.operator_id).first()
-            admin = db.query(AdminUser).filter(AdminUser.id == inventory_request.admin_id).first()
+            inventory_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.supervisor_id).first()
             project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
             part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
             
@@ -443,13 +442,13 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
                 "project_id": inventory_request.project_id,
                 "part_id": inventory_request.part_id,
                 "quantity": inventory_request.quantity,
-                "admin_id": inventory_request.admin_id,
+                "supervisor_id": inventory_request.supervisor_id,
                 "status": inventory_request.status,
                 "created_at": inventory_request.created_at,
                 "updated_at": inventory_request.updated_at,
                 "tool_name": tool.item_description if tool else None,
                 "operator_name": inv_operator.user_name if inv_operator else None,
-                "admin_name": admin.user_name if admin else None,
+                "supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
                 "project_name": project.sale_order_number if project else None,
                 "part_name": part.part_name if part else None
             }
@@ -465,7 +464,7 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
             "created_at": ret_req.created_at,
             "updated_at": ret_req.updated_at,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "supervisor_name": supervisor.user_name if supervisor else None,
             "inventory_request_details": inventory_request_details
         }
         result.append(InventoryReturnRequestWithDetailsSchema(**request_dict))
@@ -483,8 +482,7 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
         # Get related details
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
-        admin = db.query(AccessUser).filter(AccessUser.id == ret_req.admin_id).first()
+        supervisor = db.query(AccessUser).filter(AccessUser.id == ret_req.supervisor_id).first()
         
         # Get inventory request details
         inventory_request_details = None
@@ -495,7 +493,7 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
             
             tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
             inv_operator = db.query(AdminUser).filter(AdminUser.id == inventory_request.operator_id).first()
-            admin = db.query(AdminUser).filter(AdminUser.id == inventory_request.admin_id).first()
+            inventory_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.supervisor_id).first()
             project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
             part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
             
@@ -506,13 +504,13 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
                 "project_id": inventory_request.project_id,
                 "part_id": inventory_request.part_id,
                 "quantity": inventory_request.quantity,
-                "admin_id": inventory_request.admin_id,
+                "supervisor_id": inventory_request.supervisor_id,
                 "status": inventory_request.status,
                 "created_at": inventory_request.created_at,
                 "updated_at": inventory_request.updated_at,
                 "tool_name": tool.item_description if tool else None,
                 "operator_name": inv_operator.user_name if inv_operator else None,
-                "admin_name": admin.user_name if admin else None,
+                "supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
                 "project_name": project.sale_order_number if project else None,
                 "part_name": part.part_name if part else None
             }
@@ -528,7 +526,7 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
             "created_at": ret_req.created_at,
             "updated_at": ret_req.updated_at,
             "operator_name": operator.user_name if operator else None,
-            "admin_name": admin.user_name if admin else None,
+            "supervisor_name": supervisor.user_name if supervisor else None,
             "inventory_request_details": inventory_request_details
         }
         result.append(InventoryReturnRequestWithDetailsSchema(**request_dict))

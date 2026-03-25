@@ -170,8 +170,10 @@ async def create_document(
         document_name: str = Form(...),
         document_type: str = Form(...),
         document_version: str = Form(...),
-        part_id: int = Form(...),
+        part_id: Optional[int] = Form(None),
+        assembly_id: Optional[int] = Form(None),
         parent_id: Optional[int] = Form(None),
+        user_id: Optional[int] = Form(None),
         db: Session = Depends(get_db)
 ):
     """
@@ -179,13 +181,21 @@ async def create_document(
     Automatically extracts data from PDF files and stores in database
 
     Args:
-        file: File to upload (PDF, DOCX, CSV, XLSX)
+        file: File to upload (PDF, DOCX, CSV, XLSX, images, 3D)
         document_name: Name of the document
         document_type: Type/category of document
         document_version: Version of the document
-        part_id: ID of the associated part
+        part_id: ID of the associated part (optional)
+        assembly_id: ID of the associated assembly (optional)
         parent_id: Optional parent document ID
     """
+    # Ensure at least one of part_id or assembly_id is provided
+    if part_id is None and assembly_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either part_id or assembly_id must be provided"
+        )
+
     # Validate file extension
     if not is_allowed_file(file.filename):
         raise HTTPException(
@@ -197,10 +207,17 @@ async def create_document(
         # Get MinIO client
         minio_client = get_minio_client()
 
+        # Determine owning entity (part or assembly) for storage path
+        owner_prefix = "part"
+        owner_id = part_id
+        if part_id is None and assembly_id is not None:
+            owner_prefix = "assembly"
+            owner_id = assembly_id
+
         # Generate unique object name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_extension = get_file_extension(file.filename)
-        object_name = f"documents/part_{part_id}/{timestamp}_{document_name}{file_extension}"
+        object_name = f"documents/{owner_prefix}_{owner_id}/{timestamp}_{document_name}{file_extension}"
 
         # Read file content
         file_content = await file.read()
@@ -218,12 +235,13 @@ async def create_document(
                 'document_name': document_name,
                 'document_type': document_type,
                 'document_version': document_version,
-                'part_id': str(part_id),
+                'part_id': str(part_id) if part_id is not None else '',
+                'assembly_id': str(assembly_id) if assembly_id is not None else '',
                 'original_filename': file.filename
             }
         )
 
-        # Create database record
+        # Create database record (user_id = uploader: project_coordinator, admin, or manufacturing_coordinator)
         processed_parent_id = None if parent_id in (0, None) else parent_id
         db_document = DocumentModel(
             document_name=document_name,
@@ -231,15 +249,21 @@ async def create_document(
             document_type=document_type,
             document_version=document_version,
             part_id=part_id,
-            parent_id=processed_parent_id
+            assembly_id=assembly_id,
+            parent_id=processed_parent_id,
+            user_id=user_id
         )
 
         db.add(db_document)
         db.commit()
         db.refresh(db_document)
 
-        # Extract data from PDF if applicable (2D files)
-        if file_extension.lower() == '.pdf' and document_type.lower() in ['2d', '2d drawing', 'drawing']:
+        # Extract data from PDF if applicable (2D files) - currently only for part documents
+        if (
+            part_id is not None
+            and file_extension.lower() == '.pdf'
+            and document_type.lower() in ['2d', '2d drawing', 'drawing']
+        ):
             try:
                 extracted = extract_pdf_data(file_content)
                 if extracted:
@@ -269,9 +293,12 @@ async def create_document(
 
 
 @router.get("/", response_model=List[Document])
-def get_documents(db: Session = Depends(get_db)):
-    """Get all documents"""
-    return db.query(DocumentModel).order_by(DocumentModel.id.asc()).all()
+def get_documents(user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all documents. Filter by user_id (uploader) for module-specific views."""
+    query = db.query(DocumentModel).order_by(DocumentModel.id.asc())
+    if user_id is not None:
+        query = query.filter(DocumentModel.user_id == user_id)
+    return query.all()
 
 
 @router.get("/{document_id}", response_model=Document)
@@ -431,10 +458,21 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/part/{part_id}", response_model=List[Document])
-def get_documents_by_part(part_id: int, db: Session = Depends(get_db)):
-    """Get all documents for a specific part"""
-    documents = db.query(DocumentModel).filter(DocumentModel.part_id == part_id).all()
-    return documents
+def get_documents_by_part(part_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all documents for a specific part. Filter by user_id (uploader) for module-specific views."""
+    query = db.query(DocumentModel).filter(DocumentModel.part_id == part_id)
+    if user_id is not None:
+        query = query.filter(DocumentModel.user_id == user_id)
+    return query.all()
+
+
+@router.get("/assembly/{assembly_id}", response_model=List[Document])
+def get_documents_by_assembly(assembly_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+    """Get all documents for a specific assembly. Filter by user_id (uploader) for module-specific views."""
+    query = db.query(DocumentModel).filter(DocumentModel.assembly_id == assembly_id)
+    if user_id is not None:
+        query = query.filter(DocumentModel.user_id == user_id)
+    return query.all()
 
 
 @router.get("/parent/{parent_id}", response_model=List[Document])
@@ -497,10 +535,17 @@ async def replace_document_file(
         old_object_name = db_document.document_url.split(f"/{minio_client.bucket_name}/")[1]
         minio_client.delete_file(old_object_name)
 
+        # Determine owning entity (part or assembly) for storage path
+        owner_prefix = "part"
+        owner_id = db_document.part_id
+        if db_document.part_id is None and db_document.assembly_id is not None:
+            owner_prefix = "assembly"
+            owner_id = db_document.assembly_id
+
         # Generate new object name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_extension = get_file_extension(file.filename)
-        object_name = f"documents/part_{db_document.part_id}/{timestamp}_{db_document.document_name}{file_extension}"
+        object_name = f"documents/{owner_prefix}_{owner_id}/{timestamp}_{db_document.document_name}{file_extension}"
 
         # Read and upload new file
         file_content = await file.read()
@@ -515,7 +560,8 @@ async def replace_document_file(
                 'document_name': db_document.document_name,
                 'document_type': db_document.document_type,
                 'document_version': db_document.document_version,
-                'part_id': str(db_document.part_id),
+                'part_id': str(db_document.part_id) if db_document.part_id is not None else '',
+                'assembly_id': str(db_document.assembly_id) if db_document.assembly_id is not None else '',
                 'original_filename': file.filename
             }
         )

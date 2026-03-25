@@ -31,6 +31,7 @@ from routers import (
     tool_issues_router,
     out_source_parts_status_router,
     maintenance_router,
+    maintenance_router,
 )
 
 # Import Pokayoke checklists router
@@ -44,6 +45,11 @@ from document_routers.machine_documents import router as machine_documents_route
 
 # Import common documents router
 from document_routers.common_documents import router as common_documents_router
+from notification_routers.order_notifications import router as order_notifications_router
+from notification_routers.machine_notifications import router as machine_notifications_router
+from notification_routers.tool_issues_notification import router as tool_issues_notifications_router
+from notification_routers.component_issues_notification import router as component_issues_notifications_router
+from notification_routers.machine_calibration_notification import router as machine_calibration_notifications_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -77,6 +83,12 @@ async def startup_event():
 
     # Create database tables
     try:
+        # Ensure notifications schema exists
+        try:
+            from sqlalchemy import text
+            engine.execute(text("CREATE SCHEMA IF NOT EXISTS notifications"))
+        except Exception:
+            pass
         Base.metadata.create_all(bind=engine)
         print("SUCCESS: Database tables created/verified")
     except Exception as e:
@@ -116,6 +128,7 @@ app.include_router(tools_router, prefix="/api/v1")
 app.include_router(customers_router, prefix="/api/v1")
 app.include_router(orders_router, prefix="/api/v1")
 app.include_router(order_documents_router, prefix="/api/v1")
+
 app.include_router(rawmaterials_router, prefix="/api/v1")
 app.include_router(workcenter_router, prefix="/api/v1")
 app.include_router(general_documents_router)
@@ -131,6 +144,11 @@ app.include_router(inventory_requests_router, prefix="/api/v1")
 app.include_router(inventory_return_requests_router, prefix="/api/v1")
 app.include_router(transaction_history_router, prefix="/api/v1")
 app.include_router(pokayoke_checklists_router, prefix="/api/v1")
+app.include_router(order_notifications_router, prefix="/api/v1")
+app.include_router(machine_notifications_router, prefix="/api/v1")
+app.include_router(tool_issues_notifications_router, prefix="/api/v1")
+app.include_router(component_issues_notifications_router, prefix="/api/v1")
+app.include_router(machine_calibration_notifications_router, prefix="/api/v1")
 app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
 app.include_router(tool_issues_router, prefix="/api/v1")
 app.include_router(out_source_parts_status_router, prefix="/api/v1")
@@ -203,7 +221,8 @@ def system_info():
             "inventory_requests": "/api/v1/inventory-requests",
             "inventory_return_requests": "/api/v1/inventory-return-requests",
             "tool_issues": "/api/v1/tool-issues",
-            "general_documents": "/general-documents"
+            "general_documents": "/general-documents",
+            "maintenance": "/api/v1/maintenance"
         }
     }
 
@@ -214,7 +233,7 @@ if __name__ == "__main__":
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8000,
+        port=3000,
         log_level="info"
     )
 
@@ -227,9 +246,16 @@ if __name__ == "__main__":
 
 
 
+# localsystem
 
+#  uvicorn main:app --reload --host 172.18.7.91 --port 8000
 
 #  uvicorn main:app --reload --host 172.18.7.86 --port 8000
 
+# python -m uvicorn main:app --reload --host 172.18.7.91 --port 8000
 
 # python -m uvicorn main:app --reload --host 172.18.100.76 --port 8000
+
+# server:
+# uvicorn main:app --reload --host 172.18.7.91 --port 3000
+#  uvicorn main:app --reload --host 172.18.7.86 --port 8000
