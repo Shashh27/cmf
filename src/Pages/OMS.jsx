@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
@@ -31,6 +31,18 @@ const OMS = () => {
   const [dateRange, setDateRange] = useState(null);
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
+
+  const getCurrentAdminId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const user = JSON.parse(stored);
+      if (user?.id == null) return null;
+      return user.id;
+    } catch {
+      return null;
+    }
+  };
 
   useEffect(() => {
     if (hasFetchedData.current) return;
@@ -74,7 +86,10 @@ const OMS = () => {
 
   const fetchOrders = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/orders/`);
+      const adminId = getCurrentAdminId();
+      const response = await axios.get(`${API_BASE_URL}/orders/`, {
+        params: adminId != null ? { admin_id: adminId } : undefined,
+      });
       const data = response.data;
       setOrders(Array.isArray(data) ? data : []);
     } catch (error) {
@@ -185,6 +200,21 @@ const OMS = () => {
     setDateRange(dates);
   };
 
+  const orderDatesSet = useMemo(() => {
+    const dates = new Set();
+    orders.forEach(order => {
+      if (order.order_date) dates.add(dayjs(order.order_date).format('YYYY-MM-DD'));
+      if (order.due_date) dates.add(dayjs(order.due_date).format('YYYY-MM-DD'));
+    });
+    return dates;
+  }, [orders]);
+
+  const disabledDate = (current) => {
+    if (!current) return false;
+    // Check if the current date is in our set of order dates
+    return !orderDatesSet.has(current.format('YYYY-MM-DD'));
+  };
+
   const filteredOrders = orders.filter((order, index) => {
     // 0. Product ID Filter (from URL)
     if (productId && order.product_id?.toString() !== productId) return false;
@@ -216,13 +246,10 @@ const OMS = () => {
     // Project Number
     const saleOrderNumber = String(order.sale_order_number || "").toLowerCase();
     
-    // Project Name
-    const projectName = String(order.project_name || "").toLowerCase();
-    
     // Customer
     const customerName = String(getCustomerName(order.customer_id, order) || "").toLowerCase();
     
-    // Product
+    // Project Name (from product)
     const productName = String(getProductName(order.product_id, order) || "").toLowerCase();
     
     // Qty
@@ -240,7 +267,6 @@ const OMS = () => {
     
     return (
       slNo.includes(searchLower) ||
-      projectName.includes(searchLower) ||
       saleOrderNumber.includes(searchLower) ||
       customerName.includes(searchLower) ||
       productName.includes(searchLower) ||
@@ -281,12 +307,6 @@ const OMS = () => {
       render: (text) => <span className="font-medium text-gray-800">{text}</span>,
     },
     {
-      title: <span className="font-semibold text-gray-700">Project Name</span>,
-      dataIndex: "project_name",
-      key: "project_name",
-      render: (text) => <span className="text-gray-600">{text}</span>,
-    },
-    {
       title: <span className="font-semibold text-gray-700">Customer</span>,
       dataIndex: "customer_id",
       key: "customer_id",
@@ -298,7 +318,7 @@ const OMS = () => {
       ),
     },
     {
-      title: <span className="font-semibold text-gray-700">Product</span>,
+      title: <span className="font-semibold text-gray-700">Project Name</span>,
       dataIndex: "product_id",
       key: "product_id",
       render: (productId, record) => (
@@ -351,6 +371,19 @@ const OMS = () => {
         <Space>
           <UserOutlined className="text-gray-400" />
           <span className="text-gray-700">{text || record.user_id}</span>
+        </Space>
+      ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Mfg Coordinator</span>,
+      dataIndex: "manufacturing_coordinator_name",
+      key: "manufacturing_coordinator_name",
+      render: (text, record) => (
+        <Space>
+          <UserOutlined className="text-gray-400" />
+          <span className="text-gray-700">
+            {text || record.manufacturing_coordinator_id || "-"}
+          </span>
         </Space>
       ),
     },
@@ -517,6 +550,7 @@ const OMS = () => {
             <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
               <RangePicker
                 onChange={handleDateRangeChange}
+                disabledDate={disabledDate}
                 className="w-full sm:w-64"
                 format="DD/MM/YYYY"
                 placeholder={["Start Date", "End Date"]}

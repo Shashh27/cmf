@@ -1,4 +1,4 @@
 import React from 'react';
-import Dashboard from '../Supervisor Components/Dashboard';
-const SupervisorDashboard = () => <Dashboard />;
+import SupervisorInventoryDashboard from '../Supervisor Components/Dashboard';
+const SupervisorDashboard = () => <SupervisorInventoryDashboard />;
 export default SupervisorDashboard;

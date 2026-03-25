@@ -115,24 +115,26 @@ const partsColumnWidths = {
 
 const operationsColumnWidths = {
   slNo: 20,
-  partNumber: 60,
-  partName: 100,
-  opNumber: 36,
-  opName: 110,
-  machine: 70,
-  setup: 55,
-  cycle: 55,
-  workcenter: 70,
+  partNumber: 55,
+  partName: 85,
+  opNumber: 30,
+  opName: 90,
+  type: 50,
+  machine: 65,
+  setup: 45,
+  cycle: 45,
+  workcenter: 65,
 };
 
 const opNotesColumnWidths = {
   slNo: 20,
-  partNumber: 60,
-  partName: 90,
-  opNumber: 36,
+  partNumber: 55,
+  partName: 85,
+  opNumber: 30,
   opName: 80,
-  instructions: 150,
-  notes: 150,
+  type: 50,
+  instructions: 110,
+  notes: 110,
 };
 
 const documentsColumnWidths = {
@@ -283,6 +285,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                 <Text style={[styles.headerCell, { width: operationsColumnWidths.opName }]}>
                   Operation
                 </Text>
+                <Text style={[styles.headerCell, { width: operationsColumnWidths.type }]}>
+                  Type
+                </Text>
                 <Text style={[styles.headerCell, { width: operationsColumnWidths.machine }]}>
                   Machine
                 </Text>
@@ -312,6 +317,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                   </Text>
                   <Text style={[styles.cell, { width: operationsColumnWidths.opName }]}>
                     {op.operation_name || "-"}
+                  </Text>
+                  <Text style={[styles.cell, { width: operationsColumnWidths.type }]}>
+                    {op.part_type_name || "IN-House"}
                   </Text>
                   <Text style={[styles.cell, { width: operationsColumnWidths.machine }]}>
                     {op.machine_name || op.machine_id || "-"}
@@ -349,6 +357,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                 <Text style={[styles.headerCell, { width: opNotesColumnWidths.opName }]}>
                   Operation
                 </Text>
+                <Text style={[styles.headerCell, { width: opNotesColumnWidths.type }]}>
+                  Type
+                </Text>
                 <Text style={[styles.headerCell, { width: opNotesColumnWidths.instructions }]}>
                   Instructions
                 </Text>
@@ -372,6 +383,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                   </Text>
                   <Text style={[styles.cell, { width: opNotesColumnWidths.opName }]}>
                     {op.operation_name || "-"}
+                  </Text>
+                  <Text style={[styles.cell, { width: opNotesColumnWidths.type }]}>
+                    {op.part_type_name || "IN-House"}
                   </Text>
                   <Text style={[styles.cell, { width: opNotesColumnWidths.instructions }]}>
                     {op.work_instructions || "-"}
@@ -429,7 +443,7 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                     {doc.document_name || "-"}
                   </Text>
                   <Text style={[styles.cell, { width: documentsColumnWidths.version }]}>
-                    {doc.document_version || "1.0"}
+                    {doc.document_version ? (doc.document_version.startsWith('v') ? doc.document_version : `v${doc.document_version}`) : "v1.0"}
                   </Text>
                 </View>
               ))}

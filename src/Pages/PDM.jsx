@@ -3,7 +3,9 @@ import { Layout, Drawer, Button } from "antd";
 import { MenuOutlined } from "@ant-design/icons";
 import BillOfMaterials from "../PDM Components/BillOfMaterials";
 import ProductDetails from "../PDM Components/ProductDetails";
+import ProductSummary from "../PDM Components/ProductSummary";
 import DocumentsPanel from "../PDM Components/DocumentsPanel";
+import AssemblyDocumentsPanel from "../PDM Components/AssemblyDocumentsPanel";
 
 const { Sider, Content } = Layout;
 
@@ -12,6 +14,7 @@ const PDM = () => {
   const [partDocuments, setPartDocuments] = useState([]);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  const [productHierarchies, setProductHierarchies] = useState({});
 
   // Detect screen size
   React.useEffect(() => {
@@ -29,6 +32,10 @@ const PDM = () => {
     setPartDocuments([]);
     if (isMobile) setMobileDrawerOpen(false); // Close drawer on mobile after selection
   };
+  const handleHierarchyLoaded = (productId, hierarchy) => {
+    setProductHierarchies(prev => ({ ...prev, [productId]: hierarchy }));
+  };
+  const isProductSelected = selectedItem?.itemType === "product";
 
   return (
     <>
@@ -69,7 +76,10 @@ const PDM = () => {
               maxWidth: 500
             }}
           >
-            <BillOfMaterials onItemSelected={handleItemSelected} />
+            <BillOfMaterials 
+              onItemSelected={handleItemSelected} 
+              onHierarchyLoaded={handleHierarchyLoaded}
+            />
           </Sider>
         )}
 
@@ -82,11 +92,14 @@ const PDM = () => {
             style={{ width: '85%' }}
             styles={{ body: { padding: 0 } }}
           >
-            <BillOfMaterials onItemSelected={handleItemSelected} />
+            <BillOfMaterials 
+              onItemSelected={handleItemSelected} 
+              onHierarchyLoaded={handleHierarchyLoaded}
+            />
           </Drawer>
         )}
         
-        {/* Right: ProductDetails on top, DocumentsPanel gets remaining space */}
+        {/* Right: Product summary for product; otherwise details + documents */}
         <Content 
           style={{ 
             display: "flex", 
@@ -97,19 +110,40 @@ const PDM = () => {
             marginLeft: isMobile ? 0 : undefined
           }}
         >
-          <div 
-            style={{ 
-              flexShrink: 0, 
-              maxHeight: isMobile ? "30vh" : "38vh", 
-              minHeight: 0, 
-              overflow: "hidden" 
-            }}
-          >
-            <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments} />
-          </div>
-          <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-            <DocumentsPanel selectedItem={selectedItem} onDocumentsLoaded={setPartDocuments} />
-          </div>
+          {isProductSelected ? (
+            <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+              <ProductSummary 
+                productId={selectedItem?.id} 
+                initialHierarchy={productHierarchies[selectedItem?.id]}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Top panel: only show detailed part view for parts; assemblies/products handled separately */}
+              {selectedItem?.itemType === 'part' && (
+                <div 
+                  style={{ 
+                    flexShrink: 0, 
+                    maxHeight: isMobile ? "30vh" : "38vh", 
+                    minHeight: 0, 
+                    overflow: "hidden" 
+                  }}
+                >
+                  <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments} />
+                </div>
+              )}
+              <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                {selectedItem?.itemType === 'assembly' ? (
+                  <AssemblyDocumentsPanel selectedItem={selectedItem} />
+                ) : (
+                  <DocumentsPanel
+                    selectedItem={selectedItem}
+                    onDocumentsLoaded={setPartDocuments}
+                  />
+                )}
+              </div>
+            </>
+          )}
         </Content>
       </Layout>
     </>

@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Modal, Upload, Button, Table, Tag, message } from "antd";
 import { InboxOutlined, FileTextOutlined } from "@ant-design/icons";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
 const { Dragger } = Upload;
@@ -10,6 +11,15 @@ const OperationImportModal = ({ open, onCancel, onUseOperations }) => {
   const [loading, setLoading] = useState(false);
   const [operations, setOperations] = useState([]);
   const [hasExtracted, setHasExtracted] = useState(false);
+
+  // Reset state when modal opens
+  useEffect(() => {
+    if (open) {
+      setFileList([]);
+      setOperations([]);
+      setHasExtracted(false);
+    }
+  }, [open]);
 
   const handleBeforeUpload = (file) => {
     setFileList([file]);
@@ -36,21 +46,16 @@ const OperationImportModal = ({ open, onCancel, onUseOperations }) => {
     const formData = new FormData();
     formData.append("file", fileToUse);
     try {
-      const response = await fetch(`${API_BASE_URL}/operations/parse-mpp`, {
-        method: "POST",
-        body: formData
-      });
-      if (!response.ok) {
-        let detail = "Failed to extract operations";
-        try {
-          const errorData = await response.json();
-          if (errorData.detail) detail = errorData.detail;
-        } catch {
-        }
-        throw new Error(detail);
-      }
-      const data = await response.json();
-      setOperations(data || []);
+      const response = await axios.post(
+        `${API_BASE_URL}/operations/parse-mpp`,
+        formData
+      );
+      const data = response.data;
+      const opsWithKeys = (data || []).map((op, idx) => ({
+        ...op,
+        tempId: op.operation_number || `op-${idx}-${Date.now()}`
+      }));
+      setOperations(opsWithKeys);
       setHasExtracted(true);
       message.success(`Extracted ${data.length} operations`);
     } catch (error) {
@@ -68,6 +73,10 @@ const OperationImportModal = ({ open, onCancel, onUseOperations }) => {
       return;
     }
     onUseOperations(operations);
+    // Reset state after using
+    setFileList([]);
+    setOperations([]);
+    setHasExtracted(false);
   };
 
   const handleClose = () => {
@@ -176,7 +185,7 @@ const OperationImportModal = ({ open, onCancel, onUseOperations }) => {
               size="small"
               dataSource={operations}
               columns={columns}
-              rowKey={(row, index) => `${row.operation_number || index}`}
+              rowKey="tempId"
               pagination={false}
               scroll={{ x: 600, y: 220 }}
             />

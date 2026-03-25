@@ -48,7 +48,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     current: 1,
     pageSize: 10,
   });
-  
+
   // Modal state
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [currentRecord, setCurrentRecord] = useState(null);
@@ -62,7 +62,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   const [issueQty, setIssueQty] = useState(1);
   const [issueCategory, setIssueCategory] = useState(undefined);
   const [issueDescription, setIssueDescription] = useState('');
-  const [issueFile, setIssueFile] = useState(null);
+  const [issueFiles, setIssueFiles] = useState([]);
   const [issueCustomCategory, setIssueCustomCategory] = useState('');
   const [issuesByReq, setIssuesByReq] = useState({});
   // Issue quantity exceeded popup (issue qty > remaining)
@@ -76,14 +76,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       .reduce((sum, rr) => sum + (rr.returned_qty || 0), 0);
     const issues = issuesByReq[req.id] || 0;
     return Math.max(0, (req.quantity || 0) - returned - issues);
-  };
-
-  const isConsumableType = (record) => {
-    // Check if the tool is consumable based on tool type or category
-    // You may need to adjust this logic based on your data structure
-    return record.tool_type?.toLowerCase()?.includes('consumable') || 
-           record.category?.toLowerCase()?.includes('consumable') ||
-           record.is_consumable === true;
   };
 
   useEffect(() => {
@@ -111,18 +103,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   };
 
   const totalRequested = requests.reduce((sum, r) => sum + (r.quantity || 0), 0);
-  const pendingByReq = returnRequests.reduce((acc, rr) => {
-    if (rr.status === 'pending' || rr.status === 'not_collected') {
-      acc[rr.requested_id] = (acc[rr.requested_id] || 0) + (rr.returned_qty || 0);
-    }
-    return acc;
-  }, {});
-  const collectedByReq = returnRequests.reduce((acc, rr) => {
-    if (rr.status === 'collected') {
-      acc[rr.requested_id] = (acc[rr.requested_id] || 0) + (rr.returned_qty || 0);
-    }
-    return acc;
-  }, {});
   const totalReturned = returnRequests.reduce((sum, rr) => {
     return rr.status === 'collected' ? sum + (rr.returned_qty || 0) : sum;
   }, 0);
@@ -144,7 +124,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
       if (response.ok) {
         let data = await response.json();
-        // Sort by date descending
         const sortedData = Array.isArray(data) ? data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];
         const currentOpId = getCurrentOperatorId();
         const filteredSorted = currentOpId != null
@@ -183,9 +162,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       console.error('Failed to fetch return requests:', error);
     }
   };
+
   const fetchToolIssues = async () => {
     try {
-      // scope to current operator if available
       let operator_id = null;
       const storedUser = localStorage.getItem('user');
       if (storedUser) {
@@ -218,7 +197,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   };
 
   const handleReturnTool = (record) => {
-    // ensure latest outstanding before opening
     fetchToolIssues();
     fetchReturnRequests();
     const remaining = computeRemaining(record);
@@ -234,8 +212,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
 
   const handleReturnSubmit = async () => {
     if (!currentRecord) return;
-
-    // Recompute remaining at submit time (in case of stale data)
     const remaining = computeRemaining(currentRecord);
     if (returnQuantity < 1) {
       message.error('Return quantity must be at least 1');
@@ -246,10 +222,8 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       setShowQuantityExceededModal(true);
       return;
     }
-    
     setReturnLoading(true);
     try {
-      // Get operator_id from localStorage user object
       let operator_id = null;
       const storedUser = localStorage.getItem('user');
       if (storedUser) {
@@ -260,26 +234,21 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
           console.error("Error parsing user from local storage", e);
         }
       }
-      
-      // Fallback to direct operator_id if not found in user object
       if (!operator_id) {
         operator_id = localStorage.getItem('operator_id');
       }
-
       if (!operator_id) {
         throw new Error('Operator ID not found. Please log in again.');
       }
-      
       const payload = {
-        requested_id: currentRecord.id, // backend expects requested_id
+        requested_id: currentRecord.id,
         operator_id: operator_id ? parseInt(operator_id) : null,
         total_requested_qty: currentRecord.quantity,
         returned_qty: returnQuantity,
         remarks: remarks || "Returned by operator",
-        status: 'pending', // Initial status
+        status: 'pending',
         return_date: new Date().toISOString()
       };
-
       const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`, {
         method: 'POST',
         headers: {
@@ -288,23 +257,21 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
         },
         body: JSON.stringify(payload)
       });
-
       if (response.ok) {
         message.success('Return request initiated successfully');
         setIsModalVisible(false);
-        fetchRequests(); // Refresh the list to update returned quantities
-        fetchReturnRequests(); // Refresh return requests to update KPI
+        fetchRequests();
+        fetchReturnRequests();
         if (onReturnSuccess) {
           onReturnSuccess();
         }
       } else {
         const errorData = await response.json().catch(() => ({}));
-        const errorMessage = typeof errorData.detail === 'object' 
-          ? JSON.stringify(errorData.detail) 
+        const errorMessage = typeof errorData.detail === 'object'
+          ? JSON.stringify(errorData.detail)
           : (errorData.detail || 'Failed to initiate return');
         throw new Error(errorMessage);
       }
-
     } catch (error) {
       console.error('Error returning tool:', error);
       notification.error({
@@ -317,7 +284,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   };
 
   const openIssueModal = (record) => {
-    // Compute outstanding before opening
     fetchToolIssues();
     fetchReturnRequests();
     const outstanding = computeRemaining(record);
@@ -329,13 +295,12 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     setIssueQty(Math.min(1, outstanding) || 1);
     setIssueCategory(undefined);
     setIssueDescription('');
-    setIssueFile(null);
+    setIssueFiles([]);
     setIsIssueModalVisible(true);
   };
 
   const handleIssueSubmit = async () => {
     if (!currentRecord) return;
-    // client-side validation for max within outstanding
     const outstanding = computeRemaining(currentRecord);
     if (issueQty <= 0) {
       message.error('Issue quantity must be at least 1');
@@ -347,7 +312,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       return;
     }
     try {
-      // operator id
       let operator_id = null;
       const storedUser = localStorage.getItem('user');
       if (storedUser) {
@@ -373,8 +337,11 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       }
       if (categoryToSend) formData.append('issue_category', categoryToSend);
       if (issueDescription) formData.append('description', issueDescription);
-      if (issueFile) formData.append('document', issueFile);
-      
+      if (issueFiles && issueFiles.length > 0) {
+        issueFiles.forEach(file => {
+          formData.append('document', file);
+        });
+      }
       const resp = await fetch(`${API_BASE_URL}/tool-issues/`, {
         method: 'POST',
         body: formData,
@@ -418,7 +385,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       },
     },
     {
-      title: 'Total Quantity',
+      title: 'Requested Qty',
       dataIndex: 'quantity',
       key: 'quantity',
       width: 100,
@@ -427,7 +394,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       title: 'Remaining Qty',
       key: 'remaining_qty',
       width: 130,
-      align: 'center',
+      // align: 'center',
       render: (_, record) => {
         const remaining = computeRemaining(record);
         return remaining > 0 ? remaining : 0;
@@ -469,8 +436,8 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     },
     {
       title: 'Approved By',
-      dataIndex: 'admin_name',
-      key: 'admin_name',
+      dataIndex: 'inventory_supervisor_name',
+      key: 'inventory_supervisor_name',
       width: 150,
       ellipsis: true,
       render: (text) => text || <span style={{ color: '#999', fontStyle: 'italic' }}>Pending</span>,
@@ -483,80 +450,82 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       render: (_, record) => {
         const remaining = computeRemaining(record);
         const isExhausted = remaining <= 0;
-        
         return (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button 
-            type="primary" 
-            size="small"
-            disabled={record.status !== 'approved' || isExhausted}
-            onClick={() => handleReturnTool(record)}
-            loading={returnLoading}
-          >
-            {isExhausted ? 'Returned' : 'Return Tool'}
-          </Button>
-          <Button
-            danger
-            size="small"
-            disabled={record.status !== 'approved' || isExhausted}
-            onClick={() => openIssueModal(record)}
-          >
-            Report Issue
-          </Button>
-        </div>
-      )},
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button
+              type="primary"
+              size="small"
+              disabled={record.status !== 'approved' || isExhausted}
+              onClick={() => handleReturnTool(record)}
+              loading={returnLoading}
+            >
+              {isExhausted ? 'Returned' : 'Return Tool'}
+            </Button>
+            <Button
+              danger
+              size="small"
+              disabled={record.status !== 'approved' || isExhausted}
+              onClick={() => openIssueModal(record)}
+            >
+              Report Issue
+            </Button>
+          </div>
+        );
+      },
     },
   ];
 
   return (
     <div style={{ background: '#f0f2f5', padding: '0px', borderRadius: '8px' }}>
-      {/* KPI Cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        <Col xs={24} sm={12} md={6}>
-          <KpiCard
-            title="Total Tool Requested"
-            count={totalRequested}
-            label="Tools"
-            icon={<ToolOutlined style={{ fontSize: '20px', color: '#1677FF' }} />}
-            color="#1677FF"
-            bgColor="#E6F4FF"
-          />
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <KpiCard
-            title="Total Tool Collected"
-            count={totalReturned}
-            label="Collected"
-            icon={<CheckCircleOutlined style={{ fontSize: '20px', color: '#52C41A' }} />}
-            color="#237804"
-            bgColor="#F6FFED"
-          />
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <KpiCard
-            title="Total Tool to be Returned"
-            count={totalToBeReturned}
-            label="To be returned"
-            icon={<ClockCircleOutlined style={{ fontSize: '20px', color: '#FA8C16' }} />}
-            color="#FA8C16"
-            bgColor="#FFF7E6"
-          />
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <KpiCard
-            title="Total Tools yet to be Collected"
-            count={yetToBeCollected}
-            label="Not collected"
-            icon={<ClockCircleOutlined style={{ fontSize: '20px', color: '#EB2F96' }} />}
-            color="#EB2F96"
-            bgColor="#FFF0F6"
-          />
-        </Col>
-      </Row>
+      <Card style={{ borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
 
-      <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+        {/* KPI Cards */}
+        <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+          <Col xs={24} sm={12} md={6}>
+            <KpiCard
+              title="Total Tool Requested"
+              count={totalRequested}
+              label="Tools"
+              icon={<ToolOutlined style={{ fontSize: '20px', color: '#1677FF' }} />}
+              color="#1677FF"
+              bgColor="#E6F4FF"
+            />
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <KpiCard
+              title="Total Tool Collected"
+              count={totalReturned}
+              label="Collected"
+              icon={<CheckCircleOutlined style={{ fontSize: '20px', color: '#52C41A' }} />}
+              color="#237804"
+              bgColor="#F6FFED"
+            />
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <KpiCard
+              title="Total Tool to be Returned"
+              count={totalToBeReturned}
+              label="To be returned"
+              icon={<ClockCircleOutlined style={{ fontSize: '20px', color: '#FA8C16' }} />}
+              color="#FA8C16"
+              bgColor="#FFF7E6"
+            />
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <KpiCard
+              title="Total Tools yet to be Collected"
+              count={yetToBeCollected}
+              label="Not collected"
+              icon={<ClockCircleOutlined style={{ fontSize: '20px', color: '#EB2F96' }} />}
+              color="#EB2F96"
+              bgColor="#FFF0F6"
+            />
+          </Col>
+        </Row>
+
+        {/* Search + Table */}
         <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
-         <Input
+          <Input
             placeholder="Search requested tools..."
             allowClear
             prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
@@ -564,24 +533,26 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
             style={{ width: 300 }}
             onChange={(e) => setSearchText(e.target.value)}
           />
-      </div>
-      <Table 
-        columns={columns} 
-        dataSource={requests} 
-        rowKey="id" 
-        loading={loading}
-        scroll={{ x: 'max-content' }}
-        pagination={{
+        </div>
+        <Table
+          columns={columns}
+          dataSource={requests}
+          rowKey="id"
+          loading={loading}
+          scroll={{ x: 'max-content' }}
+          pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
             position: ['bottomCenter']
-        }}
-        onChange={handleTableChange}
-      />
-      
+          }}
+          onChange={handleTableChange}
+        />
+      </Card>
+
+      {/* Return Tool Modal */}
       <Modal
         title="Return Tool"
         open={isModalVisible}
@@ -592,10 +563,10 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       >
         <Form layout="vertical">
           <Form.Item label="Tool Name">
-             <Input value={currentRecord?.tool_name} disabled />
+            <Input value={currentRecord?.tool_name} disabled />
           </Form.Item>
           <Form.Item label="Return Quantity">
-            <InputNumber 
+            <InputNumber
               min={1}
               value={returnQuantity}
               onChange={(val) => {
@@ -612,7 +583,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
             </div>
           </Form.Item>
           <Form.Item label="Remarks">
-            <Input.TextArea 
+            <Input.TextArea
               rows={3}
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
@@ -621,6 +592,8 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* Return Quantity Exceeded Modal */}
       <Modal
         title="Invalid Quantity"
         open={showQuantityExceededModal}
@@ -633,9 +606,11 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
         closable
       >
         <p style={{ margin: 0 }}>
-          Return quantity is more than the remaining quantity. Remaining quantity is <strong>{quantityExceededRemaining}</strong>. 
+          Return quantity is more than the remaining quantity. Remaining quantity is <strong>{quantityExceededRemaining}</strong>.
         </p>
       </Modal>
+
+      {/* Report Issue Modal */}
       <Modal
         title="Report Issue"
         open={isIssueModalVisible}
@@ -648,9 +623,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
             <Input value={currentRecord?.tool_name} disabled />
           </Form.Item>
           <Form.Item label="Issue Quantity">
-            <InputNumber 
+            <InputNumber
               min={1}
-              value={issueQty} 
+              value={issueQty}
               onChange={(val) => {
                 if (typeof val === 'number') {
                   if (val < 1) setIssueQty(1);
@@ -692,14 +667,17 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
               onChange={(e) => setIssueDescription(e.target.value)}
             />
           </Form.Item>
-          <Form.Item label="Attach Document (optional)">
+          <Form.Item label="Attach Documents (optional)">
             <input
               type="file"
-              onChange={(e) => setIssueFile(e.target.files?.[0] || null)}
+              multiple
+              onChange={(e) => setIssueFiles(Array.from(e.target.files || []))}
             />
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* Issue Quantity Exceeded Modal */}
       <Modal
         title="Invalid Quantity"
         open={showIssueQuantityExceededModal}
@@ -712,10 +690,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
         closable
       >
         <p style={{ margin: 0 }}>
-          Issue quantity is more than the remaining quantity. Remaining quantity is <strong>{issueQuantityExceededRemaining}</strong>. 
+          Issue quantity is more than the remaining quantity. Remaining quantity is <strong>{issueQuantityExceededRemaining}</strong>.
         </p>
       </Modal>
-    </div>
     </div>
   );
 };

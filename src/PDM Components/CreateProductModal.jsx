@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Modal, Form, Input, Select, Button, message, Badge } from "antd";
 
@@ -182,11 +183,8 @@ const CreateProductModal = ({
 
   const fetchPartTypes = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/part-types/`);
-      if (response.ok) {
-        const data = await response.json();
-        setPartTypes(data);
-      }
+      const response = await axios.get(`${API_BASE_URL}/part-types/`);
+      setPartTypes(response.data);
     } catch (error) {
       console.error("Error fetching part types:", error);
     }
@@ -194,45 +192,41 @@ const CreateProductModal = ({
 
   const fetchRawMaterials = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/rawmaterials/`);
-      if (response.ok) {
-        const data = await response.json();
-        setRawMaterials(data);
-      }
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
+      setRawMaterials(response.data);
     } catch (error) {
       console.error("Error fetching raw materials:", error);
+    }
+  };
+
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem('user');
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u?.id == null) return null;
+      return u.id;
+    } catch {
+      return null;
     }
   };
 
   const handleFinish = async (values) => {
     setLoading(true);
 
-    // Merge values with necessary IDs
-    const currentProductId = mode === 'edit' && editingItem ? editingItem.product_id : (selectedProduct?.id || '');
-    const currentAssemblyId = mode === 'edit' && editingItem ? editingItem.assembly_id : (parentAssembly?.id || null);
-    
-    // For assembly/part creation, we need product_id from context if not editing
-    // If editing, we use the existing IDs
-    
     try {
       let url, method, payload;
 
       if (createType === 'product') {
         url = `${API_BASE_URL}/products${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
         method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
-        // Get user_id from localStorage
-        let uid = null;
-        try {
-          const stored = localStorage.getItem('user');
-          if (stored) {
-            const u = JSON.parse(stored);
-            uid = u?.id ?? null;
-          }
-        } catch {}
+        const uid = getCurrentUserId();
         payload = {
           product_number: values.product_number,
           product_name: values.product_name,
-          product_version: values.product_version,
+          product_version: (mode === 'edit' && editingItem)
+            ? (editingItem?.product_version ?? values.product_version ?? '1.0')
+            : '1.0',
           user_id: uid
         };
       } else if (createType === 'assembly') {
@@ -242,7 +236,8 @@ const CreateProductModal = ({
           assembly_number: values.assembly_number,
           assembly_name: values.assembly_name,
           product_id: editingItem?.product_id || selectedProduct?.id,
-          parent_id: parentAssembly?.id || editingItem?.parent_id || null
+          parent_id: parentAssembly?.id || editingItem?.parent_id || null,
+          user_id: getCurrentUserId(),
         };
       } else if (createType === 'part') {
         url = `${API_BASE_URL}/parts${mode === 'edit' && editingItem ? `/${editingItem.id}` : '/'}`;
@@ -253,29 +248,31 @@ const CreateProductModal = ({
           type_id: values.type_id,
           raw_material_id: values.raw_material_id,
           assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
-          product_id: editingItem?.product_id || selectedProduct?.id
+          product_id: editingItem?.product_id || selectedProduct?.id,
+          user_id: getCurrentUserId(),
         };
       }
 
-      const response = await fetch(url, {
-        method,
+      const response = await axios({
+        url,
+        method: method.toLowerCase(),
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        data: payload,
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        onProductCreated(result, createType, mode === 'edit' ? 'edit' : 'create');
-        onCancel(); // Close modal
-        form.resetFields();
-      } else {
-        message.error('Error creating item');
-      }
+      const result = response.data;
+      onProductCreated(result, createType, mode === 'edit' ? 'edit' : 'create');
+      onCancel();
+      form.resetFields();
     } catch (error) {
       console.error('Error:', error);
-      message.error('An error occurred');
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        'An error occurred';
+      message.error(detail);
     } finally {
       setLoading(false);
     }
@@ -351,22 +348,35 @@ const CreateProductModal = ({
               name="product_number"
               label={<span className="text-xs sm:text-sm">Product Number</span>}
               rules={[{ required: true, message: 'Please input product number!' }]}
+              getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9-_]/g, '').slice(0, 30)}
             >
-              <Input placeholder="e.g., PRD-001" autoComplete="off" size="large" />
+              <Input placeholder="e.g., PRD-001" autoComplete="off" size="large" maxLength={30} />
             </Form.Item>
             <Form.Item
               name="product_name"
               label={<span className="text-xs sm:text-sm">Product Name</span>}
               rules={[{ required: true, message: 'Please input product name!' }]}
+              getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}
             >
-              <Input placeholder="e.g., Main Product" autoComplete="off" size="large" />
+              <Input placeholder="e.g., Main Product" autoComplete="off" size="large" maxLength={30} />
             </Form.Item>
             <Form.Item
               name="product_version"
               label={<span className="text-xs sm:text-sm">Product Version</span>}
               rules={[{ required: true, message: 'Please input product version!' }]}
             >
-              <Input placeholder="e.g., 1.0" autoComplete="off" size="large" />
+              <Input
+                placeholder="1.0"
+                autoComplete="off"
+                size="large"
+                readOnly
+                disabled
+                style={{
+                  backgroundColor: '#f5f5f5',
+                  color: '#6b7280',
+                  borderColor: '#e5e7eb'
+                }}
+              />
             </Form.Item>
           </>
         )}
@@ -377,15 +387,17 @@ const CreateProductModal = ({
               name="assembly_number"
               label={<span className="text-xs sm:text-sm">Assembly Number</span>}
               rules={[{ required: true, message: 'Please input assembly number!' }]}
+              getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9-_]/g, '').slice(0, 30)}
             >
-              <Input placeholder="e.g., ASM-001" autoComplete="off" size="large" />
+              <Input placeholder="e.g., ASM-001" autoComplete="off" size="large" maxLength={30} />
             </Form.Item>
             <Form.Item
               name="assembly_name"
               label={<span className="text-xs sm:text-sm">Assembly Name</span>}
               rules={[{ required: true, message: 'Please input assembly name!' }]}
+              getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}
             >
-              <Input placeholder="e.g., Main Assembly" autoComplete="off" size="large" />
+              <Input placeholder="e.g., Main Assembly" autoComplete="off" size="large" maxLength={30} />
             </Form.Item>
           </>
         )}
@@ -396,15 +408,17 @@ const CreateProductModal = ({
               name="part_number"
               label={<span className="text-xs sm:text-sm">Part Number</span>}
               rules={[{ required: true, message: 'Please input part number!' }]}
+              getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9-_]/g, '').slice(0, 30)}
             >
-              <Input placeholder="e.g., PRT-001" autoComplete="off" size="large" />
+              <Input placeholder="e.g., PRT-001" autoComplete="off" size="large" maxLength={30} />
             </Form.Item>
             <Form.Item
               name="part_name"
               label={<span className="text-xs sm:text-sm">Part Name</span>}
               rules={[{ required: true, message: 'Please input part name!' }]}
+              getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}
             >
-              <Input placeholder="e.g., Component Part" autoComplete="off" size="large" />
+              <Input placeholder="e.g., Component Part" autoComplete="off" size="large" maxLength={30} />
             </Form.Item>
             <Form.Item
               name="type_id"

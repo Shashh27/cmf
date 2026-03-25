@@ -72,6 +72,18 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
     return 'default';
   };
 
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const user = JSON.parse(stored);
+      if (user?.id == null) return null;
+      return user.id;
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     if (!hasFetchedData.current) {
       hasFetchedData.current = true;
@@ -81,7 +93,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
 
   const fetchProducts = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/products/`);
+      // Filter by user_id: each admin sees only their own products. For those products, operations/documents from project coordinator and manufacturing coordinator are still shown (no filter when fetching by part/operation).
+      const adminId = getCurrentUserId();
+      const response = await axios.get(`${API_BASE_URL}/products/`, {
+        params: adminId != null ? { user_id: adminId } : undefined,
+      });
       setProducts(response.data);
     } catch (error) {
       console.error('Error fetching products:', error);
@@ -610,7 +626,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded }) => {
   };
 
   const filteredProducts = products.filter(product =>
-    product.product_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    // product.product_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
     product.product_name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 

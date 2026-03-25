@@ -1,8 +1,24 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import { Button, Typography, Table, Space, message, Tag, Card, Tooltip, Badge, Modal, Spin, Select } from "antd";
-import { CaretDownOutlined, CaretRightOutlined, ArrowLeftOutlined, AppstoreOutlined, BlockOutlined, CodeSandboxOutlined,CodepenOutlined,EyeOutlined,
-  DownloadOutlined,FileTextOutlined,ToolOutlined,ClockCircleOutlined,EnvironmentOutlined,InfoCircleOutlined,CloseOutlined} from "@ant-design/icons";
+import { 
+  CaretDownOutlined, 
+  CaretRightOutlined, 
+  ArrowLeftOutlined, 
+  AppstoreOutlined, 
+  BlockOutlined, 
+  CodeSandboxOutlined,
+  CodepenOutlined,
+  EyeOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
+  ToolOutlined,
+  ClockCircleOutlined,
+  EnvironmentOutlined,
+  InfoCircleOutlined,
+  CloseOutlined
+} from "@ant-design/icons";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
 const { Title, Text } = Typography;
@@ -33,13 +49,13 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
         if (!isMounted) return;
         setLoading(true);
         try {
-            const response = await fetch(`${API_BASE_URL}/operation-documents/operation/${operationId}`, { signal });
-            if (response.ok) {
-                const data = await response.json();
-                if (isMounted) setDocs(data);
-            }
+            const response = await axios.get(
+                `${API_BASE_URL}/operation-documents/operation/${operationId}`,
+                { signal }
+            );
+            if (isMounted) setDocs(response.data);
         } catch (error) {
-            if (error.name !== 'AbortError') {
+            if (error.name !== 'CanceledError' && error.name !== 'AbortError') {
                 console.error("Error fetching operation documents:", error);
             }
         } finally {
@@ -72,7 +88,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
             dataIndex: 'document_version',
             key: 'document_version',
             width: 100,
-            render: (text) => <span className="text-gray-500 text-xs">v{text || '1.0'}</span>
+            render: (text) => <span className="text-gray-500 text-xs">{text?.startsWith('v') ? text : `v${text || '1.0'}`}</span>
         },
         {
             title: 'Actions',
@@ -190,12 +206,13 @@ const ProductBOMView = ({ onBackToOrders }) => {
     fetchBOMData().catch(console.error);
   }, [productId]);
 
-  const processSubassemblies = (subassemblies) => 
+  const processSubassemblies = (subassemblies) =>
     subassemblies?.flatMap(sub => [{
       id: sub.assembly?.id,
       name: sub.assembly?.assembly_name,
       part_number: sub.assembly?.assembly_number,
       type: 'assembly',
+      documents: sub.documents || [],
       components: [
         ...(sub.parts?.map(p => ({
           id: p.part.id,
@@ -205,19 +222,18 @@ const ProductBOMView = ({ onBackToOrders }) => {
           operations: p.operations,
           process_plans: p.process_plans,
           documents: p.documents,
-          tools: p.tools
+          tools: p.tools,
+          extracted_data: p.extracted_data || [],
         })) || []),
         ...processSubassemblies(sub.subassemblies || [])
-      ]
+      ].sort((a, b) => a.id - b.id)
     }]) || [];
 
   const fetchBOMData = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/products/${productId}/hierarchical`);
-      if (!response.ok) return setBomData(null);
-      
-      const data = await response.json();
+      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical`);
+      const data = response.data;
       if (data.product) {
         setProduct(data.product);
       }
@@ -226,6 +242,7 @@ const ProductBOMView = ({ onBackToOrders }) => {
         name: asm.assembly?.assembly_name,
         part_number: asm.assembly?.assembly_number,
         type: 'assembly',
+        documents: asm.documents || [],
         components: [
           ...(asm.parts?.map(p => ({
             id: p.part.id,
@@ -235,10 +252,11 @@ const ProductBOMView = ({ onBackToOrders }) => {
             operations: p.operations,
             process_plans: p.process_plans,
             documents: p.documents,
-            tools: p.tools
+            tools: p.tools,
+            extracted_data: p.extracted_data || [],
           })) || []),
           ...processSubassemblies(asm.subassemblies || [])
-        ]
+        ].sort((a, b) => a.id - b.id)
       })) || [];
 
       const transformedData = {
@@ -255,10 +273,11 @@ const ProductBOMView = ({ onBackToOrders }) => {
             operations: p.operations,
             process_plans: p.process_plans,
             documents: p.documents,
-            tools: p.tools
+            tools: p.tools,
+            extracted_data: p.extracted_data || [],
           })) || []),
           ...processedAssemblies
-        ]
+        ].sort((a, b) => a.id - b.id)
       };
 
       setBomData(transformedData);
@@ -319,13 +338,12 @@ const ProductBOMView = ({ onBackToOrders }) => {
       if (url.startsWith('data:') || url.startsWith('blob:')) {
         link.href = url;
       } else {
-        const response = await fetch(url, {
-          method: 'GET',
+        const response = await axios.get(url, {
+          responseType: 'blob',
           headers: { 'Content-Type': 'application/octet-stream' },
-          credentials: 'include'
+          withCredentials: true,
         });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        link.href = window.URL.createObjectURL(await response.blob());
+        link.href = window.URL.createObjectURL(response.data);
       }
       link.download = name?.includes('.') ? name : `${name || 'document'}.pdf`;
       document.body.appendChild(link);
@@ -432,9 +450,10 @@ const ProductBOMView = ({ onBackToOrders }) => {
         dataIndex: 'version',
         key: 'version',
         width: 100,
-        render: (version, record) => (
-          <Tag color="green">{version || record.document_version || '1.0'}</Tag>
-        ),
+        render: (version, record) => {
+          const v = version || record.document_version || '1.0';
+          return <Tag color="green">{v.startsWith('v') ? v : `v${v}`}</Tag>;
+        },
       },
       {
         title: <span className="font-semibold text-gray-700">Actions</span>,
@@ -671,8 +690,9 @@ const ProductBOMView = ({ onBackToOrders }) => {
                     const group = groupedPartDocs[rootId] || [];
                     const currentDoc = selectedDocVersions[rootId] || record;
                     const latestDoc = record;
+                    const v = currentDoc.document_version || '1.0';
                     if (group.length <= 1) {
-                      return <Tag color="green">v{currentDoc.document_version || '1.0'}</Tag>;
+                      return <Tag color="green">{v.startsWith('v') ? v : `v${v}`}</Tag>;
                     }
                     return (
                       <Select
@@ -687,10 +707,13 @@ const ProductBOMView = ({ onBackToOrders }) => {
                         style={{ minWidth: 140 }}
                         options={group
                           .sort((a, b) => parseFloat(b.document_version || '0') - parseFloat(a.document_version || '0'))
-                          .map(ver => ({
-                            value: ver.id,
-                            label: `v${ver.document_version || '1.0'}`,
-                          }))}
+                          .map(ver => {
+                            const verStr = ver.document_version || '1.0';
+                            return {
+                              value: ver.id,
+                              label: verStr.startsWith('v') ? verStr : `v${verStr}`,
+                            };
+                          })}
                         optionRender={(option) => (
                           <span className="flex items-center gap-2">
                             <Badge status={option.value === latestDoc.id ? 'success' : 'default'} />

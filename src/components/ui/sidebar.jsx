@@ -27,21 +27,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   
-  // Detect mobile screen
-  useEffect(() => {
-    const handleResize = () => {
-      const mobile = window.innerWidth < 768;
-      setIsMobile(mobile);
-      if (!mobile) {
-        setMobileDrawerOpen(false);
-      }
-    };
-    
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
   // Get the role prefix from the path
   const getRolePrefix = () => {
     const path = location.pathname;
@@ -59,12 +44,30 @@ const Sidebar = ({ collapsed, onCollapse }) => {
   // Determine open keys based on path
   const getOpenKeys = () => {
     const path = location.pathname;
-    if (path.includes('/oms')) return ['oms'];
-    if (path.includes('/pps')) return ['pps'];
-    if (path.includes('/product-monitoring')) return ['product-monitoring'];
-    if (path.includes('/inventory-management')) return ['inventory-management'];
-    return [];
+    const keys = [];
+    if (path.includes('/oms')) keys.push('oms');
+    if (path.includes('/pps')) keys.push('pps');
+    if (path.includes('/product-monitoring')) keys.push('product-monitoring');
+    if (path.includes('/inventory-management')) keys.push('inventory-management');
+    return keys;
   };
+
+  const [openKeys, setOpenKeys] = useState(getOpenKeys());
+  
+  // Detect mobile screen
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) {
+        setMobileDrawerOpen(false);
+      }
+    };
+    
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Define all menu items with dynamic paths
   const allItems = [
@@ -181,18 +184,27 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link>,
         icon: <ShoppingCartOutlined />,
       },
-      {
-        key: `${prefix}/pdm`,
-        label: <Link to={`${prefix}/pdm`} onClick={() => setMobileDrawerOpen(false)}>PDM</Link>,
-        icon: <DeploymentUnitOutlined />,
-      },
     ];
-  } else if (prefix === '/manufacturing_coordinator' || prefix === '/supervisor' || prefix === '/inventory_supervisor') {
+  } else if (prefix === '/manufacturing_coordinator') {
     items = [
       {
         key: `${prefix}/dashboard`,
         label: <Link to={`${prefix}/dashboard`} onClick={() => setMobileDrawerOpen(false)}>Dashboard</Link>,
         icon: <DashboardOutlined />,
+      },
+    ];
+  } else if (prefix === '/supervisor') {
+    items = [];
+  } else if (prefix === '/inventory_supervisor') {
+    items = [
+      {
+        key: 'inventory-management',
+        label: 'Inventory Management',
+        icon: <DatabaseOutlined />,
+        children: [
+          { key: `${prefix}/inventory-management/inventory-master`, label: <Link to={`${prefix}/inventory-management/inventory-master`} onClick={() => setMobileDrawerOpen(false)}>Inventory Master</Link> },
+          { key: `${prefix}/inventory-management/overview-data`, label: <Link to={`${prefix}/inventory-management/overview-data`} onClick={() => setMobileDrawerOpen(false)}>Overview Data</Link> },
+        ],
       },
     ];
   } else {
@@ -207,7 +219,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       <Menu
         mode="inline"
         defaultSelectedKeys={[selectedKey]}
-        defaultOpenKeys={getOpenKeys()}
+        openKeys={openKeys}
+        onOpenChange={setOpenKeys}
         selectedKeys={[selectedKey]}
         style={{ borderRight: 0 }}
         items={items}

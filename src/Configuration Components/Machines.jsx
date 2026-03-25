@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Button, message, Popconfirm, Space, Card, Tooltip } from "antd";
 import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
@@ -19,14 +20,8 @@ const Machines = ({ workCenter, onBack }) => {
 
   const fetchMachines = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/machines/work-center/${workCenter.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setMachines(data);
-      } else {
-        console.error("Failed to fetch machines:", response.statusText);
-        setMachines([]);
-      }
+      const response = await axios.get(`${API_BASE_URL}/machines/work-center/${workCenter.id}`);
+      setMachines(response.data);
     } catch (error) {
       console.error("Error fetching machines:", error);
       setMachines([]);
@@ -60,18 +55,17 @@ const Machines = ({ workCenter, onBack }) => {
 
   const handleDeleteMachine = async (id) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/machines/${id}`, {
-        method: "DELETE",
-      });
-      if (response.ok) {
-        message.success("Machine deleted successfully");
-        fetchMachines();
-      } else {
-        message.error("Failed to delete machine");
-      }
+      await axios.delete(`${API_BASE_URL}/machines/${id}`);
+      message.success("Machine deleted successfully");
+      fetchMachines();
     } catch (error) {
       console.error("Error deleting machine:", error);
-      message.error("Error deleting machine");
+      let detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error deleting machine";
+      message.error(detail);
     }
   };
 
@@ -219,15 +213,16 @@ const Machines = ({ workCenter, onBack }) => {
   return (
     <Card 
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
           <Button 
             icon={<ArrowLeftOutlined />} 
             onClick={onBack}
             type="text"
+            className="w-fit"
           />
-          <div>
-            <span>Machines</span>
-            <span style={{ marginLeft: '12px', fontSize: '14px', fontWeight: 'normal', color: '#666' }}>
+          <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
+            <span className="text-lg font-bold">Machines</span>
+            <span className="text-xs sm:text-sm text-gray-500 font-normal">
               Work Center: <strong>{workCenter?.work_center_name}</strong>
             </span>
           </div>
@@ -238,22 +233,49 @@ const Machines = ({ workCenter, onBack }) => {
           type="primary"
           icon={<PlusOutlined />}
           onClick={handleAddMachine}
+          className="whitespace-nowrap"
         >
-          Add Machine
+          <span className="hidden sm:inline">Add Machine</span>
+          <span className="sm:hidden">Add</span>
         </Button>
       }
       variant="borderless"
-      className="shadow-sm"
+      className="shadow-sm overflow-hidden"
+      styles={{
+        header: { padding: '12px 16px' },
+        body: { padding: '0 12px 12px' }
+      }}
     >
+      <style>{`
+        .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff) !important;
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff !important;
+          white-space: nowrap;
+        }
+        @media (max-width: 640px) {
+          .ant-card-extra {
+            padding: 12px 0;
+          }
+        }
+      `}</style>
       <Table
         columns={columns}
         dataSource={machines}
         rowKey="id"
         loading={loading}
-        pagination={{ pageSize: 10 }}
+        pagination={{ 
+          pageSize: 10,
+          size: "small",
+          responsive: true,
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+          showSizeChanger: true,
+          showQuickJumper: true,
+        }}
         bordered
         size="middle"
-        scroll={{ x: 1500 }}
+        scroll={{ x: 1200 }}
+        className="machine-table"
       />
 
       {machineModalOpen && (

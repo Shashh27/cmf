@@ -280,7 +280,13 @@ const ReportIssue = ({ open, onClose, machineId }) => {
               <DatePicker
                 showTime
                 value={oeeTimes[0]}
-                onChange={(v) => setOeeTimes([v, oeeTimes[1]])}
+                onChange={(v) => {
+                  if (oeeTimes[1] && v && v.isAfter(oeeTimes[1])) {
+                    setOeeTimes([v, null]);
+                  } else {
+                    setOeeTimes([v, oeeTimes[1]]);
+                  }
+                }}
                 style={{ width: 280 }}
               />
               <DatePicker
@@ -288,6 +294,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
                 value={oeeTimes[1]}
                 onChange={(v) => setOeeTimes([oeeTimes[0], v])}
                 style={{ width: 280 }}
+                disabledDate={(current) => oeeTimes[0] && current && current.isBefore(oeeTimes[0], 'day')}
               />
             </Space>
             <Button

@@ -5,6 +5,7 @@ import { ExclamationCircleOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { 
   OrderedListOutlined, 
@@ -48,6 +49,18 @@ const PartsPriority = () => {
   const [partSearchText, setPartSearchText] = useState("");
   const [orderSearchText, setOrderSearchText] = useState("");
 
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      if (u?.id == null) return null;
+      return u.id;
+    } catch {
+      return null;
+    }
+  };
+
   const setActiveTab = (tab) => {
     setSearchParams({ tab });
   };
@@ -63,18 +76,17 @@ const PartsPriority = () => {
   const fetchPartPriorities = async () => {
     setPartLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/part-priorities/all`);
-      if (response.ok) {
-        const result = await response.json();
-        const filtered = result.filter(
-          (item) =>
-            item.part_type_name &&
-            item.part_type_name.toLowerCase() === "in-house"
-        );
-        setPartData(filtered);
-      } else {
-        messageApi.error("Failed to fetch priority data");
-      }
+      const uid = getCurrentUserId();
+      const response = await axios.get(`${API_BASE_URL}/orders/part-priorities/all`, {
+        params: uid != null ? { admin_id: uid } : undefined,
+      });
+      const result = response.data;
+      const filtered = result.filter(
+        (item) =>
+          item.part_type_name &&
+          item.part_type_name.toLowerCase() === "in-house"
+      );
+      setPartData(filtered);
     } catch (error) {
       console.error("Error fetching data:", error);
       messageApi.error("Error connecting to server");
@@ -86,13 +98,12 @@ const PartsPriority = () => {
   const fetchOrderWisePriorities = async () => {
     setOrderLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/part-priorities/order-wise`);
-      if (response.ok) {
-        const result = await response.json();
-        setOrderData(result);
-      } else {
-        messageApi.error("Failed to fetch order-wise priority data");
-      }
+      const uid = getCurrentUserId();
+      const response = await axios.get(`${API_BASE_URL}/orders/part-priorities/order-wise`, {
+        params: uid != null ? { admin_id: uid } : undefined,
+      });
+      const result = response.data;
+      setOrderData(result);
     } catch (error) {
       console.error("Error fetching order-wise data:", error);
       messageApi.error("Error connecting to server");
@@ -119,10 +130,12 @@ const PartsPriority = () => {
   }, [activeTab]);
 
   const handlePartSearch = (value) => {
-    setPartSearchText(value);
+    const filteredValue = (value || '').replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20);
+    setPartSearchText(filteredValue);
   };
   const handleOrderSearch = (value) => {
-    setOrderSearchText(value);
+    const filteredValue = (value || '').replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20);
+    setOrderSearchText(filteredValue);
   };
 
   const filteredPartData = partData.filter((row, index) => {
@@ -195,29 +208,31 @@ const PartsPriority = () => {
     if (!newPriority || newPriority < 1) return;
     
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/part-priorities/update-global`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      const uid = getCurrentUserId();
+      await axios.put(
+        `${API_BASE_URL}/orders/part-priorities/update-global`,
+        {
           id: id,
-          priority: newPriority
-        }),
-      });
+          priority: newPriority,
+          admin_id: uid,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-      if (response.ok) {
-        messageApi.success("Priority updated successfully");
-        fetchPartPriorities();
-        setEditingId(null);
-      } else {
-        const errorData = await response.json();
-        messageApi.error(errorData.detail || "Failed to update priority");
-        fetchPartPriorities();
-      }
+      messageApi.success("Priority updated successfully");
+      fetchPartPriorities();
+      setEditingId(null);
     } catch (error) {
       console.error("Error updating priority:", error);
-      messageApi.error("Error connecting to server");
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        "Failed to update priority";
+      messageApi.error(detail);
       fetchPartPriorities();
     }
   };
@@ -298,14 +313,10 @@ const PartsPriority = () => {
       title: <span className="font-semibold text-gray-700">SL NO</span>,
       key: "index",
       width: 80,
-      render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Project Name</span>,
-      dataIndex: "project_name",
-      key: "project_name",
-      ellipsis: true,
-      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
+      render: (_, __, index) => {
+        const { current, pageSize } = partPagination;
+        return <span className="text-gray-500 font-mono">{(current - 1) * pageSize + index + 1}</span>;
+      },
     },
     {
       title: <span className="font-semibold text-gray-700">Project Number</span>,
@@ -314,7 +325,7 @@ const PartsPriority = () => {
       render: (text) => <span className="font-medium text-gray-800">{text || "-"}</span>,
     },
     {
-      title: <span className="font-semibold text-gray-700">Product Name</span>,
+      title: <span className="font-semibold text-gray-700">Project Name</span>,
       dataIndex: "product_name",
       key: "product_name",
       ellipsis: true,
@@ -436,14 +447,10 @@ const PartsPriority = () => {
       title: <span className="font-semibold text-gray-700">SL NO</span>,
       key: "index",
       width: 80,
-      render: (_, __, index) => <span className="text-gray-500 font-mono">{index + 1}</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Project Name</span>,
-      dataIndex: "project_name",
-      key: "project_name",
-      ellipsis: true,
-      render: (text) => <span className="text-gray-600">{text || "-"}</span>,
+      render: (_, __, index) => {
+        const { current, pageSize } = orderPagination;
+        return <span className="text-gray-500 font-mono">{(current - 1) * pageSize + index + 1}</span>;
+      },
     },
     {
       title: <span className="font-semibold text-gray-700">Project Number</span>,
@@ -452,7 +459,7 @@ const PartsPriority = () => {
       render: (text) => <span className="font-medium text-gray-800">{text || "-"}</span>,
     },
     {
-      title: <span className="font-semibold text-gray-700">Product Name</span>,
+      title: <span className="font-semibold text-gray-700">Project Name</span>,
       dataIndex: "product_name",
       key: "product_name",
       ellipsis: true,
@@ -484,29 +491,30 @@ const PartsPriority = () => {
 
   const handleOrderWiseReorder = async (newOrderIds) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/part-priorities/order-wise/reorder`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
+      const uid = getCurrentUserId();
+      await axios.put(
+        `${API_BASE_URL}/orders/part-priorities/order-wise/reorder`,
+        {
           order_ids: newOrderIds,
-        }),
-      });
+          admin_id: uid,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-      if (response.ok) {
-        messageApi.success("Order-wise priorities updated successfully");
-        await fetchOrderWisePriorities();
-        await fetchPartPriorities();
-      } else {
-        const errorData = await response.json();
-        messageApi.error(errorData.detail || "Failed to update order-wise priorities");
-        await fetchOrderWisePriorities();
-        await fetchPartPriorities();
-      }
+      messageApi.success("Order-wise priorities updated successfully");
+      await fetchOrderWisePriorities();
+      await fetchPartPriorities();
     } catch (error) {
       console.error("Error updating order-wise priorities:", error);
-      messageApi.error("Error connecting to server");
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        "Failed to update order-wise priorities";
+      messageApi.error(detail);
       await fetchOrderWisePriorities();
       await fetchPartPriorities();
     }
@@ -565,8 +573,8 @@ const PartsPriority = () => {
     }
 
     return (
-      <div className="p-2">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 sm:px-4 pt-2 pb-3 gap-2">
+      <div className="p-0">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 sm:px-3 pt-0 pb-1 gap-2">
           <Typography.Text className="font-semibold text-gray-700 text-sm sm:text-base">
             Part Wise Priority
           </Typography.Text>
@@ -578,6 +586,8 @@ const PartsPriority = () => {
               className="w-full sm:w-64"
               onSearch={handlePartSearch}
               onChange={(e) => handlePartSearch(e.target.value)}
+              value={partSearchText}
+              maxLength={20}
             />
             <PartWisePriorityPdfDownload data={partData} />
           </Space>
@@ -631,8 +641,8 @@ const PartsPriority = () => {
     }
 
     return (
-      <div className="p-2">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 sm:px-4 pt-2 pb-3 gap-2">
+      <div className="p-0">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 sm:px-3 pt-0 pb-1 gap-2">
           <Typography.Text className="font-semibold text-gray-700 text-sm sm:text-base">
             Order Wise Priority
           </Typography.Text>
@@ -644,6 +654,8 @@ const PartsPriority = () => {
               className="w-full sm:w-64"
               onSearch={handleOrderSearch}
               onChange={(e) => handleOrderSearch(e.target.value)}
+              value={orderSearchText}
+              maxLength={20}
             />
             <OrderWisePriorityPdfDownload data={orderData} />
           </Space>

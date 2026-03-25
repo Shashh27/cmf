@@ -37,63 +37,37 @@ const Document = () => {
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <div style={{ 
-        padding: isMobile ? '8px 16px' : '16px 16px 0 16px'
-      }}>
-        <Card 
-          bordered={false} 
-          style={{ 
-            borderRadius: '12px',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
-            marginBottom: '16px'
-          }}
-          bodyStyle={{ padding: '16px 24px' }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-            <div style={{ width: 64, height: 64 }}>
-              <Lottie
-                animationData={documentIcon}
-                loop
-                autoplay
-                style={{ width: '100%', height: '100%' }}
-              />
-            </div>
-            <div>
-              <Title level={3} style={{ margin: 0, fontSize: '22px', fontWeight: 600, color: '#1a1a1a' }}>
-                Document Management
-              </Title>
-              <Text type="secondary" style={{ fontSize: '14px', marginTop: '2px', display: 'block' }}>
-                Organize, manage, and track all your technical documents and order files in one place
-              </Text>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Main Content - No background, just padding */}
-      <div style={{ 
-        height: isMobile ? 'auto' : 'calc(100vh - 180px)', 
-        display: 'flex', 
-        gap: isMobile ? '8px' : '16px',
-        padding: isMobile ? '8px' : '0 16px 16px 16px',
-        flexDirection: isMobile ? 'column' : 'row'
-      }}>
+    <div style={{ 
+      height: isMobile ? 'auto' : 'calc(100vh - 100px)', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      overflow: 'hidden' 
+    }}>
+      {/* Main Content */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          gap: isMobile ? '8px' : '12px',
+          padding: isMobile ? '8px' : '12px',
+          flexDirection: isMobile ? 'column' : 'row',
+          overflow: 'hidden',
+          minHeight: 0 // Crucial for nested flex scrolling
+        }}
+      >
         {/* Left Panel - Document Tree */}
-        <div 
-          style={{ 
+        <div
+          style={{
             flex: isMobile ? '0 0 100%' : '0 0 32%',
             minWidth: isMobile ? 'unset' : 280,
-            maxWidth: isMobile ? '100%' : 480,
-            height: isMobile ? 'calc(100vh - 200px)' : '100%', 
-            background: '#fff', 
-            overflow: 'visible',
+            maxWidth: isMobile ? '100%' : 420,
+            background: '#fff',
             borderRadius: '12px',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
             flexShrink: 0,
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            overflow: 'hidden'
           }}
         >
           {/* Tree Header with Search Bar and New Folder Button */}
@@ -138,14 +112,16 @@ const Document = () => {
         </div>
 
         {/* Right Panel - Document Content */}
-        <div style={{ 
-          flex: 1, 
-          overflow: 'hidden',
-          background: '#fff',
-          borderRadius: '12px',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-          minWidth: 0
-        }}>
+        <div
+          style={{
+            flex: 1,
+            overflow: 'hidden',
+            background: '#fff',
+            borderRadius: '12px',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+            minWidth: 0
+          }}
+        >
           <DocumentContent 
             selectedNode={selectedNode} 
             onDocumentsChange={handleDocumentsChange}
