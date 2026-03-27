@@ -19,11 +19,11 @@ router = APIRouter(
 )
 
 
-def _sync_shift_timings(
-    config: ShiftHoursConfiguration,
-    selected_shifts: list[ShiftCode],
-) -> None:
+def _sync_shift_timings(config, selected_shifts, db: Session):
     config.shift_timings.clear()
+    
+    db.flush()  # 👈 IMPORTANT FIX
+
     for shift_code in selected_shifts:
         start_time, end_time = SHIFT_TIME_LOOKUP[shift_code]
         config.shift_timings.append(
@@ -33,8 +33,27 @@ def _sync_shift_timings(
                 shift_end=end_time,
             )
         )
-    # Keep parent table strictly in sync with linked timings.
+
     config.number_of_shifts = len(selected_shifts)
+
+
+
+# def _sync_shift_timings(
+#     config: ShiftHoursConfiguration,
+#     selected_shifts: list[ShiftCode],
+# ) -> None:
+#     config.shift_timings.clear()
+#     for shift_code in selected_shifts:
+#         start_time, end_time = SHIFT_TIME_LOOKUP[shift_code]
+#         config.shift_timings.append(
+#             ShiftTimingConfiguration(
+#                 shift_code=shift_code,
+#                 shift_start=start_time,
+#                 shift_end=end_time,
+#             )
+#         )
+    # Keep parent table strictly in sync with linked timings.
+    # config.number_of_shifts = len(selected_shifts)
 
 
 def _enforce_shift_count_consistency(config: ShiftHoursConfiguration) -> None:
@@ -90,7 +109,7 @@ def create_shift_config(data: ShiftHoursConfigCreate, db: Session = Depends(get_
         working_day=data.working_day,
         number_of_shifts=number_of_shifts,
     )
-    _sync_shift_timings(new_config, selected_shifts)
+    _sync_shift_timings(new_config, selected_shifts, db)
     _enforce_shift_count_consistency(new_config)
     db.add(new_config)
     db.commit()
@@ -176,9 +195,9 @@ def update_shift_config(
             number_of_shifts = 1
             selected_shifts = ["GENERAL"]
 
-        _sync_shift_timings(config, selected_shifts)
+        _sync_shift_timings(config, selected_shifts, db)
     elif data.working_day is not None and config.working_day and not config.shift_timings:
-        _sync_shift_timings(config, ["GENERAL"])
+        _sync_shift_timings(config, ["GENERAL"], db)
 
     _enforce_shift_count_consistency(config)
 
