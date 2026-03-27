@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 class MachineDowntimeOut(BaseModel):
+    work_center_name: str
     machine_id: int
     machine_name: str
     status_id: int

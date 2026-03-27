@@ -49,8 +49,9 @@ from DB.models.scheduling import (
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────
-SHIFT_START_HOUR    = 9   # 09:00 – default shift start when no config row exists
-SHIFT_HOURS_PER_DAY = 8   # hours per shift segment
+DEFAULT_SHIFT_START = time(hour=8, minute=30)
+DEFAULT_SHIFT_END   = time(hour=17, minute=0)
+SHIFT_HOURS_PER_DAY = 8   # fallback if only number_of_shifts exists
 STATUS_OFF          = 2   # MachineStatus.status_id value meaning OFF
 IN_HOUSE_TYPE_ID    = 1   # Part.type_id for IN-House parts
 OUT_SOURCE_TYPE_ID  = 2   # Operation.part_type_id value for Out-Source (oms.part_types id=2)
@@ -121,26 +122,51 @@ class SchedulerEngine:
             .filter(ShiftHoursConfiguration.date == dt.date())
             .first()
         )
-        return bool(cfg.working_day) if cfg is not None else (dt.weekday() < 5)
+        if cfg is None:
+            return dt.weekday() < 5
+        # Dedicated work on a non-working day is allowed by selecting shifts.
+        return bool(cfg.working_day or (cfg.number_of_shifts and cfg.number_of_shifts > 0))
 
-    def _shift_end_hour(self, dt: datetime) -> int:
+    def _shift_window(self, dt: datetime) -> Tuple[time, time]:
         """
-        shift_end_hour = SHIFT_START_HOUR + number_of_shifts × SHIFT_HOURS_PER_DAY.
-        Defaults to a single 8-hour shift when no config row exists.
+        Returns shift start/end times for a date.
+        Priority:
+          1) linked ShiftTimingConfiguration rows (min start, max end)
+          2) number_of_shifts fallback
+          3) default GENERAL shift
         """
         cfg = (
             self.db.query(ShiftHoursConfiguration)
             .filter(ShiftHoursConfiguration.date == dt.date())
             .first()
         )
+        if cfg and cfg.shift_timings:
+            starts = [st.shift_start for st in cfg.shift_timings]
+            ends = [st.shift_end for st in cfg.shift_timings]
+            return min(starts), max(ends)
+
         n = cfg.number_of_shifts if (cfg and cfg.number_of_shifts) else 1
-        return SHIFT_START_HOUR + n * SHIFT_HOURS_PER_DAY
+        shift_start = DEFAULT_SHIFT_START
+        shift_end_dt = datetime.combine(dt.date(), shift_start) + timedelta(hours=n * SHIFT_HOURS_PER_DAY)
+        return shift_start, shift_end_dt.time()
 
     def _shift_start_dt(self, dt: datetime) -> datetime:
-        return dt.replace(hour=SHIFT_START_HOUR, minute=0, second=0, microsecond=0)
+        shift_start, _ = self._shift_window(dt)
+        return dt.replace(
+            hour=shift_start.hour,
+            minute=shift_start.minute,
+            second=0,
+            microsecond=0,
+        )
 
     def _shift_end_dt(self, dt: datetime) -> datetime:
-        return dt.replace(hour=self._shift_end_hour(dt), minute=0, second=0, microsecond=0)
+        _, shift_end = self._shift_window(dt)
+        return dt.replace(
+            hour=shift_end.hour,
+            minute=shift_end.minute,
+            second=0,
+            microsecond=0,
+        )
 
     def _next_shift_start(self, dt: datetime) -> datetime:
         """Shift-start datetime of the next working day after dt."""

@@ -13,7 +13,8 @@ from sqlalchemy import (
     Float,
     func,
     DateTime,
-    Date
+    Date,
+    UniqueConstraint,
 )
 from ..database import Base
 from sqlalchemy.orm import relationship
@@ -93,6 +94,31 @@ class ShiftHoursConfiguration(Base):
     date = Column(Date, nullable=False)
     working_day = Column(Boolean, nullable=False, default=True)
     number_of_shifts = Column(Integer, nullable=False, default=1)
+    shift_timings = relationship(
+        "ShiftTimingConfiguration",
+        back_populates="shift_config",
+        cascade="all, delete-orphan",
+    )
+
+
+class ShiftTimingConfiguration(Base):
+    __tablename__ = "shift_timing_configuration"
+    __table_args__ = (
+        UniqueConstraint("shift_config_id", "shift_code", name="uq_shift_timing_config_shift"),
+        {'schema': 'scheduling'},
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shift_config_id = Column(
+        Integer,
+        ForeignKey("scheduling.shift_hours_configuration.id"),
+        nullable=False,
+    )
+    shift_code = Column(String, nullable=False)  # GENERAL / OT
+    shift_start = Column(TIME, nullable=False)
+    shift_end = Column(TIME, nullable=False)
+
+    shift_config = relationship("ShiftHoursConfiguration", back_populates="shift_timings")
 
 
 

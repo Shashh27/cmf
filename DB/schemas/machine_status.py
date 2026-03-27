@@ -7,6 +7,7 @@ from pydantic import BaseModel
 # Base Schema
 # ==============================
 class MachineStatusBase(BaseModel):
+    work_center_name: str
     machine_make: str
     machine_id: int
     status_id: int

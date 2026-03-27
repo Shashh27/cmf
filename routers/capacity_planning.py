@@ -23,6 +23,19 @@ router = APIRouter(
 )
 
 
+def _configured_shift_hours(config: ShiftHoursConfiguration) -> float:
+    if not config.working_day and config.number_of_shifts == 0:
+        return 0.0
+    if config.shift_timings:
+        total = 0.0
+        for timing in config.shift_timings:
+            start_dt = datetime.combine(config.date, timing.shift_start)
+            end_dt = datetime.combine(config.date, timing.shift_end)
+            total += (end_dt - start_dt).total_seconds() / 3600
+        return max(total, 0.0)
+    return float(config.number_of_shifts * 8)
+
+
 
 # get machine utilization by month
 @router.get("/machine-utilization", response_model=List[MachineUtilization])
@@ -172,8 +185,7 @@ def get_machine_utilization_by_range(
     total_shift_hours = 0
 
     for sc in shift_configs:
-        if sc.working_day:
-            total_shift_hours += sc.number_of_shifts * 8
+        total_shift_hours += _configured_shift_hours(sc)
 
     # efficiency = 0.85
     settings = db.query(EfficiencyFactor).first()

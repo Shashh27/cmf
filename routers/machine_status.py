@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import List
 from datetime import datetime, date
-
+from sqlalchemy.orm import joinedload
 from DB.database import get_db
 from DB.models.scheduling import MachineStatus, Status, MachineDowntime
 from DB.models.configuration import Machine   # adjust path if needed
@@ -30,7 +30,9 @@ async def get_machine_status(db: Session = Depends(get_db)):
     """
     try:
         # Get all machines
-        all_machines = db.query(Machine).order_by(Machine.id).all()
+        # all_machines = db.query(Machine).order_by(Machine.id).all()
+
+        all_machines = db.query(Machine).options(joinedload(Machine.work_center)).order_by(Machine.id).all()
         
         # Get existing machine statuses
         machine_statuses_query = db.query(
@@ -59,6 +61,7 @@ async def get_machine_status(db: Session = Depends(get_db)):
                 # Machine has existing status
                 ms, machine_obj, status = existing_statuses[machine.id]
                 machine_status = MachineStatusOut(
+                    work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
                     machine_make=machine.make or "Unknown",
                     machine_id=machine.id,
                     status_id=status.id,
@@ -89,6 +92,7 @@ async def get_machine_status(db: Session = Depends(get_db)):
                 
                 # Add to response
                 machine_status = MachineStatusOut(
+                    work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
                     machine_make=machine.make or "Unknown",
                     machine_id=machine.id,
                     status_id=default_status.id,
@@ -240,15 +244,9 @@ async def get_machine_downtime(
                 detail=f"Machine with id {machine_id} not found"
             )
         
-        # Query downtime records for the machine
-        downtime_records = db.query(
-            MachineDowntime,
-            Machine
-        ).join(
-            Machine, MachineDowntime.machine_id == Machine.id
-        ).filter(
-            MachineDowntime.machine_id == machine_id
-        ).order_by(MachineDowntime.start_time.desc()).all()
+        downtime_records = db.query(MachineDowntime,Machine).join(Machine, MachineDowntime.machine_id == Machine.id).options(joinedload(Machine.work_center)).filter(MachineDowntime.machine_id == machine_id).order_by(MachineDowntime.start_time.desc()).all()
+
+
         
         # Convert to response format
         downtime_list = []
@@ -257,6 +255,7 @@ async def get_machine_downtime(
             end_time = None if record.end_time.year == 1970 else record.end_time
             
             downtime_out = MachineDowntimeOut(
+                work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
                 machine_id=record.machine_id,
                 machine_name=machine.make or f"Machine {record.machine_id}",
                 status_id=record.status_id,
@@ -322,15 +321,7 @@ async def get_all_downtime_records(
     Returns all downtime entries with start and end times.
     """
     try:
-        # Query all downtime records
-        downtime_records = db.query(
-            MachineDowntime,
-            Machine
-        ).join(
-            Machine, MachineDowntime.machine_id == Machine.id
-        ).order_by(
-            MachineDowntime.start_time.desc()
-        ).all()
+        downtime_records = db.query(MachineDowntime,Machine).join(Machine, MachineDowntime.machine_id == Machine.id).options(joinedload(Machine.work_center)).order_by(MachineDowntime.start_time.desc()).all()
         
         # Convert to response format
         downtime_list = []
@@ -339,6 +330,7 @@ async def get_all_downtime_records(
             end_time = None if record.end_time.year == 1970 else record.end_time
             
             downtime_out = MachineDowntimeOut(
+                work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
                 machine_id=record.machine_id,
                 machine_name=machine.make or f"Machine {record.machine_id}",
                 status_id=record.status_id,
