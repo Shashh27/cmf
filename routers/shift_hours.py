@@ -19,22 +19,36 @@ router = APIRouter(
 )
 
 
-def _sync_shift_timings(config, selected_shifts, db: Session):
+def _sync_shift_timings(config, selected_shifts, db: Session, custom_start=None, custom_end=None):
     config.shift_timings.clear()
     
     db.flush()  # 👈 IMPORTANT FIX
 
     for shift_code in selected_shifts:
-        start_time, end_time = SHIFT_TIME_LOOKUP[shift_code]
-        config.shift_timings.append(
-            ShiftTimingConfiguration(
-                shift_code=shift_code,
-                shift_start=start_time,
-                shift_end=end_time,
-            )
+        if shift_code == "CUSTOM":
+            start_time = custom_start
+            end_time = custom_end
+        else:
+            start_time, end_time = SHIFT_TIME_LOOKUP[shift_code]
+        
+        timing_config = ShiftTimingConfiguration(
+            shift_code=shift_code,
+            shift_start=start_time,
+            shift_end=end_time,
         )
+        
+        # Add custom times for CUSTOM shifts
+        if shift_code == "CUSTOM":
+            timing_config.custom_start = custom_start
+            timing_config.custom_end = custom_end
+            
+        config.shift_timings.append(timing_config)
 
-    config.number_of_shifts = len(selected_shifts)
+    # number_of_shifts is 2 only when both GENERAL and NEXT are selected
+    if "GENERAL" in selected_shifts and "NEXT" in selected_shifts:
+        config.number_of_shifts = 2
+    else:
+        config.number_of_shifts = len(selected_shifts)
 
 
 
@@ -75,7 +89,14 @@ def _build_response(config: ShiftHoursConfiguration) -> ShiftHoursConfigResponse
         number_of_shifts=config.number_of_shifts,
         selected_shifts=selected_shifts,
         shift_timings=[
-            ShiftTimingResponse.model_validate(timing) for timing in sorted_timings
+            ShiftTimingResponse(
+                id=timing.id,
+                shift_code=timing.shift_code,
+                shift_start=timing.shift_start,
+                shift_end=timing.shift_end,
+                custom_start=timing.custom_start,
+                custom_end=timing.custom_end
+            ) for timing in sorted_timings
         ],
     )
 
@@ -96,6 +117,8 @@ def create_shift_config(data: ShiftHoursConfigCreate, db: Session = Depends(get_
         )
     
     selected_shifts = data.selected_shifts
+    custom_start = data.custom_start
+    custom_end = data.custom_end
     number_of_shifts = len(selected_shifts)
 
     # Default behaviour: non-working day with no selected shifts has 0 shifts.
@@ -109,7 +132,7 @@ def create_shift_config(data: ShiftHoursConfigCreate, db: Session = Depends(get_
         working_day=data.working_day,
         number_of_shifts=number_of_shifts,
     )
-    _sync_shift_timings(new_config, selected_shifts, db)
+    _sync_shift_timings(new_config, selected_shifts, db, custom_start, custom_end)
     _enforce_shift_count_consistency(new_config)
     db.add(new_config)
     db.commit()
@@ -189,13 +212,15 @@ def update_shift_config(
 
     if data.selected_shifts is not None:
         selected_shifts = data.selected_shifts
+        custom_start = data.custom_start
+        custom_end = data.custom_end
         number_of_shifts = len(selected_shifts)
 
         if config.working_day and number_of_shifts == 0:
             number_of_shifts = 1
             selected_shifts = ["GENERAL"]
 
-        _sync_shift_timings(config, selected_shifts, db)
+        _sync_shift_timings(config, selected_shifts, db, custom_start, custom_end)
     elif data.working_day is not None and config.working_day and not config.shift_timings:
         _sync_shift_timings(config, ["GENERAL"], db)
 

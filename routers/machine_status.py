@@ -134,13 +134,14 @@ async def update_machine_status(
     """
     try:
         # Check if machine exists
-        machine = db.query(Machine).filter(Machine.id == machine_id).first()
+        machine = (db.query(Machine).options(joinedload(Machine.work_center)).filter(Machine.id == machine_id).first())
         if not machine:
             raise HTTPException(
                 status_code=404,
                 detail=f"Machine with id {machine_id} not found"
             )
         
+
         # Check if status exists
         status = db.query(Status).filter(Status.id == status_update.status_id).first()
         if not status:
@@ -204,9 +205,11 @@ async def update_machine_status(
         db.commit()
         
         db.refresh(machine_status)
+        db.refresh(machine)
         
         # Return the updated status
         return MachineStatusOut(
+            work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
             machine_make=machine.make or "Unknown",
             machine_id=machine.id,
             status_id=status.id,   

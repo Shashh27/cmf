@@ -21,6 +21,7 @@ class MachineStatusBase(BaseModel):
 # Output Schema
 # ==============================
 class MachineStatusOut(MachineStatusBase):
+    work_center_name: str
     pass
 
 

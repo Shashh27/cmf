@@ -101,6 +101,9 @@ class ShiftHoursConfiguration(Base):
     )
 
 
+# =======================
+# Shift Timing Configuration
+# =======================
 class ShiftTimingConfiguration(Base):
     __tablename__ = "shift_timing_configuration"
     __table_args__ = (
@@ -114,12 +117,13 @@ class ShiftTimingConfiguration(Base):
         ForeignKey("scheduling.shift_hours_configuration.id"),
         nullable=False,
     )
-    shift_code = Column(String, nullable=False)  # GENERAL / OT
+    shift_code = Column(String, nullable=False)  # GENERAL / NEXT / NON_WORKING / CUSTOM
     shift_start = Column(TIME, nullable=False)
     shift_end = Column(TIME, nullable=False)
+    custom_start = Column(TIME, nullable=True)  # For CUSTOM shifts
+    custom_end = Column(TIME, nullable=True)    # For CUSTOM shifts
 
     shift_config = relationship("ShiftHoursConfiguration", back_populates="shift_timings")
-
 
 
 # =======================

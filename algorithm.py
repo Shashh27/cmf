@@ -104,6 +104,23 @@ class SchedulerEngine:
         self.efficiency_factor: float              = self._load_efficiency()
         self.machine_end_time:  Dict[int, datetime] = {}   # machine_id → earliest free
 
+    def _configured_shift_hours(self, cfg: ShiftHoursConfiguration) -> float:
+        """
+        Calculate total shift hours for a given ShiftHoursConfiguration.
+        Used for capacity planning and available hours calculations.
+        """
+        if not cfg.working_day and cfg.number_of_shifts == 0:
+            return 0.0
+        if cfg.shift_timings:
+            total = 0.0
+            for timing in cfg.shift_timings:
+                start_dt = datetime.combine(cfg.date, timing.shift_start)
+                end_dt = datetime.combine(cfg.date, timing.shift_end)
+                total += (end_dt - start_dt).total_seconds() / 3600
+            return max(total, 0.0)
+        # Fallback: number_of_shifts × 8 hours per shift
+        return float(cfg.number_of_shifts * SHIFT_HOURS_PER_DAY)
+
     def _load_efficiency(self) -> float:
         record = self.db.query(EfficiencyFactor).first()
         return record.efficiency_factor if record else 0.85

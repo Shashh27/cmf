@@ -53,25 +53,35 @@ def get_machine_utilization(
     if not 1 <= month <= 12:
         raise HTTPException(400, "Month must be 1-12")
 
-    # ----------------------------
-    # WORKING DAYS
-    # ----------------------------
+    start_date = date(year, month, 1)
     _, days_in_month = calendar.monthrange(year, month)
+    end_date = date(year, month, days_in_month)
 
-    working_days = sum(
-        1 for d in range(1, days_in_month + 1)
-        if datetime(year, month, d).weekday() < 5
+    # ------------------------------------
+    # SHIFT CONFIG → AVAILABLE HOURS BASE
+    # ------------------------------------
+    shift_configs = (
+        db.query(ShiftHoursConfiguration)
+        .filter(
+            ShiftHoursConfiguration.date >= start_date,
+            ShiftHoursConfiguration.date <= end_date
+        )
+        .all()
     )
+
+    total_shift_hours = 0
+    for sc in shift_configs:
+        total_shift_hours += _configured_shift_hours(sc)
 
     # efficiency = 0.85
     settings = db.query(EfficiencyFactor).first()
     efficiency = settings.efficiency_factor if settings else 0.85
-    daily_hours = 8
+    base_available_hours = total_shift_hours * efficiency
 
-    base_available_hours = working_days * daily_hours * efficiency
-
-    start_date = datetime(year, month, 1)
-    end_date = datetime(year + (month // 12), (month % 12) + 1, 1)
+    # 🔧 convert date → datetime for status filtering
+    start_dt = datetime.combine(start_date, datetime.min.time())
+    end_dt = datetime.combine(end_date, datetime.max.time())
+    range_end = end_dt + timedelta(seconds=1)
 
     # ----------------------------
     # MACHINES
@@ -90,9 +100,9 @@ def get_machine_utilization(
         db.query(MachineStatus)
         .filter(
             MachineStatus.available_from != None,
-            MachineStatus.available_from < end_date,
+            MachineStatus.available_from < end_dt,
             (MachineStatus.available_to == None)
-            | (MachineStatus.available_to > start_date)
+            | (MachineStatus.available_to > start_dt)
         )
         .all()
     )
@@ -118,9 +128,9 @@ def get_machine_utilization(
             if st.status_id != 2:
                 continue
 
-            start = max(st.available_from, start_date)
-            end = st.available_to or end_date
-            end = min(end, end_date)
+            start = max(st.available_from, start_dt)
+            end = st.available_to or end_dt
+            end = min(end, end_dt)
 
             if end > start:
                 hours = (end - start).total_seconds() / 3600
