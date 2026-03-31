@@ -1,17 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from DB.database import get_db, MINIO_BUCKET_NAME
 from DB.models.oms import OrderDocument, Order
 from DB.minio_client import get_minio_client
 from DB.schemas.oms import OrderDocument as OrderDocumentResponse, OrderDocumentCreate, OrderDocumentUpdate
-from pydantic import BaseModel
 import uuid
 import os
 from datetime import datetime, timedelta
 import io
 
 router = APIRouter(prefix="/order-documents", tags=["order-documents"])
+
+def get_file_extension(filename: str) -> str:
+    """Extract file extension from filename"""
+    return os.path.splitext(filename)[1].lower()
 
 def _can_upload_order_document(order, user_id: Optional[int]) -> bool:
     """Only project_coordinator, admin, or manufacturing_coordinator for this order can upload."""
@@ -56,9 +60,11 @@ async def upload_order_document(
         if not parent:
             raise HTTPException(status_code=404, detail="Parent document not found")
 
-    # Generate unique filename
+    # Generate unique object name with timestamp and UUID for descriptive safety
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_id = uuid.uuid4().hex[:8]
     file_extension = os.path.splitext(file.filename)[1]
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
+    unique_filename = f"{timestamp}_{unique_id}_{file.filename}"
 
     # Create folder structure: order_documents/order_id/filename
     object_name = f"order_documents/{order_id}/{unique_filename}"
@@ -142,8 +148,10 @@ async def upload_order_documents_bulk(
 
     try:
         for idx, file in enumerate(files):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            unique_id = uuid.uuid4().hex[:8]
             file_extension = os.path.splitext(file.filename)[1]
-            unique_filename = f"{uuid.uuid4()}{file_extension}"
+            unique_filename = f"{timestamp}_{unique_id}_{file.filename}"
             object_name = f"order_documents/{order_id}/{unique_filename}"
 
             file_content = await file.read()
@@ -212,9 +220,11 @@ async def replace_order_document(
         except Exception:
             pass
         
-        # Generate unique filename
+        # Generate unique filename with timestamp and UUID
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = uuid.uuid4().hex[:8]
         file_extension = os.path.splitext(file.filename)[1]
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        unique_filename = f"{timestamp}_{unique_id}_{file.filename}"
         
         # Create folder structure: order_documents/order_id/filename
         object_name = f"order_documents/{existing_document.order_id}/{unique_filename}"
@@ -355,6 +365,72 @@ def get_order_documents(user_id: int | None = None, db: Session = Depends(get_db
     if user_id is not None:
         query = query.filter(OrderDocument.user_id == user_id)
     return query.all()
+
+
+@router.get("/{document_id}/preview")
+async def preview_order_document(document_id: int, db: Session = Depends(get_db)):
+    """Preview an order document file from MinIO (inline display)"""
+    # Get document from database
+    document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    try:
+        # Get MinIO client
+        minio_client = get_minio_client()
+        
+        # Extract object key from URL
+        object_key = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        
+        # Download from MinIO
+        file_data = minio_client.download_file(object_key)
+        
+        # Use detected content type or fallback
+        content_type = document.document_type or "application/octet-stream"
+        filename = document.document_name
+        
+        return StreamingResponse(
+            io.BytesIO(file_data),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"inline; filename={filename}"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to preview document: {str(e)}")
+
+
+@router.get("/{document_id}/download")
+async def download_order_document(document_id: int, db: Session = Depends(get_db)):
+    """Download an order document file from MinIO"""
+    # Get document from database
+    document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    try:
+        # Get MinIO client
+        minio_client = get_minio_client()
+        
+        # Extract object key from URL
+        object_key = document.document_url.split(f"/{minio_client.bucket_name}/")[1]
+        
+        # Download from MinIO
+        file_data = minio_client.download_file(object_key)
+        
+        # Use detected content type or fallback
+        content_type = document.document_type or "application/octet-stream"
+        filename = document.document_name
+        
+        return StreamingResponse(
+            io.BytesIO(file_data),
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download document: {str(e)}")
 
 
 @router.get("/order/{order_id}", response_model=List[OrderDocumentResponse])

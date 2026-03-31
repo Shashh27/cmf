@@ -8,6 +8,7 @@ import io
 import csv
 from pydantic import BaseModel
 import pdfplumber
+from docx import Document as DocxDocument
 
 
 from DB.database import get_db

@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from DB.database import engine, MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET_NAME, MINIO_SECURE
 from DB.models import Base
@@ -11,7 +12,6 @@ from routers import (
     part_types_router,
     parts_router,
     operations_router,
-
     documents_router,
     tools_router,
     customers_router,
@@ -31,7 +31,6 @@ from routers import (
     tool_issues_router,
     out_source_parts_status_router,
     maintenance_router,
-    maintenance_router,
 )
 
 # Import Pokayoke checklists router
@@ -39,21 +38,16 @@ from routers.pokayoke_checklists import router as pokayoke_checklists_router, co
 
 # Import general documents router
 from document_routers.general_documents import router as general_documents_router
-
 from document_routers.common_documents import router as common_documents_router
-
-# Import machine documents router
 from document_routers.machine_documents import router as machine_documents_router
 
-# Import common documents router
-from document_routers.common_documents import router as common_documents_router
 from notification_routers.order_notifications import router as order_notifications_router
 from notification_routers.machine_notifications import router as machine_notifications_router
 from notification_routers.tool_issues_notification import router as tool_issues_notifications_router
 from notification_routers.component_issues_notification import router as component_issues_notifications_router
 from notification_routers.machine_calibration_notification import router as machine_calibration_notifications_router
 
-# Initialize FastAPI app
+# ── Initialize FastAPI app ────────────────────────────────────────────
 app = FastAPI(
     title="CMF Backend API",
     description="Configuration Management Framework Backend System with MinIO Integration",
@@ -62,7 +56,13 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Configure CORS
+# ── Serve Draco decoder (downloaded at Docker build time) ─────────────
+# Frontend ModelViewer3D.jsx uses /static/draco/ instead of Google CDN
+import os
+if os.path.isdir("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# ── CORS ──────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Configure this with your frontend URL in production
@@ -72,6 +72,7 @@ app.add_middleware(
 )
 
 
+# ── Startup ───────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
     """
@@ -114,23 +115,20 @@ async def startup_event():
 
     print("=" * 60)
     print("CMF Backend API is ready!")
-    print(f"Documentation available at: http://localhost:8765/docs")
     print("=" * 60)
 
 
-# Include all routers with api/v1 prefix
+# ── Routers ───────────────────────────────────────────────────────────
 app.include_router(products_router, prefix="/api/v1")
 app.include_router(assemblies_router, prefix="/api/v1")
 app.include_router(part_types_router, prefix="/api/v1")
 app.include_router(parts_router, prefix="/api/v1")
 app.include_router(operations_router, prefix="/api/v1")
-
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(tools_router, prefix="/api/v1")
 app.include_router(customers_router, prefix="/api/v1")
 app.include_router(orders_router, prefix="/api/v1")
 app.include_router(order_documents_router, prefix="/api/v1")
-
 app.include_router(rawmaterials_router, prefix="/api/v1")
 app.include_router(workcenter_router, prefix="/api/v1")
 app.include_router(general_documents_router)
@@ -157,6 +155,7 @@ app.include_router(out_source_parts_status_router, prefix="/api/v1")
 app.include_router(maintenance_router, prefix="/api/v1")
 
 
+# ── Core endpoints ────────────────────────────────────────────────────
 @app.get("/")
 def root():
     """Root endpoint"""
@@ -208,7 +207,6 @@ def system_info():
             "part_types": "/api/v1/part-types",
             "parts": "/api/v1/parts",
             "operations": "/api/v1/operations",
-           
             "documents": "/api/v1/documents",
             "tools": "/api/v1/tools",
             "customers": "/api/v1/customers",
@@ -240,24 +238,11 @@ if __name__ == "__main__":
     )
 
 
-
-
-
-
-
-
-
-
 # localsystem
-
 #  uvicorn main:app --reload --host 172.18.7.91 --port 8000
-
 #  uvicorn main:app --reload --host 172.18.7.86 --port 8000
-
 # python -m uvicorn main:app --reload --host 172.18.7.91 --port 8000
-
 # python -m uvicorn main:app --reload --host 172.18.100.76 --port 8000
-
 # server:
 # uvicorn main:app --reload --host 172.18.7.91 --port 3000
 #  uvicorn main:app --reload --host 172.18.7.86 --port 8000

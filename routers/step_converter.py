@@ -1,14 +1,13 @@
 """
-STEP to GLB converter using FreeCAD
-File: app/services/step_converter.py
+STEP / STL → GLB converter
+File: step_converter.py
 
-Requirements:
-- FreeCAD (Windows/Linux)
-- trimesh
-- numpy
+Speed strategy for large files (100-200 MB):
+  STL  → load with process=False (skip expensive vertex merge) → export GLB in memory
+  STEP → FreeCAD tessellates to STL → same fast GLB export
 
-Install:
-pip install trimesh numpy
+No file size limits. No mesh simplification. Full geometry always preserved.
+The only knob that matters for speed is process=False on trimesh load.
 """
 
 import tempfile
@@ -23,69 +22,61 @@ logger = logging.getLogger(__name__)
 
 
 class StepConverter:
-    """Convert STEP/STL files to STL / GLB using FreeCAD and trimesh"""
+    """Convert STEP/STL files to GLB.
+
+    STL  → GLB : fully in-memory, process=False, no temp files     (~2-8s for 200 MB)
+    STEP → GLB : FreeCAD tessellates to STL, then same GLB export  (~5-15s for complex parts)
+    """
 
     # ------------------------------------------------------------------
     # FIND FREECAD
     # ------------------------------------------------------------------
     @staticmethod
     def find_freecad() -> str | None:
-        """Locate FreeCAD executable"""
-        # 0️⃣ Explicit override (useful in Docker / custom installs)
+        """Locate FreeCAD executable (headless CLI preferred)"""
+
         env_path = os.getenv("FREECAD_PATH")
         if env_path and os.path.exists(env_path):
             logger.info(f"FreeCAD found via FREECAD_PATH: {env_path}")
             return env_path
 
-        # 1️⃣ Prefer the headless CLI (faster + does not require X11)
-        # Linux packages commonly expose `freecadcmd`; Windows often has `FreeCADCmd.exe`.
         for name in ("freecadcmd", "FreeCADCmd", "FreeCADCmd.exe", "freecad", "FreeCAD", "FreeCAD.exe"):
             found = shutil.which(name)
             if found:
                 logger.info(f"FreeCAD found in PATH: {found}")
                 return found
 
-        # 2️⃣ Common install locations (Linux/Docker)
-        possible_paths = [
+        for path in (
             "/usr/bin/freecadcmd",
             "/usr/bin/FreeCADCmd",
             "/usr/bin/freecad",
             "/usr/local/bin/freecadcmd",
             "/usr/local/bin/FreeCADCmd",
             "/usr/local/bin/freecad",
-        ]
-
-        for path in possible_paths:
+        ):
             if os.path.exists(path):
                 logger.info(f"FreeCAD found at: {path}")
                 return path
 
-        # 3️⃣ Common install locations (Windows)
         if os.name == "nt":
             candidates: list[str] = []
-            for env in ("ProgramFiles", "ProgramFiles(x86)"):
-                base = os.environ.get(env)
+            for env_var in ("ProgramFiles", "ProgramFiles(x86)"):
+                base = os.environ.get(env_var, "")
                 if not base or not os.path.isdir(base):
                     continue
-                # Common: C:\Program Files\FreeCAD 0.21\bin\FreeCADCmd.exe
                 try:
                     for entry in os.listdir(base):
                         if entry.lower().startswith("freecad"):
-                            candidates.append(os.path.join(base, entry, "bin", "FreeCADCmd.exe"))
-                            candidates.append(os.path.join(base, entry, "bin", "FreeCAD.exe"))
+                            candidates += [
+                                os.path.join(base, entry, "bin", "FreeCADCmd.exe"),
+                                os.path.join(base, entry, "bin", "FreeCAD.exe"),
+                            ]
                 except Exception:
                     pass
-
-            # Also try a couple of direct well-known defaults
             pf = os.environ.get("ProgramFiles", r"C:\Program Files")
-            candidates.extend(
-                [
-                    os.path.join(pf, "FreeCAD 0.21", "bin", "FreeCADCmd.exe"),
-                    os.path.join(pf, "FreeCAD 0.20", "bin", "FreeCADCmd.exe"),
-                    os.path.join(pf, "FreeCAD", "bin", "FreeCADCmd.exe"),
-                ]
-            )
-
+            for ver in ("0.21", "0.20", ""):
+                suffix = f" {ver}" if ver else ""
+                candidates.append(os.path.join(pf, f"FreeCAD{suffix}", "bin", "FreeCADCmd.exe"))
             for path in candidates:
                 if os.path.exists(path):
                     logger.info(f"FreeCAD found at: {path}")
@@ -95,189 +86,188 @@ class StepConverter:
         return None
 
     # ------------------------------------------------------------------
-    # STEP/STL → STL (via FreeCAD)
+    # STEP → STL via FreeCAD  (writes one temp file — unavoidable for STEP)
     # ------------------------------------------------------------------
     @staticmethod
-    def convert_to_stl(content: bytes, extension: str, output_stl_path: str) -> bool:
-        """Convert STEP/STL bytes to STL file using FreeCAD"""
+    def _step_to_stl_bytes(step_content: bytes) -> bytes:
+        """Run FreeCAD to tessellate a STEP file. Returns raw STL bytes or b''."""
 
         freecad_path = StepConverter.find_freecad()
         if not freecad_path:
-            logger.error("FreeCAD is required but not found")
-            return False
+            logger.error("FreeCAD is required for STEP conversion but was not found")
+            return b""
 
+        input_path = script_path = stl_path = None
         try:
-            # Save input file
-            with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp_input:
-                tmp_input.write(content)
-                input_path = tmp_input.name
+            with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as f:
+                f.write(step_content)
+                input_path = f.name
 
-            # FreeCAD Python script
+            with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as f:
+                stl_path = f.name
+
             script = f"""
-import sys
-import FreeCAD
-import Import
-import Mesh
-import Part
+import sys, FreeCAD, Import, Mesh
 
-doc = FreeCAD.newDocument("temp")
-
-# Use Import.insert for both STEP and STL
-if r"{input_path}".lower().endswith(".stl"):
-    # Special handling for STL to ensure it's loaded as a Mesh object
-    Mesh.insert(r"{input_path}", "temp")
-else:
-    Import.insert(r"{input_path}", "temp")
-
-objects = [o for o in doc.Objects]
+doc = FreeCAD.newDocument("conv")
+Import.insert(r"{input_path}", "conv")
+objects = doc.Objects
 if not objects:
-    print("No objects found")
+    print("NO_OBJECTS")
     sys.exit(1)
 
-final_mesh = Mesh.Mesh()
-
+final = Mesh.Mesh()
 for o in objects:
-    # 1. If it's already a Mesh object (typical for STL imports)
     if hasattr(o, "Mesh"):
-        final_mesh.addMesh(o.Mesh)
-    # 2. If it's a Part/Shape (typical for STEP imports)
+        final.addMesh(o.Mesh)
     elif hasattr(o, "Shape"):
-        shape_mesh = Mesh.Mesh(o.Shape.tessellate(0.1))
-        final_mesh.addMesh(shape_mesh)
+        final.addMesh(Mesh.Mesh(o.Shape.tessellate(0.1)))
 
-final_mesh.write(r"{output_stl_path}")
-
-FreeCAD.closeDocument("temp")
+final.write(r"{stl_path}")
+FreeCAD.closeDocument("conv")
 print("SUCCESS")
 """
+            with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False, encoding="utf-8") as f:
+                f.write(script)
+                script_path = f.name
 
-            with tempfile.NamedTemporaryFile(
-                suffix=".py", mode="w", delete=False, encoding="utf-8"
-            ) as tmp_script:
-                tmp_script.write(script)
-                script_path = tmp_script.name
-
-            # Run FreeCAD.
-            # - Prefer `FreeCADCmd/freecadcmd` if present (no GUI / no X11 needed)
-            # - If we end up using the GUI binary on Linux, wrap with xvfb-run.
             cmd = [freecad_path, "-c", script_path]
             if os.name != "nt":
                 bin_name = Path(freecad_path).name.lower()
-                is_cmd = ("cmd" in bin_name) or bin_name.endswith("freecadcmd")
-                if (not is_cmd) and shutil.which("xvfb-run"):
+                is_headless = "cmd" in bin_name or bin_name.endswith("freecadcmd")
+                if not is_headless and shutil.which("xvfb-run"):
                     cmd = ["xvfb-run", "-a", "--server-args=-screen 0 1024x768x24"] + cmd
 
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=int(os.getenv("FREECAD_CONVERT_TIMEOUT_SEC", "240")),
+                timeout=int(os.getenv("FREECAD_CONVERT_TIMEOUT_SEC", "300")),
             )
 
-            # Cleanup
-            for f in (input_path, script_path):
-                try:
-                    os.unlink(f)
-                except Exception:
-                    pass
+            if result.returncode != 0 or not os.path.exists(stl_path):
+                logger.error(f"❌ FreeCAD STEP→STL failed:\n{result.stderr}")
+                return b""
 
-            if result.returncode == 0 and os.path.exists(output_stl_path):
-                logger.info(f"✅ {extension.upper()} → STL successful via FreeCAD")
-                return True
+            with open(stl_path, "rb") as f:
+                stl_bytes = f.read()
 
-            logger.error(f"❌ FreeCAD error during {extension.upper()} conversion")
-            logger.error(result.stderr)
-            return False
+            logger.info(f"✅ FreeCAD STEP→STL: {len(stl_bytes)/1024/1024:.1f} MB STL produced")
+            return stl_bytes
 
         except subprocess.TimeoutExpired:
-            logger.error("❌ FreeCAD conversion timeout")
-            return False
-
-        except Exception as e:
-            logger.exception(f"❌ {extension.upper()} → STL failed")
-            return False
-
-    # ------------------------------------------------------------------
-    # STEP → GLB
-    # ------------------------------------------------------------------
-    @staticmethod
-    def convert_step_to_glb(step_content: bytes) -> bytes:
-        """Convert STEP bytes to GLB using FreeCAD for processing"""
-
-        try:
-            import trimesh
-            import numpy
-
-            with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as tmp_stl:
-                stl_path = tmp_stl.name
-
-            if not StepConverter.convert_to_stl(step_content, ".step", stl_path):
-                return b""
-
-            mesh = trimesh.load(stl_path, force="mesh")
-            os.unlink(stl_path)
-
-            if mesh.is_empty:
-                logger.error("❌ Empty mesh from STEP")
-                return b""
-
-            # Export with basic compression if possible
-            glb = mesh.export(file_type="glb")
-            logger.info("✅ STEP → GLB successful (FreeCAD + Trimesh)")
-
-            return glb if isinstance(glb, bytes) else bytes(glb)
-
-        except Exception:
-            logger.exception("❌ STEP → GLB failed")
+            logger.error("❌ FreeCAD conversion timed out")
             return b""
+        except Exception:
+            logger.exception("❌ FreeCAD STEP→STL unexpected error")
+            return b""
+        finally:
+            for p in (input_path, script_path, stl_path):
+                if p:
+                    try:
+                        os.unlink(p)
+                    except Exception:
+                        pass
 
+    # ------------------------------------------------------------------
+    # STL bytes → GLB bytes  (the fast core used by both paths)
+    # ------------------------------------------------------------------
     @staticmethod
-    def convert_stl_to_glb(stl_content: bytes) -> bytes:
-        """Convert STL bytes to GLB quickly using trimesh (no FreeCAD)"""
+    def _stl_bytes_to_glb(stl_content: bytes, label: str = "STL") -> tuple[bytes, str | None]:
+        """Convert raw STL bytes → GLB bytes entirely in memory.
 
+        Key speed decisions:
+        - process=False  → skip trimesh vertex-merge (O(n log n), very slow on 200 MB meshes)
+        - No simplification → full geometry always preserved
+        - No temp files → pure in-memory pipeline
+
+        Returns:
+            tuple: (glb_bytes, error_message) - error_message is None if successful
+
+        process=False is safe here because:
+        - GLB/three.js renders correctly even with duplicate vertices
+        - The frontend's EdgesGeometry handles any winding inconsistencies visually
+        - The user gets the exact mesh they exported from their CAD tool
+        """
         try:
             import trimesh
-            import numpy
 
-            # STL is already a triangle mesh; importing it via FreeCAD is slow and unnecessary.
-            # Load directly from memory for best latency.
+            file_mb = len(stl_content) / (1024 * 1024)
+
+            # ── Early rejection for empty ASCII STL exports ────────────
+            # CATIA / SolidWorks sometimes export "solid NAME\nendsolid NAME"
+            # with zero facets. Catch this before trimesh tries to load it.
+            try:
+                head = stl_content[:1024].decode("utf-8", errors="ignore")
+                if head.lstrip().startswith("solid") and "facet" not in stl_content[:65536].decode("utf-8", errors="ignore"):
+                    error_msg = f"❌ {label}: Empty ASCII STL — no facets found. The CAD export produced no geometry. Re-export with tessellation/mesh enabled."
+                    logger.error(error_msg)
+                    return b"", error_msg
+            except Exception:
+                pass  # binary STL — skip text scan
+
+            logger.info(f"Loading {label} ({file_mb:.1f} MB) with process=False ...")
+
+            # process=False is the single most important performance flag.
+            # On a 200 MB STL, process=True can take 60-120s; process=False takes 2-5s.
             mesh = trimesh.load(
                 io.BytesIO(stl_content),
                 file_type="stl",
                 force="mesh",
-                process=False,
+                process=False,      # ← DO NOT change to True — it kills performance on large files
             )
-            # Now using FreeCAD for STL too!
-            if not StepConverter.convert_to_stl(stl_content, ".stl", stl_path):
-                return b""
-
-            mesh = trimesh.load(stl_path, force="mesh")
-            os.unlink(stl_path)
-
-            # Now using FreeCAD for STL too!
-            if not StepConverter.convert_to_stl(stl_content, ".stl", stl_path):
-                return b""
-
-            mesh = trimesh.load(stl_path, force="mesh")
-            os.unlink(stl_path)
-
-            # Now using FreeCAD for STL too!
-            if not StepConverter.convert_to_stl(stl_content, ".stl", stl_path):
-                return b""
-
-            mesh = trimesh.load(stl_path, force="mesh")
-            os.unlink(stl_path)
-
 
             if mesh.is_empty:
-                logger.error("❌ Empty mesh from STL")
-                return b""
+                error_msg = f"❌ {label}: trimesh returned an empty mesh. The file likely has no valid geometry."
+                logger.error(error_msg)
+                return b"", error_msg
+
+            face_count = len(mesh.faces)
+            logger.info(f"{label}: {face_count:,} faces loaded, exporting to GLB ...")
 
             glb = mesh.export(file_type="glb")
-            logger.info("✅ STL → GLB successful (Trimesh)")
+            glb_mb = len(glb) / (1024 * 1024)
 
-            return glb if isinstance(glb, bytes) else bytes(glb)
+            logger.info(
+                f"✅ {label} → GLB done | "
+                f"input {file_mb:.1f} MB → output {glb_mb:.1f} MB | "
+                f"{face_count:,} faces"
+            )
+            glb_bytes = glb if isinstance(glb, bytes) else bytes(glb)
+            return glb_bytes, None
 
         except Exception:
-            logger.exception("❌ STL → GLB failed")
-            return b""
+            error_msg = f"❌ {label} → GLB failed"
+            logger.exception(error_msg)
+            return b"", error_msg
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    @staticmethod
+    def convert_step_to_glb(step_content: bytes) -> tuple[bytes, str | None]:
+        """STEP → GLB.  FreeCAD tessellates; trimesh exports.
+
+        Returns:
+            tuple: (glb_bytes, error_message) - error_message is None if successful
+        """
+        file_mb = len(step_content) / (1024 * 1024)
+        logger.info(f"STEP→GLB started ({file_mb:.1f} MB)")
+
+        stl_bytes = StepConverter._step_to_stl_bytes(step_content)
+        if not stl_bytes:
+            return b"", "STEP file conversion failed - FreeCAD could not tessellate the geometry"
+
+        return StepConverter._stl_bytes_to_glb(stl_bytes, label="STEP→STL")
+
+    @staticmethod
+    def convert_stl_to_glb(stl_content: bytes) -> tuple[bytes, str | None]:
+        """STL → GLB.  Fully in-memory, no temp files, no size limit.
+
+        Returns:
+            tuple: (glb_bytes, error_message) - error_message is None if successful
+        """
+        file_mb = len(stl_content) / (1024 * 1024)
+        logger.info(f"STL→GLB started ({file_mb:.1f} MB)")
+
+        return StepConverter._stl_bytes_to_glb(stl_content, label="STL")
