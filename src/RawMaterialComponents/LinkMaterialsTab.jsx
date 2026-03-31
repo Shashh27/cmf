@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Button, Empty, Card, Input, Space, Tooltip, InputNumber, Spin, Checkbox, Typography, message } from "antd";
+import { Table, Button, Empty, Card, Input, Space, Tooltip, InputNumber, Spin, Checkbox, Typography, message, Select, Row, Col } from "antd";
 import { 
   LinkOutlined, 
   BlockOutlined, 
@@ -12,10 +12,12 @@ import {
   CaretDownOutlined,
   CaretRightOutlined,
   CodeSandboxOutlined,
-  AppstoreOutlined
+  AppstoreOutlined,
+  ShopOutlined
 } from "@ant-design/icons";
 
 const { Text } = Typography;
+const { Option } = Select;
 
 const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => {
   const [orders, setOrders] = useState([]);
@@ -34,6 +36,9 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
   const [orderValuesByMaterial, setOrderValuesByMaterial] = useState({});
   const [orderSearchText, setOrderSearchText] = useState("");
   const [decimalWarnings, setDecimalWarnings] = useState({});
+  const [vendors, setVendors] = useState([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [showProcurementFields, setShowProcurementFields] = useState(false);
 
   const fetchingOrders = useRef(false);
   const initializedRef = useRef(false);
@@ -54,6 +59,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
     if (initializedRef.current) return;
     initializedRef.current = true;
     fetchOrders();
+    fetchVendors();
   }, []);
 
   useEffect(() => {
@@ -78,6 +84,19 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
     } finally {
       setOrdersLoading(false);
       fetchingOrders.current = false;
+    }
+  };
+
+  const fetchVendors = async () => {
+    setVendorsLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+      setVendors(response.data || []);
+    } catch (error) {
+      console.error("Error fetching vendors:", error);
+      setVendors([]);
+    } finally {
+      setVendorsLoading(false);
     }
   };
 
@@ -151,13 +170,27 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
 
     const order_quantities = {};
     const order_masses = {};
+    const procurement_quantities = {};
+    const procurement_weights = {};
+    let selectedVendorId = null;
+
     rawMaterialIds.forEach((id) => {
       const vals = orderValuesByMaterial[id];
       if (vals) {
         if (vals.order_quantity != null) order_quantities[id] = Number(vals.order_quantity) || 0;
         if (vals.order_mass != null) order_masses[id] = Number(vals.order_mass) || 0;
+        if (vals.procurement_quantity != null) procurement_quantities[id] = Number(vals.procurement_quantity) || 0;
+        if (vals.procurement_weight != null) procurement_weights[id] = Number(vals.procurement_weight) || 0;
+        if (vals.vendor_id != null) selectedVendorId = Number(vals.vendor_id);
       }
     });
+
+    // Check if procurement is needed
+    const hasProcurement = Object.keys(procurement_quantities).length > 0 || Object.keys(procurement_weights).length > 0;
+    if (hasProcurement && !selectedVendorId) {
+      message.warning("Please select a vendor for procurement items.");
+      return;
+    }
 
     setLinking(true);
     try {
@@ -175,6 +208,9 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
               order_id: orderId,
               order_quantities,
               order_masses,
+              procurement_quantities,
+              procurement_weights,
+              vendor_id: selectedVendorId,
               linkage_group_id: linkageGroupId,
               user_id: uid,
             },
@@ -190,6 +226,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         setExpandedAssemblies({});
         setOrderBomMap({});
         setOrderValuesByMaterial({});
+        setShowProcurementFields(false);
         // notify parent so other tabs can refresh
         if (typeof onDataChanged === "function") {
           onDataChanged();
@@ -304,6 +341,9 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       id: record.id,
       mass: existing.order_mass ?? record.mass ?? 0,
       quantity: existing.order_quantity ?? 0,
+      procurement_quantity: existing.procurement_quantity ?? 0,
+      procurement_weight: existing.procurement_weight ?? 0,
+      vendor_id: existing.vendor_id ?? null,
     });
   };
 
@@ -319,12 +359,22 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
     if (!inlineEditRow || inlineEditRow.id !== record.id) return;
     const order_mass = Number(inlineEditRow.mass) || 0;
     const order_quantity = Number(inlineEditRow.quantity) || 0;
+    const procurement_quantity = Number(inlineEditRow.procurement_quantity) || 0;
+    const procurement_weight = Number(inlineEditRow.procurement_weight) || 0;
+    const vendor_id = inlineEditRow.vendor_id || null;
+    
     setOrderValuesByMaterial((prev) => ({
       ...prev,
-      [record.id]: { order_mass, order_quantity },
+      [record.id]: { 
+        order_mass, 
+        order_quantity, 
+        procurement_quantity, 
+        procurement_weight, 
+        vendor_id 
+      },
     }));
     setInlineEditRow(null);
-    message.success("Order Kg and Qty captured for this material");
+    message.success("Order and procurement details captured for this material");
   };
 
   const filteredOrders = (orders || []).filter((o) => 
@@ -534,6 +584,70 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         );
       },
     },
+    ...(showProcurementFields ? [
+      {
+        title: <span className="font-semibold text-gray-700">Procure Qty</span>,
+        key: 'procurement_quantity',
+        render: (value, record) => {
+          const stored = orderValuesByMaterial[record.id]?.procurement_quantity;
+          const isEditing = inlineEditRow && inlineEditRow.id === record.id;
+          if (!isEditing) return stored !== undefined ? stored : "-";
+          const fieldKey = `proc-qty-${record.id}`;
+          return (
+            <div className="flex flex-col">
+              <InputNumber min={0} precision={0} step={1} max={99999} style={{ width: '100%' }} value={inlineEditRow.procurement_quantity} stringMode parser={(val) => limitDecimals(val, fieldKey, 0)} onKeyDown={(e) => blockExtraDecimals(e, fieldKey, 0)} onChange={(val) => changeInlineEdit('procurement_quantity', val)} />
+              {decimalWarnings[fieldKey] && <span className="text-[10px] text-orange-500 leading-none mt-1 animate-pulse">{decimalWarnings[fieldKey]}</span>}
+            </div>
+          );
+        },
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Procure Kg</span>,
+        key: 'procurement_weight',
+        render: (value, record) => {
+          const stored = orderValuesByMaterial[record.id]?.procurement_weight;
+          const isEditing = inlineEditRow && inlineEditRow.id === record.id;
+          if (!isEditing) return stored !== undefined ? stored : "-";
+          const fieldKey = `proc-weight-${record.id}`;
+          return (
+            <div className="flex flex-col">
+              <InputNumber min={0} precision={3} step={0.001} style={{ width: '100%' }} value={inlineEditRow.procurement_weight} stringMode parser={(val) => limitDecimals(val, fieldKey, 3)} onKeyDown={(e) => blockExtraDecimals(e, fieldKey, 3)} onChange={(val) => changeInlineEdit('procurement_weight', val)} />
+              {decimalWarnings[fieldKey] && <span className="text-[10px] text-orange-500 leading-none mt-1 animate-pulse">{decimalWarnings[fieldKey]}</span>}
+            </div>
+          );
+        },
+      },
+      {
+        title: <span className="font-semibold text-gray-700">Vendor</span>,
+        key: 'vendor',
+        render: (value, record) => {
+          const stored = orderValuesByMaterial[record.id]?.vendor_id;
+          const isEditing = inlineEditRow && inlineEditRow.id === record.id;
+          if (!isEditing) {
+            if (!stored) return "-";
+            const vendor = vendors.find(v => v.id === stored);
+            return vendor ? vendor.company_name : "-";
+          }
+          return (
+            <Select
+              style={{ width: '100%' }}
+              placeholder="Select Vendor"
+              loading={vendorsLoading}
+              value={inlineEditRow.vendor_id}
+              onChange={(val) => changeInlineEdit('vendor_id', val)}
+              allowClear
+            >
+              {vendors.map(vendor => (
+                <Option key={vendor.id} value={vendor.id}>
+                  <ShopOutlined className="mr-1" />
+                  {vendor.company_name}
+                </Option>
+              ))}
+            </Select>
+          );
+        },
+      }
+    ] : []),
     {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: 'actions',
@@ -562,6 +676,24 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
 
   return (
     <div className="mt-2 sm:mt-4">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Checkbox 
+            checked={showProcurementFields} 
+            onChange={(e) => setShowProcurementFields(e.target.checked)}
+          >
+            <span className="font-medium text-gray-700">Show Procurement Fields</span>
+          </Checkbox>
+          {showProcurementFields && (
+            <Tooltip title="Enable procurement to order additional materials when stock is insufficient">
+              <span className="text-xs text-gray-500">
+                <ShopOutlined /> Select vendor and specify procurement quantities
+              </span>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+      
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
         <div className="lg:col-span-1">
             <Card title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"><div className="flex items-center gap-2"><BlockOutlined className="text-blue-600" /><span className="font-bold text-gray-800 text-sm sm:text-base">Order Structure</span></div><Input.Search placeholder="Search..." allowClear onSearch={setOrderSearchText} onChange={handleSearchChange} value={orderSearchText} maxLength={20} className="w-full sm:w-48" size="small" /></div>} className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100 h-full" styles={{ body: { padding: 'clamp(8px, 2vw, 12px)', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }, header: { padding: 'clamp(12px, 2vw, 16px)' } }}>

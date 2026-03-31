@@ -6,11 +6,29 @@ import { API_BASE_URL } from "../../Config/auth";
 
 const { Dragger } = Upload;
 
-const OperationImportModal = ({ open, onCancel, onUseOperations }) => {
+const OperationImportModal = ({ open, onCancel, existingOperations = [], onUseOperations }) => {
   const [fileList, setFileList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [operations, setOperations] = useState([]);
   const [hasExtracted, setHasExtracted] = useState(false);
+
+  // Calculate next operation number based on existing operations
+  const calculateNextOpNumber = (index) => {
+    if (existingOperations?.length > 0) {
+      // Extract existing operation numbers and find the max
+      const existingNumbers = existingOperations
+        .map(op => {
+          const num = parseInt(String(op.operation_number).trim());
+          return isNaN(num) ? 0 : num;
+        })
+        .filter(num => num > 0);
+      
+      const maxNumber = Math.max(...existingNumbers, 0);
+      return maxNumber + (index + 1) * 10;
+    }
+    // Default for new parts without existing operations
+    return (index + 1) * 10;
+  };
 
   // Reset state when modal opens
   useEffect(() => {
@@ -51,8 +69,10 @@ const OperationImportModal = ({ open, onCancel, onUseOperations }) => {
         formData
       );
       const data = response.data;
+      // Generate proper sequential operation numbers, ignoring file operation numbers
       const opsWithKeys = (data || []).map((op, idx) => ({
         ...op,
+        operation_number: String(calculateNextOpNumber(idx)), // Override with proper sequence
         tempId: op.operation_number || `op-${idx}-${Date.now()}`
       }));
       setOperations(opsWithKeys);
@@ -164,13 +184,13 @@ const OperationImportModal = ({ open, onCancel, onUseOperations }) => {
           fileList={fileList}
           beforeUpload={handleBeforeUpload}
           onRemove={handleRemove}
-          accept=".pdf,.docx,.csv"
+          accept=".pdf,.docx,.csv,.xlsx,.xls"
           className="bg-gray-50 border-dashed border-2 py-5"
         >
           <p className="ant-upload-drag-icon">
             <InboxOutlined className="text-3xl text-blue-400" />
           </p>
-          <p className="ant-upload-text">Click or drag DOCX / CSV / PDF here</p>
+          <p className="ant-upload-text">Click or drag DOCX / CSV / PDF / Excel here</p>
           <p className="ant-upload-hint text-xs text-gray-400">
             File should contain table with Op Number, Operation Name, times, instructions and notes
           </p>

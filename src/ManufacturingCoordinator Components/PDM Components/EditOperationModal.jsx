@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Modal, Form, Input, Button, Tabs, Upload, message, Popconfirm,
+  Modal, Form, Input, Button, Tabs, Upload, Popconfirm,
   Spin, Empty, Tag, Row, Col, TimePicker, Select, Tooltip, Flex,
-  Badge, DatePicker
+  Badge, DatePicker, App
 } from 'antd';
 import {
   UploadOutlined, DeleteOutlined, FileTextOutlined, SaveOutlined,
@@ -13,6 +13,7 @@ import dayjs from 'dayjs';
 import axios from "axios";
 import { API_BASE_URL } from '../../Config/auth';
 import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils';
+import OperationToolsSelector from './OperationToolsSelector';
 
 const { TextArea } = Input;
 const { Dragger } = Upload;
@@ -51,6 +52,7 @@ const EditOperationModal = ({
   onUpdate, defaultTab = 'details', showAddToolForm = true
 }) => {
   const isCreateMode = !operation && partId;
+  const { message } = App.useApp();
   const [form] = Form.useForm();
   const [loading, setLoading]                   = useState(false);
   const [documents, setDocuments]               = useState([]);
@@ -64,9 +66,9 @@ const EditOperationModal = ({
   const [selectedFileList, setSelectedFileList] = useState([]);
   const [workCenters, setWorkCenters]           = useState([]);
   const [allMachines, setAllMachines]           = useState([]);
-  const [toolsList, setToolsList]               = useState([]);
   const [existingTools, setExistingTools]       = useState([]);
   const [loadingTools, setLoadingTools]         = useState(false);
+  const [allTools, setAllTools]                 = useState([]);
   const [preview, setPreview]                   = useState(null); // { url, title, type }
   const [viewingDoc, setViewingDoc]             = useState(null); // { url, title, type, id, name }
   const [documentPreviewModal, setDocumentPreviewModal] = useState(null); // { url, title, type, id, name } — preview in modal
@@ -74,6 +76,7 @@ const EditOperationModal = ({
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
   const [workCentersLoading, setWorkCentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
+  const [toolsSelectorVisible, setToolsSelectorVisible] = useState(false);
 
   const fromDateWatch = Form.useWatch('from_date', form);
   const partTypeWatch = Form.useWatch('part_type_id', form);
@@ -82,7 +85,6 @@ const EditOperationModal = ({
   const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,    setAllMachines, setMachinesLoading,    allMachines.length > 0);
-  const fetchTools       = () => fetchInto(`${API_BASE_URL}/tools-list/`,  setToolsList,   null,                  false);
 
   const getCurrentUserId = () => {
     try {
@@ -132,7 +134,6 @@ const EditOperationModal = ({
       fetchPartTypes();
     }
   }, [open, showAddToolForm]);
-  useEffect(() => { if (open && showAddToolForm) fetchTools(); }, [open, showAddToolForm]);
   useEffect(() => { if (open && isCreateMode) { form.resetFields(); form.setFieldsValue({ part_type_id: 1 }); } }, [open, isCreateMode]);
 
   useEffect(() => {
@@ -165,7 +166,12 @@ const EditOperationModal = ({
       if (operation.operation_documents) setDocuments(operation.operation_documents);
       else fetchDocuments();
     } else {
-      if (operation.tools) setExistingTools(operation.tools);
+      if (operation.tools) {
+        setExistingTools(operation.tools);
+        // Extract unique tools from existing tools for display
+        const uniqueTools = operation.tools.map(t => t.tool_details || {}).filter(Boolean);
+        setAllTools(uniqueTools);
+      }
       else fetchExistingTools();
     }
   }, [open, operation?.id, showAddToolForm]);
@@ -234,6 +240,15 @@ const EditOperationModal = ({
     a.click();
     a.remove();
     message.success(`Downloading ${doc.document_name}`);
+  };
+
+  const getDocumentDisplayName = (doc) => {
+    if (!doc) return '';
+    if (doc.document_url) {
+      const segment = doc.document_url.split('/').filter(Boolean).pop();
+      if (segment) return segment.replace(/^\d{8}_\d{6}_[a-zA-Z0-9]+_/, ''); // strip timestamp and unique ID e.g. 20260330_094250_ab0e25a8_
+    }
+    return doc.document_name || '';
   };
 
   const handleAddTools = async ({ tool_ids }) => {
@@ -334,7 +349,7 @@ const EditOperationModal = ({
   };
 
   // ── derived ────────────────────────────────────────────────────────────────
-  const availableTools  = toolsList.filter(t => !existingTools.some(et => et.tool_id === t.id));
+  const availableTools  = allTools.filter(t => !existingTools.some(et => et.tool_id === t.id));
   const partTypeOptions = partTypes.length ? partTypes.map(pt => ({ label: pt.type_name, value: pt.id })) : [{ label: 'IN-House', value: 1 }, { label: 'Out-Source', value: 2 }];
   const parseV          = (v) => parseFloat(String(v).replace(/^v/i, ''));
   const fmtV            = (v) => String(v).startsWith('v') ? String(v) : `v${v}`;
@@ -382,7 +397,7 @@ const EditOperationModal = ({
                           <div className="flex gap-3 flex-1 min-w-0">
                             <div className="bg-blue-50 p-2 rounded text-blue-500 h-fit mt-1"><FileTextOutlined /></div>
                             <div className="flex-1 overflow-hidden">
-                              <span className="text-gray-800 font-semibold truncate block mb-1">{item.document_name}</span>
+                              <span className="text-gray-800 font-semibold truncate block mb-1">{getDocumentDisplayName(item)}</span>
                               <div className="flex gap-2 items-center">
                                 <Tag color="blue" variant="filled" className="m-0 text-[10px] font-bold">{item.document_type}</Tag>
                                 <Tag color="blue" className="m-0 text-[10px] font-bold">{fmtV(item.document_version)}</Tag>
@@ -395,7 +410,7 @@ const EditOperationModal = ({
                           <div key={ver.id} className="bg-gray-50 p-2 ml-6 rounded-lg border border-gray-100 flex items-start justify-between gap-4 border-l-4 border-l-orange-400">
                             <div className="flex gap-2 flex-1 min-w-0 items-center">
                               <FileTextOutlined className="text-orange-400 text-xs shrink-0" />
-                              <span className="text-gray-700 text-sm truncate font-medium block">{ver.document_name}</span>
+                              <span className="text-gray-700 text-sm truncate font-medium block">{getDocumentDisplayName(ver)}</span>
                               <Tag color="orange" className="m-0 text-[10px] font-bold shrink-0">{fmtV(ver.document_version)}</Tag>
                             </div>
                             <DocActions doc={ver} rootId={item.id} latestV={latestV} />
@@ -491,43 +506,59 @@ const EditOperationModal = ({
       <h4 className="text-sm font-medium mb-2 flex items-center gap-2"><ToolOutlined className="text-blue-500" />Assigned Tools ({existingTools.length}):</h4>
       {loadingTools ? <div className="flex justify-center p-4"><Spin /></div>
         : existingTools.length > 0 ? (
-          <Flex vertical className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4">
-            {[...existingTools].sort((a, b) => a.id - b.id).map((item, i) => {
-              const td = toolsList.find(t => t.id === item.tool_id);
-              return (
-                <div key={item.id} className={`flex items-center justify-between p-3 ${i < existingTools.length - 1 ? 'border-b border-gray-100' : ''} hover:bg-gray-50`}>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-gray-800 truncate">{td?.item_description || `Tool ID: ${item.tool_id}`}</div>
-                    <div className="flex gap-2 text-xs mt-1">
-                      <Tag className="m-0 text-[10px]">{td?.identification_code}</Tag>
-                      {td?.range && <span className="text-gray-400">{td.range}</span>}
-                    </div>
-                  </div>
-                  {showAddToolForm && (
-                    <Popconfirm title="Remove Tool" description="Are you sure?" onConfirm={() => handleRemoveTool(item.id)} okText="Yes" cancelText="No">
-                      <Button type="text" danger size="small" icon={<DeleteOutlined />} />
-                    </Popconfirm>
-                  )}
-                </div>
-              );
-            })}
-          </Flex>
+          <div className="bg-white rounded-lg border border-gray-200 overflow-hidden mb-4 overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Item Description</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Range / Size</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">ID Code</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Make</th>
+                  <th className="px-3 py-2 text-center text-xs font-semibold text-gray-600">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...existingTools].sort((a, b) => a.id - b.id).map((item, i) => {
+                  const td = item.tool || item.tool_details || item || {};
+                  return (
+                    <tr key={item.id} className={`${i < existingTools.length - 1 ? 'border-b border-gray-100' : ''} hover:bg-gray-50`}>
+                      <td className="px-3 py-2">
+                        <span className="font-medium text-gray-900">{td?.item_description || `Tool ID: ${item.tool_id}`}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-gray-600">{td?.range || td?.size || '—'}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-gray-600">{td?.identification_code || '—'}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className="text-gray-600">{td?.make || '—'}</span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {showAddToolForm && (
+                          <Popconfirm title="Remove Tool" description="Are you sure?" onConfirm={() => handleRemoveTool(item.id)} okText="Yes" cancelText="No">
+                            <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+                          </Popconfirm>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         ) : <Empty description="No tools assigned" image={Empty.PRESENTED_IMAGE_SIMPLE} className="mb-4" />
       }
       {showAddToolForm && (
         <div className="pt-4 border-t">
-          <Form form={form} layout="vertical" onFinish={handleAddTools}>
-            <Form.Item name="tool_ids" label={<span className="text-sm font-medium">Add New Tools</span>} rules={[{ required: true, message: 'Please select tools' }]}>
-              <Select mode="multiple" placeholder="Select Tools to Add" loading={!toolsList.length}
-                filterOption={(input, option) => { const t = toolsList.find(t => t.id === option.value); return t && `${t.item_description} ${t.identification_code} ${t.range || ''}`.toLowerCase().includes(input.toLowerCase()); }}
-              >
-                {availableTools.map(t => <Select.Option key={t.id} value={t.id}>{t.item_description} ({t.identification_code}){t.range ? ` - ${t.range}` : ''}</Select.Option>)}
-              </Select>
-            </Form.Item>
-            <div className="flex justify-end">
-              <Button type="primary" htmlType="submit" loading={loadingTools} icon={<PlusOutlined />} className="no-hover-btn">Add Selected Tools</Button>
-            </div>
-          </Form>
+          <Button 
+            type="primary" 
+            icon={<PlusOutlined />} 
+            onClick={() => setToolsSelectorVisible(true)}
+            className="no-hover-btn w-full sm:w-auto"
+          >
+            Add Tools
+          </Button>
         </div>
       )}
     </div>
@@ -676,6 +707,27 @@ const EditOperationModal = ({
             : <iframe src={`${preview.url}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
           }
         </Modal>
+      )}
+      {toolsSelectorVisible && (
+        <OperationToolsSelector
+          visible={toolsSelectorVisible}
+          onCancel={() => setToolsSelectorVisible(false)}
+          onConfirm={async (newLinks) => {
+            // OperationToolsSelector already made the API call and showed success message
+            // This callback just handles UI updates after success
+            if (!newLinks || newLinks.length === 0) {
+              message.info('No new tools were added');
+              return;
+            }
+
+            fetchExistingTools();
+            if (onUpdate) onUpdate();
+            setToolsSelectorVisible(false);
+          }}
+          existingTools={existingTools}
+          operationId={operation?.id}
+          partId={operation?.part_id}
+        />
       )}
     </Modal>
   );

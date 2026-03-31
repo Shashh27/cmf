@@ -3,11 +3,12 @@ import {PlusOutlined,DownloadOutlined,EyeOutlined,SyncOutlined,InboxOutlined,Fil
 import {Badge,Button,Empty,Input,Modal,Popconfirm,Select,Table,Tag,Typography,Upload,message,} from "antd";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
+import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
 
-const AssemblyDocumentsPanel = ({ selectedItem }) => {
+const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }) => {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -294,19 +295,20 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
 
   const columns = [
     {
-      title: <span className="text-xs font-semibold">DOCUMENT NAME</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap">DOCUMENT NAME</span>,
       key: "document_name",
+      width: "35%",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
         const currentDoc = selectedVersions[rootId] || record;
         const isLatest = currentDoc.id === record.id;
         return (
           <div className="flex items-center gap-3 py-1">
-            <div className="p-2 bg-blue-50 rounded">
+            <div className="p-2 bg-blue-50 rounded flex-shrink-0">
               <FilePdfOutlined className="text-blue-500" />
             </div>
             <div className="flex flex-col min-w-0">
-              <Text strong className="text-sm truncate max-w-[300px]">
+              <Text strong className="text-sm truncate">
                 {currentDoc.document_name}
               </Text>
               {!isLatest && (
@@ -320,23 +322,23 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
       },
     },
     {
-      title: <span className="text-xs font-semibold">DOCUMENT TYPE</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap">DOCUMENT TYPE</span>,
       key: "document_type",
-      width: 120,
+      width: "25%",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
         const currentDoc = selectedVersions[rootId] || record;
         return (
-          <Tag className="m-0 text-xs px-1 leading-4 uppercase bg-blue-100 text-blue-700 border-none">
+          <Tag className="m-0 text-xs px-2 py-1 leading-4 uppercase bg-blue-100 text-blue-700 border-none whitespace-nowrap">
             {currentDoc.document_type || "2D"}
           </Tag>
         );
       },
     },
     {
-      title: <span className="text-xs font-semibold">VERSION</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap">VERSION</span>,
       key: "version",
-      width: 160,
+      width: "20%",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
         const group = groupedDocs[rootId] || [];
@@ -399,9 +401,9 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
       },
     },
     {
-      title: <span className="text-xs font-semibold text-center block">ACTIONS</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap text-center block">ACTIONS</span>,
       key: "actions",
-      width: 220,
+      width: "20%",
       align: "center",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
@@ -474,7 +476,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
           }
         `}
       </style>
-      <div className="flex justify-between items-center px-3 pt-3 pb-2 border-b border-slate-100">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 px-3 pt-3 pb-2 border-b border-slate-100">
         <div>
           <div className="text-sm font-semibold text-slate-800">
             Assembly Documents
@@ -483,17 +485,24 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
             Manage documents for this assembly / sub-assembly
           </div>
         </div>
-        <Button
-          type="primary"
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={() => {
-          resetUploadState();
-          setIsUploadModalOpen(true);
-        }}
-      >
-        Add Document
-      </Button>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <AssemblyPartsUploadPanel
+            selectedItem={selectedItem}
+            partTypes={partTypes}
+            onPartsCreated={onPartsCreated}
+          />
+          <Button
+            type="primary"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => {
+            resetUploadState();
+            setIsUploadModalOpen(true);
+          }}
+          >
+            Add Document
+          </Button>
+        </div>
     </div>
 
     <div className="flex-1 min-h-0 overflow-hidden px-3 pb-3">
@@ -513,7 +522,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
             />
           ),
         }}
-        scroll={{ x: 600, y: "calc(100vh - 260px)" }}
+        scroll={{ x: true, y: "calc(100vh - 260px)" }}
       />
     </div>
 

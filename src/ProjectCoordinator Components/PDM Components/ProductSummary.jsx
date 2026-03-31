@@ -1,10 +1,24 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Card, Empty, Spin, Table, Tag, Typography } from "antd";
-import { ClockCircleOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { ToolOutlined, ClockCircleOutlined, AppstoreOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 
 const { Text } = Typography;
+
+// ─── Section Header ──────────────────────────────────────────────────────────
+
+const SectionHeader = ({ icon, title, count }) => (
+  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+    <div className="flex items-center gap-2">
+      <span className="text-blue-600">{icon}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>{title}</span>
+    </div>
+    {count != null && (
+      <Tag color="blue" style={{ margin: 0, fontFamily: "monospace", fontSize: 13 }}>{count} rows</Tag>
+    )}
+  </div>
+);
 
 const FitTable = ({ columns, dataSource, scrollX, locale, rowKey, className, maxHeight }) => {
   const containerStyle = maxHeight
@@ -235,8 +249,9 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
       title: "Machine",
       dataIndex: "machine_name",
       key: "machine_name",
+      width: 120,
       render: (t) => (
-        <Tag color="geekblue" className="m-0 px-2 py-0.5 text-xs sm:text-sm">
+        <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 11, lineHeight: "1.3" }}>
           {t || "N/A"}
         </Tag>
       ),
@@ -244,26 +259,29 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     {
       title: "Setup Time",
       key: "setup",
+      width: 100,
       render: (_, r) => (
-        <span className="font-mono text-slate-700 text-xs sm:text-sm">
+        <Tag color="orange" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
           {formatHms(r.setup_seconds)}
-        </span>
+        </Tag>
       ),
     },
     {
       title: "Cycle Time",
       key: "cycle",
+      width: 100,
       render: (_, r) => (
-        <span className="font-mono text-slate-700 text-xs sm:text-sm">
+        <Tag color="green" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
           {formatHms(r.cycle_seconds)}
-        </span>
+        </Tag>
       ),
     },
     {
       title: "Total",
       key: "total",
+      width: 100,
       render: (_, r) => (
-        <span className="font-mono font-semibold text-slate-800 text-xs sm:text-sm">
+        <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#1e293b", fontSize: 11 }}>
           {formatHms(r.total_seconds)}
         </span>
       ),
@@ -349,22 +367,24 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
       `}</style>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0 overflow-hidden">
-        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col min-h-0 shadow-sm">
-          <div className="px-3 py-2 border-b border-slate-100 bg-slate-50">
-            <span className="text-[11px] sm:text-xs font-semibold text-slate-700">
-              Machine-wise total hours
-            </span>
-          </div>
-          <FitTable
-            columns={machineColumns}
-            dataSource={summary.machineRows}
-            rowKey={(r) => r.machine_name}
-            scrollX={520}
-            maxHeight="55vh"
-            tableLayout="auto"
-            locale={{ emptyText: <Empty description="No IN-House operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-            className="product-summary-table"
+        <div className="bg-white rounded-lg border border-slate-200 shadow-sm" style={{ display: "flex", flexDirection: "column" }}>
+          <SectionHeader
+            icon={<ToolOutlined />}
+            title="Machine-wise Total Hours"
+            count={summary.machineRows.length}
           />
+          <div style={{ overflowY: "auto", overflowX: "auto", maxHeight: 320 }}>
+            <Table
+              className="ps-table"
+              columns={machineColumns}
+              dataSource={summary.machineRows}
+              rowKey={(r) => r.machine_name}
+              pagination={false}
+              size="small"
+              scroll={{ x: 420 }}
+              locale={{ emptyText: <Empty description="No IN-House operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+            />
+          </div>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col min-h-0 shadow-sm">

@@ -41,6 +41,8 @@ const CreateProductModal = ({
     type_id: 1,
     raw_material_id: null,
     part_detail: null,
+    size: '',
+    qty: 1,
     assembly_id: null,
     product_id: ''
   });
@@ -68,6 +70,8 @@ const CreateProductModal = ({
           type_id: editingItem.type_id || 1,
           raw_material_id: editingItem.raw_material_id,
           part_detail: editingItem.part_detail ?? null,
+          size: editingItem.size || '',
+          qty: editingItem.qty || 1,
         };
       }
     } else {
@@ -89,6 +93,8 @@ const CreateProductModal = ({
           type_id: 1,
           raw_material_id: null,
           part_detail: null,
+          size: '',
+          qty: 1,
         };
       }
     }
@@ -120,6 +126,8 @@ const CreateProductModal = ({
           type_id: editingItem.type_id || 1,
           raw_material_id: editingItem.raw_material_id,
           part_detail: editingItem.part_detail ?? null,
+          size: editingItem.size || '',
+          qty: editingItem.qty || 1,
         };
       }
     } else {
@@ -141,6 +149,8 @@ const CreateProductModal = ({
           type_id: 1,
           raw_material_id: null,
           part_detail: null,
+          size: '',
+          qty: 1,
         };
       }
     }
@@ -268,6 +278,8 @@ const CreateProductModal = ({
           type_id: values.type_id,
           raw_material_id: values.raw_material_id || null,
           part_detail: partDetail,
+          size: values.size || null,
+          qty: values.qty || 1,
           assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
           product_id: editingItem?.product_id || selectedProduct?.id,
           user_id: getCurrentUserId(),
@@ -438,6 +450,24 @@ const CreateProductModal = ({
             >
               <Input placeholder="e.g., Component Part" autoComplete="off" size="large" maxLength={30} />
             </Form.Item>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Form.Item
+                name="size"
+                label={<span className="text-xs sm:text-sm">Size</span>}
+                rules={[{ required: false }]}
+              >
+                <Input placeholder="e.g., 25x25x160" autoComplete="off" size="large" />
+              </Form.Item>
+              <Form.Item
+                name="qty"
+                label={<span className="text-xs sm:text-sm">Quantity</span>}
+                rules={[{ required: false }]}
+              >
+                <Input type="number" min={1} placeholder="1" autoComplete="off" size="large" />
+              </Form.Item>
+            </div>
+
             <Form.Item
               name="type_id"
               label={<span className="text-xs sm:text-sm">Part Type</span>}

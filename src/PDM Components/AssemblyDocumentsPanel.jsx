@@ -9,6 +9,7 @@ import {
   FileTextOutlined,
   DeleteOutlined,
   UploadOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import {
   Badge,
@@ -26,6 +27,7 @@ import {
 } from "antd";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
+import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -46,7 +48,7 @@ const sanitizeDeleteError = (e) => {
   return msg.length > 160 ? `${msg.slice(0, 160)}...` : msg;
 };
 
-const AssemblyDocumentsPanel = ({ selectedItem }) => {
+const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }) => {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -205,7 +207,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
     if (!doc) return "";
     if (doc.document_url) {
       const segment = doc.document_url.split("/").filter(Boolean).pop();
-      if (segment) return segment.replace(/^\d+_\d+_/, ""); // strip leading timestamp e.g. 20260312_155636_
+      if (segment) return segment.replace(/^\d{8}_\d{6}_[a-zA-Z0-9]+_/, ""); // strip timestamp and unique ID e.g. 20260330_094250_ab0e25a8_
     }
     return doc.document_name || "";
   };
@@ -339,19 +341,20 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
 
   const columns = [
     {
-      title: <span className="text-xs font-semibold">DOCUMENT NAME</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap">DOCUMENT NAME</span>,
       key: "document_name",
+      width: "35%",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
         const currentDoc = selectedVersions[rootId] || record;
         const isLatest = currentDoc.id === record.id;
         return (
           <div className="flex items-center gap-3 py-1">
-            <div className="p-2 bg-blue-50 rounded">
+            <div className="p-2 bg-blue-50 rounded flex-shrink-0">
               <FilePdfOutlined className="text-blue-500" />
             </div>
             <div className="flex flex-col min-w-0">
-              <Text strong className="text-sm truncate max-w-[300px]">
+              <Text strong className="text-sm truncate">
                 {getDocumentDisplayName(currentDoc) || currentDoc.document_name}
               </Text>
               {!isLatest && (
@@ -365,28 +368,28 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
       },
     },
     {
-      title: <span className="text-xs font-semibold">DOCUMENT TYPE</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap">DOCUMENT TYPE</span>,
       key: "document_type",
-      width: 120,
+      width: "25%",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
         const currentDoc = selectedVersions[rootId] || record;
         return (
-          <Tag className="m-0 text-xs px-1 leading-4 uppercase bg-blue-100 text-blue-700 border-none">
+          <Tag className="m-0 text-xs px-2 py-1 leading-4 uppercase bg-blue-100 text-blue-700 border-none whitespace-nowrap">
             {currentDoc.document_type || "2D"}
           </Tag>
         );
       },
     },
     {
-      title: <span className="text-xs font-semibold">VERSION</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap">VERSION</span>,
       key: "version",
-      width: 160,
+      width: "20%",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
         const group = groupedDocs[rootId] || [];
         const currentDoc = selectedVersions[rootId] || record;
-        const versionWidth = 88;
+        const versionWidth = "100%";
         const fmtV = (v) => (String(v || "1.0").startsWith("v") ? String(v || "1.0") : `v${v || "1.0"}`);
 
         if (group.length <= 1) {
@@ -438,11 +441,10 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
       },
     },
     {
-      title: <span className="text-xs font-semibold text-center block">ACTIONS</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap text-center block">ACTIONS</span>,
       key: "actions",
-      width: 220,
+      width: "20%",
       align: "center",
-      fixed: "right",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;
         const currentDoc = selectedVersions[rootId] || record;
@@ -514,7 +516,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
           }
         `}
       </style>
-      <div className="flex justify-between items-center px-3 pt-3 pb-2 border-b border-slate-100">
+      <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 px-3 pt-3 pb-2 border-b border-slate-100">
         <div>
           <div className="text-sm font-semibold text-slate-800">
             Assembly Documents
@@ -523,17 +525,24 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
             Manage documents for this assembly / sub-assembly
           </div>
         </div>
-        <Button
-          type="primary"
-          size="small"
-          icon={<PlusOutlined />}
-          onClick={() => {
-          resetUploadState();
-          setIsUploadModalOpen(true);
-        }}
-      >
-        Add Document
-      </Button>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <AssemblyPartsUploadPanel
+            selectedItem={selectedItem}
+            partTypes={partTypes}
+            onPartsCreated={onPartsCreated}
+          />
+          <Button
+            type="primary"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              resetUploadState();
+              setIsUploadModalOpen(true);
+            }}
+          >
+            Add Document
+          </Button>
+        </div>
     </div>
 
     <div className="flex-1 min-h-0 overflow-hidden px-3 pb-3">
@@ -553,7 +562,7 @@ const AssemblyDocumentsPanel = ({ selectedItem }) => {
             />
           ),
         }}
-        scroll={{ x: "max-content", y: "calc(100vh - 280px)" }}
+        scroll={{ x: true, y: "calc(100vh - 280px)" }}
       />
     </div>
 

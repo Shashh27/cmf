@@ -2,15 +2,16 @@ import React, { useState, useEffect, useRef } from "react";
 import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
-import { Input, Button, message, Modal, Tooltip, Empty, Spin, Tag, Typography } from "antd";
+import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
+import ProductToolsViewer from "./ProductToolsViewer";
 
 const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
-  
+  const { message, modal } = App.useApp();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
@@ -26,6 +27,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [showPartActionModal, setShowPartActionModal] = useState(false);
   const [partActionType, setPartActionType] = useState('');
   const [activeItemId, setActiveItemId] = useState(null);
+  const [activeItemType, setActiveItemType] = useState(null);
+  const [showToolsModal, setShowToolsModal] = useState(false);
+  const [selectedProductForTools, setSelectedProductForTools] = useState(null);
+  const [originalHierarchicalData, setOriginalHierarchicalData] = useState(null);
   const hasFetchedData = useRef(false);
 
   const getExpandKey = (type, id) => `${type}-${id}`;
@@ -117,43 +122,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProductId, loading, products, hierarchicalData]);
-
-  const fetchProducts = async () => {
-    try {
-      const mcId = getCurrentUserId();
-
-      // 1) Get orders where this user is the manufacturing coordinator
-      const ordersRes = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: mcId != null ? { manufacturing_coordinator_id: mcId } : undefined,
-      });
-      const orders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
-
-      // 2) Collect unique product_ids from those orders
-      const productIds = [
-        ...new Set(
-          orders
-            .map(o => o.product_id)
-            .filter(id => id != null)
-        ),
-      ];
-
-      if (!productIds.length) {
-        setProducts([]);
-        return;
-      }
-
-      // 3) Fetch all products and keep only those that belong to the MC's orders
-      //    (products API is still admin-based, so we filter client-side by id)
-      const productsRes = await axios.get(`${API_BASE_URL}/products/`);
-      const allProducts = Array.isArray(productsRes.data) ? productsRes.data : [];
-      const filtered = allProducts.filter(p => productIds.includes(p.id));
-
-      setProducts(filtered);
-    } catch (error) {
-      console.error('Error fetching products for manufacturing coordinator:', error);
-      message.error('Failed to fetch products for manufacturing coordinator');
-    }
-  };
 
   const flattenBOMForExport = (data) => {
     const assemblies = [];
@@ -275,6 +243,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
         setHierarchicalData(prev => ({ ...prev, [productId]: transformedData }));
 
+        // Store original hierarchical data for tools viewer
+        setOriginalHierarchicalData(data);
+
         // For external consumers (like ProductSummary) that need full PartDetails
         // including operations, pass the original hierarchy 'data'.
         if (onHierarchyLoaded) {
@@ -301,6 +272,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           })),
         child_assemblies: transformSubassemblies(sub.subassemblies || [])
       }));
+  };
+
+  const handleViewAllTools = (product) => {
+    setSelectedProductForTools(product);
+    setShowToolsModal(true);
   };
 
   const toggleExpand = (key) => {
@@ -375,7 +351,13 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const handleProductCreated = async (newItem, type, action = 'create') => {
-    await fetchProducts();
+    if (type === 'product') {
+      if (action === 'edit') {
+        setProducts(prev => prev.map(p => p.id === newItem.id ? { ...p, ...newItem } : p));
+      } else {
+        setProducts(prev => [...prev, newItem]);
+      }
+    }
     const actionText = action === 'edit' ? 'updated' : 'created';
     const messages = {
       product: `Product "${newItem.product_name}" ${actionText} successfully!`,
@@ -397,7 +379,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const endpoints = { product: `/products/${item.id}`, assembly: `/assemblies/${item.id}`, part: `/parts/${item.id}` };
     const names = { product: item.product_name, assembly: item.assembly_name, part: item.part_name };
     
-    Modal.confirm({
+    modal.confirm({
       title: `Delete ${type}`,
       content: `Are you sure you want to delete ${type} "${names[type]}"? This cannot be undone.`,
       okText: 'Yes',
@@ -408,7 +390,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
           message.success(`${type.charAt(0).toUpperCase() + type.slice(1)} "${names[type]}" deleted successfully.`);
           if (type === 'product') {
-            await fetchProducts();
+            setProducts(prev => prev.filter(p => p.id !== item.id));
             setHierarchicalData(prev => {
               const newData = { ...prev };
               delete newData[item.id];
@@ -435,8 +417,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     });
   };
 
-  const handleItemClick = async (item, type, productId) => {
+  const handleItemClick = async (item, type, productId = null) => {
+    // Clear previous selection and set new one
     setActiveItemId(item.id);
+    setActiveItemType(type);
 
     if (type === 'product') {
       if (!hierarchicalData[item.id]) {
@@ -446,10 +430,43 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
     toggleExpand(getExpandKey(type, item.id));
 
-    const itemWithMeta = { ...item, itemType: type, productId };
+    const itemWithMeta = { ...item, itemType: type, productId: productId || (type === 'product' ? item.id : null) };
     if (onItemSelected) {
       onItemSelected(itemWithMeta);
     }
+  };
+
+  // Helper function to find productId for a part or assembly
+  const findProductIdForItem = (itemId) => {
+    for (const productId in hierarchicalData) {
+      const product = hierarchicalData[productId];
+      
+      // Check if it's a direct part
+      if (product.parts?.some(p => p.id === itemId)) {
+        return productId;
+      }
+      
+      // Check in assemblies recursively
+      const checkAssemblies = (assemblies) => {
+        for (const assembly of assemblies) {
+          if (assembly.id === itemId) {
+            return productId;
+          }
+          if (assembly.parts?.some(p => p.id === itemId)) {
+            return productId;
+          }
+          if (assembly.child_assemblies) {
+            const found = checkAssemblies(assembly.child_assemblies);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      
+      const found = checkAssemblies(product.assemblies || []);
+      if (found) return found;
+    }
+    return null;
   };
 
   const getNestedAssemblies = (assemblyId) => {
@@ -570,14 +587,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     return <Tag className="m-0 text-[10px] shrink-0">N/A</Tag>;
   };
 
-  const renderPartInTree = (part, level = 0) => {
-    const isSelected = activeItemId === part.id;
+  const renderPartInTree = (part, level = 0, productId = null) => {
+    const isSelected = activeItemId === part.id && activeItemType === 'part';
     return (
       <div
         key={`part-${part.id}`}
         className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
         style={{ marginLeft: `${level * 14}px` }}
-        onClick={() => handleItemClick(part, 'part')}
+        onClick={() => handleItemClick(part, 'part', productId || findProductIdForItem(part.id))}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
@@ -593,7 +610,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
-  const renderAssemblyTree = (assembly, level = 0) => {
+  const renderAssemblyTree = (assembly, level = 0, productId = null) => {
     const childAssemblies = getNestedAssemblies(assembly.id);
     const assemblyParts = getPartsForAssembly(assembly.id);
     const combinedChildren = [
@@ -606,14 +623,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     });
     const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
     const hasChildren = combinedChildren.length > 0;
-    const isSelected = activeItemId === assembly.id;
+    const isSelected = activeItemId === assembly.id && activeItemType === 'assembly';
 
     return (
       <div key={`assembly-${assembly.id}`} className="select-none">
         <div
           className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
           style={{ marginLeft: `${level * 14}px` }}
-          onClick={() => handleItemClick(assembly, 'assembly')}
+          onClick={() => handleItemClick(assembly, 'assembly', productId || findProductIdForItem(assembly.id))}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0 w-5 flex justify-center">
@@ -637,8 +654,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           <div className="mt-0.5">
             {combinedChildren.map(child =>
               child.__childType === 'part'
-                ? renderPartInTree(child, level + 1)
-                : renderAssemblyTree(child, level + 1)
+                ? renderPartInTree(child, level + 1, productId)
+                : renderAssemblyTree(child, level + 1, productId)
             )}
           </div>
         )}
@@ -662,7 +679,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const isExpanded = expandedItems[getExpandKey('product', product.id)];
     const hasChildren = combinedChildren.length > 0;
     const showArrow = !hasData || hasChildren;
-    const isSelected = activeItemId === product.id;
+    const isSelected = activeItemId === product.id && activeItemType === 'product';
 
     return (
       <div key={product.id} className="select-none mb-1">
@@ -692,8 +709,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           <div className="mt-0.5 ml-2 border-l border-slate-200 pl-1">
             {combinedChildren.map(child =>
               child.__childType === 'part'
-                ? renderPartInTree(child, 1)
-                : renderAssemblyTree(child, 1)
+                ? renderPartInTree(child, 1, product.id)
+                : renderAssemblyTree(child, 1, product.id)
             )}
           </div>
         )}
@@ -739,19 +756,19 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                 <span className="sm:hidden">BOM</span>
               </h2>
             </div>
-
-
-
-            {/* <Button
-              type="primary"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={handleCreateProduct}
-              className="bom-primary-btn shrink-0"
-            >
-              <span className="hidden sm:inline">New Product</span>
-              <span className="sm:hidden">New</span>
-            </Button> */}
+            <div className="flex items-center gap-2 shrink-0">
+              {products.length === 1 && (
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<ToolOutlined />}
+                  onClick={() => handleViewAllTools(products[0])}
+                  className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
+                >
+                  View Tools
+                </Button>
+              )}
+            </div>
 
 
 
@@ -798,6 +815,13 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         actionType={partActionType}
         selectedPart={selectedPart}
         onActionCreated={handleActionCreated}
+      />
+
+      <ProductToolsViewer
+        visible={showToolsModal}
+        onClose={() => setShowToolsModal(false)}
+        product={selectedProductForTools}
+        hierarchicalData={originalHierarchicalData}
       />
     </>
   );

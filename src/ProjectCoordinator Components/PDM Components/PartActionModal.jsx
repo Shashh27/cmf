@@ -38,7 +38,7 @@ const OutSourceDates = ({ form, index, itemsWatch }) => {
   );
 };
 
-const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCreated, initialOperations = [] }) => {
+const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCreated, initialOperations = [], existingOperations = [] }) => {
   const [form] = Form.useForm();
   const [loading, setLoading]           = useState(false);
   const [workCenters, setWorkCenters]   = useState([]);
@@ -51,6 +51,24 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   const [toolsLoading, setToolsLoading]             = useState(false);
 
   const itemsWatch = Form.useWatch('items', form);
+  
+  // Calculate next operation number based on existing operations
+  const calculateNextOpNumber = (index) => {
+    if (actionType === 'operation' && existingOperations?.length > 0) {
+      // Extract existing operation numbers and find the max
+      const existingNumbers = existingOperations
+        .map(op => {
+          const num = parseInt(String(op.operation_number).trim());
+          return isNaN(num) ? 0 : num;
+        })
+        .filter(num => num > 0);
+      
+      const maxNumber = Math.max(...existingNumbers, 0);
+      return maxNumber + (index + 1) * 10;
+    }
+    // Default for new parts without existing operations
+    return (index + 1) * 10;
+  };
 
   // ── fetch helpers ──────────────────────────────────────────────────────────
   const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
@@ -79,11 +97,13 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     if (!open) return;
     form.resetFields();
     if (actionType === 'operation') {
+      // Use initialOperations for pre-filling (imported operations), but existingOperations for sequencing
       const items = initialOperations?.length > 0
         ? initialOperations.map(op => ({
             operation_name:    op.operation_name,
             part_type_id:      op.part_type_id ?? 1,
-            from_date: null, to_date: null,
+            from_date: op.from_date ? dayjs(op.from_date) : null, 
+            to_date: op.to_date ? dayjs(op.to_date) : null,
             setup_time:        op.setup_time ? dayjs(op.setup_time, 'HH:mm:ss') : null,
             cycle_time:        op.cycle_time ? dayjs(op.cycle_time, 'HH:mm:ss') : null,
             workcenter_id:     op.workcenter_id || null,
@@ -131,78 +151,118 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     const now = dayjs();
     const ts  = (d) => d ? dayjs(d).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString() : null;
     const resolveType = (type, other) => (type === 'Other' && other?.trim()) ? other.trim() : type;
+    let bulkDocFormData = null;
 
-    for (const item of items) {
+    // Bulk create operations + reduce tool/doc upload calls
+    if (actionType === 'operation') {
+      const uid = getCurrentUserId();
+      const opPayloads = items.map((item) => {
+        const out = item.part_type_id === 2;
+        return {
+          operation_name: item.operation_name,
+          part_type_id: item.part_type_id ?? 1,
+          from_date: ts(item.from_date),
+          to_date: ts(item.to_date),
+          setup_time: out ? null : (item.setup_time?.format('HH:mm:ss') ?? null),
+          cycle_time: out ? null : (item.cycle_time?.format('HH:mm:ss') ?? null),
+          workcenter_id: out ? null : (item.workcenter_id ? parseInt(item.workcenter_id) : null),
+          machine_id: out ? null : (item.machine_id ? parseInt(item.machine_id) : null),
+          work_instructions: out ? null : (item.work_instructions || null),
+          notes: out ? null : (item.notes || null),
+          part_id: selectedPart.id,
+          user_id: uid,
+        };
+      });
+
       try {
-        if (actionType === 'operation') {
-          const out = item.part_type_id === 2;
-          const uid = getCurrentUserId();
-          const payload = {
-            operation_name:    item.operation_name,
-            part_type_id:      item.part_type_id ?? 1,
-            from_date:         ts(item.from_date),
-            to_date:           ts(item.to_date),
-            setup_time:        out ? null : (item.setup_time?.format('HH:mm:ss') ?? null),
-            cycle_time:        out ? null : (item.cycle_time?.format('HH:mm:ss') ?? null),
-            workcenter_id:     out ? null : (item.workcenter_id ? parseInt(item.workcenter_id) : null),
-            machine_id:        out ? null : (item.machine_id   ? parseInt(item.machine_id)    : null),
-            work_instructions: out ? null : (item.work_instructions || null),
-            notes:             out ? null : (item.notes || null),
-            part_id:           selectedPart.id,
-            user_id:           uid,
-          };
-          const opRes = await axios.post(
-            `${API_BASE_URL}/operations/`,
-            payload,
-            {
-              headers: { 'Content-Type': 'application/json' },
-            }
-          );
-          const newOp = opRes.data;
-          results.push(newOp);
+        const opRes = await axios.post(
+          `${API_BASE_URL}/operations/bulk`,
+          opPayloads,
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+        const createdOps = Array.isArray(opRes.data) ? opRes.data : [];
+        createdOps.forEach((o) => results.push(o));
 
-          // Tools
-          for (const toolId of (item.tool_ids || [])) {
-            try {
-              await axios.post(
-                `${API_BASE_URL}/tools/`,
-                { tool_id: toolId, part_id: selectedPart.id, operation_id: newOp.id, user_id: uid },
-                { headers: { 'Content-Type': 'application/json' } }
-              );
+        // Build ONE tools bulk request (across all operations)
+        try {
+          const links = [];
+          for (let i = 0; i < createdOps.length; i++) {
+            const newOp = createdOps[i];
+            const item = items[i];
+            const toolIds = item?.tool_ids || [];
+            for (const tid of toolIds) {
+              links.push({ tool_id: tid, part_id: selectedPart.id, operation_id: newOp.id, user_id: uid });
             }
-            catch (e) { console.error(e); }
+          }
+          if (links.length) {
+            await axios.post(`${API_BASE_URL}/tools/bulk-links`, links, { headers: { 'Content-Type': 'application/json' } });
+          }
+        } catch (e) { console.error(e); }
+
+        // Build ONE operation-documents bulk request (across all operations)
+        try {
+          const fd = new FormData();
+          if (uid != null) fd.append('user_id', String(uid));
+
+          for (let i = 0; i < createdOps.length; i++) {
+            const newOp = createdOps[i];
+            const item = items[i];
+            const docs = item?.documents || [];
+            for (const doc of docs) {
+              if (!doc.files?.length) continue;
+              const fileObj = doc.files?.[0]?.originFileObj;
+              if (!fileObj) continue;
+              fd.append('operation_id', String(newOp.id));
+              fd.append('files', fileObj);
+              fd.append('document_name', fileObj.name || 'Document');
+              fd.append('document_type', resolveType(doc.document_type, doc.document_type_other) || 'Balloon');
+              fd.append('document_version', (doc.document_version || 'v1.0').replace(/^v/i, ''));
+              fd.append('parent_id', '');
+            }
           }
 
-          // Documents
-          for (const doc of (item.documents || [])) {
-            if (!doc.files?.length) continue;
+          if (fd.getAll('files')?.length) {
+            await axios.post(`${API_BASE_URL}/operation-documents/upload-bulk-multi/`, fd);
+          }
+        } catch (e) { console.error(e); }
+      } catch (e) {
+        console.error(e);
+        message.error('Failed to create operations');
+      }
+    } else {
+      for (const item of items) {
+        try {
+          if (actionType === 'document') {
+          if (!bulkDocFormData) {
             const fd = new FormData();
-            fd.append('operation_id', newOp.id);
-            fd.append('document_version', doc.document_version || 'v1.0');
-            fd.append('document_type', resolveType(doc.document_type, doc.document_type_other) || 'Balloon');
-            doc.files.forEach(f => { if (f.originFileObj) fd.append('files', f.originFileObj); });
+            fd.append('part_id', selectedPart.id.toString());
+            const uid = getCurrentUserId();
             if (uid != null) fd.append('user_id', String(uid));
-            try {
-              await axios.post(`${API_BASE_URL}/operation-documents/upload/`, fd);
-            } catch (e) { console.error(e); }
+            bulkDocFormData = fd;
           }
 
-        } else if (actionType === 'document') {
           const file = item.file?.[0]?.originFileObj;
           if (!file) continue;
-          const fd = new FormData();
-          fd.append('file', file);
-          fd.append('document_name', item.document_name);
-          fd.append('document_type', resolveType(item.document_type, item.document_type_other));
-          fd.append('document_version', item.document_version || 'v1.0');
-          fd.append('part_id', selectedPart.id.toString());
-          if (item.parent_id) fd.append('parent_id', item.parent_id.toString());
-          const uid = getCurrentUserId();
-          if (uid != null) fd.append('user_id', String(uid));
-          const r = await axios.post(`${API_BASE_URL}/documents/`, fd);
-          results.push(r.data);
-        }
-      } catch (e) { console.error(e); message.error('Failed to create item'); }
+
+          bulkDocFormData.append('files', file);
+          bulkDocFormData.append('document_name', item.document_name || file.name?.replace(/\.[^/.]+$/, '') || 'Document');
+          bulkDocFormData.append('document_type', resolveType(item.document_type, item.document_type_other));
+          bulkDocFormData.append('document_version', item.document_version || 'v1.0');
+          if (item.parent_id) bulkDocFormData.append('parent_id', String(item.parent_id));
+          }
+        } catch (e) { console.error(e); message.error('Failed to create item'); }
+      }
+    }
+
+    if (actionType === 'document' && bulkDocFormData) {
+      try {
+        const resp = await axios.post(`${API_BASE_URL}/documents/bulk`, bulkDocFormData);
+        const created = Array.isArray(resp.data) ? resp.data : [];
+        created.forEach(d => results.push(d));
+      } catch (e) {
+        console.error(e);
+        message.error('Failed to upload documents');
+      }
     }
 
     setLoading(false);
@@ -224,7 +284,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
           {(fields, { add, remove }) => (
             <>
               <div style={{ maxHeight: '70vh', overflowY: 'auto', paddingRight: 4 }}>
-                {fields.map(({ key, name, ...rest }, index) => (
+                {fields.map(({ key, name, ...restField }, index) => (
                   <Card key={key} size="small"
                     title={`${actionType === 'operation' ? 'Operation' : 'Document'} ${index + 1}`}
                     extra={fields.length > 1 ? <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(name)} /> : null}
@@ -234,46 +294,93 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                     {actionType === 'operation' && (
                       <>
                         {/* Row 1: Name + Type + Setup/Cycle */}
-                        <Form.Item noStyle shouldUpdate={(p, c) => p.items?.[index]?.part_type_id !== c.items?.[index]?.part_type_id}>
+                        <Form.Item noStyle shouldUpdate={(prev, curr) => prev.items?.[index]?.part_type_id !== curr.items?.[index]?.part_type_id || prev.items?.[index]?.from_date !== curr.items?.[index]?.from_date}>
                           {({ getFieldValue }) => {
-                            const isOut = getFieldValue(['items', index, 'part_type_id']) === 2;
+                            const isOutSource = getFieldValue(['items', index, 'part_type_id']) === 2;
                             return (
-                              <Row gutter={[12, 12]}>
-                                <Col xs={24} sm={8} md={5}>
-                                  <Form.Item {...rest} name={[name, 'operation_name']} label="Operation Name" rules={[{ required: true, message: 'Req' }]} getValueFromEvent={e => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}>
-                                    <Input placeholder="Cutting" autoComplete="off" maxLength={30} />
-                                  </Form.Item>
-                                </Col>
-                                <Col xs={24} sm={8} md={4}>
-                                  <Form.Item {...rest} name={[name, 'part_type_id']} label="Operation Type" initialValue={1} rules={[{ required: true }]}>
-                                    <Select placeholder="Type" loading={partTypesLoading} onOpenChange={o => { if (o) fetchPartTypes(); }} options={partTypeOptions} />
-                                  </Form.Item>
-                                </Col>
-                                {!isOut && (
-                                  <>
-                                    <Col xs={12} sm={12} md={5}>
-                                      <Form.Item {...rest} name={[name, 'setup_time']} label="Setup Time" rules={timePickerRules('Setup Time')}>
-                                        <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
+                              <>
+                                <Row gutter={[12, 12]}>
+                                  <Col xs={24} sm={6} md={3}>
+                                    <Form.Item label="Op Number" required>
+                                      <Input value={calculateNextOpNumber(index)} disabled />
+                                    </Form.Item>
+                                  </Col>
+                                  <Col xs={24} sm={8} md={5}>
+                                    <Form.Item {...restField} name={[name, 'operation_name']} label="Operation Name" rules={[{ required: true, message: 'Operation Name is required' }]} getValueFromEvent={e => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}>
+                                      <Input placeholder="Cutting" autoComplete="off" maxLength={30} />
+                                    </Form.Item>
+                                  </Col>
+                                  <Col xs={24} sm={8} md={4}>
+                                    <Form.Item {...restField} name={[name, 'part_type_id']} label="Operation Type" initialValue={1} rules={[{ required: true }]}>
+                                      <Select placeholder="Type" loading={partTypesLoading} onOpenChange={o => { if (o) fetchPartTypes(); }} options={partTypeOptions} />
+                                    </Form.Item>
+                                  </Col>
+                                  {!isOutSource && (
+                                    <>
+                                      <Col xs={12} sm={12} md={5}>
+                                        <Form.Item {...restField} name={[name, 'setup_time']} label="Setup Time" required rules={timePickerRules('Setup Time')}>
+                                          <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
+                                        </Form.Item>
+                                      </Col>
+                                      <Col xs={12} sm={12} md={6}>
+                                        <Form.Item {...restField} name={[name, 'cycle_time']} label="Cycle Time" required rules={timePickerRules('Cycle Time')}>
+                                          <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
+                                        </Form.Item>
+                                      </Col>
+                                    </>
+                                  )}
+                                </Row>
+                                
+                                {/* Out-Source Dates - only show when Out-Source is selected */}
+                                {isOutSource && (
+                                  <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
+                                    <Col xs={24} sm={12} md={12}>
+                                      <Form.Item
+                                        {...restField}
+                                        name={[name, 'from_date']}
+                                        label="From Date"
+                                        rules={[{ required: true, message: 'Required for Out-Source' }]}
+                                      >
+                                        <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} inputReadOnly />
                                       </Form.Item>
                                     </Col>
-                                    <Col xs={12} sm={12} md={6}>
-                                      <Form.Item {...rest} name={[name, 'cycle_time']} label="Cycle Time" rules={timePickerRules('Cycle Time')}>
-                                        <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
+                                    <Col xs={24} sm={12} md={12}>
+                                      <Form.Item
+                                        {...restField}
+                                        name={[name, 'to_date']}
+                                        label="To Date"
+                                        rules={[
+                                          { required: true, message: 'Required for Out-Source' },
+                                          {
+                                            validator: (_, value) => {
+                                              const fd = getFieldValue(['items', index, 'from_date']);
+                                              if (!value) return Promise.resolve();
+                                              if (!fd) return Promise.reject(new Error('Select From Date first'));
+                                              return dayjs(value).isAfter(dayjs(fd), 'day')
+                                                ? Promise.resolve()
+                                                : Promise.reject(new Error('To Date must be after From Date'));
+                                            }
+                                          }
+                                        ]}
+                                      >
+                                        <DatePicker 
+                                          format="DD-MM-YYYY" 
+                                          style={{ width: '100%' }} 
+                                          inputReadOnly 
+                                          disabled={!getFieldValue(['items', index, 'from_date'])}
+                                          disabledDate={(current) => {
+                                            const fd = getFieldValue(['items', index, 'from_date']);
+                                            if (!fd) return true;
+                                            return current && !current.isAfter(dayjs(fd), 'day');
+                                          }}
+                                        />
                                       </Form.Item>
                                     </Col>
-                                  </>
+                                  </Row>
                                 )}
-                              </Row>
+                              </>
                             );
                           }}
-                        </Form.Item>
-
-                        {/* Out-Source: dates */}
-                        <Form.Item noStyle shouldUpdate={(p, c) => p.items?.[index]?.part_type_id !== c.items?.[index]?.part_type_id}>
-                          {({ getFieldValue }) => getFieldValue(['items', index, 'part_type_id']) === 2
-                            ? <OutSourceDates form={form} index={index} itemsWatch={itemsWatch} />
-                            : null
-                          }
                         </Form.Item>
 
                         {/* IN-House: WC, Machine, Tools, Instructions, Notes */}
@@ -284,7 +391,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                               <>
                                 <Row gutter={[12, 12]}>
                                   <Col xs={24} sm={12} md={8} lg={6}>
-                                    <Form.Item {...rest} name={[name, 'workcenter_id']} label="Workcenter">
+                                    <Form.Item {...restField} name={[name, 'workcenter_id']} label="Workcenter">
                                       <Select placeholder="Select WC" loading={workCentersLoading} onOpenChange={o => { if (o) fetchWorkCenters(); }}
                                         onChange={() => { const items = form.getFieldValue('items'); if (items?.[index]) { items[index].machine_id = undefined; form.setFieldsValue({ items }); } }}>
                                         {workCenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
@@ -296,7 +403,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                       {({ getFieldValue }) => {
                                         const wcId = getFieldValue(['items', index, 'workcenter_id']);
                                         return (
-                                          <Form.Item {...rest} name={[name, 'machine_id']} label="Machine">
+                                          <Form.Item {...restField} name={[name, 'machine_id']} label="Machine">
                                             <Select placeholder={wcId ? 'Select Machine' : 'Select WC First'} disabled={!wcId} loading={machinesLoading} onOpenChange={o => { if (o) fetchMachines(); }}>
                                               {allMachines.filter(m => m.work_center_id === wcId).map(m => (
                                                 <Select.Option key={m.id} value={m.id}>{[m.make, m.model].filter(Boolean).join(' - ')} ({m.type})</Select.Option>
@@ -308,22 +415,30 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                     </Form.Item>
                                   </Col>
                                   <Col xs={24} sm={24} md={8} lg={12}>
-                                    <Form.Item {...rest} name={[name, 'tool_ids']} label="Tools">
-                                      <Select mode="multiple" placeholder="Select Tools" loading={toolsLoading} onOpenChange={o => { if (o) fetchTools(); }} optionFilterProp="children" maxTagCount="responsive"
-                                        filterOption={(input, option) => (option?.children ?? '').toLowerCase().includes(input.toLowerCase())}>
-                                        {toolsList.map(t => <Select.Option key={t.id} value={t.id}>{t.item_description} ({t.identification_code}){t.range ? ` - ${t.range}` : ''}</Select.Option>)}
+                                    <Form.Item {...restField} name={[name, 'tool_ids']} label="Tools">
+                                      <Select mode="multiple" placeholder="Select Tools" loading={toolsLoading} onOpenChange={o => { if (o) fetchTools(); }} optionFilterProp="label" maxTagCount="responsive"
+                                        filterOption={(input, option) => {
+                                        const label = option?.label ?? option?.children;
+                                        const str = (label != null && typeof label === 'string') ? label : String(label ?? '');
+                                        const inp = (input != null && typeof input === 'string') ? input : String(input ?? '');
+                                        return str.toLowerCase().includes(inp.toLowerCase());
+                                      }}>
+                                        {toolsList.map(t => {
+                                          const searchLabel = `${t.item_description || ''} ${t.identification_code || ''} ${t.range || ''}`.trim();
+                                          return <Select.Option key={t.id} value={t.id} label={searchLabel}>{t.item_description} ({t.identification_code}){t.range ? ` - ${t.range}` : ''}</Select.Option>;
+                                        })}
                                       </Select>
                                     </Form.Item>
                                   </Col>
                                 </Row>
                                 <Row gutter={[12, 12]}>
                                   <Col xs={24} sm={12}>
-                                    <Form.Item {...rest} name={[name, 'work_instructions']} label="Work Instructions">
+                                    <Form.Item {...restField} name={[name, 'work_instructions']} label="Work Instructions">
                                       <TextArea rows={2} placeholder="Enter instructions..." />
                                     </Form.Item>
                                   </Col>
                                   <Col xs={24} sm={12}>
-                                    <Form.Item {...rest} name={[name, 'notes']} label="Notes">
+                                    <Form.Item {...restField} name={[name, 'notes']} label="Notes">
                                       <TextArea rows={2} placeholder="Enter notes..." />
                                     </Form.Item>
                                   </Col>
@@ -394,7 +509,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                     {actionType === 'document' && (
                       <Row gutter={[16, 12]} align="bottom">
                         <Col xs={24} sm={12} lg={6}>
-                          <Form.Item {...rest} name={[name, 'file']} label={<span className="text-xs font-medium text-gray-600">Upload File</span>} valuePropName="fileList" getValueFromEvent={e => Array.isArray(e) ? e : e?.fileList} rules={[{ required: true, message: 'Required' }]} className="mb-0">
+                          <Form.Item {...restField} name={[name, 'file']} label={<span className="text-xs font-medium text-gray-600">Upload File</span>} valuePropName="fileList" getValueFromEvent={e => Array.isArray(e) ? e : e?.fileList} rules={[{ required: true, message: 'Required' }]} className="mb-0">
                             <Upload maxCount={1} beforeUpload={() => false} className="w-full"
                               onChange={({ fileList }) => {
                                 const f = fileList?.[0]?.originFileObj;
@@ -405,7 +520,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={12} lg={6}>
-                          <Form.Item {...rest} name={[name, 'document_name']} label={<span className="text-xs font-medium text-gray-600">Document Name</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
+                          <Form.Item {...restField} name={[name, 'document_name']} label={<span className="text-xs font-medium text-gray-600">Document Name</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
                             <Input placeholder="Tech Drawing" autoComplete="off" />
                           </Form.Item>
                         </Col>
@@ -415,13 +530,13 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                               const type = getFieldValue(['items', name, 'document_type']);
                               return (
                                 <div className="flex flex-col gap-2">
-                                  <Form.Item {...rest} name={[name, 'document_type']} label={<span className="text-xs font-medium text-gray-600">Document Type</span>} className="mb-0" rules={[{ required: true, message: 'Required' }]}>
+                                  <Form.Item {...restField} name={[name, 'document_type']} label={<span className="text-xs font-medium text-gray-600">Document Type</span>} className="mb-0" rules={[{ required: true, message: 'Required' }]}>
                                     <Select placeholder="Select Type">
                                       {['2D','3D','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
                                     </Select>
                                   </Form.Item>
                                   {type === 'Other' && (
-                                    <Form.Item {...rest} name={[name, 'document_type_other']} className="mb-0" rules={[{ required: true, message: 'Type Required' }]}>
+                                    <Form.Item {...restField} name={[name, 'document_type_other']} className="mb-0" rules={[{ required: true, message: 'Type Required' }]}>
                                       <Input placeholder="Custom type..." autoComplete="off" />
                                     </Form.Item>
                                   )}
@@ -431,7 +546,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={12} lg={6}>
-                          <Form.Item {...rest} name={[name, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Version</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
+                          <Form.Item {...restField} name={[name, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Version</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
                             <Input placeholder="v1.0" disabled className="bg-gray-50" />
                           </Form.Item>
                         </Col>
