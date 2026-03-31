@@ -11,41 +11,32 @@ dayjs.extend(isSameOrAfter);
 dayjs.extend(isSameOrBefore);
 
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
-import { Card, Row, Col, Tabs, Table, Tag, Statistic, message, Spin, Button, Modal, Form, Select, DatePicker, Input, Popconfirm, Calendar, Radio, Space } from "antd";
-import { CheckCircleOutlined, ExclamationCircleOutlined, InfoCircleOutlined,EditOutlined,DeleteOutlined,ReloadOutlined, SearchOutlined 
+import { Card, Row, Col, Tabs, Table, Tag, message, Spin, Button, Modal, Form, Select, DatePicker, Input, Space, Switch } from "antd";
+import { CheckCircleOutlined, ExclamationCircleOutlined, InfoCircleOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, FilterOutlined, UploadOutlined, EyeOutlined, DownloadOutlined, LeftOutlined, DeleteOutlined 
 } from "@ant-design/icons";
+import MaintenanceSection from "./MaintenanceSection";
 
 const { TabPane } = Tabs;
 const { Option } = Select;
 const { TextArea } = Input;
-const { Search } = Input;
-
 
 const AssetAvailability = () => {
   const [machineData, setMachineData] = useState(null);
-  const [downtimeLogs, setDowntimeLogs] = useState([]);
-  const [calendarDowntimes, setCalendarDowntimes] = useState([]);
-  const [selectedDateDowntimes, setSelectedDateDowntimes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [downtimeLoading, setDowntimeLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("machine-status");
   const [updateModalVisible, setUpdateModalVisible] = useState(false);
   const [selectedMachine, setSelectedMachine] = useState(null);
   const [updateForm] = Form.useForm();
+  const [inlineEditForm] = Form.useForm();
+  const [editingKey, setEditingKey] = useState("");
   const [updateLoading, setUpdateLoading] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState(null);
-  const [shiftConfigs, setShiftConfigs] = useState([]);
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [currentConfig, setCurrentConfig] = useState(null);
-  const [shiftLoading, setShiftLoading] = useState(false);
-  const [shiftForm] = Form.useForm();
-  const [isWorkingDay, setIsWorkingDay] = useState(true);
 
   // Search and Pagination states
   const [machineSearchText, setMachineSearchText] = useState(null);
-  const [logSearchText, setLogSearchText] = useState(null);
+  const [wcSearchText, setWcSearchText] = useState(null);
+  const [statusSearchText, setStatusSearchText] = useState(null);
   const [machinePageSize, setMachinePageSize] = useState(10);
-  const [logPageSize, setLogPageSize] = useState(10);
 
   // Get unique machine names for dropdown
   const getMachineOptions = () => {
@@ -54,309 +45,21 @@ const AssetAvailability = () => {
     return uniqueNames.map(name => ({ label: name, value: name }));
   };
 
+  const getWcOptions = () => {
+    if (!machineData?.statuses) return [];
+    const uniqueWcs = [...new Set(machineData.statuses.map(item => item.work_center_name))];
+    return uniqueWcs.map(wc => ({ label: wc, value: wc }));
+  };
+
+  const getStatusOptions = () => {
+    if (!machineData?.statuses) return [];
+    const uniqueStatuses = [...new Set(machineData.statuses.map(item => item.status_name))];
+    return uniqueStatuses.map(status => ({ label: status, value: status }));
+  };
+
   useEffect(() => {
     fetchMachineStatus();
   }, []);
-
-  useEffect(() => {
-    if (activeTab === "downtime-logs") {
-      fetchDowntimeLogs();
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "shift-hours") {
-      fetchShiftConfigs();
-      fetchCurrentBreakdowns();
-    }
-  }, [activeTab]);
-
-  const fetchDowntimeLogs = async () => {
-    try {
-      setDowntimeLoading(true);
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/machine-status/machine-downtime/`);
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Fetched downtime logs:', data);
-        const logsWithKeys = (data || []).map((log, idx) => ({
-          ...log,
-          tempId: log.id || `${log.machine_id}-${idx}-${Date.now()}`
-        }));
-        setDowntimeLogs(logsWithKeys);
-      } else {
-        console.error("Failed to fetch downtime logs:", response.statusText);
-        message.error("Failed to fetch downtime logs");
-      }
-    } catch (error) {
-      console.error("Error fetching downtime logs:", error);
-      message.error("Error fetching downtime logs");
-    } finally {
-      setDowntimeLoading(false);
-    }
-  };
-
-  const fetchShiftConfigs = async () => {
-    try {
-      setShiftLoading(true);
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/shift-hours/`);
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Fetched shift configs:', data);
-        setShiftConfigs(data);
-      } else {
-        console.error("Failed to fetch shift configs:", response.statusText);
-        message.error("Failed to fetch shift configurations");
-      }
-    } catch (error) {
-      console.error("Error fetching shift configs:", error);
-      message.error("Error fetching shift configurations");
-    } finally {
-      setShiftLoading(false);
-    }
-  };
-
-
-// const fetchCalendarDowntimes = async () => {
-//   try {
-//     const response = await fetch(`${SCHEDULING_API_BASE_URL}/machine-status/machine-downtime/`);
-//     if (response.ok) {
-//       const data = await response.json();
-//       setCalendarDowntimes(data);
-//     }
-//   } catch (err) {
-//     console.error("Downtime fetch error", err);
-//   }
-// };
-
-const fetchCurrentBreakdowns = async () => {
-  try {
-    const res = await fetch(`${SCHEDULING_API_BASE_URL}/machine-status/machine-status/`);
-    const data = await res.json();
-
-    const breakdowns = data.statuses.filter(m => m.status_id === 2);
-
-    setCalendarDowntimes(breakdowns);
-  } catch (err) {
-    console.error("breakdown fetch error", err);
-  }
-};
-
-
-
-  const handleDateSelect = (date) => {
-  const dateStr = date.format('YYYY-MM-DD');
-  setSelectedDate(date);
-
-  const machines = getDowntimesForDate(date);
-  setSelectedDateDowntimes(machines);
-
-  // existing logic stays
-  const existingConfig = shiftConfigs.find(config => 
-    dayjs(config.date).format('YYYY-MM-DD') === dateStr
-  );
-
-  if (existingConfig) {
-    setCurrentConfig(existingConfig);
-    setIsWorkingDay(existingConfig.working_day);
-    shiftForm.setFieldsValue({
-      working_day: existingConfig.working_day,
-      number_of_shifts: existingConfig.number_of_shifts
-    });
-  } else {
-    setCurrentConfig(null);
-    setIsWorkingDay(true);
-    shiftForm.resetFields();
-    shiftForm.setFieldsValue({
-      working_day: true,
-      number_of_shifts: 2
-    });
-  }
-};
-
-  const handleSaveShiftConfig = async (values) => {
-    if (!selectedDate) {
-      message.error('Please select a date first');
-      return;
-    }
-
-    try {
-      setShiftLoading(true);
-      const dateStr = selectedDate.format('YYYY-MM-DD');
-      const payload = {
-        date: dateStr,
-        working_day: values.working_day,
-        number_of_shifts: values.working_day ? values.number_of_shifts : 0
-      };
-
-      let response;
-      if (currentConfig) {
-        // Update existing config
-        response = await fetch(`${SCHEDULING_API_BASE_URL}/shift-hours/${currentConfig.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        // Create new config
-        response = await fetch(`${SCHEDULING_API_BASE_URL}/shift-hours/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        });
-      }
-
-      if (response.ok) {
-        const savedConfig = await response.json();
-        message.success('Shift configuration saved successfully');
-        
-        // Update local state
-        if (currentConfig) {
-          setShiftConfigs(prev => prev.map(config => 
-            config.id === currentConfig.id ? savedConfig : config
-          ));
-        } else {
-          setShiftConfigs(prev => [...prev, savedConfig]);
-        }
-        
-        setCurrentConfig(savedConfig);
-      } else {
-        const errorData = await response.json();
-        message.error(errorData.detail || 'Failed to save shift configuration');
-      }
-    } catch (error) {
-      console.error('Error saving shift config:', error);
-      message.error('Error saving shift configuration');
-    } finally {
-      setShiftLoading(false);
-    }
-  };
-
-  const handleClearConfig = () => {
-    shiftForm.resetFields();
-    shiftForm.setFieldsValue({
-      working_day: true,
-      number_of_shifts: 2
-    });
-    setCurrentConfig(null);
-    setIsWorkingDay(true);
-  };
-
-  const handleRefresh = () => {
-    fetchShiftConfigs();
-  };
-
-  const getDateCellData = (date) => {
-    const dateStr = date.format('YYYY-MM-DD');
-    const config = shiftConfigs.find(config => 
-      dayjs(config.date).format('YYYY-MM-DD') === dateStr
-    );
-    return config;
-  };
-
-
-  const getDowntimesForDate = (date) => {
-  return calendarDowntimes.filter(m => {
-    if (m.status_id !== 2) return false;
-
-    const start = dayjs(m.available_from).startOf("day");
-    const end = m.available_to
-      ? dayjs(m.available_to).endOf("day")
-      : dayjs().endOf("day");
-
-    return date.isSameOrAfter(start) && date.isSameOrBefore(end);
-  });
-};
-
-  const dateCellRender = (value) => {
-  const config = getDateCellData(value);
-  const downtimes = getDowntimesForDate(value);
-
-  return (
-    <div
-      style={{
-        position: "relative",   // IMPORTANT
-        textAlign: "center",
-        minHeight: 60
-      }}
-    >
-      {/* 🚨 TOP LEFT ALERT ICON */}
-      {downtimes.length > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            top: 2,
-            left: 2,
-            zIndex: 2
-          }}
-        >
-          <Lottie
-            animationData={warningAnimation}
-            loop
-            autoplay
-            style={{ width: 35, height: 35}}
-            speed={3.0}
-          />
-        </div>
-      )}
-
-      {/* Normal Work/Off Block */}
-      {config && (
-        <div
-          style={{
-            background: config.working_day ? "#e6f7ff" : "#fff2e8",
-            padding: "2px 4px",
-            borderRadius: "4px",
-            fontSize: "12px"
-          }}
-        >
-          <div style={{ color: config.working_day ? "#1890ff" : "#fa8c16" }}>
-            {config.working_day ? "Work" : "Off"}
-          </div>
-          <div style={{ color: "#666" }}>
-            {config.number_of_shifts} shift
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-  const handleWorkingDayChange = (e) => {
-    const isWorking = e.target.value;
-    setIsWorkingDay(isWorking);
-    
-    // Reset number of shifts to default when switching to non-working day
-    if (!isWorking) {
-      shiftForm.setFieldsValue({ number_of_shifts: 0 });
-    } else {
-      // Set to 2 shifts when switching back to working day
-      shiftForm.setFieldsValue({ number_of_shifts: 2 });
-    }
-  };
-
-  const handleDeleteDowntime = async (record) => {
-    try {
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/machine-status/machine-downtime/${record.machine_id}`, {
-        method: 'DELETE',
-      });
-      
-      if (response.ok) {
-        message.success('Downtime record deleted successfully');
-        // Refresh the downtime logs
-        fetchDowntimeLogs();
-      } else {
-        const errorData = await response.json();
-        message.error(errorData.detail || 'Failed to delete downtime record');
-      }
-    } catch (error) {
-      console.error('Error deleting downtime record:', error);
-      message.error('Error deleting downtime record');
-    }
-  };
 
   const fetchMachineStatus = async () => {
     try {
@@ -396,26 +99,9 @@ const fetchCurrentBreakdowns = async () => {
       machine_name: machine.machine_make, 
       status_id: nextStatusId, // Set to automatically calculated next status
       description: machine.description || '',
+      available_from: null, // Start empty
+      available_to: null,   // Start empty
     };
-    
-    // Only set dates if they exist and are valid using dayjs
-    try {
-      if (machine.available_from) {
-        const fromDate = dayjs(machine.available_from);
-        if (fromDate.isValid()) {
-          formValues.available_from = fromDate;
-        }
-      }
-      
-      if (machine.available_to) {
-        const toDate = dayjs(machine.available_to);
-        if (toDate.isValid()) {
-          formValues.available_to = toDate;
-        }
-      }
-    } catch (error) {
-      console.warn('Error parsing dates:', error);
-    }
     
     console.log('Setting form values:', formValues);
     updateForm.setFieldsValue(formValues);
@@ -518,6 +204,105 @@ const fetchCurrentBreakdowns = async () => {
     setSelectedStatus(null);
   };
 
+  const isEditing = (record) => (record.id || record.machine_id).toString() === editingKey;
+
+  const edit = (record) => {
+    const key = (record.id || record.machine_id).toString();
+    inlineEditForm.setFieldsValue({
+      status_id: record.status_id === 1, // true for ON, false for OFF
+      description: record.description,
+      available_from: null, // Start empty
+      available_to: null,   // Start empty
+      machine_make: record.machine_make,
+      work_center_name: record.work_center_name,
+    });
+    setEditingKey(key);
+  };
+
+  const cancel = () => {
+    setEditingKey("");
+  };
+
+  const saveInlineEdit = async (record) => {
+    try {
+      const row = await inlineEditForm.validateFields();
+      setUpdateLoading(true);
+      
+      const machineId = record.machine_id;
+      const currentStatusId = record.status_id;
+      const newStatusId = row.status_id ? 1 : 2; // true -> 1 (ON), false -> 2 (OFF)
+      
+      let payload = {
+        status_id: newStatusId,
+        description: row.description || '',
+        work_center_name: row.work_center_name || record.work_center_name,
+        machine_make: row.machine_make || record.machine_make,
+      };
+
+      // Case 1: Initial machine creation (no previous status)
+      if (!currentStatusId) {
+        payload.available_from = '2026-01-01T00:00:00';
+        payload.available_to = null;
+      }
+      // Case 2: ON -> OFF transition (Switch OFF)
+      else if (newStatusId === 2) {
+        if (!row.available_from || !row.available_to) {
+          message.error('Please provide both "From" and "To" times for OFF status');
+          setUpdateLoading(false);
+          return;
+        }
+        payload.available_from = row.available_from.toISOString();
+        payload.available_to = row.available_to.toISOString();
+      }
+      // Case 3: OFF -> ON transition (Switch ON)
+      else if (newStatusId === 1) {
+        payload.available_from = new Date().toISOString();
+        payload.available_to = null;
+      }
+
+      const response = await fetch(
+        `${SCHEDULING_API_BASE_URL}/machine-status/machine-status/${machineId}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (response.ok) {
+        const updatedData = await response.json();
+        message.success('Machine status updated successfully');
+        setEditingKey("");
+        
+        // Update local state
+        if (machineData?.statuses) {
+          const updatedStatuses = machineData.statuses.map(status => 
+            status.machine_id === machineId 
+              ? { 
+                  ...status, 
+                  status_id: updatedData.status_id,
+                  status_name: updatedData.status_name,
+                  description: updatedData.description,
+                  available_from: updatedData.available_from,
+                  available_to: updatedData.available_to
+                }
+              : status
+          );
+          setMachineData({ ...machineData, statuses: updatedStatuses });
+        }
+      } else {
+        const errorData = await response.json();
+        message.error(errorData.detail || 'Failed to update machine status');
+      }
+    } catch (errInfo) {
+      console.log('Validate Failed:', errInfo);
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
   // Helper function to determine if date fields should be shown
   const shouldShowDateFields = () => {
     if (!selectedMachine || !selectedStatus) return false;
@@ -573,99 +358,6 @@ const fetchCurrentBreakdowns = async () => {
     }).length;
   };
 
-  // Table columns for downtime logs
-  const downtimeColumns = [
-    {
-      title: "Machine Name",
-      dataIndex: "machine_name",
-      key: "machine_name",
-      sorter: (a, b) => a.machine_name.localeCompare(b.machine_name),
-    },
-    {
-      title: "Status Name",
-      dataIndex: "status_name",
-      key: "status_name",
-      render: (status) => {
-        let color = "default";
-        if (status?.toLowerCase() === 'on' || status?.toLowerCase().includes('active') || status?.toLowerCase().includes('running')) {
-          color = "green";
-        } else if (status?.toLowerCase() === 'off' || status?.toLowerCase().includes('inactive') || status?.toLowerCase().includes('down')) {
-          color = "red";
-        } else if (status?.toLowerCase().includes('maintenance')) {
-          color = "orange";
-        }
-        return <Tag color={color}>{status}</Tag>;
-      },
-    },
-    {
-      title: "Description",
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
-    },
-    {
-      title: "Start Time",
-      dataIndex: "start_time",
-      key: "start_time",
-      render: (date) => date ? new Date(date).toLocaleString() : "N/A",
-      sorter: (a, b) => new Date(a.start_time) - new Date(b.start_time),
-    },
-    {
-      title: "End Time",
-      dataIndex: "end_time",
-      key: "end_time",
-      render: (date) => date ? new Date(date).toLocaleString() : "N/A",
-      sorter: (a, b) => {
-        if (!a.end_time && !b.end_time) return 0;
-        if (!a.end_time) return 1;
-        if (!b.end_time) return -1;
-        return new Date(a.end_time) - new Date(b.end_time);
-      },
-    },
-    {
-      title: "Duration",
-      key: "duration",
-      render: (_, record) => {
-        if (!record.start_time) return "N/A";
-        const startTime = new Date(record.start_time);
-        const endTime = record.end_time ? new Date(record.end_time) : new Date();
-        const duration = Math.floor((endTime - startTime) / (1000 * 60)); // minutes
-        const hours = Math.floor(duration / 60);
-        const minutes = duration % 60;
-        return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-      },
-    },
-    {
-      title: "Created At",
-      dataIndex: "created_at",
-      key: "created_at",
-      render: (date) => date ? new Date(date).toLocaleString() : "N/A",
-      sorter: (a, b) => new Date(a.created_at) - new Date(b.created_at),
-    },
-    {
-      title: "Actions",
-      key: "actions",
-      render: (_, record) => (
-        <Popconfirm
-          title="Are you sure you want to delete this downtime record?"
-          description="This action cannot be undone."
-          onConfirm={() => handleDeleteDowntime(record)}
-          okText="Yes"
-          cancelText="No"
-        >
-          <Button
-            type="primary"
-            danger
-            size="small"
-            icon={<DeleteOutlined />}
-          >
-            Delete
-          </Button>
-        </Popconfirm>
-      ),
-    },
-  ];
-
   // Table columns for machine status
   const machineStatusColumns = [
     {
@@ -674,52 +366,153 @@ const fetchCurrentBreakdowns = async () => {
       key: "machine_make",
     },
     {
-      title: "Status",
-      dataIndex: "status_name",
-      key: "status_name",
-      render: (status) => {
-        let color = "default";
-        if (status?.toLowerCase() === 'on' || status?.toLowerCase().includes('active') || status?.toLowerCase().includes('running')) {
-          color = "green";
-        } else if (status?.toLowerCase() === 'off' || status?.toLowerCase().includes('inactive') || status?.toLowerCase().includes('down')) {
-          color = "red";
-        } else if (status?.toLowerCase().includes('maintenance')) {
-          color = "orange";
-        }
-        return <Tag color={color}>{status}</Tag>;
-      },
-    },
-    {
-      title: "Description",
-      dataIndex: "description",
-      key: "description",
-      ellipsis: true,
+      title: "Work Center",
+      dataIndex: "work_center_name",
+      key: "work_center_name",
     },
     {
       title: "From",
       dataIndex: "available_from",
       key: "available_from",
-      render: (date) => date ? new Date(date).toLocaleString() : "N/A",
+      render: (date, record) => {
+        const editable = isEditing(record);
+        if (editable) {
+          return (
+            <Form.Item
+              noStyle
+              shouldUpdate={(prevValues, currentValues) => prevValues.status_id !== currentValues.status_id}
+            >
+              {({ getFieldValue }) => {
+                const isON = getFieldValue('status_id');
+                return isON ? "-" : (
+                  <Form.Item
+                    name="available_from"
+                    style={{ margin: 0 }}
+                  >
+                    <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" />
+                  </Form.Item>
+                );
+              }}
+            </Form.Item>
+          );
+        }
+        return record.status_id === 1 ? "-" : (date ? new Date(date).toLocaleString() : "N/A");
+      },
     },
     {
       title: "To",
       dataIndex: "available_to",
       key: "available_to",
-      render: (date) => date ? new Date(date).toLocaleString() : "N/A",
+      render: (date, record) => {
+        const editable = isEditing(record);
+        if (editable) {
+          return (
+            <Form.Item
+              noStyle
+              shouldUpdate={(prevValues, currentValues) => prevValues.status_id !== currentValues.status_id}
+            >
+              {({ getFieldValue }) => {
+                const isON = getFieldValue('status_id');
+                return isON ? "-" : (
+                  <Form.Item
+                    name="available_to"
+                    style={{ margin: 0 }}
+                  >
+                    <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" />
+                  </Form.Item>
+                );
+              }}
+            </Form.Item>
+          );
+        }
+        return record.status_id === 1 ? "-" : (date ? new Date(date).toLocaleString() : "N/A");
+      },
+    },
+    {
+      title: "Status",
+      dataIndex: "status_id",
+      key: "status_id",
+      render: (statusId, record) => {
+        const editable = isEditing(record);
+        if (editable) {
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Form.Item name="status_id" valuePropName="checked" style={{ margin: 0 }}>
+                <Switch
+                  checkedChildren="ON"
+                  unCheckedChildren="OFF"
+                />
+              </Form.Item>
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) => prevValues.status_id !== currentValues.status_id}
+              >
+                {({ getFieldValue }) => {
+                  const isON = getFieldValue('status_id');
+                  return <Tag color={isON ? "green" : "red"}>{isON ? "ON" : "OFF"}</Tag>;
+                }}
+              </Form.Item>
+            </div>
+          );
+        }
+        let color = "default";
+        const statusName = record.status_name || '';
+        if (statusId === 1 || statusName.toLowerCase() === 'on') {
+          color = "green";
+        } else if (statusId === 2 || statusName.toLowerCase() === 'off') {
+          color = "red";
+        }
+        return <Tag color={color}>{statusName || (statusId === 1 ? 'ON' : 'OFF')}</Tag>;
+      },
+    },
+    {
+      title: "Remarks",
+      dataIndex: "description",
+      key: "description",
+      render: (description, record) => {
+        const editable = isEditing(record);
+        if (editable) {
+          return (
+            <Form.Item
+              name="description"
+              style={{ margin: 0 }}
+            >
+              <Input.TextArea rows={2} placeholder="Machine status remarks" />
+            </Form.Item>
+          );
+        }
+        return description || "No remarks";
+      },
     },
     {
       title: "Actions",
       key: "actions",
-      render: (_, record) => (
-        <Button
-          type="primary"
-          size="small"
-          icon={<EditOutlined />}
-          onClick={() => handleUpdateStatus(record)}
-        >
-          Update Status
-        </Button>
-      ),
+      render: (_, record) => {
+        const editable = isEditing(record);
+        return editable ? (
+          <Space>
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => saveInlineEdit(record)}
+              loading={updateLoading}
+              style={{ background: '#52c41a', borderColor: '#52c41a' }}
+            >
+              Save
+            </Button>
+              <Button size="small" danger onClick={cancel}>Cancel</Button>
+          </Space>
+        ) : (
+          <Button
+            size="small"
+            disabled={editingKey !== ""}
+            onClick={() => edit(record)}
+            style={{ borderRadius: '4px' }}
+          >
+            Edit
+          </Button>
+        );
+      },
     },
   ];
 
@@ -733,245 +526,229 @@ const fetchCurrentBreakdowns = async () => {
   }
 
   return (
-    <div style={{ padding: '24px' }}>
-      <h2 style={{ marginBottom: '24px' }}>Asset Availability</h2>
-      
-      {/* KPI Cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        <Col xs={24} sm={12} lg={8}>
-          <Card>
-            <Statistic
-              title="Total Machines"
-              value={getTotalMachines()}
-              prefix={<InfoCircleOutlined style={{ color: '#1890ff' }} />}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={8}>
-          <Card>
-            <Statistic
-              title="Active Machines"
-              value={getActiveMachines()}
-              prefix={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={8}>
-          <Card>
-            <Statistic
-              title="Inactive Machines"
-              value={getInactiveMachines()}
-              prefix={<ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />}
-              valueStyle={{ color: '#ff4d4f' }}
-            />
-          </Card>
-        </Col>
-      </Row>
-
+    <div style={{ padding: '0px' }}>
       {/* Tabs */}
-      <Card>
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          <TabPane tab="Machine Status" key="machine-status">
-            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
-              <Select
-                placeholder="Filter by Machine"
-                allowClear
-                style={{ width: 250 }}
-                value={machineSearchText}
-                onChange={value => setMachineSearchText(value)}
-                options={getMachineOptions()}
-              />
-            </div>
-            <Table
-              columns={machineStatusColumns}
-              dataSource={(machineData?.statuses || []).filter(item => 
-                !machineSearchText || item.machine_make === machineSearchText
-              )}
-              rowKey={(record) => record.id || record.machine_id}
-              scroll={{ x: 800 }}
-              pagination={{
-                pageSize: machinePageSize,
-                showSizeChanger: true,
-                showQuickJumper: true,
-                pageSizeOptions: ['10', '20', '50', '100'],
-                onShowSizeChange: (current, size) => setMachinePageSize(size),
-                showTotal: (total, range) => 
-                  `${range[0]}-${range[1]} of ${total} items`,
-                simple: window.innerWidth < 768,
-              }}
-            />
-          </TabPane>
-          <TabPane tab="Machine Logs" key="downtime-logs">
-            {downtimeLoading ? (
-              <div style={{ textAlign: 'center', padding: '50px' }}>
-                <Spin size="large" />
-                <p>Loading downtime logs...</p>
-              </div>
-            ) : (
-              <>
-                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
-                  <Select
-                    placeholder="Filter by Machine"
-                    allowClear
-                    style={{ width: 250 }}
-                    value={logSearchText}
-                    onChange={value => setLogSearchText(value)}
-                    options={getMachineOptions()}
-                  />
+      <Card 
+        bordered={false} 
+        style={{ 
+          borderRadius: '16px', 
+          boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+          overflow: 'hidden'
+        }}
+      >
+        <Tabs 
+          activeKey={activeTab} 
+          onChange={setActiveTab}
+          style={{ padding: '0 16px' }}
+        >
+          <TabPane tab="Assets Availability" key="machine-status">
+            <div style={{ padding: '24px 0' }}>
+              {/* Header Section */}
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'flex-start',
+                marginBottom: '24px',
+                flexWrap: 'wrap',
+                gap: '16px'
+              }}>
+                <div>
+                  <h2 style={{ 
+                    margin: 0, 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '12px',
+                    fontWeight: 'bold',
+                    textTransform: 'uppercase',
+                    fontSize: '24px'
+                  }}>
+                    <SettingOutlined style={{ color: '#1890ff', fontSize: '32px' }} />
+                    ASSETS AVAILABILITY
+                  </h2>
+                  <p style={{ margin: '4px 0 0 44px', color: '#8c8c8c' }}>
+                    Real-time machine status and maintenance overview
+                  </p>
                 </div>
-                <Table
-                  columns={downtimeColumns}
-                  dataSource={downtimeLogs.filter(item => 
-                    !logSearchText || item.machine_name === logSearchText
-                  )}
-                  rowKey="tempId"
-                  scroll={{ x: 800 }}
-                  pagination={{
-                    pageSize: logPageSize,
-                    showSizeChanger: true,
-                    showQuickJumper: true,
-                    pageSizeOptions: ['10', '20', '50', '100'],
-                    onShowSizeChange: (current, size) => setLogPageSize(size),
-                    showTotal: (total, range) => 
-                      `${range[0]}-${range[1]} of ${total} items`,
-                    simple: window.innerWidth < 768,
-                  }}
-                />
-              </>
-            )}
-          </TabPane>
-          <TabPane tab="Shift Hours Configuration" key="shift-hours">
-            <div style={{ padding: window.innerWidth < 768 ? '10px' : '20px' }}>
-              <Row gutter={[24, 24]}>
-                {/* Left Side - Calendar */}
-                <Col xs={24} lg={16}>
+              </div>
+
+              {/* KPI Cards Section */}
+              <Row gutter={[24, 24]} style={{ marginBottom: '32px' }}>
+                <Col xs={24} sm={12} lg={8}>
                   <Card 
-                    title="Shift Calendar" 
-                    extra={
-                      <Button 
-                        icon={<ReloadOutlined />} 
-                        onClick={handleRefresh}
-                        loading={shiftLoading}
-                        size={window.innerWidth < 768 ? 'small' : 'middle'}
-                      >
-                        {window.innerWidth < 768 ? '' : 'Refresh Data'}
-                      </Button>
-                    }
+                    style={{ 
+                      borderRadius: '12px',
+                      background: 'linear-gradient(135deg, #f0f5ff 0%, #ffffff 100%)',
+                      border: '1px solid #d6e4ff',
+                      boxShadow: '0 4px 12px rgba(24, 144, 255, 0.08)'
+                    }}
+                    bodyStyle={{ padding: '20px' }}
                   >
-                    {shiftLoading ? (
-                      <div style={{ textAlign: 'center', padding: '50px' }}>
-                        <Spin size="large" />
-                        <p>Loading shift configurations...</p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <p style={{ color: '#597ef7', fontWeight: 600, fontSize: '16px', margin: 0 }}>Total Machines</p>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '8px' }}>
+                          <span style={{ fontSize: '32px', fontWeight: 'bold', color: '#2f54eb' }}>{getTotalMachines()}</span>
+                          <span style={{ color: '#597ef7', fontSize: '14px' }}>Machines</span>
+                        </div>
                       </div>
-                    ) : (
-                      <Calendar 
-                        key={JSON.stringify(shiftConfigs)}
-                        onSelect={handleDateSelect}
-                        dateCellRender={dateCellRender}
-                      />
-                    )}
+                      <div style={{ 
+                        background: '#f0f5ff', 
+                        padding: '12px', 
+                        borderRadius: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <InfoCircleOutlined style={{ fontSize: '24px', color: '#597ef7' }} />
+                      </div>
+                    </div>
                   </Card>
                 </Col>
-
-                {/* Right Side - Configuration Panel */}
-                <Col xs={24} lg={8}>
-                  <Card title={selectedDate ? `Configure: ${selectedDate.format('DD MMM YYYY')}` : 'Configure: Select Date'}>
-                    {selectedDate ? (
-                      <Form
-                        form={shiftForm}
-                        layout="vertical"
-                        onFinish={handleSaveShiftConfig}
-                        initialValues={{
-                          working_day: true,
-                          number_of_shifts: 2
-                        }}
-                      >
-                        <Form.Item
-                          label="Day Type"
-                          name="working_day"
-                          rules={[{ required: true, message: 'Please select day type' }]}
-                        >
-                          <Radio.Group 
-                            onChange={handleWorkingDayChange}
-                            size={window.innerWidth < 768 ? 'small' : 'middle'}
-                          >
-                            <Radio value={true}>Working Day</Radio>
-                            <Radio value={false}>Non-Working Day</Radio>
-                          </Radio.Group>
-                        </Form.Item>
-
-                        <Form.Item
-                          label="Number of Shifts"
-                          name="number_of_shifts"
-                          rules={[{ required: isWorkingDay, message: 'Please select number of shifts' }]}
-                        >
-                          <Radio.Group 
-                            disabled={!isWorkingDay}
-                            size={window.innerWidth < 768 ? 'small' : 'middle'}
-                          >
-                            <Radio value={1}>1 Shift</Radio>
-                            <Radio value={2}>2 Shifts</Radio>
-                            <Radio value={3}>3 Shifts</Radio>
-                          </Radio.Group>
-                        </Form.Item>
-
-                        <Form.Item style={{ marginBottom: 0 }}>
-                          <Space direction={window.innerWidth < 768 ? 'vertical' : 'horizontal'} style={{ width: '100%' }}>
-                            <Button 
-                              type="primary" 
-                              htmlType="submit" 
-                              loading={shiftLoading}
-                              block={window.innerWidth < 768}
-                            >
-                              Save Changes
-                            </Button>
-                            <Button 
-                              onClick={handleClearConfig}
-                              block={window.innerWidth < 768}
-                            >
-                              Clear
-                            </Button>
-                          </Space>
-                        </Form.Item>
-                      </Form>
-                    ) : (
-                      <div style={{ 
-                        textAlign: 'center', 
-                        padding: '40px 0',
-                        color: '#999'
-                      }}>
-                        <p>Please select a date from the calendar to configure shifts.</p>
+                <Col xs={24} sm={12} lg={8}>
+                  <Card 
+                    style={{ 
+                      borderRadius: '12px',
+                      background: 'linear-gradient(135deg, #f6ffed 0%, #ffffff 100%)',
+                      border: '1px solid #d9f7be',
+                      boxShadow: '0 4px 12px rgba(82, 196, 26, 0.08)'
+                    }}
+                    bodyStyle={{ padding: '20px' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <p style={{ color: '#52c41a', fontWeight: 600, fontSize: '16px', margin: 0 }}>Active Machines</p>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '8px' }}>
+                          <span style={{ fontSize: '32px', fontWeight: 'bold', color: '#389e0d' }}>{getActiveMachines()}</span>
+                          <span style={{ color: '#52c41a', fontSize: '14px' }}>Machines</span>
+                        </div>
                       </div>
-                    )}
+                      <div style={{ 
+                        background: '#f6ffed', 
+                        padding: '12px', 
+                        borderRadius: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <CheckCircleOutlined style={{ fontSize: '24px', color: '#52c41a' }} />
+                      </div>
+                    </div>
                   </Card>
-
-                    {selectedDateDowntimes.length > 0 && (
-  <Card 
-    title="Machine Breakdown"
-    style={{ marginTop: 16, borderColor: "#ff4d4f" }}
-  >
-    {selectedDateDowntimes.map((m, idx) => (
-      <Card 
-        key={idx}
-        size="small"
-        style={{ marginBottom: 10, background: "#fff1f0", borderColor: "#ffccc7" }}
-      >
-        <b>{m.machine_make}</b>
-        <p>Status: {m.status_name}</p>
-        <p>{m.description}</p>
-        <p><b>Start:</b> {dayjs(m.available_from).format("DD MMM YYYY HH:mm")}</p>
-        <p><b>End:</b> {m.available_to ? dayjs(m.available_to).format("DD MMM YYYY HH:mm") : "Ongoing"}</p>
-      </Card>
-    ))}
-  </Card>
-)}
-                    
-
-                  </Col>
+                </Col>
+                <Col xs={24} sm={12} lg={8}>
+                  <Card 
+                    style={{ 
+                      borderRadius: '12px',
+                      background: 'linear-gradient(135deg, #fff1f0 0%, #ffffff 100%)',
+                      border: '1px solid #ffa39e',
+                      boxShadow: '0 4px 12px rgba(255, 77, 79, 0.08)'
+                    }}
+                    bodyStyle={{ padding: '20px' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <p style={{ color: '#f5222d', fontWeight: 600, fontSize: '16px', margin: 0 }}>Inactive Machines</p>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '8px' }}>
+                          <span style={{ fontSize: '32px', fontWeight: 'bold', color: '#cf1322' }}>{getInactiveMachines()}</span>
+                          <span style={{ color: '#f5222d', fontSize: '14px' }}>Machines</span>
+                        </div>
+                      </div>
+                      <div style={{ 
+                        background: '#fff1f0', 
+                        padding: '12px', 
+                        borderRadius: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <ExclamationCircleOutlined style={{ fontSize: '24px', color: '#f5222d' }} />
+                      </div>
+                    </div>
+                  </Card>
+                </Col>
               </Row>
+
+              {/* Filters Section */}
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'flex-end', 
+                alignItems: 'center',
+                marginBottom: '16px',
+                flexWrap: 'wrap',
+                gap: '16px'
+              }}>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 500 }}>Machine Name:</span>
+                    <Select
+                      placeholder={<span><SearchOutlined /> All Machines</span>}
+                      allowClear
+                      showSearch
+                      style={{ width: 180 }}
+                      value={machineSearchText}
+                      onChange={value => setMachineSearchText(value)}
+                      options={getMachineOptions()}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 500 }}>Work Center:</span>
+                    <Select
+                      placeholder={<span><SearchOutlined /> All Work Centers</span>}
+                      allowClear
+                      showSearch
+                      style={{ width: 180 }}
+                      value={wcSearchText}
+                      onChange={value => setWcSearchText(value)}
+                      options={getWcOptions()}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontWeight: 500 }}>Status:</span>
+                    <Select
+                      placeholder={<span><FilterOutlined /> All Statuses</span>}
+                      allowClear
+                      style={{ width: 180 }}
+                      value={statusSearchText}
+                      onChange={value => setStatusSearchText(value)}
+                      options={getStatusOptions()}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Table Section */}
+              <div style={{ background: '#fff', borderRadius: '12px', overflow: 'hidden' }}>
+                <Form form={inlineEditForm} component={false}>
+                  <Table
+                    columns={machineStatusColumns}
+                    dataSource={(machineData?.statuses || []).filter(item => 
+                      (!machineSearchText || item.machine_make === machineSearchText) &&
+                      (!wcSearchText || item.work_center_name === wcSearchText) &&
+                      (!statusSearchText || item.status_name === statusSearchText)
+                    )}
+                    rowKey={(record) => record.id || record.machine_id}
+                    scroll={{ x: 800 }}
+                    pagination={{
+                      pageSize: machinePageSize,
+                      showSizeChanger: true,
+                      showQuickJumper: true,
+                      pageSizeOptions: ['10', '20', '50', '100'],
+                      onShowSizeChange: (current, size) => setMachinePageSize(size),
+                      showTotal: (total, range) => 
+                        `${range[0]}-${range[1]} of ${total} items`,
+                      simple: window.innerWidth < 768,
+                    }}
+                    className="custom-table"
+                  />
+                </Form>
+              </div>
             </div>
+          </TabPane>
+          <TabPane tab="Breakdown Logs" key="downtime-logs">
+            <MaintenanceSection activeTab={activeTab} machineData={machineData} />
+          </TabPane>
+          <TabPane tab="Shift Hours Configuration" key="shift-hours">
+            <MaintenanceSection activeTab={activeTab} machineData={machineData} />
           </TabPane>
         </Tabs>
       </Card>

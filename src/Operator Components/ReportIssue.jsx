@@ -131,12 +131,13 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       return;
     }
     const payload = {
-      machine_id: machineId,
-      reported_by: operatorId,
+      machine_id: parseInt(machineId),
+      reported_by: parseInt(operatorId),
       issue_category: oeeCategory,
       issue_reason: oeeReasonsSel,
       start_time: formatLocalNaive(oeeTimes[0]),
       end_time: formatLocalNaive(oeeTimes[1]),
+      reported_at: formatLocalNaive(new Date()),
     };
     try {
       const res = await fetch(`${API_BASE_URL}/maintenance/oee-issues`, {
@@ -161,12 +162,13 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       return;
     }
     const payload = {
-      machine_id: machineId,
-      reported_by: operatorId,
+      machine_id: parseInt(machineId),
+      reported_by: parseInt(operatorId),
       issue_category: breakdownCategory,
       machine_status: machineStatus,
       issue_reason: breakdownReasonsSel,
       additional_reason: breakdownAdditional || null,
+      reported_at: formatLocalNaive(new Date()),
     };
     try {
       const res = await fetch(`${API_BASE_URL}/maintenance/machine-breakdown`, {
@@ -191,12 +193,13 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       return;
     }
     const payload = {
-      machine_id: machineId,
-      reported_by: operatorId,
+      machine_id: parseInt(machineId),
+      reported_by: parseInt(operatorId),
       component_status: componentStatus,
-      production_order_id: orderId,
-      part_id: partId,
+      production_order_id: parseInt(orderId),
+      part_id: parseInt(partId),
       description: componentDesc,
+      reported_at: formatLocalNaive(new Date()),
     };
     try {
       const res = await fetch(`${API_BASE_URL}/maintenance/component-issues`, {
