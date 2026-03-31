@@ -723,11 +723,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Status</span>}
                 className="mb-0"
               >
-                <Select className="h-10">
-                  <Option value="Pending">Pending</Option>
-                  <Option value="Ongoing">Ongoing</Option>
-                  <Option value="Completed">Completed</Option>
-                </Select>
+                <Input className="h-10 rounded-md border-gray-300 w-full" disabled />
               </Form.Item>
             </Col>
           </Row>

@@ -279,47 +279,58 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       title: 'Version',
       key: 'version',
       width: 220,
-      render: (_, record) => (
-        <Select
-          size="middle"
-          value={record.id}
-          onChange={(value) => {
-            setSelectedVersions(prev => ({
-              ...prev,
-              [record.familyId]: value
-            }));
-          }}
-          className="version-select-custom"
-          popupMatchSelectWidth={false}
-          bordered={true}
-          style={{ 
-            width: '180px', 
-            borderRadius: '6px',
-            border: '1px solid #d9d9d9'
-          }}
-        >
-          {record.allVersions.map(v => (
-            <Option key={v.id} value={v.id}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
-                <div style={{ 
-                  width: '8px', 
-                  height: '8px', 
-                  borderRadius: '50%', 
-                  backgroundColor: v.id === record.allVersions[0].id ? '#52c41a' : '#d9d9d9' 
-                }} />
-                <Text strong style={{ color: v.id === record.id ? '#1890ff' : '#595959' }}>
-                  v{v.version}
-                </Text>
-                {v.created_at && (
-                  <Text type="secondary" style={{ fontSize: '12px', marginLeft: 'auto' }}>
-                    {new Date(v.created_at).toLocaleDateString('en-GB')}
+      render: (_, record) => {
+        // Hide version options for maintenance documents
+        if (record.document_type === 'maintenance') {
+          return (
+            <Text strong style={{ color: '#595959' }}>
+              {record.version}
+            </Text>
+          );
+        }
+        
+        return (
+          <Select
+            size="middle"
+            value={record.id}
+            onChange={(value) => {
+              setSelectedVersions(prev => ({
+                ...prev,
+                [record.familyId]: value
+              }));
+            }}
+            className="version-select-custom"
+            popupMatchSelectWidth={false}
+            bordered={true}
+            style={{ 
+              width: '180px', 
+              borderRadius: '6px',
+              border: '1px solid #d9d9d9'
+            }}
+          >
+            {record.allVersions.map(v => (
+              <Option key={v.id} value={v.id}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
+                  <div style={{ 
+                    width: '8px', 
+                    height: '8px', 
+                    borderRadius: '50%', 
+                    backgroundColor: v.id === record.allVersions[0].id ? '#52c41a' : '#d9d9d9' 
+                  }} />
+                  <Text strong style={{ color: v.id === record.id ? '#1890ff' : '#595959' }}>
+                    {v.version}
                   </Text>
-                )}
-              </div>
-            </Option>
-          ))}
-        </Select>
-      ),
+                  {v.created_at && (
+                    <Text type="secondary" style={{ fontSize: '12px', marginLeft: 'auto' }}>
+                      {new Date(v.created_at).toLocaleDateString('en-GB')}
+                    </Text>
+                  )}
+                </div>
+              </Option>
+            ))}
+          </Select>
+        );
+      },
     },
     {
       title: 'Actions',
@@ -351,14 +362,17 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
               onClick={() => handleDownloadDocument(record)}
             />
           </Tooltip>
-          <Tooltip title="Upload New Version">
-            <Button
-              type="text"
-              size="small"
-              icon={<CloudUploadOutlined className="text-green-500" />}
-              onClick={() => handleUploadVersion(record)}
-            />
-          </Tooltip>
+          {/* Hide Upload New Version for maintenance documents */}
+          {record.document_type !== 'maintenance' && (
+            <Tooltip title="Upload New Version">
+              <Button
+                type="text"
+                size="small"
+                icon={<CloudUploadOutlined className="text-green-500" />}
+                onClick={() => handleUploadVersion(record)}
+              />
+            </Tooltip>
+          )}
           <Tooltip title="Delete Document">
             <Button
               type="text"
@@ -513,8 +527,33 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     }
 
     if (downloadUrl) {
-      window.open(downloadUrl, '_blank');
-      message.success('Download started');
+      // Force download by fetching the file and creating a blob
+      fetch(downloadUrl)
+        .then(response => response.blob())
+        .then(blob => {
+          const url = window.URL.createObjectURL(blob);
+          const link = window.document.createElement('a');
+          link.href = url;
+          
+          // Get proper filename with extension
+          const fileName = document.file_name || document.document_name || 'document';
+          const fileExtension = downloadUrl.split('.').pop()?.split('?')[0] || '';
+          const fullFileName = fileExtension ? `${fileName}.${fileExtension}` : fileName;
+          
+          link.download = fullFileName;
+          link.style.display = 'none';
+          window.document.body.appendChild(link);
+          link.click();
+          window.document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          message.success('Download started');
+        })
+        .catch(error => {
+          console.error('Download error:', error);
+          // Fallback to opening in new tab if blob download fails
+          window.open(downloadUrl, '_blank');
+          message.warning('Download started in new tab');
+        });
     } else {
       message.error('Download URL not found');
     }
@@ -626,6 +665,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('document_type', uploadingDocument.document_type || 'Other');
         formData.append('document_version', nextVersion);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
+        formData.append('user_id', userId.toString());
       }
 
       if (!url) {
@@ -668,64 +708,73 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
 
   const handleAddDocument = async () => {
     if (!addFileList.length) {
-      message.error('Please select a file to upload');
+      message.error('Please select files to upload');
       return;
     }
 
-    const fileObj = addFileList[0];
-    const file = fileObj.originFileObj || fileObj;
-
     const formData = new FormData();
-    formData.append('file', file, file.name);
+    
+    // Add all files to FormData with 'files' key for multiple upload
+    addFileList.forEach((fileObj) => {
+      const file = fileObj.originFileObj || fileObj;
+      formData.append('files', file, file.name);
+    });
 
     try {
+      const userId = getUserId();
+      if (!userId) {
+        message.error('User not found. Please login.');
+        return;
+      }
       setAddUploading(true);
       let url = '';
       
       if (selectedNode.type === 'general-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
-        formData.append('file_name', file.name);
+        formData.append('file_name', addFileList[0].originFileObj.name);
+        formData.append('user_id', userId.toString());
       } else if (selectedNode.type === 'common-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
-        console.log('Uploading common document:', {
+        formData.append('user_id', userId.toString());
+        console.log('Uploading common documents:', {
           url,
           folderId: selectedNode.folderId,
-          fileName: file.name,
-          fileSize: file.size
+          fileCount: addFileList.length
         });
       } else if (selectedNode.type === 'common-root') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
-        console.log('Uploading common document to root:', {
+        formData.append('user_id', userId.toString());
+        console.log('Uploading common documents to root:', {
           url,
           folderId: null,
-          fileName: file.name,
-          fileSize: file.size
+          fileCount: addFileList.length
         });
       } else if (selectedNode.type === 'machine-folder') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
-        // For machine documents, parent_id is optional - if not provided, creates a new document (version 1.0)
-        // We don't append parent_id here so it creates a new document instead of a version
-        console.log('Uploading machine document:', {
+        formData.append('user_id', userId.toString());
+        console.log('Uploading machine documents:', {
           url,
           folderId: selectedNode.folderId,
-          fileName: file.name,
-          fileSize: file.size
+          fileCount: addFileList.length
         });
       } else if (selectedNode.type === 'machine') {
         url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
-        // For direct machine uploads, folder_id is null and machine_id is provided
-        console.log('Uploading machine document directly to machine:', {
+        formData.append('user_id', userId.toString());
+        console.log('Uploading machine documents directly to machine:', {
           url,
           machineId: selectedNode.machineId,
-          fileName: file.name,
-          fileSize: file.size
+          fileCount: addFileList.length
         });
       } else if (selectedNode.type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/`;
+        // For part-category, still use single file upload as it expects 'document_name'
+        const file = addFileList[0].originFileObj || addFileList[0];
+        formData.delete('files');
+        formData.append('file', file, file.name);
         formData.append('document_name', file.name);
         formData.append('document_type', selectedNode.category === 'MPP' ? 'mpp' : 
                         selectedNode.category === 'ENGINEERING_DRAWING' ? '2d' : 
@@ -738,12 +787,22 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('operation_id', selectedNode.operationId);
         formData.append('document_type', addDocType);
         formData.append('document_version', '1.0');
-        formData.delete('file');
-        formData.append('files', file, file.name);
+        // Operation documents endpoint expects 'files' (plural) as it supports multi-upload
+        // Remove the existing 'files' and add them with proper naming
+        const files = formData.getAll('files');
+        formData.delete('files');
+        files.forEach((file) => {
+          formData.append('files', file, file.name);
+        });
       } else if (selectedNode.type === 'folder' && selectedNode.category === 'Reports') {
         url = `${config.API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
+        // For order documents, still use single file upload
+        const file = addFileList[0].originFileObj || addFileList[0];
+        formData.delete('files');
+        formData.append('file', file, file.name);
         formData.append('document_type', 'Report');
         formData.append('document_version', '1.0');
+        formData.append('user_id', userId.toString());
       }
 
       const response = await fetch(url, {
@@ -1084,20 +1143,27 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         
         <div>
           <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
-            Select File:
+            Select Files:
           </label>
           <Upload
             beforeUpload={() => false}
             fileList={addFileList}
             onChange={({ fileList }) => setAddFileList(fileList)}
-            onRemove={() => setAddFileList([])}
-            maxCount={1}
+            onRemove={(file) => {
+              const newFileList = addFileList.filter(item => item.uid !== file.uid);
+              setAddFileList(newFileList);
+            }}
+            multiple
+            showUploadList={true}
             accept=".pdf,.docx,.doc,.txt,.jpg,.jpeg,.png,.xlsx,.xls,.csv"
+            customRequest={({ onSuccess }) => onSuccess('ok')}
           >
-            <Button icon={<UploadOutlined />}>Select File</Button>
+            <Button icon={<UploadOutlined />}>Select Files</Button>
           </Upload>
           <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-            This will be stored as version 1.0
+            {selectedNode?.type === 'machine-folder' || selectedNode?.type === 'machine' 
+              ? 'Multiple files will be uploaded as separate documents (version 1.0 each)'
+              : 'This will be stored as version 1.0'}
           </p>
         </div>
       </Modal>

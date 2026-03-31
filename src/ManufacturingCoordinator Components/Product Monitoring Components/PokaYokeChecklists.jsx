@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Card, Typography, Divider, Tooltip } from 'antd';
-import { PlusOutlined, EyeOutlined, DeleteOutlined,EditOutlined,CheckCircleOutlined,ClockCircleOutlined } from '@ant-design/icons';
+import { Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Card, Typography, Divider, Tooltip, Select, DatePicker, Row, Col } from 'antd';
+import { PlusOutlined, EyeOutlined, DeleteOutlined,EditOutlined,CheckCircleOutlined,ClockCircleOutlined, FilterOutlined, CalendarOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
 
 const { Title, Text } = Typography;
@@ -17,6 +17,7 @@ const PokaYokeChecklists = () => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingChecklist, setEditingChecklist] = useState(null);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const [searchText, setSearchText] = useState('');
   const [form] = Form.useForm();
   const [itemForm] = Form.useForm();
   const [editForm] = Form.useForm();
@@ -28,7 +29,7 @@ const PokaYokeChecklists = () => {
   const fetchChecklists = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/`);
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/all`);
       if (!response.ok) throw new Error('Failed to fetch checklists');
       const data = await response.json();
       
@@ -301,45 +302,63 @@ const PokaYokeChecklists = () => {
     },
   ];
 
+  const filteredChecklists = checklists.filter(item => 
+    item.name.toLowerCase().includes(searchText.toLowerCase())
+  );
+
   return (
     <div>
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>Manage Checklists</Title>
-          <Text type="secondary" style={{ fontSize: '14px' }}>
-            Create and manage PokaYoke checklists for your machines
-          </Text>
-        </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            setInitialItems([
-              {
-                id: Date.now(),
-                item_text: '',
-                item_type: '',
-                expected_value: '',
-                is_required: false,
-              },
-            ]);
-            setCreateModalVisible(true);
-          }}
-          style={{
-            background: '#1890ff',
-            borderColor: '#1890ff',
-            borderRadius: '6px',
-            height: '40px',
-            fontWeight: '500'
-          }}
-        >
-          Create New Checklist
-        </Button>
-      </div>
+      <Row gutter={[16, 16]} style={{ marginBottom: '16px' }} justify="space-between" align="middle">
+        <Col xs={24} lg={12}>
+            <Title level={4} style={{ margin: 0 }}>Manage Checklists</Title>
+            <Text type="secondary" style={{ fontSize: '14px' }}>
+                Create and manage PokaYoke checklists for your machines
+            </Text>
+        </Col>
+        <Col xs={24} lg={12}>
+            <Row justify="end" gutter={[12, 12]} align="middle">
+                <Col>
+                  <Input.Search
+                    placeholder="Search by name..."
+                    allowClear
+                    onChange={(e) => setSearchText(e.target.value)}
+                    style={{ width: 250 }}
+                  />
+                </Col>
+                <Col>
+                    <Button
+                      type="primary"
+                      icon={<PlusOutlined />}
+                      onClick={() => {
+                        setInitialItems([
+                          {
+                            id: Date.now(),
+                            item_text: '',
+                            item_type: '',
+                            expected_value: '',
+                            is_required: false,
+                          },
+                        ]);
+                        setCreateModalVisible(true);
+                      }}
+                      style={{
+                        background: '#1890ff',
+                        borderColor: '#1890ff',
+                        borderRadius: '6px',
+                        height: '40px',
+                        fontWeight: '500'
+                      }}
+                    >
+                      Create New Checklist
+                    </Button>
+                </Col>
+            </Row>
+        </Col>
+    </Row>
 
       <Table
         columns={columns}
-        dataSource={checklists}
+        dataSource={filteredChecklists}
         loading={loading}
         rowKey="id"
         size="small"

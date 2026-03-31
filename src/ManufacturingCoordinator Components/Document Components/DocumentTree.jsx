@@ -114,7 +114,6 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
       const foldersData = await foldersResponse.json();
       const docsData = await docsResponse.json();
 
-      console.log('Fetched Common Folders:', foldersData);
       setCommonFolders(foldersData);
       setCommonRootDocumentCount(Array.isArray(docsData) ? docsData.length : 0);
     } catch (error) {
@@ -551,9 +550,6 @@ const buildMachineFoldersTree = (folders, machine) => {
       },
       ...buildGeneralFoldersTree(filteredGeneralFolders)
     ];
-    console.log('Tree Data Structure:', initialTreeData.map(item => ({ key: item.key, titleText: item.titleText })));
-    console.log('Common Folders Data:', commonFolders);
-    console.log('General Folders Data:', generalFolders);
     
     // Clear tree data first to force re-render
     setTreeData([]);
@@ -561,7 +557,6 @@ const buildMachineFoldersTree = (folders, machine) => {
     // Set new tree data after a short delay
     setTimeout(() => {
       setTreeData(initialTreeData);
-      console.log('Tree data set:', initialTreeData.length, 'items');
     }, 100);
   };
 
@@ -649,9 +644,7 @@ const buildMachineFoldersTree = (folders, machine) => {
   };
 
   const buildCommonFoldersTree = (folders, level = 0) => {
-    console.log('Building Common Folders Tree with data:', folders);
     return folders.map(folder => {
-      console.log('Processing Common Folder:', folder);
       return {
         title: (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
@@ -878,14 +871,6 @@ const buildMachineFoldersTree = (folders, machine) => {
     // Get the actual file object from the originFileObj
     const file = fileObj.originFileObj || fileObj;
     
-    console.log('File object details:', {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      originFileObj: fileObj.originFileObj,
-      isFile: file instanceof File
-    });
-    
     // Validate that we have a proper File object
     if (!(file instanceof File) && !(file instanceof Blob)) {
       message.error('Invalid file object');
@@ -904,15 +889,12 @@ const buildMachineFoldersTree = (folders, machine) => {
     
     try {
       setLoading(true);
-      console.log('Uploading file:', file.name, 'to:', uploadUrl);
-      
+   
       const response = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,
         // Don't set Content-Type header, let browser set it with boundary
       });
-
-      console.log('Upload response status:', response.status);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -927,7 +909,6 @@ const buildMachineFoldersTree = (folders, machine) => {
       }
 
       const result = await response.json();
-      console.log('Upload success:', result);
       message.success('Document uploaded successfully');
       setUploadModalVisible(false);
       setFileList([]);

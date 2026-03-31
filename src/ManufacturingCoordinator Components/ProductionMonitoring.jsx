@@ -35,7 +35,7 @@ const ProductionMonitoring = () => {
     if (path.includes('/product-monitoring/live-monitoring')) return 'Live Monitoring';
     if (path.includes('/product-monitoring/planned-vs-actual')) return 'Planned vs Actual';
     if (path.includes('/product-monitoring/order-tracking')) return 'Order Tracking';
-    return 'PokaYoke Checklist System';
+    return 'Preventive Maintenance';
   })();
   const showPokaYokeIcon = path.includes('/product-monitoring/pokayoke-checklists');
 

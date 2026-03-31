@@ -442,7 +442,7 @@ const OMS = () => {
   // KPI stats
   const totalOrders = filteredOrders.length;
   const inProgressCount = filteredOrders.filter(o => o.status === 'Pending').length;
-  const scheduledCount = filteredOrders.filter(o => o.status === 'Ongoing').length;
+  const scheduledCount = filteredOrders.filter(o => o.status === 'Scheduled').length;
   const completedCount = filteredOrders.filter(o => o.status === 'Completed').length;
 
   const ordersForPdf = filteredOrders.map(order => ({

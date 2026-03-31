@@ -147,6 +147,27 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       ),
     },
     {
+      title: 'Frequency',
+      dataIndex: 'frequency',
+      key: 'frequency',
+      width: 120,
+      className: 'table-header-styled',
+      render: (frequency, record) => {
+        const shift = record?.shift;
+        return (
+          <div>
+            {frequency ? (
+              <Tag color="blue" style={{ borderRadius: '12px' }}>
+                {frequency}{shift ? ` (${shift})` : ''}
+              </Tag>
+            ) : (
+              '-'
+            )}
+          </div>
+        );
+      },
+    },
+    {
       title: 'Operator',
       dataIndex: 'operator',
       key: 'operator',
@@ -421,6 +442,16 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
                     <Text type="secondary">Part</Text>
                     <div style={{ fontWeight: 500 }}>
                       {selectedLogDetails.part?.part_name || '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <Text type="secondary">Frequency</Text>
+                    <div style={{ fontWeight: 500 }}>
+                      {selectedLogDetails.frequency ? (
+                        <Tag color="blue" style={{ borderRadius: '12px' }}>
+                          {selectedLogDetails.frequency}{selectedLogDetails.shift ? ` (${selectedLogDetails.shift})` : ''}
+                        </Tag>
+                      ) : '-'}
                     </div>
                   </div>
                 </div>
