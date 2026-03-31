@@ -122,6 +122,9 @@ class PokayokeMachineAssignment(Base):
     id = Column(Integer, primary_key=True, index=True)
     checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    frequency = Column(String, nullable=True)  # 'Daily', 'Weekly', 'Monthly'
+    shift = Column(String, nullable=True)      # 'Morning', 'Evening', 'Both' (if Daily)
+    scheduled_day = Column(String, nullable=True) # Day of week (Weekly) or Day of month (Monthly)
     assigned_at = Column(TIMESTAMP, server_default=func.now())
 
     # Relationships
@@ -143,6 +146,9 @@ class PokayokeCompletedLog(Base):
     all_items_passed = Column(Boolean, nullable=False)
     comments = Column(Text, nullable=True)
     read = Column(Boolean, default=False)
+    assignment_id = Column(Integer, ForeignKey("configuration.pokayoke_machine_assignments.id"), nullable=True)
+    frequency = Column(String, nullable=True)  # 'Daily', 'Weekly', 'Monthly'
+    shift = Column(String, nullable=True)      # 'Morning', 'Evening', 'Both'
 
     # Relationships
     checklist = relationship("PokayokeChecklist")
@@ -151,6 +157,7 @@ class PokayokeCompletedLog(Base):
     operator = relationship("AccessUser")
     order = relationship("Order")
     item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
+    machine_assignment = relationship("PokayokeMachineAssignment")
 
 
 class PokayokeItemResponse(Base):

@@ -143,20 +143,15 @@ async def upload_tools_excel(
             item_desc  = safe_str(row.get(col['item_description']))
             ident_code = safe_str(row.get(col['identification_code'])) if col['identification_code'] else None
 
-            if not item_desc and not ident_code:
-                continue
-            if not ident_code: ident_code = item_desc
-            if not item_desc:  item_desc  = ident_code
-
             qty = safe_int(row.get(col['quantity']), 0) if col['quantity'] else 0
 
             cat_from_file = safe_str(row.get(col['category'])) if col['category'] else None
             sub_from_file = safe_str(row.get(col['sub_category'])) if col['sub_category'] else None
             if cat_from_file:
                 category     = cat_from_file
-                sub_category = sub_from_file or resolve_category(item_desc)[1]
+                sub_category = sub_from_file or resolve_category(item_desc or "")
             else:
-                category, sub_category = resolve_category(item_desc)
+                category, sub_category = resolve_category(item_desc or "")
 
             tool_data = {
                 'item_description': item_desc,
@@ -174,15 +169,7 @@ async def upload_tools_excel(
                 'sub_category':     sub_category,
             }
 
-            existing = db.query(ToolsListModel).filter(
-                ToolsListModel.identification_code == ident_code
-            ).first()
-
-            if existing:
-                for k, v in tool_data.items():
-                    setattr(existing, k, v)
-            else:
-                db.add(ToolsListModel(identification_code=ident_code, **tool_data))
+            db.add(ToolsListModel(identification_code=ident_code, **tool_data))
 
             processed += 1
             if processed % 50 == 0:

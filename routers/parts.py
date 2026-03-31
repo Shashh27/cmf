@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 from sqlalchemy.exc import IntegrityError
@@ -50,6 +51,8 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, user_map: dict)
         "assembly_id": part.assembly_id,
         "product_id": part.product_id,
         "user_id": part.user_id,
+        "size": part.size,  # New optional size field
+        "qty": part.qty,    # New optional quantity field
         "size": part.size,  # New optional size field
         "qty": part.qty,    # New optional quantity field
         "type_name": type_map.get(part.type_id),
@@ -242,6 +245,13 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
         ).delete(synchronize_session=False)
 
         # Now delete the documents associated with this part
+        # 4. Delete part documents and their extracted data
+        # First delete any extracted data associated with this part
+        db.query(DocumentExtractedDataModel).filter(
+            DocumentExtractedDataModel.part_id == part_id
+        ).delete(synchronize_session=False)
+
+        # Now delete the documents associated with this part
         db.query(DocumentModel).filter(DocumentModel.part_id == part_id).delete(
             synchronize_session=False
         )
@@ -265,6 +275,19 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
         # 8. Delete tools with part (that are not associated with operations)
         db.query(ToolWithPartModel).filter(ToolWithPartModel.part_id == part_id).delete(
             synchronize_session=False
+        )
+
+        # 9. Delete inventory requests for this part
+        # First delete return requests that reference these inventory requests
+        db.execute(
+            text("DELETE FROM inventory.inventory_return_requests WHERE requested_id IN (SELECT id FROM inventory.inventory_requests WHERE part_id = :pid)"),
+            {"pid": part_id}
+        )
+        
+        # Then delete the inventory requests
+        db.execute(
+            text("DELETE FROM inventory.inventory_requests WHERE part_id = :pid"),
+            {"pid": part_id}
         )
 
         # 9. Delete inventory requests for this part

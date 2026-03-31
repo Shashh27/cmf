@@ -46,6 +46,7 @@ def create_oee_issue(payload: OEEIssueCreate, db: Session = Depends(get_db)):
         issue_reason=issue_reason_str,
         start_time=payload.start_time,
         end_time=payload.end_time,
+        reported_at=payload.reported_at if payload.reported_at else None,
     )
     db.add(obj)
     db.commit()
@@ -60,6 +61,7 @@ def create_oee_issue(payload: OEEIssueCreate, db: Session = Depends(get_db)):
         "issue_reason": obj.issue_reason.split("|") if obj.issue_reason else [],
         "start_time": obj.start_time,
         "end_time": obj.end_time,
+        "reported_at": obj.reported_at,
     }
 
 @router.get("/oee-issues", response_model=List[OEEIssueSchema])
@@ -78,6 +80,7 @@ def list_oee_issues(db: Session = Depends(get_db)):
             "issue_reason": r.issue_reason.split("|") if r.issue_reason else [],
             "start_time": r.start_time,
             "end_time": r.end_time,
+            "reported_at": r.reported_at,
         })
     return out
 
@@ -96,6 +99,7 @@ def get_oee_issue(id: int, db: Session = Depends(get_db)):
         "issue_reason": obj.issue_reason.split("|") if obj.issue_reason else [],
         "start_time": obj.start_time,
         "end_time": obj.end_time,
+        "reported_at": obj.reported_at,
     }
 
 @router.put("/oee-issues/{id}", response_model=OEEIssueSchema)
@@ -122,6 +126,7 @@ def update_oee_issue(id: int, payload: OEEIssueUpdate, db: Session = Depends(get
         "issue_reason": obj.issue_reason.split("|") if obj.issue_reason else [],
         "start_time": obj.start_time,
         "end_time": obj.end_time,
+        "reported_at": obj.reported_at,
     }
 
 @router.delete("/oee-issues/{id}")
@@ -144,6 +149,7 @@ def create_machine_breakdown(payload: MachineBreakdownCreate, db: Session = Depe
         machine_status=payload.machine_status,
         issue_reason=issue_reason_str,
         additional_reason=payload.additional_reason,
+        reported_at=payload.reported_at if payload.reported_at else None,
     )
     db.add(obj)
     db.commit()
@@ -168,6 +174,7 @@ def create_machine_breakdown(payload: MachineBreakdownCreate, db: Session = Depe
         "machine_status": obj.machine_status,
         "issue_reason": obj.issue_reason.split("|") if obj.issue_reason else [],
         "additional_reason": obj.additional_reason,
+        "reported_at": obj.reported_at,
     }
 
 @router.get("/machine-breakdown", response_model=List[MachineBreakdownSchema])
@@ -186,6 +193,7 @@ def list_machine_breakdown(db: Session = Depends(get_db)):
             "machine_status": r.machine_status,
             "issue_reason": r.issue_reason.split("|") if r.issue_reason else [],
             "additional_reason": r.additional_reason,
+            "reported_at": r.reported_at,
         })
     return out
 
@@ -204,6 +212,7 @@ def get_machine_breakdown(id: int, db: Session = Depends(get_db)):
         "machine_status": obj.machine_status,
         "issue_reason": obj.issue_reason.split("|") if obj.issue_reason else [],
         "additional_reason": obj.additional_reason,
+        "reported_at": obj.reported_at,
     }
 
 @router.put("/machine-breakdown/{id}", response_model=MachineBreakdownSchema)
@@ -230,6 +239,7 @@ def update_machine_breakdown(id: int, payload: MachineBreakdownUpdate, db: Sessi
         "machine_status": obj.machine_status,
         "issue_reason": obj.issue_reason.split("|") if obj.issue_reason else [],
         "additional_reason": obj.additional_reason,
+        "reported_at": obj.reported_at,
     }
 
 @router.delete("/machine-breakdown/{id}")
@@ -251,6 +261,7 @@ def create_component_issue(payload: ComponentIssueCreate, db: Session = Depends(
         production_order_id=payload.production_order_id,
         part_id=payload.part_id,
         description=payload.description,
+        reported_at=payload.reported_at if payload.reported_at else None,
     )
     db.add(obj)
     db.commit()
@@ -277,6 +288,7 @@ def create_component_issue(payload: ComponentIssueCreate, db: Session = Depends(
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
         "description": obj.description,
+        "reported_at": obj.reported_at,
     }
 
 @router.get("/component-issues", response_model=List[ComponentIssueSchema])
@@ -297,6 +309,7 @@ def list_component_issues(db: Session = Depends(get_db)):
             "part_id": r.part_id,
             "part_name": p_map.get(r.part_id),
             "description": r.description,
+            "reported_at": r.reported_at,
         })
     return out
 
@@ -317,6 +330,7 @@ def get_component_issue(id: int, db: Session = Depends(get_db)):
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
         "description": obj.description,
+        "reported_at": obj.reported_at,
     }
 
 @router.put("/component-issues/{id}", response_model=ComponentIssueSchema)
@@ -343,6 +357,7 @@ def update_component_issue(id: int, payload: ComponentIssueUpdate, db: Session =
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
         "description": obj.description,
+        "reported_at": obj.reported_at,
     }
 
 @router.delete("/component-issues/{id}")

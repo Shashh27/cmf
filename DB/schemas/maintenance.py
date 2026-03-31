@@ -78,7 +78,7 @@ class OEEIssueBase(BaseModel):
 
 
 class OEEIssueCreate(OEEIssueBase):
-    pass
+    reported_at: Optional[datetime] = None
 
 
 class OEEIssueUpdate(BaseModel):
@@ -101,6 +101,7 @@ class OEEIssue(OEEIssueBase):
     id: int
     machine_name: Optional[str] = None
     operator_name: Optional[str] = None
+    reported_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -161,7 +162,7 @@ class MachineBreakdownBase(BaseModel):
 
 
 class MachineBreakdownCreate(MachineBreakdownBase):
-    pass
+    reported_at: Optional[datetime] = None
 
 
 class MachineBreakdownUpdate(BaseModel):
@@ -177,6 +178,7 @@ class MachineBreakdown(MachineBreakdownBase):
     id: int
     machine_name: Optional[str] = None
     operator_name: Optional[str] = None
+    reported_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -206,7 +208,7 @@ class ComponentIssueBase(BaseModel):
 
 
 class ComponentIssueCreate(ComponentIssueBase):
-    pass
+    reported_at: Optional[datetime] = None
 
 
 class ComponentIssueUpdate(BaseModel):
@@ -224,6 +226,7 @@ class ComponentIssue(ComponentIssueBase):
     operator_name: Optional[str] = None
     order_name: Optional[str] = None
     part_name: Optional[str] = None
+    reported_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

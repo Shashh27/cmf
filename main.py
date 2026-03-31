@@ -68,6 +68,24 @@ from routers import (
 
 
 
+# Import notification routers
+
+from notification_routers import (
+
+    component_issues_notification_router,
+
+    machine_calibration_notification_router,
+
+    machine_notifications_router,
+
+    order_notifications_router,
+
+    tool_issues_notification_router,
+
+)
+
+
+
 # Import Pokayoke checklists router
 
 from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
@@ -81,8 +99,6 @@ from document_routers import (
     general_documents_router,
     machine_documents_router
 )
-
-
 
 # Initialize FastAPI app
 
@@ -263,6 +279,18 @@ app.include_router(tool_issues_router, prefix="/api/v1")
 app.include_router(out_source_parts_status_router, prefix="/api/v1")
 
 app.include_router(maintenance_router, prefix="/api/v1")
+
+# Include notification routers
+
+app.include_router(component_issues_notification_router, prefix="/api/v1")
+
+app.include_router(machine_calibration_notification_router, prefix="/api/v1")
+
+app.include_router(machine_notifications_router, prefix="/api/v1")
+
+app.include_router(order_notifications_router, prefix="/api/v1")
+
+app.include_router(tool_issues_notification_router, prefix="/api/v1")
 
 
 

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, time
 import re
 from sqlalchemy.orm import Session
+from sqlalchemy import func, TIME, extract
 from DB.database import get_db
 from DB.models.configuration import (
     PokayokeChecklist,
@@ -109,10 +110,61 @@ def create_checklist(checklist: PokayokeChecklistCreate, db: Session = Depends(g
     return db_checklist
 
 
+@router.get("/all", response_model=List[PokayokeChecklistWithItems])
+def get_absolutely_all_checklists(db: Session = Depends(get_db)):
+    """Get absolutely all Pokayoke checklists without any filtering"""
+    checklists = db.query(PokayokeChecklist).order_by(PokayokeChecklist.created_at.desc()).all()
+    return checklists
+
+
 @router.get("/", response_model=List[PokayokeChecklistWithItems])
-def get_all_checklists(db: Session = Depends(get_db)):
-    """Get all Pokayoke checklists"""
-    checklists = db.query(PokayokeChecklist).all()
+def get_all_checklists(
+    period: Optional[str] = None, # 'daily', 'weekly', 'monthly'
+    shift: Optional[str] = None,  # 'morning', 'evening'
+    month: Optional[int] = None,  # 1 to 12
+    year: Optional[int] = None,   # e.g., 2024, 2025
+    db: Session = Depends(get_db)
+):
+    """Get all Pokayoke checklists with optional filtering"""
+    query = db.query(PokayokeChecklist)
+    
+    # Use IST for time calculations as that's how they are stored
+    now = datetime.now(IST).replace(tzinfo=None)
+    
+    # Priority 1: Specific Month and Year
+    if month is not None and year is not None:
+        query = query.filter(
+            extract('month', PokayokeChecklist.created_at) == month,
+            extract('year', PokayokeChecklist.created_at) == year
+        )
+    # Priority 2: Relative Period (only if specific month/year is NOT provided)
+    elif period:
+        if period == 'daily':
+            start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.filter(PokayokeChecklist.created_at >= start_of_day)
+        elif period == 'weekly':
+            # Start of current week (Monday)
+            start_of_week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            query = query.filter(PokayokeChecklist.created_at >= start_of_week)
+        elif period == 'monthly':
+            # Start of current month
+            start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            query = query.filter(PokayokeChecklist.created_at >= start_of_month)
+        
+    if shift == 'morning':
+        # Morning: 8:30 AM – 4:00 PM
+        query = query.filter(
+            func.cast(PokayokeChecklist.created_at, TIME) >= time(8, 30),
+            func.cast(PokayokeChecklist.created_at, TIME) <= time(16, 0)
+        )
+    elif shift == 'evening':
+        # Evening: 4:00 PM – 9:00 PM
+        query = query.filter(
+            func.cast(PokayokeChecklist.created_at, TIME) >= time(16, 0),
+            func.cast(PokayokeChecklist.created_at, TIME) <= time(21, 0)
+        )
+        
+    checklists = query.order_by(PokayokeChecklist.created_at.desc()).all()
     return checklists
 
 
@@ -443,6 +495,19 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
     log_data = log.model_dump()
     if not log_data.get('completed_at'):
         log_data['completed_at'] = datetime.now(IST).replace(tzinfo=None)
+    
+    # If assignment_id is provided, fetch frequency and shift from assignment
+    assignment_id = log_data.get('assignment_id')
+    if assignment_id:
+        assignment = db.query(PokayokeMachineAssignment).filter(
+            PokayokeMachineAssignment.id == assignment_id
+        ).first()
+        if assignment:
+            # Use assignment's frequency and shift if not already provided
+            if not log_data.get('frequency') and assignment.frequency:
+                log_data['frequency'] = assignment.frequency
+            if not log_data.get('shift') and assignment.shift:
+                log_data['shift'] = assignment.shift
     
     db_log = PokayokeCompletedLog(**log_data)
     db.add(db_log)
