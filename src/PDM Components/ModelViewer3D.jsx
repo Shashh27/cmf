@@ -105,7 +105,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
       // Add DRACOLoader for much faster loading of compressed meshes
       const dracoLoader = new DRACOLoader();
       // Using Google's hosted draco decoder for convenience and speed
-      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+     dracoLoader.setDecoderPath('/static/draco/');
       loader.setDRACOLoader(dracoLoader);
 
       const loadModel = async () => {
@@ -117,12 +117,44 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
           if (modelCache.has(documentId)) {
             arrayBuffer = modelCache.get(documentId);
           } else {
-            const response = await axios.get(
-              `${API_BASE_URL}/documents/${documentId}/3d`,
-              { responseType: "arraybuffer" }
-            );
-            arrayBuffer = response.data;
-            modelCache.set(documentId, arrayBuffer);
+            try {
+              const response = await axios.get(
+                `${API_BASE_URL}/documents/${documentId}/3d`,
+                { responseType: "arraybuffer" }
+              );
+              arrayBuffer = response.data;
+              modelCache.set(documentId, arrayBuffer);
+            } catch (apiError) {
+              // Extract detailed error message from response
+              let errorMessage = "Unable to load 3D model";
+              if (apiError.response) {
+                // Try to parse JSON error response
+                if (apiError.response.data) {
+                  try {
+                    // If the response is ArrayBuffer (due to responseType), decode it
+                    if (apiError.response.data instanceof ArrayBuffer) {
+                      const decoder = new TextDecoder('utf-8');
+                      const jsonStr = decoder.decode(apiError.response.data);
+                      const errorData = JSON.parse(jsonStr);
+                      errorMessage = errorData.detail || errorData.message || `Error ${apiError.response.status}: ${apiError.response.statusText}`;
+                    } else if (typeof apiError.response.data === 'object') {
+                      // JSON response with detail field
+                      errorMessage = apiError.response.data.detail || apiError.response.data.message || apiError.message;
+                    } else {
+                      errorMessage = String(apiError.response.data);
+                    }
+                  } catch {
+                    // If JSON parsing fails, use status text
+                    errorMessage = apiError.response?.statusText || apiError.message;
+                  }
+                } else {
+                  errorMessage = apiError.message;
+                }
+              } else {
+                errorMessage = apiError.message;
+              }
+              throw new Error(errorMessage);
+            }
           }
 
           const blob = new Blob([arrayBuffer], { type: "model/gltf-binary" });
@@ -257,7 +289,9 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
             return;
           }
           setLoading(false);
-          setError(e && e.message ? e.message : "Unable to load 3D model");
+          // Display the specific error message if available
+          const errorMsg = e?.message || e?.response?.data?.detail || "Unable to load 3D model";
+          setError(errorMsg);
         }
       };
 
@@ -411,8 +445,8 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
         </div>
       )}
       {error && !loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/80">
-          <Text type="danger" className="text-xs">
+        <div className="absolute left-0 right-0 top-0 bottom-0 flex items-center justify-center bg-white/80 p-4">
+          <Text type="danger" className="text-xs text-center break-words max-w-full block">
             {error}
           </Text>
         </div>

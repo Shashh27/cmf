@@ -134,11 +134,8 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
     const filtered = source.filter(doc => {
       const url = (doc.document_url || "").toLowerCase();
       const name = (doc.document_name || "").toLowerCase();
-      const type = (doc.document_type || "").toString().toUpperCase();
       const target = url || name;
-      const byExt = [".stl", ".step", ".stp"].some(ext => target.endsWith(ext));
-      const byType = type === "3D";
-      return byExt || byType;
+      return [".stl", ".step", ".stp"].some(ext => target.endsWith(ext));
     });
     const sorted = [...filtered].sort((a, b) => {
       // Sort by ID in FIFO order (ascending)

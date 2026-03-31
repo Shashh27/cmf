@@ -50,10 +50,7 @@ const ToolsIssues = () => {
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
       
-      console.log('Tool issues with sale_order_number:', data);
-      setIssues(Array.isArray(data) ? data : []);
     } catch (e) {
-      console.error('Failed to load tool issues', e);
       message.error('Failed to load tool issues');
       setIssues([]);
     } finally {

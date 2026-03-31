@@ -18,16 +18,13 @@ const [pagination, setPagination] = useState({current: 1, pageSize: 10,});
 
   const fetchAllTransactions = async () => {
     try {
-      console.log('Fetching all transactions...');
       const response = await fetch(`${API_BASE_URL}/transaction-history/all`);
-      console.log('Response status:', response.status);
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const data = await response.json();
-      console.log('Received data:', data);
       setAllTransactionsData(data);
     } catch (error) {
       console.error('Failed to fetch all transactions:', error);

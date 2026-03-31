@@ -254,21 +254,15 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         const transformedData = {
           ...data,
           parts: (data.direct_parts || [])
-            .slice()
-            .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
             .map(item => ({
               ...item.part,
               extracted_data: item.extracted_data || [],
               documents: item.documents || []
             })),
           assemblies: (data.assemblies || [])
-            .slice()
-            .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
             .map(assembly => ({
               ...assembly.assembly,
               parts: (assembly.parts || [])
-                .slice()
-                .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
                 .map(part => ({
                   ...part.part,
                   extracted_data: part.extracted_data || [],
@@ -297,13 +291,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
   const transformSubassemblies = (subassemblies) => {
     return (subassemblies || [])
-      .slice()
-      .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
       .map(sub => ({
         ...sub.assembly,
         parts: (sub.parts || [])
-          .slice()
-          .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
           .map(part => ({
             ...part.part,
             extracted_data: part.extracted_data || [],
@@ -609,7 +599,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const combinedChildren = [
       ...assemblyParts.map(p => ({ ...p, __childType: 'part' })),
       ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
-    ].sort((a, b) => (a.id || 0) - (b.id || 0));
+    ].sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeA - timeB || (a.id || 0) - (b.id || 0);
+    });
     const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
     const hasChildren = combinedChildren.length > 0;
     const isSelected = activeItemId === assembly.id;
@@ -660,7 +654,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const combinedChildren = [
       ...directParts.map(p => ({ ...p, __childType: 'part' })),
       ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
-    ].sort((a, b) => (a.id || 0) - (b.id || 0));
+    ].sort((a, b) => {
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return timeA - timeB || (a.id || 0) - (b.id || 0);
+    });
     const isExpanded = expandedItems[getExpandKey('product', product.id)];
     const hasChildren = combinedChildren.length > 0;
     const showArrow = !hasData || hasChildren;

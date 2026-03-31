@@ -175,17 +175,14 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const handleDownload = async (documentId, documentName) => {
     try {
-      const doc = documents.find(d => d.id === documentId);
-      if (!doc?.document_url) {
-        message.error("No document URL available");
-        return;
-      }
-      const response = await axios.get(doc.document_url, { responseType: "blob" });
+      const response = await axios.get(`${API_BASE_URL}/order-documents/${documentId}/download`, {
+        responseType: "blob",
+      });
       const blob = response.data;
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
-      a.download = documentName || 'document';
+      a.download = documentName || "document";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -574,31 +571,65 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       <Modal
         open={viewerOpen}
         onCancel={() => { setViewerOpen(false); setViewerDoc(null); }}
-        footer={null}
+        footer={[
+          <Button 
+            key="dl" 
+            icon={<DownloadOutlined />} 
+            onClick={() => { 
+              if (viewerDoc?.id) { 
+                handleDownload(viewerDoc.id, viewerDoc.document_name);
+              } 
+              setViewerOpen(false); 
+              setViewerDoc(null); 
+            }}
+          >
+            Download
+          </Button>,
+          <Button key="cl" type="primary" onClick={() => { setViewerOpen(false); setViewerDoc(null); }}>Close</Button>
+        ]}
         width="95%"
         style={{ maxWidth: 1000 }}
         title={viewerDoc?.document_name || 'Preview'}
       >
         {viewerDoc ? (
-          <>
-            {(viewerDoc.document_type?.includes('pdf') || viewerDoc.document_url?.toLowerCase().endsWith('.pdf')) ? (
-              <iframe
-                src={viewerDoc.document_url}
-                title="Document Preview"
-                style={{ width: '100%', height: '75vh', border: 'none' }}
-              />
-            ) : (viewerDoc.document_type?.startsWith('image/') ? (
-              <img
-                src={viewerDoc.document_url}
-                alt={viewerDoc.document_name}
-                style={{ maxWidth: '100%', maxHeight: '75vh' }}
-              />
-            ) : (
-              <div style={{ padding: 16 }}>
-                <Empty description="Preview not available for this file type. Use Download." />
+          (() => {
+            const getPreviewType = (name) => {
+              const ext = (name || "").split(".").pop().toLowerCase();
+              if (["jpg", "jpeg", "png", "gif", "svg"].includes(ext)) return "image";
+              if (ext === "pdf") return "pdf";
+              return "other";
+            };
+            
+            const displayName = viewerDoc.document_name || viewerDoc.document_url?.split('/').pop() || 'Document';
+            const type = getPreviewType(displayName);
+            const previewUrl = `${API_BASE_URL}/order-documents/${viewerDoc.id}/preview`;
+            
+            if (type === "image") {
+              return (
+                <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+                  <img src={previewUrl} alt={displayName} style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain" }} />
+                </div>
+              );
+            }
+            
+            if (type === "pdf") {
+              return (
+                <iframe
+                  src={previewUrl}
+                  title="Document Preview"
+                  style={{ width: '100%', height: '75vh', border: 'none' }}
+                />
+              );
+            }
+            
+            return (
+              <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+                <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
+                <p className="text-gray-700 font-medium mb-2">Preview is not available for this file type.</p>
+                <p className="text-gray-500">Please download the file to view it.</p>
               </div>
-            ))}
-          </>
+            );
+          })()
         ) : null}
       </Modal>
     </Modal>
