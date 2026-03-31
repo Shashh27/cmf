@@ -108,6 +108,8 @@ class PartBase(BaseModel):
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
+    size: Optional[str] = None  # Optional size field (e.g., "25x25x160", "Ø210x110", "Tyre Coupling F160 Type:B")
+    qty: Optional[int] = None  # Optional quantity field
 
 
 class PartCreate(PartBase):
@@ -123,6 +125,8 @@ class PartUpdate(BaseModel):
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
+    size: Optional[str] = None  # Optional size field
+    qty: Optional[int] = None  # Optional quantity field
 
 
 class Part(PartBase):
@@ -132,6 +136,8 @@ class Part(PartBase):
     raw_material_status: Optional[str] = None  # From raw_materials.status: Available / Not Available / N/A
     priority: Optional[int] = None
     user_name: Optional[str] = None
+    size: Optional[str] = None  # Optional size field
+    qty: Optional[int] = None  # Optional quantity field
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
