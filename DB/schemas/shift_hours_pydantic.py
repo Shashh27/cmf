@@ -1,6 +1,6 @@
 from datetime import date, time
 from typing import List, Literal, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ShiftCode = Literal["GENERAL", "NEXT", "NON_WORKING", "CUSTOM"]
 
@@ -42,21 +42,16 @@ class ShiftHoursConfigCreate(BaseModel):
         if len(deduped) > 2:
             raise ValueError("A day can have at most two shifts")
         
-        # NEXT shift can only be selected with GENERAL on working days
-        if "NEXT" in deduped and "GENERAL" not in deduped:
-            raise ValueError("NEXT shift can only be selected along with GENERAL shift")
+        # NEXT shift can be selected alone or with GENERAL on any day (working or non-working)
+        if "NEXT" in deduped and "GENERAL" in deduped and len(deduped) > 2:
+            raise ValueError("NEXT shift with GENERAL can only have at most 2 shifts")
         
-        if "NEXT" in deduped and not working_day:
-            raise ValueError("NEXT shift is only applicable for working days")
-        
-        # NON_WORKING shift only for non-working days
-        if "NON_WORKING" in deduped and working_day:
-            raise ValueError("NON_WORKING shift is only applicable for non-working days")
-        
+        # NON_WORKING shift can be selected on any day (working or non-working)
         # Cannot combine NON_WORKING with other shifts
         if "NON_WORKING" in deduped and len(deduped) > 1:
             raise ValueError("NON_WORKING shift cannot be combined with other shifts")
         
+        # CUSTOM shift can be selected on any day
         # If CUSTOM is selected, validate custom times are provided
         if "CUSTOM" in deduped:
             custom_start = info.data.get('custom_start')
@@ -77,46 +72,37 @@ class ShiftHoursConfigUpdate(BaseModel):
     custom_start: time | None = None
     custom_end: time | None = None
 
-    @field_validator("selected_shifts")
-    @classmethod
-    def validate_shift_selection(cls, value: List[ShiftCode] | None, info) -> List[ShiftCode] | None:
-        if value is None:
-            return value
+    @model_validator(mode='after')
+    def validate_shift_selection(self):
+        selected_shifts = self.selected_shifts
+        if selected_shifts is None:
+            return self
             
-        deduped = list(dict.fromkeys(value))
-        
-        # Get working_day from the data or assume current value
-        working_day = info.data.get('working_day')
+        deduped = list(dict.fromkeys(selected_shifts))
         
         # Validation rules
         if len(deduped) > 2:
             raise ValueError("A day can have at most two shifts")
         
-        # NEXT shift can only be selected with GENERAL on working days
-        if "NEXT" in deduped and "GENERAL" not in deduped:
-            raise ValueError("NEXT shift can only be selected along with GENERAL shift")
+        # NEXT shift can be selected alone or with GENERAL on any day (working or non-working)
+        if "NEXT" in deduped and "GENERAL" in deduped and len(deduped) > 2:
+            raise ValueError("NEXT shift with GENERAL can only have at most 2 shifts")
         
-        if "NEXT" in deduped and working_day is False:
-            raise ValueError("NEXT shift is only applicable for working days")
-        
-        # NON_WORKING shift only for non-working days
-        if "NON_WORKING" in deduped and working_day is True:
-            raise ValueError("NON_WORKING shift is only applicable for non-working days")
-        
+        # NON_WORKING shift can be selected on any day (working or non-working)
         # Cannot combine NON_WORKING with other shifts
         if "NON_WORKING" in deduped and len(deduped) > 1:
             raise ValueError("NON_WORKING shift cannot be combined with other shifts")
         
+        # CUSTOM shift can be selected on any day
         # If CUSTOM is selected, validate custom times are provided
         if "CUSTOM" in deduped:
-            custom_start = info.data.get('custom_start')
-            custom_end = info.data.get('custom_end')
-            if not custom_start or not custom_end:
+            if not self.custom_start or not self.custom_end:
                 raise ValueError("Custom shift requires both custom_start and custom_end times")
-            if custom_start >= custom_end:
+            if self.custom_start >= self.custom_end:
                 raise ValueError("custom_start must be before custom_end")
         
-        return deduped
+        self.selected_shifts = deduped
+        return self
 
     # model_config = {"from_attributes": True}
 

@@ -71,11 +71,18 @@ def _sync_shift_timings(config, selected_shifts, db: Session, custom_start=None,
 
 
 def _enforce_shift_count_consistency(config: ShiftHoursConfiguration) -> None:
+    """Ensure number_of_shifts matches the actual shift timings count."""
     timing_count = len(config.shift_timings)
     if timing_count > 0:
-        config.number_of_shifts = timing_count
-        return
-    config.number_of_shifts = 0 if not config.working_day else 1
+        # number_of_shifts is 2 only when both GENERAL and NEXT are selected
+        has_general = any(t.shift_code == "GENERAL" for t in config.shift_timings)
+        has_next = any(t.shift_code == "NEXT" for t in config.shift_timings)
+        if has_general and has_next:
+            config.number_of_shifts = 2
+        else:
+            config.number_of_shifts = timing_count
+    else:
+        config.number_of_shifts = 0 if not config.working_day else 1
 
 
 def _build_response(config: ShiftHoursConfiguration) -> ShiftHoursConfigResponse:
@@ -130,7 +137,7 @@ def create_shift_config(data: ShiftHoursConfigCreate, db: Session = Depends(get_
     new_config = ShiftHoursConfiguration(
         date=data.date,
         working_day=data.working_day,
-        number_of_shifts=number_of_shifts,
+        number_of_shifts=0,  # Will be set correctly by _sync_shift_timings and _enforce_shift_count_consistency
     )
     _sync_shift_timings(new_config, selected_shifts, db, custom_start, custom_end)
     _enforce_shift_count_consistency(new_config)

@@ -10,7 +10,7 @@ from .models.oms import (
     Order,
     OrderDocument,
     OperationDocument,
-    OrderPartsRawMaterialLinked
+    # OrderPartsRawMaterialLinked
 )
 from .models.configuration import (
     Customer,
@@ -39,7 +39,7 @@ __all__ = [
     "Order",
     "OrderDocument",
     "OperationDocument",
-    "OrderPartsRawMaterialLinked",
+    # "OrderPartsRawMaterialLinked",
     "Customer",
     "WorkCenter",
     "Machine",

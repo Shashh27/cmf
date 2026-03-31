@@ -104,7 +104,7 @@ class Part(Base):
     documents = relationship("Document", back_populates="part", cascade="all, delete-orphan")
     # tools = relationship("ToolWithPart", back_populates="part", cascade="all, delete-orphan")
 
-    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="part", cascade="all, delete-orphan")
+    # raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="part", cascade="all, delete-orphan")
 
 # =======================
 # Operation
@@ -249,7 +249,7 @@ class Order(Base):
     product = relationship("Product", back_populates="orders")
     user = relationship("AccessUser")
     order_documents = relationship("OrderDocument", back_populates="order", cascade="all, delete-orphan")
-    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order",  cascade="all, delete-orphan")
+    # raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order",  cascade="all, delete-orphan")
 
     part_priorities = relationship("OrderPartPriority", back_populates="order", cascade="all, delete-orphan")
     
@@ -309,20 +309,38 @@ class OrderPartsRawMaterialLinked(Base):
     __table_args__ = {'schema': 'oms'}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=False)
+    # raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=False)
+    stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
     order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
-    order_quantity = Column(Integer, nullable=True)
-    mass = Column(Float, nullable=True)
-    material_status = Column(String, nullable=True)
+    # order_quantity = Column(Integer, nullable=True)
+    used_quantity = Column(Integer, nullable=False, default=1)  # Quantity used from this stock
+    # mass = Column(Float, nullable=True)
+    # material_status = Column(String, nullable=True)
+
+    # Procurement fields
+    is_procurement = Column(Boolean, nullable=False, default=False)  # True if this is a procurement request
+    procurement_quantity = Column(Integer, nullable=True)  # Quantity to procure
+    procurement_weight = Column(Float, nullable=True)  # Weight in kg to procure
+    vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Selected vendor
+    procurement_status = Column(String, nullable=False, default="pending")  # pending, ordered, received
+
+     # Manufacturing coordinator responsible for this linkage (optional)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     linkage_group_id = Column(String, nullable=True)  # Segregates demand batches (e.g. 20 kg vs 5 kg)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
-    raw_material = relationship("RawMaterial")
+    # raw_material = relationship("RawMaterial")
     part = relationship("Part")
     order = relationship("Order")
+
+    # stock_item = relationship("RawMaterialStock", back_populates="usage_links")
+    part = relationship("Part")
+    order = relationship("Order")
+    user = relationship("AccessUser")
+    vendor = relationship("Vendors")
 
 
 # =======================

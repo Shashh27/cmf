@@ -51,7 +51,6 @@ from DB.models.scheduling import (
 # ── Constants ─────────────────────────────────────────────────────────────
 DEFAULT_SHIFT_START = time(hour=8, minute=30)
 DEFAULT_SHIFT_END   = time(hour=17, minute=0)
-SHIFT_HOURS_PER_DAY = 8   # fallback if only number_of_shifts exists
 STATUS_OFF          = 2   # MachineStatus.status_id value meaning OFF
 IN_HOUSE_TYPE_ID    = 1   # Part.type_id for IN-House parts
 OUT_SOURCE_TYPE_ID  = 2   # Operation.part_type_id value for Out-Source (oms.part_types id=2)
@@ -118,8 +117,8 @@ class SchedulerEngine:
                 end_dt = datetime.combine(cfg.date, timing.shift_end)
                 total += (end_dt - start_dt).total_seconds() / 3600
             return max(total, 0.0)
-        # Fallback: number_of_shifts × 8 hours per shift
-        return float(cfg.number_of_shifts * SHIFT_HOURS_PER_DAY)
+        # Fallback: use DEFAULT shift hours (8.5 hours from 8:30-17:00)
+        return 8.5
 
     def _load_efficiency(self) -> float:
         record = self.db.query(EfficiencyFactor).first()
@@ -164,8 +163,9 @@ class SchedulerEngine:
 
         n = cfg.number_of_shifts if (cfg and cfg.number_of_shifts) else 1
         shift_start = DEFAULT_SHIFT_START
-        shift_end_dt = datetime.combine(dt.date(), shift_start) + timedelta(hours=n * SHIFT_HOURS_PER_DAY)
-        return shift_start, shift_end_dt.time()
+        # Use DEFAULT_SHIFT_END instead of calculating from SHIFT_HOURS_PER_DAY
+        shift_end = DEFAULT_SHIFT_END
+        return shift_start, shift_end
 
     def _shift_start_dt(self, dt: datetime) -> datetime:
         shift_start, _ = self._shift_window(dt)
@@ -905,9 +905,12 @@ class SchedulerEngine:
 
                     # ── IN-HOUSE operation: machine selection ──────── #
                     #
-                    # Tier 1: operation.machine_id pinned + schedulable
-                    # Tier 2: pinned but not in schedulable WC → WC fallback
+                    # Tier 1: operation.machine_id pinned + schedulable + available
+                    # Tier 2: pinned but broken down → find next available in WC (DYNAMIC)
                     # Tier 3: no pin → earliest-free in work center (FIFO)
+
+                    machine: Optional[Machine] = None
+                    cand_start: datetime = op_cursor
 
                     if operation.machine_id and operation.machine_id in all_machines:
                         # Tier 1 – pinned machine
@@ -916,21 +919,28 @@ class SchedulerEngine:
                             pinned.id, op_cursor
                         )
                         earliest = max(op_cursor, machine_free)
-                        avail    = self._machine_next_available(pinned, earliest)
+                        avail = self._machine_next_available(pinned, earliest)
 
-                        if avail is None:
-                            skipped_parts.append(
-                                f"Part {part_data['part_number']}, "
-                                f"Op {operation.operation_number}: "
-                                f"pinned machine {operation.machine_id} is "
-                                f"permanently OFF — skipped."
+                        if avail is not None:
+                            # Pinned machine is available
+                            machine, cand_start = pinned, avail
+                        else:
+                            # Tier 2 – pinned machine is broken (permanently OFF)
+                            # DYNAMIC RESCHEDULING: Find next available machine in same workcenter
+                            alt_machine, alt_start = self._pick_best_machine(
+                                operation.workcenter_id, machines_by_wc, op_cursor
                             )
-                            continue
+                            if alt_machine:
+                                machine, cand_start = alt_machine, alt_start
+                                skipped_parts.append(
+                                    f"Part {part_data['part_number']}, "
+                                    f"Op {operation.operation_number}: "
+                                    f"pinned machine {operation.machine_id} is "
+                                    f"broken — reassigned to machine {machine.id}."
+                                )
 
-                        machine, cand_start = pinned, avail
-
-                    else:
-                        # Tier 2 / 3 – earliest-free within the work center
+                    if machine is None:
+                        # Tier 3 – no pinned machine or pinned was broken with no alternative
                         machine, cand_start = self._pick_best_machine(
                             operation.workcenter_id, machines_by_wc, op_cursor
                         )
