@@ -47,7 +47,9 @@ const getComponentColors = (operations) => {
 //  TIME HELPERS
 // ─────────────────────────────────────────────────────────────
 const getTimeAxisScale = (v) => ({ year:'month', month:'day', week:'hour', day:'hour' }[v] || 'hour');
-const getTimeAxisStep  = (v) => ({ year:1, month:1, week:1, day:1 }[v] || 1);
+const getTimeAxisStep  = (v) => ({ year:1, month:1, week:3, day:3 }[v] || 1);
+
+const SHIFT_MS = 30 * 60 * 1000;
 
 const getTimeRange = (viewType, dateRange, scheduleData) => {
   const now = moment();
@@ -84,6 +86,11 @@ const getTimeRange = (viewType, dateRange, scheduleData) => {
         end   = now.clone().startOf('isoWeek').add(4,'days').hour(17).minute(30).toDate();
     }
   }
+
+  // Shift start/end forward for 8:30 grid alignment
+  start = new Date(start.getTime() + SHIFT_MS);
+  end   = new Date(end.getTime() + SHIFT_MS);
+
   return { start, end, dataMin, dataMax };
 };
 
@@ -290,16 +297,20 @@ const MachineScheduling = () => {
 
         // 3. Items
         const items = new DataSet(
-          operations.map((op, index) => ({
-            id:        index,
-            group:     op.machineId,
-            content:   `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.production_order}</div><div style="font-size:10px;opacity:0.85;">${op.component} · ${op.description}</div></div>`,
-            start:     new Date(op.start_time),
-            end:       new Date(op.end_time),
-            className: `order-${op.production_order.replace(/[^a-zA-Z0-9]/g, '-')}`,
-            operation: op,
-            style:     `background-color:${colors[op.production_order].backgroundColor};border-color:${colors[op.production_order].borderColor};color:white;border-radius:4px;`,
-          }))
+          operations.map((op, index) => {
+            const start = new Date(new Date(op.start_time).getTime() + SHIFT_MS);
+            const end   = new Date(new Date(op.end_time).getTime() + SHIFT_MS);
+            return {
+              id:        index,
+              group:     op.machineId,
+              content:   `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.production_order}</div><div style="font-size:10px;opacity:0.85;">${op.component} · ${op.description}</div></div>`,
+              start:     start,
+              end:       end,
+              className: `order-${op.production_order.replace(/[^a-zA-Z0-9]/g, '-')}`,
+              operation: op,
+              style:     `background-color:${colors[op.production_order].backgroundColor};border-color:${colors[op.production_order].borderColor};color:white;border-radius:4px;`,
+            };
+          })
         );
 
         // 4. Groups
@@ -331,7 +342,8 @@ const MachineScheduling = () => {
         if (styleElementRef.current) styleElementRef.current.remove();
         const styleEl = document.createElement('style');
         styleEl.textContent = `
-          .vis-custom-time { background-color:#e53935!important; width:2px!important; }
+          // .vis-custom-time { background-color:#e53935!important; width:2px!important; }
+          .vis-current-time { background-color:#ff9800!important; width:2px!important; }
           .vis-item { border-width:1px!important; min-height:28px!important; height:28px!important; }
           .vis-item .timeline-item { height:28px!important; }
           .vis-item.vis-selected { border:2px solid rgba(0,0,0,0.35)!important; }
@@ -365,33 +377,50 @@ const MachineScheduling = () => {
           zoomMin: 1000 * 60 * 30,
           zoomMax: 1000 * 60 * 60 * 24 * 365 * 2,
           editable: false,
+          showCurrentTime: true,
           tooltip: {
             followMouse:    true,
             overflowMethod: 'cap',
             template: (item) => {
               const op = item.operation;
               if (!op) return '';
+              // Subtract SHIFT_MS for display
+              const displayStart = moment(op.start_time);
+              const displayEnd   = moment(op.end_time);
               return `<div style="padding:10px 14px;min-width:220px;font-size:13px;line-height:1.9;background:#fff;border-radius:6px;">
                 <div><b>Production Order:</b> ${op.production_order}</div>
                 <div><b>Part Number:</b> ${op.component}</div>
                 <div><b>Machine:</b> ${op.machineName}</div>
                 <div><b>Operation:</b> ${op.description}</div>
                 <div><b>Quantity:</b> ${op.quantity}</div>
-                <div><b>Start:</b> ${new Date(op.start_time).toLocaleString()}</div>
-                <div><b>PDC of Operation:</b> ${new Date(op.end_time).toLocaleString()}</div>
+                <div><b>Start:</b> ${displayStart.format('DD-MM-YYYY, HH:mm')}</div>
+                <div><b>PDC of Operation:</b> ${displayEnd.format('DD-MM-YYYY, HH:mm')}</div>
               </div>`;
             },
           },
           timeAxis: { scale: getTimeAxisScale(viewType), step: getTimeAxisStep(viewType) },
           format: {
-            minorLabels: { hour:'HH:mm', day:'D', month:'MMM' },
-            majorLabels: { hour:'ddd D MMM', day:'MMMM YYYY', month:'YYYY' },
+            minorLabels: (date, scale, step) => {
+              // Round to nearest hour to ensure grid alignment across all days
+              const d = moment(date).startOf('hour').subtract(30, 'minutes');
+              if (scale === 'hour') return d.format('HH:mm');
+              if (scale === 'day')  return d.format('D');
+              if (scale === 'month') return d.format('MMM');
+              return d.format('HH:mm');
+            },
+            majorLabels: (date, scale, step) => {
+              const d = moment(date).startOf('hour').subtract(30, 'minutes');
+              if (scale === 'hour') return d.format('ddd D MMM');
+              if (scale === 'day')  return d.format('MMMM YYYY');
+              if (scale === 'month') return d.format('YYYY');
+              return d.format('ddd D MMM');
+            },
           },
           hiddenDates: [
-            // Hide non-shift hours
-            { start:'1970-01-01 00:00:00', end:'1970-01-01 08:30:00', repeat:'daily' },
-            { start:'1970-01-01 17:30:01', end:'1970-01-01 23:59:59', repeat:'daily' },
-            // Hide weekends (Saturday & Sunday)
+            // Standardize hidden periods to avoid fractional shifts on subsequent days
+            { start:'1970-01-01 00:00:00', end:'1970-01-01 09:00:00', repeat:'daily' },
+            { start:'1970-01-01 18:00:00', end:'1970-01-01 23:59:59', repeat:'daily' },
+            // Weekend hide (exact day boundaries)
             { start:'1970-01-03 00:00:00', end:'1970-01-05 00:00:00', repeat:'weekly' },
           ],
         };
@@ -406,7 +435,7 @@ const MachineScheduling = () => {
         timelineRef.current = tl;
         tl.setWindow(timeRange.start, timeRange.end, { animation: false });
 
-        try { tl.addCustomTime(new Date(), 'now'); } catch (e) { console.error(e); }
+        // try { tl.addCustomTime(new Date(), 'now'); } catch (e) { console.error(e); }
 
       } catch (err) {
         console.error('Timeline init error:', err);
@@ -501,33 +530,57 @@ const MachineScheduling = () => {
 
                 <Select
                   mode="multiple" placeholder="Select Machines"
+                  showSearch
+                  filterOption={(input, option) => {
+                    const label = option?.label || '';
+                    return label.toLowerCase().includes(input.toLowerCase());
+                  }}
                   value={selectedMachines} onChange={setSelectedMachines}
                   style={{ minWidth:190 }} allowClear size="small" maxTagCount={1}
                 >
                   {availableMachines.map(m => (
-                    <Option key={m.machineId} value={m.machineId}>{m.displayName}</Option>
+                    <Option key={m.machineId} value={m.machineId} label={m.displayName}>
+                      {m.displayName}
+                    </Option>
                   ))}
                 </Select>
 
                 <Select
                   placeholder="Select Project"
+                  showSearch
+                  filterOption={(input, option) => {
+                    const label = option?.label || '';
+                    return label.toLowerCase().includes(input.toLowerCase());
+                  }}
                   value={selectedProjectId}
                   onChange={handleProjectChange}
                   style={{ minWidth:180 }} allowClear size="small"
                 >
-                  {orders.map(o => (
-                    <Option key={o.id} value={o.id}>{o.sale_order_number || `Order ${o.id}`}</Option>
-                  ))}
+                  {orders.map(o => {
+                    const label = o.sale_order_number || `Order ${o.id}`;
+                    return (
+                      <Option key={o.id} value={o.id} label={label}>
+                        {label}
+                      </Option>
+                    );
+                  })}
                 </Select>
 
                 <Select
                   mode="multiple" placeholder="Select Parts"
+                  showSearch
+                  filterOption={(input, option) => {
+                    const label = option?.label || '';
+                    return label.toLowerCase().includes(input.toLowerCase());
+                  }}
                   value={selectedComponents}
                   onChange={setSelectedComponents}
                   style={{ minWidth:160 }} allowClear size="small" maxTagCount={1}
                 >
                   {parts.map(p => (
-                    <Option key={p.id} value={p.part_number}>{p.part_name || p.part_number}</Option>
+                    <Option key={p.id} value={p.part_number} label={`${p.part_name || ''} (${p.part_number})`}>
+                      {p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number}
+                    </Option>
                   ))}
                 </Select>
 

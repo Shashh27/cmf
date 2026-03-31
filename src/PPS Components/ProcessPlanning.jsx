@@ -4,6 +4,7 @@ import { ToolOutlined, ExclamationCircleFilled, SaveOutlined, EditOutlined, Down
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import { API_BASE_URL } from "../Config/auth";
 import dayjs from "dayjs";
+import axios from "axios";
 
 const ProcessPlanning = ({ initialOrderId }) => {
   const [orders, setOrders] = useState([]);
@@ -26,6 +27,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
   const [partOpDetails, setPartOpDetails] = useState({});
   const [partOpLoading, setPartOpLoading] = useState({});
+  const [expandedRowKeys, setExpandedRowKeys] = useState([]);
 
   // ================================
   // FETCH ORDERS
@@ -34,9 +36,8 @@ const ProcessPlanning = ({ initialOrderId }) => {
     const fetchOrders = async () => {
       setOrdersLoading(true);
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
-        const data = await res.json();
-        setOrders(data || []);
+        const res = await axios.get(`${API_BASE_URL}/orders/`);
+        setOrders(res.data || []);
       } catch {}
       setOrdersLoading(false);
     };
@@ -66,9 +67,8 @@ const ProcessPlanning = ({ initialOrderId }) => {
     setDetailsLoading(true);
     setOrderPartsMetadata(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/orders/${id}/hierarchical`);
-      const data = await res.json();
-      setOrderDetails(data || null);
+      const res = await axios.get(`${API_BASE_URL}/orders/${id}/hierarchical`);
+      setOrderDetails(res.data || null);
     } catch {}
     setDetailsLoading(false);
   };
@@ -79,9 +79,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const fetchOrderSummary = async (orderId) => {
     if (!orderId) return;
     try {
-      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/order-summary/${orderId}`);
-      if (res.ok) {
-        const data = await res.json();
+      const res = await axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/order-summary/${orderId}`);
+      if (res.status === 200) {
+        const data = res.data;
         setOrderSummary(data);
         setIsActive(data.status === "active");
       }
@@ -94,10 +94,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const fetchOrderPartsMetadata = async (orderId) => {
     if (!orderId) return;
     try {
-      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/order-parts-metadata/${orderId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setOrderPartsMetadata(data);
+      const res = await axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/order-parts-metadata/${orderId}`);
+      if (res.status === 200) {
+        setOrderPartsMetadata(res.data);
       }
     } catch {}
   };
@@ -111,10 +110,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
     setPartOpLoading(prev => ({ ...prev, [partId]: true }));
     try {
-      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setPartOpDetails(prev => ({ ...prev, [partId]: data.operations || [] }));
+      const res = await axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`);
+      if (res.status === 200) {
+        setPartOpDetails(prev => ({ ...prev, [partId]: res.data.operations || [] }));
       }
     } catch {
       // ignore
@@ -128,8 +126,8 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const fetchActiveParts = async (orderId) => {
     if (!orderId) return;
     try {
-      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/active-parts/${orderId}`);
-      const data = await res.json();
+      const res = await axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/active-parts/${orderId}`);
+      const data = res.data;
       const ids = (data.active_parts || [])
         .filter(p => p.status === "active")
         .map(p => p.part_id);
@@ -137,9 +135,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
     } catch {}
   };
 
-  // ================================
-  // WHEN ORDER SELECTED
-  // ================================
+  // When order selected
   useEffect(() => {
     if (!selectedOrderId) return;
     fetchOrderDetails(selectedOrderId);
@@ -163,6 +159,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
         id: p.id,
         part_number: p.part_number,
         part_name: p.part_name,
+        qty: p.qty || 0,
         type_name: (p.type_name || "").toLowerCase()
       });
     };
@@ -182,12 +179,122 @@ const ProcessPlanning = ({ initialOrderId }) => {
   };
 
   const allParts = useMemo(() => getAllParts(orderDetails), [orderDetails]);
+
+  // Function to get assembly names for a part
+  const getAssemblyNamesForPart = (partId) => {
+    const h = orderDetails?.product_hierarchy || {};
+    const assemblyNames = [];
+    
+    // Check direct parts first
+    if (Array.isArray(h.direct_parts)) {
+      const directPartFound = h.direct_parts.some(p => p.part?.id === partId || p.id === partId);
+      if (directPartFound) {
+        assemblyNames.push('Direct Parts');
+      }
+    }
+    
+    // Enhanced walk function that tracks assembly hierarchy
+    const walk = (assemblies, parentPath = []) => {
+      if (!Array.isArray(assemblies)) return;
+      assemblies.forEach(a => {
+        // Get the current assembly name from the nested structure
+        const currentAssembly = a.assembly || {};
+        const currentAssemblyName = currentAssembly.assembly_name || currentAssembly.name || 
+                                  currentAssembly.assembly || currentAssembly.part_name || 
+                                  currentAssembly.product_name || currentAssembly.display_name || 
+                                  currentAssembly.title || currentAssembly.label || currentAssembly.description;
+        
+        // Build the full path for this assembly
+        const currentPath = currentAssemblyName ? [...parentPath, currentAssemblyName] : parentPath;
+        
+        // Check parts in this assembly
+        if (Array.isArray(a.parts)) {
+          const partFound = a.parts.some(p => p.part?.id === partId || p.id === partId);
+          if (partFound) {
+            // Display the full hierarchy path
+            if (currentPath.length > 0) {
+              assemblyNames.push(currentPath.join('/'));
+            } else {
+              assemblyNames.push('Unnamed Assembly');
+            }
+          }
+        }
+        
+        // Recursively check subassemblies
+        if (Array.isArray(a.subassemblies)) {
+          walk(a.subassemblies, currentPath);
+        }
+      });
+    };
+    
+    walk(h.assemblies);
+    
+    // If still no assembly names found, try a comprehensive search
+    if (assemblyNames.length === 0) {
+      const comprehensiveSearch = (obj, currentPath = []) => {
+        if (!obj || typeof obj !== 'object') return;
+        
+        Object.keys(obj).forEach(key => {
+          const value = obj[key];
+          
+          // Check if this is a parts array
+          if (key === 'parts' && Array.isArray(value)) {
+            const partFound = value.some(p => p.part?.id === partId || p.id === partId);
+            if (partFound && currentPath.length > 0) {
+              assemblyNames.push(currentPath.join('/'));
+            }
+          } else if (key === 'assembly' && typeof value === 'object' && value !== null) {
+            // Found an assembly object, extract its name and continue searching
+            const assemblyName = value.assembly_name || value.name || value.assembly || 
+                                value.part_name || value.product_name || value.display_name || 
+                                value.title || value.label || value.description;
+            
+            if (assemblyName) {
+              const newPath = [...currentPath, assemblyName];
+              // Continue searching in the parent object
+              comprehensiveSearch(obj, newPath);
+            }
+          } else if (Array.isArray(value)) {
+            value.forEach(item => {
+              if (typeof item === 'object' && item !== null) {
+                comprehensiveSearch(item, currentPath);
+              }
+            });
+          } else if (typeof value === 'object' && value !== null) {
+            comprehensiveSearch(value, currentPath);
+          }
+        });
+      };
+      
+      comprehensiveSearch(h);
+    }
+    
+    // Return a comma-separated string, not an array
+    return assemblyNames.length > 0 ? assemblyNames.join(', ') : '-';
+  };
+
   const inHouseParts = useMemo(() =>
     allParts
       .filter(p => p.type_name.includes("in"))
+      .map(p => ({
+        ...p,
+        assemblies: getAssemblyNamesForPart(p.id)
+      }))
       .sort((a, b) => String(a.part_number).localeCompare(String(b.part_number), undefined, { numeric: true, sensitivity: 'base' })),
-    [allParts]
+    [allParts, orderDetails]
   );
+
+  // Fetch all part operation details for in-house parts to get start/end times
+  useEffect(() => {
+    if (!selectedOrderId || inHouseParts.length === 0) return;
+    
+    inHouseParts.forEach(part => {
+      if (!partOpDetails[part.id]) {
+        fetchPartOperationDetails(part.id);
+      }
+    });
+  }, [selectedOrderId, inHouseParts.length]);
+
   const outSourceParts = useMemo(() => allParts.filter(p => p.type_name.includes("out")), [allParts]);
 
   // ================================
@@ -207,9 +314,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
   // ================================
   const fetchOutSourceStatuses = async (orderId) => {
     try {
-      const res = await fetch(`${API_BASE_URL}/out-source-parts-status/order/${orderId}`);
-      if (!res.ok) return;
-      const rows = await res.json();
+      const res = await axios.get(`${API_BASE_URL}/out-source-parts-status/order/${orderId}`);
+      if (res.status !== 200) return;
+      const rows = res.data;
       const map = {};
       (rows || []).forEach(x => {
         map[x.part_id] = {
@@ -264,24 +371,13 @@ const ProcessPlanning = ({ initialOrderId }) => {
       const existing = outStatusMap[part.id];
       let res;
       if (existing?.id) {
-        res = await fetch(`${API_BASE_URL}/out-source-parts-status/${existing.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+        res = await axios.put(`${API_BASE_URL}/out-source-parts-status/${existing.id}`, payload);
       } else {
-        res = await fetch(`${API_BASE_URL}/out-source-parts-status/`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+        res = await axios.post(`${API_BASE_URL}/out-source-parts-status/`, payload);
       }
-      if (!res.ok) {
+      if (res.status !== 200 && res.status !== 201) {
         let errMsg = "Failed to save";
-        try {
-          const e = await res.json();
-          errMsg = e?.detail || errMsg;
-        } catch {}
+        errMsg = res.data?.detail || errMsg;
         throw new Error(errMsg);
       }
       message.success("Out source status saved");
@@ -304,12 +400,11 @@ const ProcessPlanning = ({ initialOrderId }) => {
     if (!selectedOrderId) return;
 
     try {
-      const res = await fetch(
-        `${SCHEDULING_API_BASE_URL}/scheduling/set-order-status/${selectedOrderId}?status=${next}`,
-        { method: "POST" }
+      const res = await axios.post(
+        `${SCHEDULING_API_BASE_URL}/scheduling/set-order-status/${selectedOrderId}?status=${next}`
       );
 
-      if (!res.ok) throw new Error();
+      if (res.status !== 200) throw new Error();
 
       message.success(`Order status changed to ${next}`);
 
@@ -355,7 +450,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
     try {
       await Promise.all(
         selectedInIds.map(pid =>
-          fetch(`${SCHEDULING_API_BASE_URL}/scheduling/update-part-status/${selectedOrderId}/${pid}?status=${status}`, { method: "PUT" })
+          axios.put(`${SCHEDULING_API_BASE_URL}/scheduling/update-part-status/${selectedOrderId}/${pid}?status=${status}`)
         )
       );
 
@@ -371,12 +466,58 @@ const ProcessPlanning = ({ initialOrderId }) => {
     }
   };
 
+  const showPartStatusPopup = () => {
+    if (!selectedInIds || selectedInIds.length === 0) {
+      Modal.warning({
+        title: "Select Parts",
+        content: "Please select at least one part.",
+        okText: "OK",
+      });
+      return;
+    }
+
+    const modal = Modal.confirm({
+      title: "Update Parts Status",
+      icon: <ExclamationCircleFilled style={{ color: "#faad14" }} />,
+      content: "Choose an action for the selected parts.",
+      footer: (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button onClick={() => modal.destroy()}>Cancel</Button>
+          <Button onClick={() => { applyPartStatus("inactive"); modal.destroy(); }}>Inactivate</Button>
+          <Button type="primary" onClick={() => { applyPartStatus("active"); modal.destroy(); }}>Activate</Button>
+        </div>
+      ),
+    });
+  };
+
   // ================================
   // TABLE COLUMNS
   // ================================
   const inHouseColumns = [
     { title: "Part No", dataIndex: "part_number" },
     { title: "Part Name", dataIndex: "part_name" },
+    { title: "Assemblies", dataIndex: "assemblies" },
+    {
+      title: "Start Time",
+      render: (_, record) => {
+        const ops = partOpDetails[record.id] || [];
+        if (ops.length === 0) return "-";
+        const startTimes = ops.map(o => o.planned_start_time).filter(Boolean);
+        if (startTimes.length === 0) return "-";
+        return dayjs(startTimes.sort()[0]).format("DD-MM-YYYY, HH:mm");
+      }
+    },
+    {
+      title: "End Time",
+      render: (_, record) => {
+        const ops = partOpDetails[record.id] || [];
+        if (ops.length === 0) return "-";
+        const endTimes = ops.map(o => o.planned_end_time).filter(Boolean);
+        if (endTimes.length === 0) return "-";
+        return dayjs(endTimes.sort().reverse()[0]).format("DD-MM-YYYY, HH:mm");
+      }
+    },
+    { title: "Part Qty", dataIndex: "qty" },
     {
       title: "Status",
       render: (_, r) => {
@@ -509,11 +650,11 @@ const ProcessPlanning = ({ initialOrderId }) => {
         return String(v);
       }
     };
+    const totalInHousePartsCount = (orderPartsMetadata?.active_inhouse_parts ?? 0) + (orderPartsMetadata?.inactive_inhouse_parts ?? 0);
     return {
       projectNo: order.sale_order_number || order.order_number || order.production_order_number || "-",
-      projectName: order.project_name || "-",
+      projectName: part.part_name || order.product_name || order.project_name || "-",
       customer: order.customer_name || order.company_name || "-",
-      product: part.part_name || order.product_name || "-",
       launchedQuantity: order.launched_quantity ?? order.quantity ?? "-",
       startDate: dateOnly(order.order_date || order.start_date),
       dueDate: dateOnly(order.due_date),
@@ -521,6 +662,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
       totalActiveParts: orderPartsMetadata?.active_inhouse_parts ?? "-",
       inactiveParts: orderPartsMetadata?.inactive_inhouse_parts ?? "-",
       totalOutsourceParts: orderPartsMetadata?.total_outsource_parts ?? "-",
+      totalInHousePartsCount: totalInHousePartsCount > 0 ? totalInHousePartsCount : "-",
     };
   }, [orderDetails, orderPartsMetadata]);
 
@@ -539,8 +681,14 @@ const ProcessPlanning = ({ initialOrderId }) => {
       `}</style>
       <Card>
         <Space>
-          <span>Select Order:</span>
+          <span>Select Project:</span>
           <Select
+            showSearch
+            placeholder="Search or Select Project"
+            optionFilterProp="children"
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
             style={{ width: 300 }}
             value={selectedOrderId}
             onChange={isLockedToInitialOrder ? undefined : setSelectedOrderId}
@@ -567,8 +715,9 @@ const ProcessPlanning = ({ initialOrderId }) => {
                 ["Project No.", summary.projectNo],
                 ["Project Name", summary.projectName],
                 ["Customer", summary.customer],
-                ["Product", summary.product],
                 ["Quantity", summary.launchedQuantity],
+                ["Start Date", summary.startDate || "Not yet scheduled"],
+                ["Due Date", summary.dueDate || "Not yet scheduled"],
                 ["Status",
                   <div key="order-status-cell" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <Tag color={isOrderActiveDerived ? "green" : "default"}>
@@ -583,14 +732,14 @@ const ProcessPlanning = ({ initialOrderId }) => {
                     </Button>
                   </div>
                 ],
-                ["Start Date", summary.startDate || "Not yet scheduled"],
-                ["Due Date", summary.dueDate || "Not yet scheduled"],
                 ["PDC", (String(summary.pdc).toLowerCase().includes("not yet")
                   ? <span key="pdc-tag" style={{ color: "#555", fontWeight: 600 }}>{summary.pdc}</span>
                   : <span key="pdc-tag" style={{ color: "#1677FF", fontWeight: 600 }}>{summary.pdc}</span>)],
                 ["Total Active Parts", summary.totalActiveParts],
                 ["Inactive Parts", summary.inactiveParts],
+                ["Total In-House Parts", summary.totalInHousePartsCount],
                 ["Total Outsource Parts", summary.totalOutsourceParts],
+                
               ].map(([label, value], idx) => (
                 <React.Fragment key={idx}>
                   <div
@@ -621,8 +770,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
           <Tabs defaultActiveKey="1">
             <Tabs.TabPane tab="In House Parts" key="1">
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginBottom: 12 }}>
-                <Button type="primary" onClick={() => applyPartStatus("active")}>Parts Active</Button>
-                <Button onClick={() => applyPartStatus("inactive")}>Parts Inactive</Button>
+                <Button type="primary" onClick={showPartStatusPopup}>Update Status</Button>
               </div>
 
               <Table
@@ -631,23 +779,67 @@ const ProcessPlanning = ({ initialOrderId }) => {
                 rowKey="id"
                 scroll={{ x: "max-content" }}
                 style={{ width: "100%" }}
+                onRow={(record) => ({
+                  onClick: () => {
+                    const isExpanded = expandedRowKeys.includes(record.id);
+                    const nextExpandedKeys = isExpanded
+                      ? expandedRowKeys.filter(k => k !== record.id)
+                      : [...expandedRowKeys, record.id];
+                    setExpandedRowKeys(nextExpandedKeys);
+                    if (!isExpanded) {
+                      fetchPartOperationDetails(record.id);
+                    }
+                  },
+                })}
                 pagination={{
                   showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} parts`,
                 }}
                 rowSelection={{
                   selectedRowKeys: selectedInIds,
-                  onChange: setSelectedInIds
+                  onChange: setSelectedInIds,
+                  onClick: (e) => e.stopPropagation(), // Don't trigger row click when selecting
+                }}
+                expandedRowKeys={expandedRowKeys}
+                onExpand={(expanded, record) => {
+                  const nextExpandedKeys = expanded
+                    ? [...expandedRowKeys, record.id]
+                    : expandedRowKeys.filter(k => k !== record.id);
+                  setExpandedRowKeys(nextExpandedKeys);
+                  if (expanded) {
+                    fetchPartOperationDetails(record.id);
+                  }
                 }}
                 expandable={{
-                  expandIconColumnIndex: 4,
+                  expandIconColumnIndex: 8,
                   expandIcon: ({ expanded, onExpand, record }) =>
                     expanded ? (
-                      <UpOutlined onClick={e => onExpand(record, e)} style={{ fontSize: "14px", color: "#666", cursor: "pointer" }} />
+                      <UpOutlined onClick={e => { e.stopPropagation(); onExpand(record, e); }} style={{ fontSize: "14px", color: "#666", cursor: "pointer" }} />
                     ) : (
-                      <DownOutlined onClick={e => onExpand(record, e)} style={{ fontSize: "14px", color: "#666", cursor: "pointer" }} />
+                      <DownOutlined onClick={e => { e.stopPropagation(); onExpand(record, e); }} style={{ fontSize: "14px", color: "#666", cursor: "pointer" }} />
                     ),
                   expandedRowRender: (record) => {
-                    const data = partOpDetails[record.id] || [];
+                    const rawData = partOpDetails[record.id] || [];
+                    
+                    // Grouping logic: same operation ID and name
+                    const groupedData = [];
+                    const groups = {};
+
+                    rawData.forEach(op => {
+                      const key = `${op.operation_id}-${op.operation}`;
+                      if (!groups[key]) {
+                        groups[key] = { ...op };
+                        groupedData.push(groups[key]);
+                      } else {
+                        // Update start/end times with min/max
+                        if (op.planned_start_time && (!groups[key].planned_start_time || dayjs(op.planned_start_time).isBefore(dayjs(groups[key].planned_start_time)))) {
+                          groups[key].planned_start_time = op.planned_start_time;
+                        }
+                        if (op.planned_end_time && (!groups[key].planned_end_time || dayjs(op.planned_end_time).isAfter(dayjs(groups[key].planned_end_time)))) {
+                          groups[key].planned_end_time = op.planned_end_time;
+                        }
+                      }
+                    });
+
                     const loading = partOpLoading[record.id];
                     const columns = [
                       { title: "Operation Name", dataIndex: "operation" },
@@ -655,30 +847,25 @@ const ProcessPlanning = ({ initialOrderId }) => {
                       {
                         title: "Start Time",
                         dataIndex: "planned_start_time",
-                        render: (v) => v ? dayjs(v).format("DD-MM-YYYY HH:mm") : "-"
+                        render: (v) => v ? dayjs(v).format("DD-MM-YYYY, HH:mm") : "-"
                       },
                       {
                         title: "End Time",
                         dataIndex: "planned_end_time",
-                        render: (v) => v ? dayjs(v).format("DD-MM-YYYY HH:mm") : "-"
+                        render: (v) => v ? dayjs(v).format("DD-MM-YYYY, HH:mm") : "-"
                       },
                     ];
                     return (
                       <Table
                         columns={columns}
-                        dataSource={data}
+                        dataSource={groupedData}
                         pagination={false}
                         loading={loading}
                         size="small"
-                        rowKey="operation_id"
+                        rowKey={(op) => `${op.operation_id}-${op.operation}`}
                       />
                     );
                   },
-                  onExpand: (expanded, record) => {
-                    if (expanded) {
-                      fetchPartOperationDetails(record.id);
-                    }
-                  }
                 }}
               />
             </Tabs.TabPane>

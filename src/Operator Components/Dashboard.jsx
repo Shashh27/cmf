@@ -4,6 +4,8 @@ import { ToolOutlined,DashboardOutlined,ClockCircleOutlined,ProfileOutlined,Sett
 import machineImg from '../assets/machine.png';
 import PokaYokeChecklist from './PokaYokeChecklist';
 import ReportIssue from './ReportIssue';
+import SelectJob from './SelectJob';
+import PartDocumentTab from './PartDocumentTab';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -18,6 +20,8 @@ const Dashboard = () => {
   const [showChecklist, setShowChecklist] = useState(false);
   const [machineId, setMachineId] = useState(null);
   const [showReportIssue, setShowReportIssue] = useState(false);
+  const [showSelectJob, setShowSelectJob] = useState(false);
+  const [selectedJob, setSelectedJob] = useState(null);
 
   useEffect(() => {
     try {
@@ -131,7 +135,11 @@ const Dashboard = () => {
             />
             <Text>{currentTime.toLocaleString()}</Text>
           </div>
-          <Button type="primary" size="large">
+          <Button 
+            type="primary" 
+            size="large"
+            onClick={() => setShowSelectJob(true)}
+          >
             Select Job
           </Button>
         </div>
@@ -148,7 +156,7 @@ const Dashboard = () => {
                   <span>Machine Status</span>
                 </Space>
                 <Space>
-                  <span style={{ width: 8, height: 8, borderRadius: 9999, background: '#ff4d4f', display: 'inline-block' }} />
+                  {/* <span style={{ width: 8, height: 8, borderRadius: 9999, background: '#ff4d4f', display: 'inline-block' }} /> */}
                   <Button
                     type="link"
                     danger
@@ -315,22 +323,34 @@ const Dashboard = () => {
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ background: '#E6F4FF', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
-                <Text style={{ color: '#64748b' }}>Part Number</Text>
-                <div style={{ fontWeight: 700, color: '#1677FF', marginTop: 6 }}>62027912AA</div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>No description</div>
+                <Text style={{ color: '#64748b' }}>Production Order</Text>
+                <div style={{ fontWeight: 700, color: '#1677FF', marginTop: 6 }}>
+                  {selectedJob?.sale_order_number || selectedJob?.production_order || 'None'}
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                  Priority {selectedJob?.priority || '0'}
+                </div>
               </div>
               <div style={{ background: '#E6F4FF', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
-                <Text style={{ color: '#64748b' }}>Order</Text>
-                <div style={{ fontWeight: 700, color: '#1677FF', marginTop: 6 }}>10486051</div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>Priority 10</div>
+                <Text style={{ color: '#64748b' }}>Part Number</Text>
+                <div style={{ fontWeight: 700, color: '#1677FF', marginTop: 6 }}>
+                  {selectedJob?.part_number || 'None'}
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                  {selectedJob?.operation_name || selectedJob?.part_name || 'No description'}
+                </div>
               </div>
               <div style={{ background: '#fff', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Text style={{ color: '#64748b' }}>Current Operation</Text>
-                  <Tag>Not Selected</Tag>
+                  <Tag>{selectedJob ? 'Selected' : 'Not Selected'}</Tag>
                 </div>
-                <div style={{ marginTop: 8, color: '#94a3b8' }}>No operation selected</div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>Select an operation from the Operations tab</div>
+                <div style={{ marginTop: 8, color: '#94a3b8' }}>
+                  {selectedJob ? 'Operation in progress' : 'No operation selected'}
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                  {selectedJob ? 'View details in the Operations tab' : 'Select an operation from the Select Job'}
+                </div>
               </div>
             </div>
           </Card>
@@ -341,156 +361,7 @@ const Dashboard = () => {
       <Row gutter={[24, 24]} style={{ marginTop: 24, marginBottom: 8 }}>
         {/* Documents / Operations */}
         <Col xs={24} lg={16}>
-          <Card
-            style={{ borderRadius: 16 }}
-            headStyle={{ borderRadius: '16px 16px 0 0' }}
-            title={
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <FileTextOutlined style={{ color: '#1677FF' }} />
-                <span>Documents</span>
-              </div>
-            }
-          >
-            <Tabs defaultActiveKey="operations" tabBarGutter={24}>
-              <TabPane tab="Operations" key="operations">
-                <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
-                  No operation selected
-                  <div style={{ fontSize: 12 }}>
-                    Select an operation from the list to view documents.
-                  </div>
-                </div>
-              </TabPane>
-              <TabPane tab="Documents" key="documents">
-                {/* Documents header */}
-                <div style={{ marginBottom: 4 }}>
-                  <Text strong style={{ display: 'block' }}>
-                    Documents
-                  </Text>
-                  <Text style={{ fontSize: 12, color: '#94a3b8' }}>
-                    62027912AA -
-                  </Text>
-                </div>
-
-                {/* Document type filters */}
-                <Tabs
-                  size="small"
-                  activeKey={keyFromLabel(docFilter)}
-                  onChange={(k) => setDocFilter(labelFromKey(k))}
-                >
-                  {docTabs.map((label) => (
-                    <TabPane tab={label} key={keyFromLabel(label)} />
-                  ))}
-                </Tabs>
-
-                {/* Document list / empty state */}
-                {(() => {
-                  const filtered =
-                    docFilter === 'All Documents'
-                      ? sampleDocuments
-                      : sampleDocuments.filter((doc) => {
-                          if (docFilter === 'Drawing') return doc.type === 'Drawing';
-                          if (docFilter === 'MPP') return doc.type === 'MPP';
-                          // For other filters we don't have sample data; show empty state
-                          return false;
-                        });
-
-                  if (docFilter === 'Tools' || filtered.length === 0) {
-                    return (
-                      <div
-                        style={{
-                          padding: 40,
-                          textAlign: 'center',
-                          color: '#94a3b8',
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: 80,
-                            height: 80,
-                            borderRadius: 40,
-                            border: '1px dashed #cbd5e1',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            margin: '0 auto 12px',
-                          }}
-                        >
-                          <FileTextOutlined style={{ fontSize: 32, color: '#cbd5e1' }} />
-                        </div>
-                        <div style={{ fontSize: 13 }}>No tools found</div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      {filtered.map((doc) => (
-                        <Card
-                          key={doc.id}
-                          size="small"
-                          style={{
-                            borderRadius: 12,
-                            borderColor: '#e2e8f0',
-                          }}
-                          bodyStyle={{ padding: 12 }}
-                        >
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexDirection: isMobile ? 'column' : 'row',
-                          alignItems: isMobile ? 'flex-start' : 'center',
-                          justifyContent: isMobile ? 'flex-start' : 'space-between',
-                          gap: 16,
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                              <div
-                                style={{
-                                  width: 34,
-                                  height: 34,
-                                  borderRadius: 8,
-                                  background: '#E0F2FE',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                }}
-                              >
-                                <FileTextOutlined style={{ color: '#1677FF' }} />
-                              </div>
-                              <div>
-                            <div style={{ fontWeight: 600, fontSize: 13, wordBreak: 'break-word' }}>{doc.name}</div>
-                                <div style={{ fontSize: 11, color: '#94a3b8' }}>
-                                  Version: {doc.version} &nbsp;•&nbsp; Format: {doc.format}
-                                </div>
-                              </div>
-                            </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: isMobile ? 8 : 0 }}>
-                              <Tag
-                                color={doc.type === 'Drawing' ? 'blue' : 'green'}
-                                style={{ borderRadius: 9999 }}
-                              >
-                                {doc.tag}
-                              </Tag>
-                              <Tag color="default" style={{ borderRadius: 9999 }}>
-                                {doc.size}
-                              </Tag>
-                              <Button
-                                icon={<DownloadOutlined />}
-                                size="small"
-                                type="default"
-                              >
-                                Download
-                              </Button>
-                            </div>
-                          </div>
-                        </Card>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </TabPane>
-            </Tabs>
-          </Card>
+          <PartDocumentTab selectedJob={selectedJob} />
         </Col>
 
         {/* Poka Yoke & Operator Handover (single card) */}
@@ -544,6 +415,14 @@ const Dashboard = () => {
         open={showReportIssue}
         onClose={() => setShowReportIssue(false)}
         machineId={machineId}
+      />
+      <SelectJob
+        open={showSelectJob}
+        onClose={() => setShowSelectJob(false)}
+        onSelectJob={(job) => {
+          setSelectedJob(job);
+          setShowSelectJob(false);
+        }}
       />
     </div>
   );
