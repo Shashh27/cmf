@@ -5,6 +5,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, text
 from pydantic import BaseModel
 import re, tempfile, os
+from pydantic import BaseModel
+import re, tempfile, os
 
 from DB.database import get_db
 from DB.models.oms import (
@@ -18,6 +20,7 @@ from DB.models.oms import (
     OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
     OperationDocument as OperationDocumentModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
+    DocumentExtractedData as DocumentExtractedDataModel,
     DocumentExtractedData as DocumentExtractedDataModel,
 )
 from DB.models.configuration import PokayokeCompletedLog
@@ -529,176 +532,3 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
             )
  
     return BulkPartCreateResult(created=created, duplicates=duplicates, errors=errors)
-
-
-class BulkDeleteResult(BaseModel):
-    assembly_id:   int
-    deleted_count: int
-    part_ids:      list[int]
-
-
-@router.delete(
-    "/bulk-by-assembly/{assembly_id}",
-    response_model=BulkDeleteResult,
-    status_code=status.HTTP_200_OK,
-)
-def bulk_delete_parts_by_assembly(assembly_id: int, db: Session = Depends(get_db)):
-    """
-    Delete ALL parts linked to the given assembly_id in a single call,
-    along with every dependent record for each part — identical cleanup
-    logic to the single-part DELETE /{part_id} endpoint.
-
-    Called from the Assembly Document Panel when the user clicks
-    "Delete All Parts" for an assembly.
-
-    Returns the count and IDs of deleted parts so the frontend can
-    update its local state without a refetch.
-    """
-    # ── 1. Find all part IDs for this assembly ────────────────────────────────
-    parts = (
-        db.query(PartModel)
-        .filter(PartModel.assembly_id == assembly_id)
-        .all()
-    )
-
-    if not parts:
-        # Nothing to delete — return gracefully (not a 404)
-        return BulkDeleteResult(
-            assembly_id=assembly_id,
-            deleted_count=0,
-            part_ids=[],
-        )
-
-    part_ids = [p.id for p in parts]
-
-    try:
-        # ── 2. Pokayoke logs ──────────────────────────────────────────────────
-        for part_id in part_ids:
-            result = db.execute(
-                text(
-                    "SELECT id FROM configuration.pokayoke_completed_logs "
-                    "WHERE part_id = :pid"
-                ),
-                {"pid": part_id},
-            )
-            log_ids = [row[0] for row in result]
-            for log_id in log_ids:
-                log_obj = (
-                    db.query(PokayokeCompletedLog)
-                    .filter(PokayokeCompletedLog.id == log_id)
-                    .first()
-                )
-                if log_obj:
-                    db.delete(log_obj)
-        db.flush()
-
-        # ── 3. Scheduling: part_schedule_status ──────────────────────────────
-        db.execute(
-            text(
-                "DELETE FROM scheduling.part_schedule_status "
-                "WHERE part_id = ANY(:pids)"
-            ),
-            {"pids": part_ids},
-        )
-
-        # ── 4. Order part priorities ──────────────────────────────────────────
-        db.query(OrderPartPriority).filter(
-            OrderPartPriority.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # ── 5. Operations → planned_schedule_items, documents, tools ─────────
-        operations = (
-            db.query(OperationModel)
-            .filter(OperationModel.part_id.in_(part_ids))
-            .all()
-        )
-        operation_ids = [op.id for op in operations]
-
-        if operation_ids:
-            db.execute(
-                text(
-                    "DELETE FROM scheduling.planned_schedule_items "
-                    "WHERE operation_id = ANY(:oids)"
-                ),
-                {"oids": operation_ids},
-            )
-            db.query(OperationDocumentModel).filter(
-                OperationDocumentModel.operation_id.in_(operation_ids)
-            ).delete(synchronize_session=False)
-            db.query(ToolWithPartModel).filter(
-                ToolWithPartModel.operation_id.in_(operation_ids)
-            ).delete(synchronize_session=False)
-            db.query(OperationModel).filter(
-                OperationModel.id.in_(operation_ids)
-            ).delete(synchronize_session=False)
-
-        # ── 6. Part documents + extracted data ───────────────────────────────
-        db.query(DocumentExtractedDataModel).filter(
-            DocumentExtractedDataModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-        db.query(DocumentModel).filter(
-            DocumentModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # ── 7. OutSource part status ──────────────────────────────────────────
-        db.query(OutSourcePartStatusModel).filter(
-            OutSourcePartStatusModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # ── 8. Raw material links ─────────────────────────────────────────────
-        db.query(OrderPartsRawMaterialLinkedModel).filter(
-            OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # ── 9. Maintenance component issues ──────────────────────────────────
-        db.execute(
-            text(
-                "DELETE FROM maintenance.component_issues "
-                "WHERE part_id = ANY(:pids)"
-            ),
-            {"pids": part_ids},
-        )
-
-        # ── 10. Tools with part (not operation-linked) ────────────────────────
-        db.query(ToolWithPartModel).filter(
-            ToolWithPartModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # ── 11. Inventory return requests + inventory requests ────────────────
-        db.execute(
-            text(
-                "DELETE FROM inventory.inventory_return_requests "
-                "WHERE requested_id IN ("
-                "  SELECT id FROM inventory.inventory_requests "
-                "  WHERE part_id = ANY(:pids)"
-                ")"
-            ),
-            {"pids": part_ids},
-        )
-        db.execute(
-            text(
-                "DELETE FROM inventory.inventory_requests "
-                "WHERE part_id = ANY(:pids)"
-            ),
-            {"pids": part_ids},
-        )
-
-        # ── 12. Finally delete all parts ──────────────────────────────────────
-        db.query(PartModel).filter(
-            PartModel.id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        db.commit()
-
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Bulk delete failed: {str(exc)}",
-        )
-
-    return BulkDeleteResult(
-        assembly_id=assembly_id,
-        deleted_count=len(part_ids),
-        part_ids=part_ids,
-    )

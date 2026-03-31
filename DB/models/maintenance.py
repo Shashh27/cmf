@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, func
 from sqlalchemy.types import DateTime
 from sqlalchemy.orm import relationship
+from datetime import datetime
 from ..database import Base
 
 class OEEIssue(Base):
@@ -14,6 +15,7 @@ class OEEIssue(Base):
     issue_reason = Column(Text, nullable=False)
     start_time = Column(DateTime(timezone=False), nullable=False)
     end_time = Column(DateTime(timezone=False), nullable=False)
+    reported_at = Column(DateTime(timezone=False), default=datetime.utcnow, nullable=False)
 
     machine = relationship("Machine")
 
@@ -28,6 +30,7 @@ class MachineBreakdown(Base):
     machine_status = Column(String, nullable=False)
     issue_reason = Column(Text, nullable=False)
     additional_reason = Column(Text, nullable=True)
+    reported_at = Column(DateTime(timezone=False), default=datetime.utcnow, nullable=False)
 
     machine = relationship("Machine")
 
@@ -42,5 +45,6 @@ class ComponentIssue(Base):
     production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
     description = Column(Text, nullable=False)
+    reported_at = Column(DateTime(timezone=False), default=datetime.utcnow, nullable=False)
 
     machine = relationship("Machine")
