@@ -541,6 +541,7 @@ class SchedulerEngine:
             # ── Only ACTIVE IN-HOUSE parts for this specific order ─────── #
             # PartScheduleStatus.sale_order_id scopes the status to the order,
             # so the same part used in two orders is handled independently.
+            print(f"[DEBUG] _load_parts_for_order: order_id={order_id}, product_id={product_id}")
             active_rows = (
                 self.db.query(PartScheduleStatus, Part)
                 .join(Part, Part.id == PartScheduleStatus.part_id)
@@ -549,13 +550,14 @@ class SchedulerEngine:
                         PartScheduleStatus.sale_order_id == order_id,
                         PartScheduleStatus.status        == 'active',
                         Part.type_id                     == IN_HOUSE_TYPE_ID,
-                        Part.product_id                  == product_id,
                     )
                 )
                 .all()
             )
+            print(f"[DEBUG] _load_parts_for_order: found {len(active_rows)} active_rows")
 
             if not active_rows:
+                print(f"[DEBUG] _load_parts_for_order: no active rows for order {order_id}")
                 return []
 
             part_map:            Dict[int, Part]     = {}
@@ -601,8 +603,14 @@ class SchedulerEngine:
                     if rm is None:
                         rm_status_map[pid] = 'No Raw Material'
                     else:
-                        rm_status_map[pid] = (rm.status or '').strip().title()
+                        # Check if RawMaterial has status attribute (new model doesn't)
+                        if hasattr(rm, 'status') and rm.status:
+                            rm_status_map[pid] = rm.status.strip()
+                        else:
+                            # New model: RawMaterial doesn't have status, assume available
+                            rm_status_map[pid] = 'Available'
 
+            print(f"[DEBUG] _load_parts_for_order: order_id={order_id}, building result with {len(ordered_ids)} parts")
             # ── Build result list ────────────────────────────────────── #
             result = []
             for pid in ordered_ids:
@@ -615,11 +623,13 @@ class SchedulerEngine:
                     'order_id':             order_id,
                     'sale_order_number':    order['sale_order_number'],
                     'quantity':             order['quantity'],
-                    'raw_material_ok':      rm_stat == 'Available',
+                    'raw_material_ok':      rm_stat.lower() in ('available', 'in stock', 'ready', '') or not rm_stat.startswith('No Raw'),
                     'raw_material_status':  rm_stat,
                     # Used in C2.1 to apply/break the cascade per part
                     'part_activation_time': part_activation_map[pid],
                 })
+                print(f"[DEBUG] _load_parts_for_order: added part_id={pid}, rm_ok={rm_stat.lower() in ('available', 'in stock', 'ready', '') or not rm_stat.startswith('No Raw')}")
+            print(f"[DEBUG] _load_parts_for_order: returning {len(result)} parts for order {order_id}")
             return result
 
         except Exception as e:
@@ -760,13 +770,16 @@ class SchedulerEngine:
 
             for order in active_orders:
                 parts = self._load_parts_for_order(order)
+                print(f"[DEBUG] Order {order['order_id']}: loaded {len(parts)} parts")
                 order_parts_map[order['order_id']] = parts
                 all_part_ids.extend(p['part_id'] for p in parts)
+            print(f"[DEBUG] Total parts across all orders: {len(all_part_ids)}")
 
             # ── Schedule order: by global OrderPartPriority (1, 2, 3, …) ── #
             scheduled_items = self._load_scheduled_items_by_priority(
                 active_orders, order_parts_map
             )
+            print(f"[DEBUG] Scheduled items by priority: {len(scheduled_items)}")
             if not scheduled_items:
                 # Fallback: no priority rows — order by order, parts per order
                 for order in active_orders:
