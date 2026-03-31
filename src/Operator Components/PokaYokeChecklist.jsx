@@ -279,10 +279,17 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
     if (!canSubmit || submitLoading) return;
     setSubmitLoading(true);
     try {
+      const selectedAssignment = selected;
+      const assignmentId = selectedAssignment?.id ?? null;
+      const assignmentFrequency = selectedAssignment?.frequency ?? null;
+      const assignmentShift = selectedAssignment?.shift ?? null;
+      
       const payload = {
         machine_id: machineId ?? null,
         checklist_id: checklistId,
-        assignment_id: selected?.id ?? null,
+        assignment_id: assignmentId,
+        frequency: assignmentFrequency,
+        shift: assignmentShift,
         production_order_id: selectedOrderId,
         order_id: selectedOrderId,
         part_id: selectedPartId ?? null,
@@ -652,8 +659,30 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
                   item?.name ??
                   item?.title ??
                   (cid ? `Checklist #${cid}` : 'Checklist');
-                const assignedAt =
-                  item?.assigned_at ?? item?.assignedAt ?? item?.created_at ?? item?.createdAt;
+                const frequency = item?.frequency ?? item?.checklist?.frequency ?? null;
+                const shift = item?.shift ?? item?.checklist?.shift ?? null;
+                const scheduledDay = item?.scheduled_day ?? item?.checklist?.scheduled_day ?? null;
+                
+                // Build frequency display text and style
+                let frequencyDisplay = frequency || '';
+                let badgeStyle = { padding: '2px 8px', borderRadius: 4 };
+                
+                if (frequency) {
+                  const freqLower = frequency.toLowerCase();
+                  if (freqLower === 'daily' && shift) {
+                    frequencyDisplay = `${frequency} (${shift})`;
+                    badgeStyle = { ...badgeStyle, background: '#dcfce7', color: '#16a34a' }; // Green for Daily
+                  } else if (freqLower === 'weekly' && scheduledDay) {
+                    frequencyDisplay = `${frequency} (${scheduledDay})`;
+                    badgeStyle = { ...badgeStyle, background: '#fef3c7', color: '#d97706' }; // Amber for Weekly
+                  } else if (freqLower === 'monthly' && scheduledDay) {
+                    frequencyDisplay = `${frequency} (${scheduledDay})`;
+                    badgeStyle = { ...badgeStyle, background: '#ede9fe', color: '#7c3aed' }; // Purple for Monthly
+                  } else {
+                    badgeStyle = { ...badgeStyle, background: '#f0f9ff', color: '#0284c7' }; // Default blue
+                  }
+                }
+                
                 return (
                   <div
                     key={cid ?? idx}
@@ -684,7 +713,11 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
                         {name}
                       </div>
                       <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                        Assigned: {assignedAt ? new Date(assignedAt).toLocaleString() : '—'}
+                        {frequencyDisplay && (
+                          <span style={badgeStyle}>
+                            {frequencyDisplay}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <Button

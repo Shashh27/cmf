@@ -8,7 +8,8 @@ import {
   RightOutlined, FolderOutlined, FileTextOutlined,
   AppstoreOutlined, ToolOutlined, ExperimentOutlined, InboxOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, PlusSquareOutlined, MinusSquareOutlined,
-  BlockOutlined, ExpandOutlined, CompressOutlined
+  BlockOutlined, ExpandOutlined, CompressOutlined,
+  CaretRightOutlined, CaretDownOutlined
 } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth';
 import ToolsHistory from './ToolsHistory';
@@ -26,19 +27,44 @@ const CATEGORY_COLORS = {
 /* ═══════════════════════════════════════════════════════════
    SIDEBAR — 2-level tree
 ═══════════════════════════════════════════════════════════ */
-function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCat }) {
+function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCat, searchText }) {
   if (loading) {
     return <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>;
   }
 
+  const sidebarFontStack = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+
+  // Define colors for "Tools" and "Instruments"
+  const CATEGORY_STYLES = {
+    'Tools': { icon: <ToolOutlined />, color: '#1677ff', bg: '#e6f4ff' },
+    'Instruments': { icon: <ExperimentOutlined />, color: '#52c41a', bg: '#f6ffed' }
+  };
+
+  const highlightSubText = (text, query) => {
+    if (!query) return text;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const index = lowerText.indexOf(lowerQuery);
+    if (index === -1) return text;
+
+    return (
+      <>
+        {text.substring(0, index)}
+        <span style={{ backgroundColor: '#fff566', color: '#000', padding: '0 1px', borderRadius: 2 }}>{text.substring(index, index + query.length)}</span>
+        {text.substring(index + query.length)}
+      </>
+    );
+  };
+
   return (
-    <div style={{ paddingBottom: 16 }}>
-      {tree.filter(cat => cat.category !== 'Misc').map(catNode => {
+    <div style={{ padding: '4px 8px 16px 8px', fontFamily: sidebarFontStack }}>
+      {tree.map(catNode => {
         const catExpanded = !!expandedCats[catNode.category];
-        const cc = CATEGORY_COLORS[catNode.category] || { bg: '#fff', text: '#555' };
+        const isCatSelected = selected?.category === catNode.category && !selected?.sub_category;
+        const style = CATEGORY_STYLES[catNode.category] || { icon: <AppstoreOutlined />, color: '#595959', bg: '#f0f0f0' };
 
         return (
-          <div key={catNode.category} style={{ position: 'relative' }}>
+          <div key={catNode.category} style={{ marginBottom: 4 }}>
             {/* ── LEVEL 1: Category ── */}
             <div
               onClick={() => {
@@ -46,68 +72,100 @@ function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCa
                 onSelect({ category: catNode.category, sub_category: null });
               }}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '8px 12px',
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 12px',
+                borderRadius: 8,
                 cursor: 'pointer', userSelect: 'none',
-                background: (selected?.category === catNode.category && !selected?.sub_category) ? '#e6f4ff' : 'transparent',
-                transition: 'background 0.15s',
+                background: isCatSelected ? '#f0f7ff' : 'transparent',
+                color: isCatSelected ? '#1677ff' : '#434343',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
-              onMouseEnter={e => { if (selected?.category !== catNode.category || selected?.sub_category) e.currentTarget.style.background = '#f5f8ff'; }}
-              onMouseLeave={e => { if (selected?.category !== catNode.category || selected?.sub_category) e.currentTarget.style.background = 'transparent'; }}
+              onMouseEnter={e => { if (!isCatSelected) e.currentTarget.style.background = '#f5f5f5'; }}
+              onMouseLeave={e => { if (!isCatSelected) e.currentTarget.style.background = 'transparent'; }}
             >
-              <div style={{ fontSize: 13, color: '#555', width: 16, display: 'flex', alignItems: 'center' }}>
-                {catExpanded ? <MinusSquareOutlined /> : <PlusSquareOutlined />}
+              <div style={{ fontSize: 10, color: '#8c8c8c', width: 14, display: 'flex', alignItems: 'center', transition: 'transform 0.2s' }}>
+                {catExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
               </div>
 
               <div style={{
-                width: 22, height: 22, flexShrink: 0,
-                color: cc.text,
+                width: 24, height: 24, flexShrink: 0,
+                background: 'transparent',
+                borderRadius: 6,
+                color: isCatSelected ? '#1677ff' : style.color,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 14,
+                fontSize: 20,
+                transition: 'all 0.2s'
               }}>
-                <BlockOutlined />
+                {style.icon}
               </div>
 
-              <span style={{ flex: 1, fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>
+              <span style={{ flex: 1, fontSize: 14, fontWeight: 700, letterSpacing: '-0.2px' }}>
                 {catNode.category}
               </span>
 
-              <span style={{
-                fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
-                background: '#e6f4ff', color: '#1677ff', border: '1px solid #91caff',
-              }}>
-                {catNode.sub_categories.length}
-              </span>
+              <Badge
+                count={catNode.sub_categories.length}
+                style={{
+                  backgroundColor: isCatSelected ? '#1677ff' : style.color,
+                  fontSize: 10,
+                  height: 18,
+                  minWidth: 18,
+                  lineHeight: '18px',
+                  borderRadius: 9,
+                  boxShadow: 'none',
+                  opacity: 0.8
+                }}
+              />
             </div>
 
             {/* ── LEVEL 2: Sub-categories ── */}
             {catExpanded && (
-              <div style={{ position: 'relative', marginLeft: 20, borderLeft: '1px solid #e0e0e0' }}>
+              <div style={{ marginLeft: 30, borderLeft: '1.5px solid #f0f0f0', marginTop: 2, paddingLeft: 4 }}>
                 {catNode.sub_categories.map((subNode) => {
                   const subActive = selected?.category === catNode.category && selected?.sub_category === subNode.sub_category;
                   return (
-                    <div key={subNode.sub_category} style={{ position: 'relative' }}>
-                      <div style={{ position: 'absolute', left: 0, top: 18, width: 14, height: 1, background: '#e0e0e0' }} />
-                      <div
-                        onClick={() => onSelect({ category: catNode.category, sub_category: subNode.sub_category })}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 6,
-                          padding: '6px 12px 6px 16px',
-                          cursor: 'pointer', userSelect: 'none',
-                          background: subActive ? '#e6f4ff' : 'transparent',
-                          transition: 'background 0.12s',
-                        }}
-                        onMouseEnter={e => { if (!subActive) e.currentTarget.style.background = '#f5f8ff'; }}
-                        onMouseLeave={e => { if (!subActive) e.currentTarget.style.background = 'transparent'; }}
-                      >
-                        <FileTextOutlined style={{ fontSize: 13, color: '#555', flexShrink: 0 }} />
-                        <span style={{ flex: 1, fontSize: 14, fontWeight: 500, color: '#2d2d3a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {subNode.sub_category}
+                    <div
+                      key={subNode.sub_category}
+                      onClick={() => onSelect({ category: catNode.category, sub_category: subNode.sub_category })}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 12px',
+                        marginTop: 2,
+                        borderRadius: 6,
+                        cursor: 'pointer', userSelect: 'none',
+                        background: subActive ? '#f0f7ff' : (subNode.hasItemMatch ? '#fffbe6' : 'transparent'),
+                        color: subActive ? '#1677ff' : '#595959',
+                        transition: 'all 0.15s',
+                        border: subNode.hasItemMatch && !subActive ? '1px dashed #ffe58f' : '1px solid transparent'
+                      }}
+                      onMouseEnter={e => { if (!subActive) e.currentTarget.style.background = subNode.hasItemMatch ? '#fff1b8' : '#f5f5f5'; }}
+                      onMouseLeave={e => { if (!subActive) e.currentTarget.style.background = subNode.hasItemMatch ? '#fffbe6' : 'transparent'; }}
+                    >
+                      <ToolOutlined style={{ fontSize: 14, opacity: subActive ? 1 : 0.6, color: subActive ? '#1677ff' : style.color }} />
+                      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                        <span style={{
+                          fontSize: 13,
+                          fontWeight: (subActive || subNode.hasItemMatch) ? 700 : 500,
+                          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+                        }}>
+                          {highlightSubText(subNode.sub_category, searchText)}
                         </span>
-                        <span style={{ fontSize: 11, fontWeight: 500, padding: '1px 6px', borderRadius: 4, background: '#f6ffed', color: '#389e0d', border: '1px solid #b7eb8f', flexShrink: 0 }}>
-                          {subNode.count}
-                        </span>
+                        {subNode.hasItemMatch && (
+                          <span style={{ fontSize: 10, color: '#d48806', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            Matches: {subNode.itemMatches[0].item_description}
+                          </span>
+                        )}
                       </div>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, padding: '1px 8px',
+                        borderRadius: 10, 
+                        background: subActive ? '#e6f4ff' : 'transparent',
+                        color: subActive ? '#1677ff' : style.color,
+                        border: subActive ? '1px solid #91caff' : `1px solid ${style.color}40`,
+                        flexShrink: 0
+                      }}>
+                        {subNode.count}
+                      </span>
                     </div>
                   );
                 })}
@@ -131,6 +189,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   const [tools,        setTools]        = useState([]);
   const [tableLoading, setTableLoading] = useState(false);
   const [searchText,   setSearchText]   = useState('');
+  const [treeSearchText, setTreeSearchText] = useState('');
   const [filteredData, setFilteredData] = useState([]);
   const [pagination,   setPagination]   = useState({ current: 1, pageSize: 10 });
   const [collapsed,    setCollapsed]    = useState(false);
@@ -149,9 +208,58 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
 
   const displayTree = (tree.length > 0 ? tree : DEFAULT_CATEGORIES).filter(cat => cat.category !== 'Misc');
 
+  // Filter tree based on sidebar search
+  const filteredTree = React.useMemo(() => {
+    if (!treeSearchText.trim()) return displayTree;
+    const lowerSearch = treeSearchText.toLowerCase();
+
+    return displayTree.map(catNode => {
+      // Search within sub-categories OR search within the items (leaf nodes) inside those sub-categories
+      const filteredSubCats = catNode.sub_categories.map(sub => {
+        const subMatches = sub.sub_category.toLowerCase().includes(lowerSearch);
+        const matchingItems = sub.items?.filter(item =>
+          item.item_description.toLowerCase().includes(lowerSearch)
+        ) || [];
+
+        if (subMatches || matchingItems.length > 0) {
+          return {
+            ...sub,
+            hasItemMatch: matchingItems.length > 0,
+            itemMatches: matchingItems
+          };
+        }
+        return null;
+      }).filter(Boolean);
+
+      if (filteredSubCats.length > 0) {
+        return {
+          ...catNode,
+          sub_categories: filteredSubCats,
+          hasSubMatch: true
+        };
+      }
+      return null;
+    }).filter(Boolean);
+  }, [displayTree, treeSearchText]);
+
+  // Auto-expand categories that have matching sub-categories
+  useEffect(() => {
+    if (treeSearchText.trim()) {
+      const newExpanded = { ...expandedCats };
+      filteredTree.forEach(catNode => {
+        if (catNode.hasSubMatch) {
+          newExpanded[catNode.category] = true;
+        }
+      });
+      setExpandedCats(newExpanded);
+    }
+  }, [treeSearchText]);
+
   useEffect(() => {
     if (selected?.sub_category && selected?.category) {
       fetchBySubCategory(selected.category, selected.sub_category);
+    } else if (selected?.category) {
+      fetchByCategory(selected.category);
     } else {
       setTools([]);
       setFilteredData([]);
@@ -185,6 +293,31 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     } finally {
       setTreeLoading(false);
       fetchingTree.current = false;
+    }
+  };
+
+  const fetchByCategory = async (category) => {
+    if (fetchingTable.current) return;
+    fetchingTable.current = true;
+    setTableLoading(true);
+    setTools([]);
+    setFilteredData([]);
+    try {
+      const url = `${API_BASE_URL}/tools-list/?category=${encodeURIComponent(category)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const sorted = Array.isArray(data)
+        ? [...data].sort((a, b) => (a.id || 0) - (b.id || 0))
+        : [];
+      setTools(sorted);
+      setFilteredData(sorted);
+      setPagination(p => ({ ...p, current: 1 }));
+    } catch (e) {
+      message.error('Failed to load category tools: ' + e.message);
+    } finally {
+      setTableLoading(false);
+      fetchingTable.current = false;
     }
   };
 
@@ -269,37 +402,83 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
 
   const columns = [
     {
-      title: 'SL No', key: 'sl_no', width: 60, fixed: 'left', align: 'center',
-      render: (_, __, i) => <span style={{ color: '#8c8c8c', fontSize: 12 }}>{(pagination.current - 1) * pagination.pageSize + i + 1}</span>,
+      title: 'SL No', key: 'sl_no', width: 90, fixed: 'left', align: 'center',
+      render: (_, __, i) => <span style={{ color: '#8c8c8c', fontSize: 11, fontWeight: 500 }}>{(pagination.current - 1) * pagination.pageSize + i + 1}</span>,
     },
     {
-      title: 'Item Description', dataIndex: 'item_description', key: 'item_description', width: 200, fixed: 'left', ellipsis: true,
-      render: (text, record) => <Button type="link" style={{ padding: 0, fontSize: 12, fontWeight: 600 }} onClick={() => { setHistoryTool(record); setHistoryVisible(true); }}>{text}</Button>,
+      title: 'Item Description', dataIndex: 'item_description', key: 'item_description', width: 220, fixed: 'left', ellipsis: true, align: 'center',
+      render: (text, record) => (
+        <Button
+          type="link"
+          style={{ padding: 0, fontSize: 13, fontWeight: 600, color: '#1677ff', height: 'auto', textAlign: 'center', width: '100%' }}
+          onClick={() => { setHistoryTool(record); setHistoryVisible(true); }}
+        >
+          {text}
+        </Button>
+      ),
     },
-    { title: 'Range / Size', dataIndex: 'range', key: 'range', width: 120, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
-    { title: 'ID Code', dataIndex: 'identification_code', key: 'identification_code', width: 150, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
-    { title: 'Make', dataIndex: 'make', key: 'make', width: 110, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
-    { title: 'Total Qty', dataIndex: 'total_quantity', key: 'total_quantity', width: 85, align: 'center', render: (v, r) => <span style={{ fontWeight: 600 }}>{v ?? r.quantity ?? 0}</span> },
+    { title: 'Range / Size', dataIndex: 'range', key: 'range', width: 120, ellipsis: true, align: 'center', render: v => <span style={{ fontSize: 12 }}>{v || <span style={{ color: '#bfbfbf' }}>—</span>}</span> },
+    { title: 'ID Code', dataIndex: 'identification_code', key: 'identification_code', width: 150, ellipsis: true, align: 'center', render: v => <code style={{ fontSize: 12, background: '#f5f5f5', padding: '2px 4px', borderRadius: 4, color: '#595959' }}>{v || '—'}</code> },
+    { title: 'Make', dataIndex: 'make', key: 'make', width: 110, ellipsis: true, align: 'center', render: v => <span style={{ fontSize: 12 }}>{v || <span style={{ color: '#bfbfbf' }}>—</span>}</span> },
+    { title: 'Total Qty', dataIndex: 'total_quantity', key: 'total_quantity', width: 120, align: 'center', render: (v, r) => <span style={{ fontWeight: 600, fontSize: 13 }}>{v ?? r.quantity ?? 0}</span> },
     {
-      title: 'Available', dataIndex: 'quantity', key: 'quantity', width: 90, align: 'center',
-      render: (v) => {
-        const n = v ?? 0;
-        return <Tag color={n === 0 ? 'red' : n <= 5 ? 'orange' : 'green'} style={{ borderRadius: 6, fontWeight: 600, minWidth: 32, textAlign: 'center' }}>{n}</Tag>;
-      },
+      title: 'Available', dataIndex: 'quantity', key: 'quantity', width: 110, align: 'center',
+      render: (v) => <span style={{ fontSize: 13, fontWeight: 600, color: '#595959' }}>{v ?? 0}</span>,
     },
-    { title: 'Issues', dataIndex: 'issues_qty', key: 'issues_qty', width: 75, align: 'center', render: v => <span style={{ color: '#8c8c8c' }}>{v ?? 0}</span> },
-    { title: 'Location', dataIndex: 'location', key: 'location', width: 100, ellipsis: true, render: v => v ? <Tag style={{ borderRadius: 5, fontSize: 11 }}>{v}</Tag> : <span style={{ color: '#bbb' }}>—</span> },
-    { title: 'Gauge', dataIndex: 'gauge', key: 'gauge', width: 90, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
-    { title: 'Remarks', dataIndex: 'remarks', key: 'remarks', width: 160, ellipsis: true, render: v => v || <span style={{ color: '#bbb' }}>—</span> },
-    { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 90, align: 'right', render: v => v != null ? <span style={{ fontWeight: 500 }}>₹{Number(v).toFixed(2)}</span> : <span style={{ color: '#bbb' }}>—</span> },
-    { title: 'Type', dataIndex: 'type', key: 'type', width: 130, render: v => v ? <Tag color={v === 'CONSUMABLES' ? 'green' : 'blue'} style={{ borderRadius: 5, fontSize: 10, fontWeight: 600 }}>{v}</Tag> : null },
+    { title: 'Issues', dataIndex: 'issues_qty', key: 'issues_qty', width: 100, align: 'center', render: v => <span style={{ color: '#8c8c8c', fontSize: 12 }}>{v ?? 0}</span> },
     {
-      title: 'Actions', key: 'actions', width: 90, fixed: 'right', align: 'center',
+      title: 'Location', dataIndex: 'location', key: 'location', width: 130, ellipsis: true, align: 'center',
+      render: v => v ? <Tag color="blue" style={{ borderRadius: 4, fontSize: 11, margin: 0 }}>{v}</Tag> : <span style={{ color: '#bfbfbf' }}>—</span>
+    },
+    { title: 'Gauge', dataIndex: 'gauge', key: 'gauge', width: 110, ellipsis: true, align: 'center', render: v => <span style={{ fontSize: 12 }}>{v || <span style={{ color: '#bfbfbf' }}>—</span>}</span> },
+    { title: 'Remarks', dataIndex: 'remarks', key: 'remarks', width: 180, ellipsis: true, align: 'center', render: v => <span style={{ fontSize: 12, color: '#8c8c8c' }}>{v || <span style={{ color: '#d9d9d9' }}>—</span>}</span> },
+    { title: 'Amount', dataIndex: 'amount', key: 'amount', width: 120, align: 'center', render: v => v != null ? <span style={{ fontWeight: 600, color: '#389e0d', fontSize: 13 }}>₹{Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span> : <span style={{ color: '#bfbfbf' }}>—</span> },
+    {
+      title: 'Type', dataIndex: 'type', key: 'type', width: 150, align: 'center',
+      render: v => {
+        if (!v) return null;
+        const isConsumable = v.toUpperCase() === 'CONSUMABLES';
+        return (
+          <Tag
+            icon={isConsumable ? <ExperimentOutlined /> : <ToolOutlined />}
+            color={isConsumable ? 'cyan' : 'geekblue'}
+            style={{ borderRadius: 12, padding: '0 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}
+          >
+            {v}
+          </Tag>
+        );
+      }
+    },
+    {
+      title: 'Actions', key: 'actions', width: 120, fixed: 'right', align: 'center',
       render: (_, record) => (
-        <Space size={0}>
-          <Tooltip title="Edit Record"><Button type="text" size="small" icon={<EditOutlined />} style={{ color: '#1677ff' }} onClick={() => onEdit(record)} /></Tooltip>
-          <Popconfirm title="Delete this tool record?" description="This action cannot be undone." onConfirm={() => onDelete(record)} okText="Yes, Delete" cancelText="Cancel" okButtonProps={{ danger: true }}>
-            <Tooltip title="Delete Record"><Button type="text" size="small" icon={<DeleteOutlined />} danger /></Tooltip>
+        <Space size={8}>
+          <Tooltip title="Edit Record">
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              style={{ color: '#1677ff', background: '#e6f4ff', borderRadius: 6 }}
+              onClick={() => onEdit(record)}
+            />
+          </Tooltip>
+          <Popconfirm
+            title="Delete this record?"
+            description="Are you sure you want to delete this tool?"
+            onConfirm={() => onDelete(record)}
+            okText="Delete"
+            cancelText="Cancel"
+            okButtonProps={{ danger: true, size: 'small' }}
+            cancelButtonProps={{ size: 'small' }}
+          >
+            <Tooltip title="Delete Record">
+              <Button
+                type="text"
+                size="small"
+                icon={<DeleteOutlined />}
+                style={{ color: '#ff4d4f', background: '#fff1f0', borderRadius: 6 }}
+              />
+            </Tooltip>
           </Popconfirm>
         </Space>
       ),
@@ -312,75 +491,169 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     selected?.sub_category ? { title: selected.sub_category } : null,
   ].filter(Boolean);
 
+  const mainFontStack = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+
   return (
-    <div style={{ display: 'flex', height: '100%', background: '#f5f6fa', overflow: 'hidden' }}>
-      <div style={{ width: collapsed ? 0 : 320, minWidth: collapsed ? 0 : 320, background: '#fff', borderRight: '1px solid #e8eaed', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', zIndex: 10 }}>
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <span style={{ fontSize: 16, fontWeight: 600, color: '#1a1a2e' }}>Categories</span>
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden', fontFamily: mainFontStack }}>
+      {/* ── SIDEBAR ── */}
+      <div style={{
+        width: collapsed ? 0 : 320,
+        minWidth: collapsed ? 0 : 320,
+        background: '#fff',
+        borderRadius: '12px',
+        marginRight: collapsed ? 0 : '16px',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        zIndex: 10,
+        boxShadow: collapsed ? 'none' : '0 1px 4px rgba(0,0,0,0.05)',
+        border: '1px solid #e8eaed'
+      }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <span style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e', letterSpacing: '-0.2px' }}>Categories</span>
           <Space size={4}>
-            <Tooltip title="Expand All"><Button type="text" size="small" icon={<ExpandOutlined />} onClick={expandAll} style={{ color: '#555' }} /></Tooltip>
-            <Tooltip title="Collapse All"><Button type="text" size="small" icon={<CompressOutlined />} onClick={collapseAll} style={{ color: '#555' }} /></Tooltip>
-            <Button type="text" size="small" icon={<MenuFoldOutlined />} style={{ color: '#8c8c8c', marginLeft: 4 }} onClick={() => setCollapsed(true)} />
+            <Tooltip title="Expand All"><Button type="text" size="small" icon={<ExpandOutlined />} onClick={expandAll} style={{ color: '#595959' }} /></Tooltip>
+            <Tooltip title="Collapse All"><Button type="text" size="small" icon={<CompressOutlined />} onClick={collapseAll} style={{ color: '#595959' }} /></Tooltip>
+            <Button type="text" size="small" icon={<MenuFoldOutlined />} style={{ color: '#8c8c8c' }} onClick={() => setCollapsed(true)} />
           </Space>
         </div>
-        <div style={{ overflowY: 'auto', flex: 1 }}>
-          <SidebarTree tree={displayTree} selected={selected} onSelect={(node) => { setSelected(node); setSearchText(''); }} loading={treeLoading} expandedCats={expandedCats} toggleCat={toggleCat} />
+        <div style={{ overflowY: 'auto', flex: 1, padding: '8px 0' }}>
+          <SidebarTree tree={filteredTree} selected={selected} onSelect={(node) => { setSelected(node); setSearchText(''); }} loading={treeLoading} expandedCats={expandedCats} toggleCat={toggleCat} searchText={treeSearchText} />
         </div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f5f6fa' }}>
+      {/* ── CONTENT ── */}
+      <div style={{ 
+        flex: 1, 
+        display: 'flex', 
+        flexDirection: 'column', 
+        overflow: 'hidden', 
+        position: 'relative',
+        background: '#fff',
+        borderRadius: '12px',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.05)',
+        border: '1px solid #e8eaed'
+      }}>
         {!selected ? (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, color: '#8c8c8c', padding: '60px 20px', textAlign: 'center' }}>
-            <div style={{ width: 80, height: 80, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', marginBottom: 8 }}>
-              <AppstoreOutlined style={{ fontSize: 40, color: '#bfbfbf' }} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px' }}>
+            <div style={{
+              width: 100, height: 100, borderRadius: '30%',
+              background: 'linear-gradient(135deg, #f0f7ff 0%, #e6f4ff 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 24,
+              boxShadow: '0 8px 16px rgba(22,119,255,0.1)'
+            }}>
+              <InboxOutlined style={{ fontSize: 48, color: '#1677ff' }} />
             </div>
-            <div>
-              <h3 style={{ fontSize: 20, fontWeight: 600, color: '#595959', margin: '0 0 8px 0' }}>Please select a category from the left sidebar</h3>
-              <p style={{ fontSize: 14, color: '#8c8c8c', maxWidth: 400, margin: 0 }}>Select a category or sub-category from the tree menu to view and manage its inventory records.</p>
-            </div>
+            <p style={{ fontSize: 15, color: '#8c8c8c', maxWidth: 400, textAlign: 'center', lineHeight: 1.6 }}>
+              Select a category or sub-category from the tree to view inventory records.
+            </p>
           </div>
         ) : (
           <>
-            <div style={{ background: '#fff', borderBottom: '1px solid #e8eaed', padding: '8px 20px', minHeight: 52, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '1 1 auto', minWidth: 200 }}>
-                {collapsed && <Button type="text" icon={<MenuUnfoldOutlined />} style={{ color: '#666' }} onClick={() => setCollapsed(false)} />}
-                <Breadcrumb items={breadcrumbItems} separator="/" style={{ fontSize: 14 }} />
+            {/* Header Bar */}
+            <div style={{
+              background: '#fff',
+              padding: '12px 24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderBottom: '1px solid #f0f0f0',
+              zIndex: 5
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                {collapsed && (
+                  <Button
+                    type="primary"
+                    shape="circle"
+                    size="small"
+                    icon={<MenuUnfoldOutlined />}
+                    onClick={() => setCollapsed(false)}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  />
+                )}
+                <Breadcrumb
+                  items={breadcrumbItems}
+                  separator={<RightOutlined style={{ fontSize: 10, color: '#bfbfbf' }} />}
+                  style={{ fontSize: 13, fontWeight: 500 }}
+                />
               </div>
-              <div style={{ flex: '0 0 auto' }}>
-                <Search placeholder="Search items..." allowClear value={searchText} onChange={e => setSearchText(e.target.value)} style={{ width: 220 }} size="small" maxLength={20} />
-              </div>
+              <Search
+                placeholder="Search tools, IDs, locations..."
+                allowClear
+                value={searchText}
+                onChange={e => setSearchText(e.target.value)}
+                style={{ width: 280 }}
+                size="middle"
+              />
             </div>
 
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '12px 16px', gap: 10, minHeight: 0 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexShrink: 0 }}>
-                <div style={{ flex: '1 1 auto', minWidth: 250 }}>
-                  <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e', margin: 0, lineHeight: 1.2 }}>{selected?.sub_category || selected?.category || 'Inventory Master Data'}</h2>
-                  <p style={{ fontSize: 14, color: '#8c8c8c', marginTop: 4, margin: 0 }}>{selected.category} {selected.sub_category && `› ${selected.sub_category}`}</p>
+            {/* Main Content Area */}
+            <div style={{ flex: 1, padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {/* Title & Actions Row */}
+              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+                <div>
+                  <h1 style={{ fontSize: 24, fontWeight: 800, color: '#1a1a2e', margin: 0, letterSpacing: '-0.5px' }}>
+                    {selected?.sub_category || selected?.category}
+                  </h1>
+                  <p style={{ fontSize: 13, color: '#8c8c8c', margin: '4px 0 0 0', fontWeight: 500 }}>
+                    {selected.category} {selected.sub_category && <span style={{ opacity: 0.5 }}> / </span>} {selected.sub_category}
+                  </p>
                 </div>
-                <Space wrap style={{ flex: '0 0 auto' }}>
-                  <Button icon={<PlusOutlined />} type="primary" style={{ borderRadius: 7, fontWeight: 600 }} onClick={() => onCreateNew(selected)}>Add Row</Button>
-                  <Upload beforeUpload={file => { handleBulkUpload(file); return false; }} showUploadList={false} accept=".xlsx,.xls"><Button icon={<UploadOutlined />} style={{ borderRadius: 7 }}>Import</Button></Upload>
-                  <Button icon={<DownloadOutlined />} style={{ borderRadius: 7 }} onClick={handleExportExcel}>Export</Button>
-                  <Button icon={<ReloadOutlined />} style={{ borderRadius: 7 }} onClick={() => selected?.sub_category && fetchBySubCategory(selected.category, selected.sub_category)} />
+                <Space size={12}>
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    size="large"
+                    onClick={() => onCreateNew(selected)}
+                    style={{ borderRadius: 10, fontWeight: 600, height: 44, padding: '0 20px', boxShadow: '0 4px 12px rgba(22,119,255,0.2)' }}
+                  >
+                    Add Row
+                  </Button>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Upload beforeUpload={file => { handleBulkUpload(file); return false; }} showUploadList={false} accept=".xlsx,.xls">
+                      <Button icon={<UploadOutlined />} size="large" style={{ borderRadius: 10, fontWeight: 500, height: 44 }}>Import</Button>
+                    </Upload>
+                    <Button icon={<DownloadOutlined />} size="large" onClick={handleExportExcel} style={{ borderRadius: 10, fontWeight: 500, height: 44 }}>Export</Button>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      size="large"
+                      onClick={() => (selected?.sub_category ? fetchBySubCategory(selected.category, selected.sub_category) : fetchByCategory(selected.category))}
+                      style={{ borderRadius: 10, height: 44, width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    />
+                  </div>
                 </Space>
               </div>
 
-              <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #e8eaed', overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              {/* Table Container */}
+              <div style={{
+                background: '#fff',
+                borderRadius: '12px',
+                border: '1px solid #f0f0f0',
+                overflow: 'hidden',
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column'
+              }}>
                 <Table
                   columns={columns}
                   dataSource={filteredData}
                   rowKey="id"
                   loading={tableLoading}
-                  size="small"
-                  scroll={{ x: 'max-content', y: 'calc(100vh - 340px)' }}
+                  size="middle"
+                  scroll={{ x: 'max-content', y: 'calc(100vh - 450px)' }}
                   pagination={{
                     current: pagination.current,
                     pageSize: pagination.pageSize,
                     showSizeChanger: true,
-                    pageSizeOptions: ['10', '20', '50'],
-                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-                    size: 'small',
-                    style: { padding: '8px 12px', margin: 0, borderTop: '1px solid #f0f0f0' },
+                    pageSizeOptions: ['10', '20', '50', '100'],
+                    showTotal: (total, range) => (
+                      <span style={{ fontSize: 13, color: '#8c8c8c' }}>
+                        Showing <b>{range[0]}-{range[1]}</b> of <b>{total}</b> items
+                      </span>
+                    ),
+                    style: { padding: '16px 24px', margin: 0, borderTop: '1px solid #f0f0f0' },
                     onChange: (page, size) => setPagination({ current: page, pageSize: size }),
                   }}
                   rowClassName={(_, i) => i % 2 === 0 ? '' : 'row-alt'}
@@ -392,10 +665,26 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
       </div>
       <ToolsHistory tool={historyTool} visible={historyVisible} onClose={() => { setHistoryVisible(false); setHistoryTool(null); }} />
       <style>{`
-        .row-alt td { background: #fafbff !important; }
-        .ant-table-row:hover td { background: #f0f5ff !important; }
+        .row-alt td { background: #fafafa !important; }
+        .ant-table-row:hover td { background: #f0f7ff !important; }
+        .ant-table-thead > tr > th { 
+          background: #f8f9fb !important; 
+          color: #595959 !important; 
+          font-weight: 700 !important;
+          font-size: 12px !important;
+          text-transform: uppercase !important;
+          letter-spacing: 0.5px !important;
+          padding: 16px 12px !important;
+        }
+        .ant-table-cell { padding: 12px !important; }
         .ant-table-thead > tr > th::before { display: none !important; }
-        .ant-table-cell { padding: 12px 10px !important; }
+        .ant-table-placeholder .ant-empty-normal { margin: 60px 0 !important; }
+        
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d9d9d9; borderRadius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #bfbfbf; }
       `}</style>
     </div>
   );

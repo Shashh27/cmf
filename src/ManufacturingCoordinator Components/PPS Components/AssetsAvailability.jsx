@@ -18,19 +18,21 @@ import {
   InfoCircleOutlined,
   EditOutlined,
   DeleteOutlined,
-  ReloadOutlined 
+  ReloadOutlined,
+  SearchOutlined
 } from "@ant-design/icons";
 
 const { TabPane } = Tabs;
 const { Option } = Select;
 const { TextArea } = Input;
+const { Search } = Input;
 
 
 const AssetAvailability = () => {
   const [machineData, setMachineData] = useState(null);
   const [downtimeLogs, setDowntimeLogs] = useState([]);
   const [calendarDowntimes, setCalendarDowntimes] = useState([]);
-const [selectedDateDowntimes, setSelectedDateDowntimes] = useState([]);
+  const [selectedDateDowntimes, setSelectedDateDowntimes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [downtimeLoading, setDowntimeLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("machine-status");
@@ -45,6 +47,19 @@ const [selectedDateDowntimes, setSelectedDateDowntimes] = useState([]);
   const [shiftLoading, setShiftLoading] = useState(false);
   const [shiftForm] = Form.useForm();
   const [isWorkingDay, setIsWorkingDay] = useState(true);
+
+  // Search and Pagination states
+  const [machineSearchText, setMachineSearchText] = useState(null);
+  const [logSearchText, setLogSearchText] = useState(null);
+  const [machinePageSize, setMachinePageSize] = useState(10);
+  const [logPageSize, setLogPageSize] = useState(10);
+
+  // Get unique machine names for dropdown
+  const getMachineOptions = () => {
+    if (!machineData?.statuses) return [];
+    const uniqueNames = [...new Set(machineData.statuses.map(item => item.machine_make))];
+    return uniqueNames.map(name => ({ label: name, value: name }));
+  };
 
   useEffect(() => {
     fetchMachineStatus();
@@ -373,7 +388,10 @@ const fetchCurrentBreakdowns = async () => {
   const handleUpdateStatus = (machine) => {
     console.log('Machine data received:', machine);
     setSelectedMachine(machine);
-    setSelectedStatus(machine.status_id); // Initialize with current status
+    
+    // Automatically set the next status: 1 (ON) -> 2 (OFF), 2 (OFF) -> 1 (ON)
+    const nextStatusId = machine.status_id === 1 ? 2 : 1;
+    setSelectedStatus(nextStatusId); 
     setUpdateModalVisible(true);
     
     // Reset form first to clear any previous values
@@ -381,8 +399,9 @@ const fetchCurrentBreakdowns = async () => {
     
     // Properly handle date values for the form using dayjs
     const formValues = {
-      machine_id: machine.machine_id, // Automatically fetch and set machine_id
-      status_id: machine.status_id,
+      machine_id: machine.machine_id,
+      machine_name: machine.machine_make, 
+      status_id: nextStatusId, // Set to automatically calculated next status
       description: machine.description || '',
     };
     
@@ -762,15 +781,29 @@ const fetchCurrentBreakdowns = async () => {
       <Card>
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
           <TabPane tab="Machine Status" key="machine-status">
+            <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+              <Select
+                placeholder="Filter by Machine"
+                allowClear
+                style={{ width: 250 }}
+                value={machineSearchText}
+                onChange={value => setMachineSearchText(value)}
+                options={getMachineOptions()}
+              />
+            </div>
             <Table
               columns={machineStatusColumns}
-              dataSource={machineData?.statuses || []}
+              dataSource={(machineData?.statuses || []).filter(item => 
+                !machineSearchText || item.machine_make === machineSearchText
+              )}
               rowKey={(record) => record.id || record.machine_id}
               scroll={{ x: 800 }}
               pagination={{
-                pageSize: 10,
+                pageSize: machinePageSize,
                 showSizeChanger: true,
                 showQuickJumper: true,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                onShowSizeChange: (current, size) => setMachinePageSize(size),
                 showTotal: (total, range) => 
                   `${range[0]}-${range[1]} of ${total} items`,
                 simple: window.innerWidth < 768,
@@ -784,20 +817,36 @@ const fetchCurrentBreakdowns = async () => {
                 <p>Loading downtime logs...</p>
               </div>
             ) : (
-              <Table
-                columns={downtimeColumns}
-                dataSource={downtimeLogs}
-                rowKey="tempId"
-                scroll={{ x: 800 }}
-                pagination={{
-                  pageSize: 10,
-                  showSizeChanger: true,
-                  showQuickJumper: true,
-                  showTotal: (total, range) => 
-                    `${range[0]}-${range[1]} of ${total} items`,
-                  simple: window.innerWidth < 768,
-                }}
-              />
+              <>
+                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Select
+                    placeholder="Filter by Machine"
+                    allowClear
+                    style={{ width: 250 }}
+                    value={logSearchText}
+                    onChange={value => setLogSearchText(value)}
+                    options={getMachineOptions()}
+                  />
+                </div>
+                <Table
+                  columns={downtimeColumns}
+                  dataSource={downtimeLogs.filter(item => 
+                    !logSearchText || item.machine_name === logSearchText
+                  )}
+                  rowKey="tempId"
+                  scroll={{ x: 800 }}
+                  pagination={{
+                    pageSize: logPageSize,
+                    showSizeChanger: true,
+                    showQuickJumper: true,
+                    pageSizeOptions: ['10', '20', '50', '100'],
+                    onShowSizeChange: (current, size) => setLogPageSize(size),
+                    showTotal: (total, range) => 
+                      `${range[0]}-${range[1]} of ${total} items`,
+                    simple: window.innerWidth < 768,
+                  }}
+                />
+              </>
             )}
           </TabPane>
           <TabPane tab="Shift Hours Configuration" key="shift-hours">
@@ -936,7 +985,7 @@ const fetchCurrentBreakdowns = async () => {
 
       {/* Update Status Modal */}
       <Modal
-        title={`Update Status - Machine ${selectedMachine?.machine_id}`}
+        title={`Update Status - ${selectedMachine?.machine_make}`}
         open={updateModalVisible}
         onCancel={handleCancelUpdate}
         footer={null}
@@ -949,8 +998,8 @@ const fetchCurrentBreakdowns = async () => {
           onFinish={handleUpdateSubmit}
         >
           <Form.Item
-            label="Machine ID"
-            name="machine_id"
+            label="Machine Name"
+            name="machine_name"
           >
             <Input disabled />
           </Form.Item>
@@ -958,16 +1007,10 @@ const fetchCurrentBreakdowns = async () => {
           <Form.Item
             label="Status"
             name="status_id"
-            rules={[{ required: true, message: 'Please select a status' }]}
           >
-            <Select 
-              placeholder="Select status"
-              onChange={(value) => setSelectedStatus(value)}
-            >
+            <Select disabled>
               <Option value={1}>ON</Option>
               <Option value={2}>OFF</Option>
-              {/* <Option value={3}>MAINTENANCE</Option> */}
-              {/* <Option value={4}>IDLE</Option> */}
             </Select>
           </Form.Item>
 

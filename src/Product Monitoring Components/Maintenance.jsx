@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Tabs, Table, Spin, message } from 'antd';
+import { Card, Tabs, Table, Spin, message, Select } from 'antd';
 import { API_BASE_URL } from '../Config/auth';
 
 const formatIST = (iso) => {
@@ -45,6 +45,7 @@ const Maintenance = () => {
   const [oeePagination, setOeePagination] = useState({ current: 1, pageSize: 10 });
   const [breakdownPagination, setBreakdownPagination] = useState({ current: 1, pageSize: 10 });
   const [componentPagination, setComponentPagination] = useState({ current: 1, pageSize: 10 });
+  const [selectedMachines, setSelectedMachines] = useState([]);
 
   useEffect(() => {
     const load = async () => {
@@ -74,6 +75,29 @@ const Maintenance = () => {
     };
     load();
   }, []);
+
+  const machineOptions = useMemo(() => {
+    const names = new Set();
+    [...oeeIssues, ...breakdowns, ...components].forEach((item) => {
+      if (item.machine_name) names.add(item.machine_name);
+    });
+    return Array.from(names).sort().map(name => ({ label: name, value: name }));
+  }, [oeeIssues, breakdowns, components]);
+
+  const filteredOee = useMemo(() => {
+    if (selectedMachines.length === 0) return oeeIssues;
+    return oeeIssues.filter(item => selectedMachines.includes(item.machine_name));
+  }, [oeeIssues, selectedMachines]);
+
+  const filteredBreakdowns = useMemo(() => {
+    if (selectedMachines.length === 0) return breakdowns;
+    return breakdowns.filter(item => selectedMachines.includes(item.machine_name));
+  }, [breakdowns, selectedMachines]);
+
+  const filteredComponents = useMemo(() => {
+    if (selectedMachines.length === 0) return components;
+    return components.filter(item => selectedMachines.includes(item.machine_name));
+  }, [components, selectedMachines]);
 
   const oeeColumns = [
     { title: 'Sl No', key: 'sl', width: 70, render: (_, __, idx) => (oeePagination.current - 1) * oeePagination.pageSize + idx + 1 },
@@ -110,6 +134,13 @@ const Maintenance = () => {
       width: 160,
       render: (_, r) => r.operator_name ?? r.reported_by,
     },
+    {
+      title: 'Reported At',
+      dataIndex: 'reported_at',
+      key: 'reported_at',
+      width: 190,
+      render: (v) => formatIST(v),
+    },
   ];
 
   const breakdownColumns = [
@@ -134,7 +165,14 @@ const Maintenance = () => {
       width: 160,
       render: (_, r) => r.operator_name ?? r.reported_by,
     },
-    { title: 'Additional Description', dataIndex: 'additional_reason', key: 'additional_reason', width: 280 },
+    {
+      title: 'Reported At',
+      dataIndex: 'reported_at',
+      key: 'reported_at',
+      width: 190,
+      render: (v) => formatIST(v),
+    },
+    { title: 'Additional Description', dataIndex: 'additional_reason', key: 'additional_reason', width: 280, render: (v) => v || '-' },
   ];
 
   const componentColumns = [
@@ -165,6 +203,13 @@ const Maintenance = () => {
       render: (_, r) => r.operator_name ?? r.reported_by,
     },
     {
+      title: 'Reported At',
+      dataIndex: 'reported_at',
+      key: 'reported_at',
+      width: 190,
+      render: (v) => formatIST(v),
+    },
+    {
       title: 'Description',
       dataIndex: 'description',
       key: 'description',
@@ -187,9 +232,9 @@ const Maintenance = () => {
             <div className="maintenance-table-scroll">
               <Table
                 columns={oeeColumns}
-                dataSource={oeeIssues}
+                dataSource={filteredOee}
                 rowKey="id"
-                scroll={{ x: 1230 }}
+                scroll={{ x: 1420 }}
                 tableLayout="fixed"
                 pagination={{ ...oeePagination, position: ['bottomRight'] }}
                 onChange={(pagination) => setOeePagination({ current: pagination.current ?? 1, pageSize: pagination.pageSize ?? 10 })}
@@ -212,9 +257,9 @@ const Maintenance = () => {
             <div className="maintenance-table-scroll">
               <Table
                 columns={breakdownColumns}
-                dataSource={breakdowns}
+                dataSource={filteredBreakdowns}
                 rowKey="id"
-                scroll={{ x: 1270 }}
+                scroll={{ x: 1460 }}
                 tableLayout="fixed"
                 pagination={{ ...breakdownPagination, position: ['bottomRight'] }}
                 onChange={(pagination) => setBreakdownPagination({ current: pagination.current ?? 1, pageSize: pagination.pageSize ?? 10 })}
@@ -237,9 +282,9 @@ const Maintenance = () => {
             <div className="maintenance-table-scroll">
               <Table
                 columns={componentColumns}
-                dataSource={components}
+                dataSource={filteredComponents}
                 rowKey="id"
-                scroll={{ x: 1500 }}
+                scroll={{ x: 1690 }}
                 tableLayout="fixed"
                 pagination={{ ...componentPagination, position: ['bottomRight'] }}
                 onChange={(pagination) => setComponentPagination({ current: pagination.current ?? 1, pageSize: pagination.pageSize ?? 10 })}
@@ -258,6 +303,18 @@ const Maintenance = () => {
         style={{ borderRadius: 16 }}
         bodyStyle={{ padding: 0, overflow: 'hidden' }}
       >
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 16 }}>
+          <span style={{ fontWeight: 500 }}>Filter by Machine:</span>
+          <Select
+            mode="multiple"
+            allowClear
+            style={{ minWidth: 300, maxWidth: 600 }}
+            placeholder="Select one or more machines"
+            options={machineOptions}
+            value={selectedMachines}
+            onChange={setSelectedMachines}
+          />
+        </div>
         <Tabs
           activeKey={activeTab}
           onChange={setActiveTab}
