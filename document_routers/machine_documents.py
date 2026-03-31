@@ -318,21 +318,23 @@ async def delete_machine_folder(
 # MACHINE DOCUMENT MANAGEMENT
 # =======================
 
-@router.post("/upload", response_model=MachineDocumentSchema, status_code=status.HTTP_201_CREATED)
+@router.post("/upload", response_model=List[MachineDocumentSchema], status_code=status.HTTP_201_CREATED)
 async def upload_machine_document(
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(...),
     folder_id: Optional[int] = Form(None),
     machine_id: Optional[int] = Form(None),
     parent_id: Optional[int] = Form(None),
+    document_type: Optional[str] = Form(None),
     user_id: int = Form(...),
     db: Session = Depends(get_db)
 ):
     """
-    Upload a new machine document with automatic versioning
-    - If parent_id is None, creates a new document with version 1.0
-    - If parent_id is provided, creates a new version (auto-incremented)
-    - Document name is automatically extracted from the uploaded file
+    Upload multiple machine documents with automatic versioning
+    - If parent_id is None, creates new documents with version 1.0
+    - If parent_id is provided, creates new versions (auto-incremented) for each file
+    - Document name is automatically extracted from each uploaded file
     - Either folder_id or machine_id must be provided (but not both)
+    - document_type: 'maintenance' for maintenance docs, None for general docs
     """
     # Validate that either folder_id or machine_id is provided, but not both
     if folder_id is None and machine_id is None:
@@ -365,72 +367,88 @@ async def upload_machine_document(
                 detail=f"Machine with id {machine_id} not found"
             )
     
-    # Validate file extension
-    if not is_allowed_file(file.filename):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
-        )
+    # Validate all file extensions
+    for file in files:
+        if not is_allowed_file(file.filename):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File type not allowed for {file.filename}. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+            )
+    
+    uploaded_documents = []
     
     try:
         # Get MinIO client
         minio_client = get_minio_client()
         
-        # Extract document name from uploaded file (remove extension)
-        original_filename = file.filename
-        document_name = os.path.splitext(original_filename)[0]  # Remove extension
+        # Process each file
+        for file in files:
+            # Extract document name from uploaded file (remove extension)
+            original_filename = file.filename
+            document_name = os.path.splitext(original_filename)[0]  # Remove extension
+            
+            # Determine version and document_type
+            version = get_next_version(db, parent_id)
+            
+            # If this is a new version (parent_id provided), inherit document_type from parent
+            final_document_type = document_type
+            if parent_id is not None and document_type is None:
+                # Get the parent document to inherit its document_type
+                parent_doc = db.query(MachineDocument).filter(MachineDocument.id == parent_id).first()
+                if parent_doc:
+                    final_document_type = parent_doc.document_type
+            
+            # Generate unique object name for MinIO
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            file_extension = get_file_extension(file.filename)
+            
+            # Use folder_id or machine_id for the path
+            if folder_id is not None:
+                object_name = f"machine_documents/{folder_id}/{timestamp}_{document_name}_{version}{file_extension}"
+            else:
+                object_name = f"machine_documents/machine_{machine_id}/{timestamp}_{document_name}_{version}{file_extension}"
+            
+            # Read file content
+            file_content = await file.read()
+            file_stream = io.BytesIO(file_content)
+            
+            # Determine content type
+            content_type = get_content_type(file.filename)
+            
+            # Upload to MinIO
+            document_url = minio_client.upload_file(
+                file_data=file_stream,
+                object_name=object_name,
+                content_type=content_type,
+                metadata={
+                    'document_name': document_name,
+                    'folder_id': str(folder_id) if folder_id else '',
+                    'machine_id': str(machine_id) if machine_id else '',
+                    'version': str(version),
+                    'parent_id': str(parent_id) if parent_id else '',
+                    'original_filename': original_filename
+                }
+            )
+            
+            # Create database record
+            db_document = MachineDocument(
+                document_name=document_name,
+                document_url=document_url,
+                version=version,
+                machine_folder_id=folder_id,
+                machine_id=machine_id,
+                parent_id=parent_id,
+                document_type=final_document_type,
+                user_id=user_id
+            )
+            
+            db.add(db_document)
+            db.commit()
+            db.refresh(db_document)
+            
+            uploaded_documents.append(db_document)
         
-        # Determine version
-        version = get_next_version(db, parent_id)
-        
-        # Generate unique object name for MinIO
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_extension = get_file_extension(file.filename)
-        
-        # Use folder_id or machine_id for the path
-        if folder_id is not None:
-            object_name = f"machine_documents/{folder_id}/{timestamp}_{document_name}_{version}{file_extension}"
-        else:
-            object_name = f"machine_documents/machine_{machine_id}/{timestamp}_{document_name}_{version}{file_extension}"
-        
-        # Read file content
-        file_content = await file.read()
-        file_stream = io.BytesIO(file_content)
-        
-        # Determine content type
-        content_type = get_content_type(file.filename)
-        
-        # Upload to MinIO
-        document_url = minio_client.upload_file(
-            file_data=file_stream,
-            object_name=object_name,
-            content_type=content_type,
-            metadata={
-                'document_name': document_name,
-                'folder_id': str(folder_id) if folder_id else '',
-                'machine_id': str(machine_id) if machine_id else '',
-                'version': str(version),
-                'parent_id': str(parent_id) if parent_id else '',
-                'original_filename': original_filename
-            }
-        )
-        
-        # Create database record
-        db_document = MachineDocument(
-            document_name=document_name,
-            document_url=document_url,
-            version=version,
-            machine_folder_id=folder_id,
-            machine_id=machine_id,
-            parent_id=parent_id,
-            user_id=user_id
-        )
-        
-        db.add(db_document)
-        db.commit()
-        db.refresh(db_document)
-        
-        return db_document
+        return uploaded_documents
         
     except Exception as e:
         db.rollback()
@@ -439,12 +457,12 @@ async def upload_machine_document(
             detail=f"Failed to upload document: {str(e)}"
         )
 
-@router.get("/machines/{machine_id}/documents", response_model=List[MachineDocumentWithVersions])
-async def get_machine_documents(
+@router.get("/machines/{machine_id}/maintenance-documents", response_model=List[MachineDocumentWithVersions])
+async def get_machine_maintenance_documents(
     machine_id: int,
     db: Session = Depends(get_db)
 ):
-    """Get all documents directly uploaded to a machine (not in folders) with their versions"""
+    """Get all maintenance documents for a specific machine with their versions"""
     # Validate machine exists from configuration schema
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
     if not machine:
@@ -453,10 +471,10 @@ async def get_machine_documents(
             detail=f"Machine with id {machine_id} not found"
         )
     
-    # Get all documents directly uploaded to this machine (machine_folder_id is null, machine_id matches)
+    # Get all maintenance documents for this machine (document_type = 'maintenance')
     documents = db.query(MachineDocument).filter(
-        MachineDocument.machine_folder_id.is_(None),
-        MachineDocument.machine_id == machine_id
+        MachineDocument.machine_id == machine_id,
+        MachineDocument.document_type == 'maintenance'
     ).all()
     
     # Group documents by family and add versions
@@ -482,6 +500,120 @@ async def get_machine_documents(
                 parent_id=latest_doc.parent_id,
                 created_at=latest_doc.created_at,
                 updated_at=latest_doc.updated_at,
+                user_id=latest_doc.user_id,
+                versions=versions
+            ))
+            
+            processed_families.add(family_id)
+    
+    return result
+
+@router.get("/machines/{machine_id}/general-documents", response_model=List[MachineDocumentWithVersions])
+async def get_machine_general_documents(
+    machine_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get all general documents (non-maintenance) for a specific machine with their versions"""
+    # Validate machine exists from configuration schema
+    machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
+    if not machine:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Machine with id {machine_id} not found"
+        )
+    
+    # Get all general documents for this machine (document_type is null)
+    documents = db.query(MachineDocument).filter(
+        MachineDocument.machine_id == machine_id,
+        MachineDocument.document_type.is_(None)
+    ).all()
+    
+    # Group documents by family and add versions
+    result = []
+    processed_families = set()
+    
+    for doc in documents:
+        family_id = doc.parent_id or doc.id
+        if family_id not in processed_families:
+            # Get all versions of this document family
+            versions = db.query(MachineDocument).filter(
+                (MachineDocument.id == family_id) | (MachineDocument.parent_id == family_id)
+            ).order_by(MachineDocument.version.desc()).all()
+            
+            # Use the latest version as the main document
+            latest_doc = versions[0] if versions else doc
+            result.append(MachineDocumentWithVersions(
+                id=latest_doc.id,
+                document_name=latest_doc.document_name,
+                document_url=latest_doc.document_url,
+                version=latest_doc.version,
+                machine_folder_id=latest_doc.machine_folder_id,
+                parent_id=latest_doc.parent_id,
+                created_at=latest_doc.created_at,
+                updated_at=latest_doc.updated_at,
+                user_id=latest_doc.user_id,
+                versions=versions
+            ))
+            
+            processed_families.add(family_id)
+    
+    return result
+
+@router.get("/machines/{machine_id}/documents", response_model=List[MachineDocumentWithVersions])
+async def get_machine_documents(
+    machine_id: int,
+    document_type: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get documents for a specific machine with their versions, optionally filtered by document_type"""
+    # Validate machine exists from configuration schema
+    machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
+    if not machine:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Machine with id {machine_id} not found"
+        )
+    
+    # Build query based on document_type filter
+    query = db.query(MachineDocument).filter(
+        MachineDocument.machine_folder_id.is_(None),
+        MachineDocument.machine_id == machine_id
+    )
+    
+    if document_type:
+        if document_type.lower() == 'general':
+            # Filter for general documents (document_type is null)
+            query = query.filter(MachineDocument.document_type.is_(None))
+        else:
+            # Filter for specific document type
+            query = query.filter(MachineDocument.document_type == document_type.lower())
+    
+    documents = query.all()
+    
+    # Group documents by family and add versions
+    result = []
+    processed_families = set()
+    
+    for doc in documents:
+        family_id = doc.parent_id or doc.id
+        if family_id not in processed_families:
+            # Get all versions of this document family
+            versions = db.query(MachineDocument).filter(
+                (MachineDocument.id == family_id) | (MachineDocument.parent_id == family_id)
+            ).order_by(MachineDocument.version.desc()).all()
+            
+            # Use the latest version as the main document
+            latest_doc = versions[0] if versions else doc
+            result.append(MachineDocumentWithVersions(
+                id=latest_doc.id,
+                document_name=latest_doc.document_name,
+                document_url=latest_doc.document_url,
+                version=latest_doc.version,
+                machine_folder_id=latest_doc.machine_folder_id,
+                parent_id=latest_doc.parent_id,
+                created_at=latest_doc.created_at,
+                updated_at=latest_doc.updated_at,
+                user_id=latest_doc.user_id,
                 versions=versions
             ))
             
@@ -531,6 +663,7 @@ async def get_folder_documents(
                 parent_id=latest_doc.parent_id,
                 created_at=latest_doc.created_at,
                 updated_at=latest_doc.updated_at,
+                user_id=latest_doc.user_id,
                 versions=versions
             ))
             
@@ -566,6 +699,7 @@ async def get_machine_document(
         parent_id=document.parent_id,
         created_at=document.created_at,
         updated_at=document.updated_at,
+        user_id=document.user_id,
         versions=versions
     )
 

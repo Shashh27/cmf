@@ -46,6 +46,7 @@ __all__ = [
     "Document",
     "ToolWithPart",
     "Order",
+    "OrderScheduleStatus",
     "OrderDocument",
     "OperationDocument",
     "OrderPartsRawMaterialLinked",

@@ -90,6 +90,7 @@ class MachineDocument(Base):
     document_url = Column(String(500), nullable=False)
     version = Column(Float, nullable=False, default=1.0)
     parent_id = Column(Integer, ForeignKey("documents.machine_documents.id"), nullable=True)
+    document_type = Column(String(50), nullable=True)  # e.g., 'maintenance', 'technical', 'manual', None for general
     created_at = Column(DateTime(timezone=False), default=get_ist_time)
     updated_at = Column(DateTime(timezone=False), default=get_ist_time, onupdate=get_ist_time)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)

@@ -97,6 +97,7 @@ class MachineDocumentBase(BaseModel):
     machine_folder_id: Optional[int] = None
     machine_id: Optional[int] = None
     parent_id: Optional[int] = None
+    document_type: Optional[str] = None
     user_id: int
 
 # Machine Folder Response schemas
@@ -135,6 +136,7 @@ class MachineDocumentUpdate(BaseModel):
     document_url: Optional[str] = None
     machine_folder_id: Optional[int] = None
     machine_id: Optional[int] = None
+    document_type: Optional[str] = None
     user_id: int
 
 # Machine Folder Response with nested data

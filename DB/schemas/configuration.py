@@ -158,6 +158,9 @@ class PokayokeChecklistItemBase(BaseModel):
 
 class PokayokeMachineAssignmentBase(BaseModel):
     machine_id: int
+    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
+    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
+    scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
 
 
 # Response schemas
@@ -218,6 +221,9 @@ class PokayokeChecklistItemUpdate(BaseModel):
 class PokayokeMachineAssignmentUpdate(BaseModel):
     checklist_id: Optional[int] = None
     machine_id: Optional[int] = None
+    frequency: Optional[str] = None
+    shift: Optional[str] = None
+    scheduled_day: Optional[str] = None
 
 
 # Response with nested data
@@ -243,6 +249,9 @@ class PokayokeCompletedLogBase(BaseModel):
     all_items_passed: bool
     comments: Optional[str] = None
     read: bool = False
+    assignment_id: Optional[int] = None
+    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
+    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both'
 
 
 class PokayokeCompletedLog(PokayokeCompletedLogBase):
@@ -293,6 +302,9 @@ class PokayokeCompletedLogUpdate(BaseModel):
     all_items_passed: Optional[bool] = None
     comments: Optional[str] = None
     read: Optional[bool] = None
+    assignment_id: Optional[int] = None
+    frequency: Optional[str] = None
+    shift: Optional[str] = None
 
 
 class PokayokeItemResponseUpdate(BaseModel):
@@ -310,6 +322,7 @@ class PokayokeCompletedLogWithResponses(PokayokeCompletedLog):
     part: Optional["PartSchema"] = None
     operator: Optional[AccessUserResponse] = None
     order: Optional["OrderSchema"] = None
+    machine_assignment: Optional[PokayokeMachineAssignment] = None
 
 
 from .oms import Part as PartSchema, Order as OrderSchema
