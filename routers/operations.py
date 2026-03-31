@@ -9,6 +9,7 @@ import csv
 from pydantic import BaseModel
 import pdfplumber
 from docx import Document as DocxDocument
+import openpyxl
 
 
 from DB.database import get_db
@@ -43,7 +44,7 @@ def _normalize_header(name: str) -> str:
 
 def _match_column(header: str) -> Optional[str]:
     h = _normalize_header(header)
-    if "op" in h and "number" in h:
+    if "op" in h and ("number" in h or "num" in h or "#" in h):
         return "operation_number"
     if "operation" in h and "name" in h:
         return "operation_name"
@@ -51,69 +52,129 @@ def _match_column(header: str) -> Optional[str]:
         return "setup_time"
     if "cycle" in h:
         return "cycle_time"
-    if "instruction" in h:
+    if "instruction" in h or "work inst" in h:
         return "work_instructions"
     if "note" in h:
         return "notes"
     return None
 
 
-def _parse_rows(rows):
+def _find_header_row(rows: list) -> int:
+    """
+    Scan rows top-to-bottom and return the index of the first row
+    that contains BOTH an op-number column and an operation-name column.
+    Returns -1 if not found.
+    This lets us skip title rows, meta-info rows, blank rows etc.
+    """
+    for idx, row in enumerate(rows):
+        mapped = set()
+        for cell in row:
+            key = _match_column(str(cell) if cell is not None else "")
+            if key:
+                mapped.add(key)
+        if "operation_number" in mapped and "operation_name" in mapped:
+            return idx
+    return -1
+
+
+def _parse_rows(rows: list) -> List[OperationPreview]:
     if not rows:
         return []
-    header = rows[0]
-    header_map = {}
-    for idx, name in enumerate(header):
-        key = _match_column(name or "")
+
+    # Find the actual header row (skip title / meta rows at top)
+    header_idx = _find_header_row(rows)
+    if header_idx == -1:
+        return []
+
+    header = rows[header_idx]
+    header_map: dict[str, int] = {}
+    for col_idx, cell in enumerate(header):
+        key = _match_column(str(cell) if cell is not None else "")
         if key:
-            header_map[key] = idx
+            header_map[key] = col_idx
+
     if "operation_number" not in header_map or "operation_name" not in header_map:
         return []
+
     result: List[OperationPreview] = []
-    for row in rows[1:]:
-        cells = [(c or "").strip() for c in row]
+    for row in rows[header_idx + 1:]:
+        # Pad row to at least the length of the header
+        cells = [(str(c) if c is not None else "").strip() for c in row]
+        while len(cells) <= max(header_map.values()):
+            cells.append("")
+
+        # Skip completely empty rows and meta/note rows that slip through
         if not "".join(cells).strip():
             continue
+
+        op_num  = cells[header_map["operation_number"]]
+        op_name = cells[header_map["operation_name"]]
+
+        # Skip rows where op_number or op_name look like note/footer lines
+        if not op_num or not op_name:
+            continue
+
         data = {
-            "operation_number": cells[header_map["operation_number"]],
-            "operation_name": cells[header_map["operation_name"]],
-            "setup_time": cells[header_map["setup_time"]] if "setup_time" in header_map else None,
-            "cycle_time": cells[header_map["cycle_time"]] if "cycle_time" in header_map else None,
+            "operation_number":  op_num,
+            "operation_name":    op_name,
+            "setup_time":        cells[header_map["setup_time"]]        if "setup_time"        in header_map else None,
+            "cycle_time":        cells[header_map["cycle_time"]]        if "cycle_time"        in header_map else None,
             "work_instructions": cells[header_map["work_instructions"]] if "work_instructions" in header_map else None,
-            "notes": cells[header_map["notes"]] if "notes" in header_map else None,
+            "notes":             cells[header_map["notes"]]             if "notes"             in header_map else None,
         }
+        # Replace empty strings with None for optional fields
+        for k in ("setup_time", "cycle_time", "work_instructions", "notes"):
+            if data[k] == "":
+                data[k] = None
+
         result.append(OperationPreview(**data))
+
     return result
 
 
-def _parse_csv(content: bytes):
+# ── CSV ───────────────────────────────────────────────────────────────────────
+def _parse_csv(content: bytes) -> List[OperationPreview]:
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = content.decode("latin-1")
     reader = csv.reader(io.StringIO(text))
-    rows = [row for row in reader if any((cell or "").strip() for cell in row)]
+    # Keep every row (including blanks) so _find_header_row can locate the header
+    rows = list(reader)
     return _parse_rows(rows)
 
 
-def _parse_docx(content: bytes):
-    doc = DocxDocument(io.BytesIO(content))
-    for table in doc.tables:
+# ── XLSX ──────────────────────────────────────────────────────────────────────
+def _parse_xlsx(content: bytes) -> List[OperationPreview]:
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
         rows = []
-        for row in table.rows:
-            rows.append([cell.text for cell in row.cells])
+        for row in ws.iter_rows(values_only=True):
+            rows.append(list(row))
         parsed = _parse_rows(rows)
         if parsed:
             return parsed
     return []
 
 
-def _parse_pdf(content: bytes):
+# ── DOCX ──────────────────────────────────────────────────────────────────────
+def _parse_docx(content: bytes) -> List[OperationPreview]:
+    doc = DocxDocument(io.BytesIO(content))
+    for table in doc.tables:
+        rows = [[cell.text for cell in row.cells] for row in table.rows]
+        parsed = _parse_rows(rows)
+        if parsed:
+            return parsed
+    return []
+
+
+# ── PDF ───────────────────────────────────────────────────────────────────────
+def _parse_pdf(content: bytes) -> List[OperationPreview]:
     operations: List[OperationPreview] = []
     with pdfplumber.open(io.BytesIO(content)) as pdf:
         for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
+            for table in page.extract_tables():
                 parsed = _parse_rows(table)
                 if parsed:
                     operations.extend(parsed)
@@ -173,7 +234,6 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
             )
         data["operation_number"] = op_number
     else:
-        # Auto-generate next operation_number in steps of 10 (10,20,30,...)
         existing_ops = (
             db.query(OperationModel)
             .filter(OperationModel.part_id == part_id)
@@ -190,7 +250,6 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
         next_num = max_num + 10 if max_num > 0 else 10
         data["operation_number"] = str(next_num)
 
-    # Out-Source (part_type_id=2) requires from_date and to_date
     if part_type_id == 2:
         if not data.get("from_date") or not data.get("to_date"):
             raise HTTPException(
@@ -201,7 +260,6 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
     db.add(db_operation)
     db.commit()
     db.refresh(db_operation)
-    # Reload with user and attach part_type_name for response
     db_operation = (
         db.query(OperationModel)
         .options(joinedload(OperationModel.user))
@@ -219,7 +277,6 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
     if not operations:
         return []
 
-    # All operations must be for the same part_id (UI creates for one selected part)
     part_ids = {op.part_id for op in operations if op.part_id}
     if not part_ids or len(part_ids) != 1:
         raise HTTPException(
@@ -228,7 +285,6 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
         )
     part_id = next(iter(part_ids))
 
-    # Precompute next auto op-number (steps of 10) for blank operation_number entries
     existing_ops = db.query(OperationModel).filter(OperationModel.part_id == part_id).all()
     max_num = 0
     for op in existing_ops:
@@ -239,7 +295,6 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
         max_num = max(max_num, n)
     next_num = max_num + 10 if max_num > 0 else 10
 
-    # Track uniqueness inside this bulk request
     requested_numbers: set[str] = set()
     created_ids: List[int] = []
 
@@ -249,7 +304,6 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
             pt_id = data.get("part_type_id") or 1
             data["part_type_id"] = pt_id
 
-            # Validate required times only for non Out-Source operations
             setup_time_val = data.get("setup_time")
             cycle_time_val = data.get("cycle_time")
             zero_time = time(0, 0, 0)
@@ -268,7 +322,6 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
             if not data.get("part_id"):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="part_id is required for operations")
 
-            # Out-Source requires from/to
             if pt_id == 2:
                 if not data.get("from_date") or not data.get("to_date"):
                     raise HTTPException(
@@ -279,7 +332,6 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
             op_number_raw = data.get("operation_number")
             op_number = op_number_raw.strip() if isinstance(op_number_raw, str) else None
             if op_number:
-                # Validate uniqueness vs DB and within request
                 if op_number in requested_numbers:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -298,7 +350,6 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
                 data["operation_number"] = op_number
                 requested_numbers.add(op_number)
             else:
-                # Assign next available number, ensuring we don't clash with explicit numbers
                 while str(next_num) in requested_numbers:
                     next_num += 10
                 data["operation_number"] = str(next_num)
@@ -338,7 +389,6 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
 
 @router.get("/", response_model=List[Operation])
 def get_operations(user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all operations with user_name. Filter by user_id for module-specific views."""
     query = (
         db.query(OperationModel)
         .options(joinedload(OperationModel.user))
@@ -374,7 +424,6 @@ def get_operations(user_id: int | None = None, db: Session = Depends(get_db)):
 
 @router.get("/{operation_id}", response_model=Operation)
 def get_operation(operation_id: int, db: Session = Depends(get_db)):
-    """Get a specific operation by ID with user_name."""
     operation = (
         db.query(OperationModel)
         .options(joinedload(OperationModel.user))
@@ -395,21 +444,14 @@ def get_operation(operation_id: int, db: Session = Depends(get_db)):
     part_type = None
     if operation.part_type_id is not None:
         part_type = db.query(PartTypeModel).filter(PartTypeModel.id == operation.part_type_id).first()
-    if work_center:
-        operation.work_center_name = work_center.work_center_name
-    else:
-        operation.work_center_name = None
-    if machine:
-        operation.machine_name = machine.make
-    else:
-        operation.machine_name = None
+    operation.work_center_name = work_center.work_center_name if work_center else None
+    operation.machine_name = machine.make if machine else None
     operation.part_type_name = part_type.type_name if part_type else None
     return operation
 
 
 @router.get("/part/{part_id}", response_model=List[Operation])
 def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
-    """Get all operations for a specific part (FIFO by id) with user_name, tools, and documents."""
     query = (
         db.query(OperationModel)
         .options(
@@ -444,7 +486,6 @@ def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session
         op.work_center_name = work_center_map.get(op.workcenter_id)
         op.machine_name = machine_map.get(op.machine_id)
         op.part_type_name = part_type_map.get(op.part_type_id)
-        # Ensure tools are sorted by ID (FIFO)
         if op.tools:
             op.tools.sort(key=lambda x: x.id)
 
@@ -453,7 +494,6 @@ def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session
 
 @router.put("/{operation_id}", response_model=Operation)
 def update_operation(operation_id: int, operation: OperationUpdate, db: Session = Depends(get_db)):
-    """Update an operation"""
     db_operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not db_operation:
         raise HTTPException(
@@ -463,7 +503,6 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
 
     update_data = operation.model_dump(exclude_unset=True)
 
-    # If operation_number is being changed, enforce uniqueness per part
     if "operation_number" in update_data:
         new_op_num_raw = update_data.get("operation_number")
         new_op_num = new_op_num_raw.strip() if isinstance(new_op_num_raw, str) else None
@@ -498,7 +537,6 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
                 detail="Outsource operations require from_date and to_date",
             )
 
-    # Enforce mandatory non-zero setup and cycle time on update for non Out-Source
     zero_time = time(0, 0, 0)
     new_setup = update_data.get("setup_time") if "setup_time" in update_data else db_operation.setup_time
     new_cycle = update_data.get("cycle_time") if "cycle_time" in update_data else db_operation.cycle_time
@@ -531,7 +569,6 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
 
 @router.delete("/{operation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_operation(operation_id: int, db: Session = Depends(get_db)):
-    """Delete an operation and all associated data (documents, tools)"""
     db_operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not db_operation:
         raise HTTPException(
@@ -539,42 +576,32 @@ def delete_operation(operation_id: int, db: Session = Depends(get_db)):
             detail=f"Operation with id {operation_id} not found"
         )
 
-    # 1. Delete associated documents (MinIO files and DB records)
     documents = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id).all()
     minio_client = get_minio_client()
-    
+
     for doc in documents:
-        # Try to delete from MinIO
         try:
-            # Extract object name from URL
-            # URL format: http://endpoint/bucket/object_name
             if doc.document_url:
                 parsed_url = urlparse(doc.document_url)
                 path_parts = parsed_url.path.lstrip('/').split('/', 1)
-                
                 if len(path_parts) >= 2:
                     bucket_name = path_parts[0]
                     object_name = path_parts[1]
                     minio_client.client.remove_object(bucket_name, object_name)
                 elif not parsed_url.netloc and '/' in doc.document_url:
-                     # Assume format: bucket/object_name
-                     path_parts = doc.document_url.lstrip('/').split('/', 1)
-                     if len(path_parts) >= 2:
+                    path_parts = doc.document_url.lstrip('/').split('/', 1)
+                    if len(path_parts) >= 2:
                         bucket_name = path_parts[0]
                         object_name = path_parts[1]
                         minio_client.client.remove_object(bucket_name, object_name)
         except Exception as e:
             print(f"Error deleting file from MinIO for document {doc.id}: {str(e)}")
-            # Continue deleting DB record even if MinIO fails
-            
         db.delete(doc)
 
-    # 2. Delete associated tools
     tools = db.query(ToolWithPartModel).filter(ToolWithPartModel.operation_id == operation_id).all()
     for tool in tools:
         db.delete(tool)
 
-    # 3. Delete the operation
     db.delete(db_operation)
     db.commit()
     return None
@@ -591,6 +618,8 @@ async def parse_mpp_file(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext == ".csv":
         operations = _parse_csv(content)
+    elif ext in (".xlsx", ".xls"):
+        operations = _parse_xlsx(content)
     elif ext == ".docx":
         operations = _parse_docx(content)
     elif ext == ".pdf":
@@ -598,11 +627,11 @@ async def parse_mpp_file(file: UploadFile = File(...)):
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file type. Use DOCX, CSV, or PDF.",
+            detail="Unsupported file type. Use DOCX, CSV, XLSX, or PDF.",
         )
     if not operations:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Could not extract operations from file",
+            detail="Could not extract operations from file. Make sure the file contains columns: Op Number, Operation Name, Setup Time, Cycle Time, Work Instructions, Notes.",
         )
     return operations

@@ -108,6 +108,8 @@ class PartBase(BaseModel):
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
+    size: Optional[str] = None  # Optional size field (e.g., "25x25x160", "Ø210x110", "Tyre Coupling F160 Type:B")
+    qty: Optional[int] = None  # Optional quantity field
 
 
 class PartCreate(PartBase):
@@ -123,6 +125,8 @@ class PartUpdate(BaseModel):
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
+    size: Optional[str] = None  # Optional size field
+    qty: Optional[int] = None  # Optional quantity field
 
 
 class Part(PartBase):
@@ -132,6 +136,8 @@ class Part(PartBase):
     raw_material_status: Optional[str] = None  # From raw_materials.status: Available / Not Available / N/A
     priority: Optional[int] = None
     user_name: Optional[str] = None
+    size: Optional[str] = None  # Optional size field
+    qty: Optional[int] = None  # Optional quantity field
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -544,13 +550,17 @@ Operation.model_rebuild()
 # Order Parts Raw Material Linked Schemas
 # =======================
 class OrderPartsRawMaterialLinkedBase(BaseModel):
-    raw_material_id: int
+    stock_id: int
     part_id: int
     order_id: int
-    order_quantity: Optional[int] = None
-    mass: Optional[float] = None
-    material_status: Optional[str] = None
+    used_quantity: int = 1
     linkage_group_id: Optional[str] = None
+    # Procurement fields
+    is_procurement: bool = False
+    procurement_quantity: Optional[int] = None
+    procurement_weight: Optional[float] = None
+    vendor_id: Optional[int] = None
+    procurement_status: str = "pending"
     user_id: Optional[int] = None
 
 
@@ -559,13 +569,17 @@ class OrderPartsRawMaterialLinkedCreate(OrderPartsRawMaterialLinkedBase):
 
 
 class OrderPartsRawMaterialLinkedUpdate(BaseModel):
-    raw_material_id: Optional[int] = None
+    stock_id: Optional[int] = None
     part_id: Optional[int] = None
     order_id: Optional[int] = None
-    order_quantity: Optional[int] = None
-    mass: Optional[float] = None
-    material_status: Optional[str] = None
+    used_quantity: Optional[int] = None
     linkage_group_id: Optional[str] = None
+    # Procurement fields
+    is_procurement: Optional[bool] = None
+    procurement_quantity: Optional[int] = None
+    procurement_weight: Optional[float] = None
+    vendor_id: Optional[int] = None
+    procurement_status: Optional[str] = None
     user_id: Optional[int] = None
 
 
@@ -580,13 +594,12 @@ class OrderPartsRawMaterialLinked(OrderPartsRawMaterialLinkedBase):
 
 class OrderPartsRawMaterialLinkedWithDetails(OrderPartsRawMaterialLinked):
     material_name: Optional[str] = None
+    form_type: Optional[str] = None
     part_name: Optional[str] = None
     part_number: Optional[str] = None
-    order_quantity: Optional[int] = None
-    mass: Optional[float] = None
+    used_quantity: Optional[int] = None
     sale_order_number: Optional[str] = None
     product_name: Optional[str] = None
-    material_status: Optional[str] = None
     linkage_group_id: Optional[str] = None
     updated_at: Optional[datetime] = None
 

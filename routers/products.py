@@ -468,13 +468,11 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     all_machines = db.query(MachineModel).all()
     machine_map = {m.id: m.make for m in all_machines}
 
-    # Get all raw materials for mapping (name + status from raw_materials table only)
+    # Get all raw materials for mapping (name only - simplified model)
     all_raw_materials = db.query(RawMaterialModel).all()
     raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
-    raw_material_status_map = {}
-    for rm in all_raw_materials:
-        s = (rm.status or "").strip().upper()
-        raw_material_status_map[rm.id] = "Available" if s == "AVAILABLE" else "Not Available"
+    # Simplified raw materials don't have status - always available
+    raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
 
     # Get all part types for mapping (avoids N+1 per part in create_part_details)
     all_part_types = db.query(PartTypeModel).all()
@@ -604,6 +602,8 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
             'user_id': part.user_id,
+            'size': part.size,  # New optional size field
+            'qty': part.qty,    # New optional quantity field
             'type_name': part_type_map.get(part.type_id),
             'raw_material_name': raw_material_map.get(part.raw_material_id),
             'raw_material_status': raw_material_status,

@@ -18,35 +18,51 @@ from DB.schemas.oms import (
 
 def _linkage_to_dict(linkage: OrderPartsRawMaterialLinked) -> dict:
     """Convert a linkage ORM object (with relationships loaded) to response dict."""
-    rm = linkage.raw_material
+    stock = linkage.stock_item
     pt = linkage.part
     od = linkage.order
+    vendor = linkage.vendor
     product = od.product if od is not None else None
+    # Get material from stock if available
+    rm = stock.material if stock else None
+    
     return {
         "id": linkage.id,
-        "raw_material_id": linkage.raw_material_id,
+        "stock_id": linkage.stock_id,
         "part_id": linkage.part_id,
         "order_id": linkage.order_id,
+        "used_quantity": linkage.used_quantity,
+        "linkage_group_id": linkage.linkage_group_id,
+        "is_procurement": linkage.is_procurement,
+        "procurement_quantity": linkage.procurement_quantity,
+        "procurement_weight": linkage.procurement_weight,
+        "vendor_id": linkage.vendor_id,
+        "procurement_status": linkage.procurement_status,
+        "user_id": linkage.user_id,
         "created_at": linkage.created_at,
         "updated_at": linkage.updated_at,
-        "linkage_group_id": linkage.linkage_group_id,
+        # Legacy fields for compatibility
+        "raw_material_id": stock.material_id if stock else None,
         "material_name": rm.material_name if rm else None,
         "part_name": pt.part_name if pt else None,
         "part_number": pt.part_number if pt else None,
-        "order_quantity": linkage.order_quantity if linkage.order_quantity is not None else (rm.quantity if rm else None),
-        "mass": linkage.mass if linkage.mass is not None else (rm.mass if rm else None),
+        "order_quantity": linkage.used_quantity,
+        "mass": stock.mass if stock else None,
         "sale_order_number": od.sale_order_number if od else None,
         "product_name": product.product_name if product else None,
-        "material_status": linkage.material_status if linkage.material_status is not None else (rm.status if rm else None),
+        "material_status": stock.status if stock else None,
+        "vendor_name": vendor.company_name if vendor else None,
     }
 
 
 def _load_linkages(query):
     """Apply joinedload to a linkage query so all related data is fetched in one SQL call."""
+    from DB.models.inventory import RawMaterialStock, RawMaterial
     return query.options(
-        joinedload(OrderPartsRawMaterialLinked.raw_material),
+        joinedload(OrderPartsRawMaterialLinked.stock_item).joinedload(RawMaterialStock.material),
         joinedload(OrderPartsRawMaterialLinked.part),
         joinedload(OrderPartsRawMaterialLinked.order).joinedload(Order.product),
+        joinedload(OrderPartsRawMaterialLinked.vendor),
     )
 
 router = APIRouter(
@@ -62,6 +78,9 @@ class BulkCreateRequest(BaseModel):
     order_id: int
     order_quantities: Optional[Dict[int, int]] = None
     order_masses: Optional[Dict[int, float]] = None
+    procurement_quantities: Optional[Dict[int, int]] = None
+    procurement_weights: Optional[Dict[int, float]] = None
+    vendor_id: Optional[int] = None
     linkage_group_id: Optional[str] = None  # If provided, same ID used for all orders in one Submit
     user_id: Optional[int] = None  # creator/owner of these linkages
 
@@ -93,80 +112,83 @@ def create_bulk_linkages(request: BulkCreateRequest, db: Session = Depends(get_d
         )
 
     # Pre-fetch all referenced raw materials and parts in two queries
-    raw_materials_map = {
-        rm.id: rm
-        for rm in db.query(RawMaterial).filter(RawMaterial.id.in_(request.raw_material_ids)).all()
-    }
+    from DB.models.inventory import RawMaterialStock
+    raw_material_stocks = db.query(RawMaterialStock).filter(
+        RawMaterialStock.id.in_(request.raw_material_ids)
+    ).all()
+    
     parts_map = {
         p.id: p
         for p in db.query(Part).filter(Part.id.in_(request.part_ids)).all()
     }
 
-    for rm_id in request.raw_material_ids:
-        if rm_id not in raw_materials_map:
-            raise HTTPException(status_code=404, detail=f"Raw material with id {rm_id} not found")
+    # Validate stock items exist
+    stocks_map = {stock.id: stock for stock in raw_material_stocks}
+    for stock_id in request.raw_material_ids:
+        if stock_id not in stocks_map:
+            raise HTTPException(status_code=404, detail=f"Raw material stock with id {stock_id} not found")
+    
     for p_id in request.part_ids:
         if p_id not in parts_map:
             raise HTTPException(status_code=404, detail=f"Part with id {p_id} not found")
 
     qty_map = request.order_quantities or {}
     mass_map = request.order_masses or {}
+    proc_qty_map = request.procurement_quantities or {}
+    proc_weight_map = request.procurement_weights or {}
 
     linkage_group_id = request.linkage_group_id or uuid.uuid4().hex
 
-    # Only skip if same (order, raw_material, part, batch) already exists - allow same part/order/material in a new batch
+    # Check for existing linkages
     existing_set = {
-        (l.raw_material_id, l.part_id, (l.linkage_group_id or ""))
+        (l.stock_id, l.part_id, (l.linkage_group_id or ""))
         for l in db.query(
-            OrderPartsRawMaterialLinked.raw_material_id,
+            OrderPartsRawMaterialLinked.stock_id,
             OrderPartsRawMaterialLinked.part_id,
             OrderPartsRawMaterialLinked.linkage_group_id,
         ).filter(OrderPartsRawMaterialLinked.order_id == request.order_id).all()
     }
 
     new_linkages = []
-    for raw_material_id in request.raw_material_ids:
+    for stock_id in request.raw_material_ids:
         for part_id in request.part_ids:
-            if (raw_material_id, part_id, linkage_group_id) in existing_set:
+            if (stock_id, part_id, linkage_group_id) in existing_set:
                 continue
-            rm = raw_materials_map[raw_material_id]
+            
+            stock = stocks_map[stock_id]
+            
+            # Check if procurement is needed
+            procurement_qty = proc_qty_map.get(stock_id, 0)
+            procurement_weight = proc_weight_map.get(stock_id, 0)
+            is_procurement = (procurement_qty > 0 or procurement_weight > 0)
+            
             db_linkage = OrderPartsRawMaterialLinked(
-                raw_material_id=raw_material_id,
+                stock_id=stock_id,
                 part_id=part_id,
                 order_id=request.order_id,
-                order_quantity=qty_map.get(raw_material_id, rm.quantity),
-                mass=mass_map.get(raw_material_id, rm.mass),
-                material_status="purchase request",
+                used_quantity=qty_map.get(stock_id, 1),
                 linkage_group_id=linkage_group_id,
+                is_procurement=is_procurement,
+                procurement_quantity=procurement_qty if procurement_qty > 0 else None,
+                procurement_weight=procurement_weight if procurement_weight > 0 else None,
+                vendor_id=request.vendor_id if is_procurement else None,
+                procurement_status="pending" if is_procurement else "completed",
                 user_id=request.user_id,
             )
             db.add(db_linkage)
             new_linkages.append(db_linkage)
 
     db.commit()
-    for lnk in new_linkages:
-        db.refresh(lnk)
+    for linkage in new_linkages:
+        db.refresh(linkage)
 
-    result = []
-    for lnk in new_linkages:
-        rm = raw_materials_map[lnk.raw_material_id]
-        pt = parts_map[lnk.part_id]
-        result.append({
-            "id": lnk.id,
-            "raw_material_id": lnk.raw_material_id,
-            "part_id": lnk.part_id,
-            "order_id": lnk.order_id,
-            "created_at": lnk.created_at.isoformat() if lnk.created_at else None,
-            "linkage_group_id": lnk.linkage_group_id,
-            "material_name": rm.material_name,
-            "part_name": pt.part_name,
-            "part_number": pt.part_number,
-            "order_quantity": lnk.order_quantity,
-            "mass": lnk.mass,
-            "sale_order_number": order.sale_order_number,
-            "project_name": order.project_name,
-            "material_status": lnk.material_status,
-        })
+    # Load relationships for response
+    result = _load_linkages(
+        db.query(OrderPartsRawMaterialLinked).filter(
+            OrderPartsRawMaterialLinked.id.in_([linkage.id for linkage in new_linkages])
+        )
+    ).all()
+    
     return result
 
 
