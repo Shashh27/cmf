@@ -66,6 +66,15 @@ from .inventory import (
     ToolsListCreate,
     ToolsListUpdate
 )
+from .scheduling import (
+    ProductionLogStatus,
+    ProductionLogBase,
+    ProductionLogCreate,
+    ProductionLogUpdate,
+    ProductionLogResponse,
+    ProductionLogWithDetails,
+    ProductionLogStatusUpdate
+)
 
 __all__ = [
     "Product",
@@ -127,5 +136,12 @@ __all__ = [
     "RawMaterialUpdate",
     "ToolsList",
     "ToolsListCreate",
-    "ToolsListUpdate"
+    "ToolsListUpdate",
+    "ProductionLogStatus",
+    "ProductionLogBase",
+    "ProductionLogCreate",
+    "ProductionLogUpdate",
+    "ProductionLogResponse",
+    "ProductionLogWithDetails",
+    "ProductionLogStatusUpdate"
 ]
