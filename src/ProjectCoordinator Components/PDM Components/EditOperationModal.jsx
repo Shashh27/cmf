@@ -79,6 +79,7 @@ const EditOperationModal = ({
 
   const fromDateWatch = Form.useWatch('from_date', form);
   const partTypeWatch = Form.useWatch('part_type_id', form);
+  const operationNameWatch = Form.useWatch('operation_name', form);
 
   // ── fetch helpers ──────────────────────────────────────────────────────────
   const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
@@ -537,8 +538,46 @@ const EditOperationModal = ({
           </Col>
         )}
         <Col xs={24} sm={16} md={12}>
-          <Form.Item name="operation_name" label="Operation Name" rules={[{ required: true, message: 'Please enter operation name' }]} getValueFromEvent={e => e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30)}>
-            <Input prefix={<FileTextOutlined className="text-gray-400" />} autoComplete="off" maxLength={30} />
+          <Form.Item name="operation_name" label="Operation Name" rules={[{ required: true, message: 'Please select operation name' }]}>
+            {operationNameWatch === 'New' ? (
+              <Input 
+                placeholder="Enter custom operation name" 
+                prefix={<FileTextOutlined className="text-gray-400" />} 
+                autoComplete="off" 
+                maxLength={30}
+                onChange={(e) => {
+                  const cleanedValue = e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
+                  form.setFieldValue('operation_name', cleanedValue);
+                }}
+              />
+            ) : (
+              <Select 
+                placeholder="Select Operation" 
+                allowClear
+                onChange={(value) => {
+                  if (value === 'New') {
+                    form.setFieldValue('operation_name', '');
+                  }
+                }}
+              >
+                <Select.Option value="Heat Treatment">Heat Treatment</Select.Option>
+                <Select.Option value="Cutting">Cutting</Select.Option>
+                <Select.Option value="Drilling">Drilling</Select.Option>
+                <Select.Option value="Milling">Milling</Select.Option>
+                <Select.Option value="Turning">Turning</Select.Option>
+                <Select.Option value="Gear Hobbing">Gear Hobbing</Select.Option>
+                <Select.Option value="Gear Cutting">Gear Cutting</Select.Option>
+                <Select.Option value="Gear grinding">Gear grinding</Select.Option>
+                <Select.Option value="Surface Grinding">Surface Grinding</Select.Option>
+                <Select.Option value="Grooving">Grooving</Select.Option>
+                <Select.Option value="Threading">Threading</Select.Option>
+                <Select.Option value="Inspection">Inspection</Select.Option>
+                <Select.Option value="Die Siking">Die Siking</Select.Option>
+                <Select.Option value="EDM">EDM</Select.Option>
+                <Select.Option value="Laser cutting">Laser cutting</Select.Option>
+                <Select.Option value="New">New (Custom)</Select.Option>
+              </Select>
+            )}
           </Form.Item>
         </Col>
         <Col xs={24} sm={24} md={8}>

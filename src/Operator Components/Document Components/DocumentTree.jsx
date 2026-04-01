@@ -66,7 +66,7 @@ const OperatorDocumentTree = ({ onNodeSelect }) => {
         }
       }
 
-      const baseUrl = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}`;
+      const baseUrl = `${API_BASE_URL}/`;
 
       const requests = [];
       if (machineId != null) {

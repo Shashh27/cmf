@@ -33,13 +33,13 @@ const OperatorDocumentContent = ({ selectedNode }) => {
     try {
       let url = '';
       if (selectedNode.type === 'common-folder') {
-        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders/${selectedNode.folderId}/documents`;
+        url = `${API_BASE_URL}/common-documents/folders/${selectedNode.folderId}/documents`;
       } else if (selectedNode.type === 'common-root') {
-        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/all/documents`;
+        url = `${API_BASE_URL}/common-documents/all/documents`;
       } else if (selectedNode.type === 'machine-folder') {
-        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/folders/${selectedNode.folderId}/documents`;
+        url = `${API_BASE_URL}/machine-documents/folders/${selectedNode.folderId}/documents`;
       } else if (selectedNode.type === 'machine') {
-        url = `http://${API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/machines/${selectedNode.machineId}/documents`;
+        url = `${API_BASE_URL}/machine-documents/machines/${selectedNode.machineId}/documents`;
       }
 
       if (!url) {
