@@ -622,7 +622,7 @@ class SchedulerEngine:
                     'part_name':            p.part_name,
                     'order_id':             order_id,
                     'sale_order_number':    order['sale_order_number'],
-                    'quantity':             order['quantity'],
+                    'quantity':             getattr(p, 'qty', None) or order['quantity'],
                     'raw_material_ok':      rm_stat.lower() in ('available', 'in stock', 'ready', '') or not rm_stat.startswith('No Raw'),
                     'raw_material_status':  rm_stat,
                     # Used in C2.1 to apply/break the cascade per part
@@ -809,7 +809,7 @@ class SchedulerEngine:
 
             for order, part_data in scheduled_items:
                 order_id = order['order_id']
-                quantity = order['quantity']
+                quantity = part_data['quantity']  # Use part quantity, not order quantity
 
                 # Count distinct orders for reporting
                 if order_id not in seen_orders:

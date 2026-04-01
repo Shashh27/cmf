@@ -87,10 +87,16 @@ class Part(Base):
     part_name = Column(String, nullable=False)
     part_number = Column(String, unique=True, nullable=False)
 
+    part_detail = Column(String, nullable=True)
+
     type_id = Column(Integer, ForeignKey("oms.part_types.id"))
     raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"))
     assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
     product_id = Column(Integer, ForeignKey("oms.products.id"))
+
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    size = Column(String, nullable=True)
+    qty = Column(Integer, nullable=True, default=1)
 
     type = relationship("PartType", back_populates="parts")
     raw_material = relationship("RawMaterial")

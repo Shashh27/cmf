@@ -2,12 +2,13 @@ from datetime import date, time
 from typing import List, Literal, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-ShiftCode = Literal["GENERAL", "NEXT", "NON_WORKING", "CUSTOM"]
+ShiftCode = Literal["GENERAL", "NEXT", "NON_WORKING", "HALF", "CUSTOM"]
 
 SHIFT_TIME_LOOKUP: dict[ShiftCode, tuple[time, time]] = {
     "GENERAL": (time(hour=8, minute=30), time(hour=17, minute=0)),
     "NEXT": (time(hour=17, minute=0), time(hour=21, minute=0)),
     "NON_WORKING": (time(hour=8, minute=30), time(hour=13, minute=0)),
+    "HALF": (time(hour=8, minute=30), time(hour=13, minute=0)),  # Half shift for working day
     "CUSTOM": (time(hour=0, minute=0), time(hour=0, minute=0)),  # Will be overridden
 }
 
@@ -51,6 +52,11 @@ class ShiftHoursConfigCreate(BaseModel):
         if "NON_WORKING" in deduped and len(deduped) > 1:
             raise ValueError("NON_WORKING shift cannot be combined with other shifts")
         
+        # HALF shift can be selected on working days
+        # Cannot combine HALF with other shifts
+        if "HALF" in deduped and len(deduped) > 1:
+            raise ValueError("HALF shift cannot be combined with other shifts")
+        
         # CUSTOM shift can be selected on any day
         # If CUSTOM is selected, validate custom times are provided
         if "CUSTOM" in deduped:
@@ -92,6 +98,11 @@ class ShiftHoursConfigUpdate(BaseModel):
         # Cannot combine NON_WORKING with other shifts
         if "NON_WORKING" in deduped and len(deduped) > 1:
             raise ValueError("NON_WORKING shift cannot be combined with other shifts")
+        
+        # HALF shift can be selected on working days
+        # Cannot combine HALF with other shifts
+        if "HALF" in deduped and len(deduped) > 1:
+            raise ValueError("HALF shift cannot be combined with other shifts")
         
         # CUSTOM shift can be selected on any day
         # If CUSTOM is selected, validate custom times are provided

@@ -1600,3 +1600,5 @@ def get_schedule_history(db: Session = Depends(get_db)):
 
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch schedule history: {str(e)}")
+
+
