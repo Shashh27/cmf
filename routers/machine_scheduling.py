@@ -1625,42 +1625,65 @@ def get_machine_operations(
     db: Session = Depends(get_db)
 ):
     """
-    Fetch all planned schedule items (operations) for a specific machine.
-    Returns operations from the planned_schedule_items table.
+    Fetch all planned schedule items (operations) for a specific machine,
+    with full enriched response (same as view_schedule API).
     """
     try:
         # Check if machine exists
-        machine = db.query(Machine).filter(Machine.id == machine_id).first()
-        if not machine:
+        machine_obj = db.query(Machine).filter(Machine.id == machine_id).first()
+        if not machine_obj:
             raise HTTPException(404, f"Machine with ID {machine_id} not found")
 
-        # Fetch all planned schedule items for this machine
-        items = db.query(PlannedScheduleItem).filter(
-            PlannedScheduleItem.machine_id == machine_id
-        ).order_by(PlannedScheduleItem.planned_start_time.asc()).all()
+        rows = (
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority)
+            .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
+            .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .outerjoin(
+                OrderPartPriority,
+                (OrderPartPriority.order_id == PlannedScheduleItem.sale_order_id) &
+                (OrderPartPriority.part_id == PlannedScheduleItem.part_id)
+            )
+            .filter(PlannedScheduleItem.machine_id == machine_id)
+            .order_by(PlannedScheduleItem.planned_start_time)
+            .all()
+        )
 
-        result = []
-        for item in items:
-            result.append({
-                "id": item.id,
-                "part_id": item.part_id,
-                "part_number": item.part_number,
-                "sale_order_id": item.sale_order_id,
-                "sale_order_number": item.sale_order_number,
-                "operation_id": item.operation_id,
-                "machine_id": item.machine_id,
+        result = [
+            {
+                "schedule_id":        item.id,
+                "sale_order_id":      item.sale_order_id,
+                "sale_order_number":  item.sale_order_number,
+                "part_id":            item.part_id,
+                "part_number":        item.part_number,
+                "priority":           priority.priority if priority else None,
+                "order_part_priority_id": priority.id if priority else None,
+                "operation_id":       item.operation_id,
+                "operation_number":   op.operation_number,
+                "operation_name":     op.operation_name,
+                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                "machine_id":         item.machine_id,
+                "machine_make":       machine.make if machine else None,
+                "machine_model":      machine.model if machine else None,
+                "machine_type":       machine.type if machine else None,
+                "work_center_id":     wc.id if wc else None,
+                "work_center_name":   wc.work_center_name if wc else None,
                 "planned_start_time": item.planned_start_time,
-                "planned_end_time": item.planned_end_time,
-                "total_quantity": item.total_quantity,
+                "planned_end_time":   item.planned_end_time,
+                "duration_hours":     round(
+                    (item.planned_end_time - item.planned_start_time).total_seconds() / 3600.0,
+                    4
+                ),
+                "total_quantity":     item.total_quantity,
                 "remaining_quantity": item.remaining_quantity,
-                "status": item.status,
-                "schedule_history_id": item.schedule_history_id,
-                "created_at": item.created_at,
-            })
+                "status":             item.status,
+            }
+            for item, op, machine, wc, priority in rows
+        ]
 
         return {
             "machine_id": machine_id,
-            "machine_name": machine.machine_make if hasattr(machine, 'machine_make') else None,
+            "machine_name": machine_obj.make if hasattr(machine_obj, 'make') else None,
             "total_operations": len(result),
             "operations": result
         }
@@ -1669,7 +1692,6 @@ def get_machine_operations(
         raise
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch machine operations: {str(e)}")
-
 
 # =========================================================
 # UPDATE OPERATION STATUS

@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     Date,
     UniqueConstraint,
+    DATE
 )
 from ..database import Base
 from sqlalchemy.orm import relationship
@@ -263,20 +264,23 @@ class MachineSchedule(Base):
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
 
-# class MachineProductionLog(Base):
-#     __tablename__ = "machine_production_log"
-#     __table_args__ = {"schema": "execution"}
+# class ProductionLog(Base):
+#     __tablename__ = "production_logs"
+#     __table_args__ = {'schema': 'scheduling'}
 
-#     id = Column(Integer, primary_key=True)
+#     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+#     operation_id = Column(Integer, ForeignKey('oms.operations.id'), nullable=False)
+#     operator_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=False)
+#     supervisor_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=True)
+#     notes = Column(Text, nullable=True)
+#     from_date = Column(DATE, nullable=False)
+#     from_time = Column(TIME, nullable=False)
+#     to_date = Column(DATE)
+#     to_time = Column(TIME)
+#     status = Column(String, default='pending', nullable=False)
+#     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
 
-#     machine_schedule_id = Column(Integer, ForeignKey("scheduling.machine_schedule.id"), nullable=False)
-
-#     actual_start_time = Column(DateTime, nullable=True)
-#     actual_end_time = Column(DateTime, nullable=True)
-
-#     produced_quantity = Column(Integer, nullable=True)
-#     # rejected_quantity = Column(Integer, nullable=True)
-
-#     operator_id = Column(Integer, ForeignKey("users.users.id"))
-
-#     status = Column(String)  # running/completed/paused
+#     # Relationships
+#     operation = relationship("Operation", back_populates="production_logs")
+#     operator = relationship("AccessUser", foreign_keys=[operator_id])
+#     supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])

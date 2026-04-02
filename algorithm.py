@@ -798,56 +798,36 @@ class SchedulerEngine:
                 for m in wc_machines
             }
 
-            # ── Phase B: initialise global clock ──────────────────────── #
-            first_activation = active_orders[0]['activation_time']
-            clock_seed       = max(start_date or first_activation, first_activation)
-            current_time     = self.adjust_to_shift(clock_seed)
-
-            # ── Phase C: main loop (by global priority) ─────────────────── #
-            orders_scheduled = 0
-            seen_orders: set = set()
-
+            # ── Phase C: Global Operation Queue for Maximum Machine Utilization ── #
+            # STRATEGY: Instead of processing parts sequentially, create a global
+            # operation queue sorted by priority, then schedule each operation ASAP.
+            #
+            # This solves the Reisauer waiting problem:
+            #   - Part 1: Op 10 (Magerle) → Op 20 (Voumard) → Op 30 (Reisauer)
+            #   - Part 3: Op 10 (Reisauer)
+            #   - OLD: Part 3 waits for Part 1's Op 30
+            #   - NEW: Part 3's Op 10 schedules ASAP when Reisauer is free
+            #
+            # Each operation finds its earliest start based on:
+            #   1. Machine availability (when does the machine become free)
+            #   2. Previous operation completion for THIS part only
+            #   3. Part activation time
+            
+            # Build global operation queue with priority information
+            global_ops_queue: List[Dict] = []
+            
             for order, part_data in scheduled_items:
                 order_id = order['order_id']
-                quantity = part_data['quantity']  # Use part quantity, not order quantity
-
-                # Count distinct orders for reporting
-                if order_id not in seen_orders:
-                    seen_orders.add(order_id)
-
-                # Edge case: zero quantity
+                part_id = part_data['part_id']
+                quantity = part_data['quantity']
+                
+                # Skip zero quantity
                 if quantity == 0:
                     skipped_orders.append(
                         f"Order {order['sale_order_number']}: quantity=0, skipped."
                     )
                     continue
-
-                # C1: enforce order activation time + shift
-                current_time = self.adjust_to_shift(
-                    max(current_time, order['activation_time'])
-                )
-
-                # C2: schedule this part (single part per iteration)
-                # ── C2.1: determine this part's start time ─────────── #
-                #
-                # MODIFICATION 2 — cascade-break for late-added parts:
-                #
-                # part_start = max(current_time, part_activation_time)
-                #
-                # • Original parts (activated WITH the order):
-                #     part_activation_time ≈ order.activated_at
-                #     → max() == current_time → cascade applies normally
-                #       (part starts right after the previous part ends)
-                #
-                # • Late-added parts (activated AFTER the order went live):
-                #     part_activation_time > order.activated_at
-                #     → if cascade end < activation_time, max() picks
-                #       activation_time → part cannot start before it was
-                #       even added to the system
-                part_start = self.adjust_to_shift(
-                    max(current_time, part_data['part_activation_time'])
-                )
-
+                
                 # Raw-material gate
                 if not part_data['raw_material_ok']:
                     rm_stat_val = part_data.get('raw_material_status', '')
@@ -860,9 +840,9 @@ class SchedulerEngine:
                         f"(order {order['sale_order_number']}): "
                         f"{reason} — part skipped."
                     )
-                    continue                      # do NOT advance current_time
-
-                # C2.2: operations for this part
+                    continue
+                
+                # Get operations for this part
                 operations = ops_by_part.get(part_data['part_id'], [])
                 if not operations:
                     parts_without_operations.append({
@@ -873,120 +853,180 @@ class SchedulerEngine:
                         'sale_order_number': order['sale_order_number'],
                         'reason':            'No operations defined for this part',
                     })
-                    continue                      # do NOT advance current_time
+                    continue
+                
+                # Get priority for this part
+                priority_row = (
+                    self.db.query(OrderPartPriority)
+                    .filter(
+                        OrderPartPriority.order_id == order_id,
+                        OrderPartPriority.part_id == part_id,
+                        OrderPartPriority.status == 'active'
+                    )
+                    .first()
+                )
+                part_priority = priority_row.priority if priority_row else 999
+                
+                # Calculate activation constraints
+                order_activation = self.adjust_to_shift(order['activation_time'])
+                part_activation = self.adjust_to_shift(part_data['part_activation_time'])
+                earliest_part_start = max(order_activation, part_activation)
+                
+                # Add all operations to global queue
+                for op_seq, operation in enumerate(operations):
+                    global_ops_queue.append({
+                        'order': order,
+                        'part_data': part_data,
+                        'operation': operation,
+                        'quantity': quantity,
+                        'priority': part_priority,
+                        'op_sequence': op_seq,  # 0, 1, 2, ... for operation order within part
+                        'earliest_part_start': earliest_part_start,
+                    })
+            
+            # Sort global queue by priority ONLY
+            # This allows operations from different parts to interleave on machines
+            # based on actual machine availability, not artificial sequence constraints
+            global_ops_queue.sort(key=lambda x: x['priority'])
+            
+            print(f"[DEBUG] Global operations queue: {len(global_ops_queue)} operations")
+            
+            # Track per-part operation completion times
+            # part_id -> last operation end time for that part
+            part_last_end_time: Dict[int, datetime] = {}
+            
+            # Track which parts have been scheduled (for reporting)
+            scheduled_part_ids: set = set()
+            
+            orders_scheduled = 0
+            seen_orders: set = set()
+            
+            # Schedule each operation from the global queue
+            for idx, op_item in enumerate(global_ops_queue):
+                order = op_item['order']
+                part_data = op_item['part_data']
+                operation = op_item['operation']
+                quantity = op_item['quantity']
+                op_sequence = op_item['op_sequence']
+                earliest_part_start = op_item['earliest_part_start']
+                
+                order_id = order['order_id']
+                part_id = part_data['part_id']
+                
+                print(f"[DEBUG] Processing Op #{idx+1}: Part {part_data['part_number']} Op {operation.operation_number} (seq={op_sequence})")
+                
+                # Count distinct orders for reporting
+                if order_id not in seen_orders:
+                    seen_orders.add(order_id)
+                    orders_scheduled += 1
+                
+                # Calculate when this operation can start
+                if op_sequence == 0:
+                    # First operation in this part
+                    op_cursor = earliest_part_start
+                    print(f"[DEBUG]   First operation in part, cursor={op_cursor}")
+                else:
+                    # Subsequent operation: wait for previous operation of THIS part
+                    prev_end_time = part_last_end_time.get(part_id, earliest_part_start)
+                    op_cursor = max(prev_end_time, earliest_part_start)
+                    print(f"[DEBUG]   Subsequent operation, prev_end={prev_end_time}, cursor={op_cursor}")
 
-                # C2.3: schedule each operation sequentially
-                op_cursor = part_start
-
-                for operation in operations:
-
-                    # ── MODIFICATION 3 — Out-Source operation ──────── #
-                    #
-                    # Identified by Operation.part_type_id == 2
-                    # (oms.part_types: id=1 IN-House, id=2 Out-Source)
-                    #
-                    # Rules:
-                    #   • No machine is allocated (machine_id = NULL)
-                    #   • planned_start_time = end time of the previous
-                    #     IN-HOUSE operation (op_cursor)
-                    #   • planned_end_time   = planned_start_time + 7 days
-                    #     (maximum provision for vendor turnaround)
-                    #   • Status set to 'outsource_pending'
-                    #   • op_cursor advances by 7 days so the next
-                    #     IN-HOUSE operation waits for the vendor
-                    if operation.part_type_id == OUT_SOURCE_TYPE_ID:
-                        os_start = op_cursor
-                        os_end   = op_cursor + OUT_SOURCE_PROVISION
-                        all_items.append(
-                            PlannedScheduleItem(
-                                part_id             = part_data['part_id'],
-                                part_number         = part_data['part_number'],
-                                sale_order_id       = part_data['order_id'],
-                                sale_order_number   = part_data['sale_order_number'],
-                                operation_id        = operation.id,
-                                machine_id          = None,   # no machine for out-source
-                                planned_start_time  = os_start,
-                                planned_end_time    = os_end,
-                                total_quantity      = quantity,
-                                remaining_quantity  = 0,
-                                status              = 'outsource_pending',
-                                schedule_history_id = history_id,
-                            )
+                # Handle Out-Source operation
+                if operation.part_type_id == OUT_SOURCE_TYPE_ID:
+                    os_start = op_cursor
+                    os_end   = op_cursor + OUT_SOURCE_PROVISION
+                    all_items.append(
+                        PlannedScheduleItem(
+                            part_id             = part_data['part_id'],
+                            part_number         = part_data['part_number'],
+                            sale_order_id       = part_data['order_id'],
+                            sale_order_number   = part_data['sale_order_number'],
+                            operation_id        = operation.id,
+                            machine_id          = None,   # no machine for out-source
+                            planned_start_time  = os_start,
+                            planned_end_time    = os_end,
+                            total_quantity      = quantity,
+                            remaining_quantity  = 0,
+                            status              = 'outsource_pending',
+                            schedule_history_id = history_id,
                         )
-                        op_cursor = os_end        # next op waits for vendor
-                        continue                  # skip machine-selection logic
-
-                    # ── IN-HOUSE operation: machine selection ──────── #
-                    #
-                    # Tier 1: operation.machine_id pinned + schedulable + available
-                    # Tier 2: pinned but broken down → find next available in WC (DYNAMIC)
-                    # Tier 3: no pin → earliest-free in work center (FIFO)
-
-                    machine: Optional[Machine] = None
-                    cand_start: datetime = op_cursor
-
-                    if operation.machine_id and operation.machine_id in all_machines:
-                        # Tier 1 – pinned machine
-                        pinned = all_machines[operation.machine_id]
-                        machine_free = self.machine_end_time.get(
-                            pinned.id, op_cursor
-                        )
-                        earliest = max(op_cursor, machine_free)
-                        avail = self._machine_next_available(pinned, earliest)
-
-                        if avail is not None:
-                            # Pinned machine is available
-                            machine, cand_start = pinned, avail
-                        else:
-                            # Tier 2 – pinned machine is broken (permanently OFF)
-                            # DYNAMIC RESCHEDULING: Find next available machine in same workcenter
-                            alt_machine, alt_start = self._pick_best_machine(
-                                operation.workcenter_id, machines_by_wc, op_cursor
-                            )
-                            if alt_machine:
-                                machine, cand_start = alt_machine, alt_start
-                                skipped_parts.append(
-                                    f"Part {part_data['part_number']}, "
-                                    f"Op {operation.operation_number}: "
-                                    f"pinned machine {operation.machine_id} is "
-                                    f"broken — reassigned to machine {machine.id}."
-                                )
-
-                    if machine is None:
-                        # Tier 3 – no pinned machine or pinned was broken with no alternative
-                        machine, cand_start = self._pick_best_machine(
+                    )
+                    # Update part completion time
+                    part_last_end_time[part_id] = os_end
+                    continue
+                
+                # IN-HOUSE operation: machine selection
+                machine: Optional[Machine] = None
+                cand_start: datetime = op_cursor
+                
+                if operation.machine_id and operation.machine_id in all_machines:
+                    # Tier 1 – pinned machine
+                    pinned = all_machines[operation.machine_id]
+                    machine_free = self.machine_end_time.get(
+                        pinned.id, op_cursor
+                    )
+                    earliest = max(op_cursor, machine_free)
+                    avail = self._machine_next_available(pinned, earliest)
+                    
+                    if avail is not None:
+                        # Pinned machine is available
+                        machine, cand_start = pinned, avail
+                    else:
+                        # Tier 2 – pinned machine broken, find alternative
+                        alt_machine, alt_start = self._pick_best_machine(
                             operation.workcenter_id, machines_by_wc, op_cursor
                         )
-
-                    if machine is None:
-                        skipped_parts.append(
-                            f"Part {part_data['part_number']}, "
-                            f"Op {operation.operation_number}: "
-                            f"no schedulable machine in WC "
-                            f"{operation.workcenter_id} — skipped."
-                        )
-                        continue                  # op_cursor unchanged
-
-                    # Schedule with shift / machine-OFF splitting
-                    blocks, op_end = self._schedule_operation_blocks(
-                        operation           = operation,
-                        machine             = machine,
-                        quantity            = quantity,
-                        op_start            = cand_start,
-                        schedule_history_id = history_id,
-                        part_data           = part_data,
+                        if alt_machine:
+                            machine, cand_start = alt_machine, alt_start
+                            skipped_parts.append(
+                                f"Part {part_data['part_number']}, "
+                                f"Op {operation.operation_number}: "
+                                f"pinned machine {operation.machine_id} is "
+                                f"broken — reassigned to machine {machine.id}."
+                            )
+                
+                if machine is None:
+                    # Tier 3 – no pin or pin broken, find earliest available
+                    machine, cand_start = self._pick_best_machine(
+                        operation.workcenter_id, machines_by_wc, op_cursor
                     )
-                    all_items.extend(blocks)
+                
+                if machine is None:
+                    skipped_parts.append(
+                        f"Part {part_data['part_number']}, "
+                        f"Op {operation.operation_number}: "
+                        f"no schedulable machine in WC "
+                        f"{operation.workcenter_id} — skipped."
+                    )
+                    continue
+                
+                # Schedule the operation
+                blocks, op_end = self._schedule_operation_blocks(
+                    operation           = operation,
+                    machine             = machine,
+                    quantity            = quantity,
+                    op_start            = cand_start,
+                    schedule_history_id = history_id,
+                    part_data           = part_data,
+                )
+                all_items.extend(blocks)
+                
+                print(f"[DEBUG]   Scheduled on {machine.make if machine else 'None'} from {cand_start} to {op_end}")
+                
+                # Update machine availability and part completion time
+                self.machine_end_time[machine.id] = op_end
+                part_last_end_time[part_id] = op_end
+                
+                # Track part as scheduled
+                scheduled_part_ids.add(part_id)
+                
+            parts_processed = len(scheduled_part_ids)
 
-                    # Update machine clock and op cursor
-                    self.machine_end_time[machine.id] = op_end
-                    op_cursor = op_end
-
-                # C2.4: part complete → advance global clock
-                current_time = op_cursor
-                parts_processed += 1
-
-            orders_scheduled = len(seen_orders)
+            # Calculate overall schedule end time (latest operation end across all machines)
+            overall_end_time = max(
+                [item.planned_end_time for item in all_items] 
+                if all_items else [start_date or datetime.now()]
+            )
 
             # ── Phase D: persist ──────────────────────────────────────── #
             if all_items:
@@ -1005,7 +1045,7 @@ class SchedulerEngine:
                 'orders_scheduled':          orders_scheduled,
                 'parts_processed':           parts_processed,
                 'start_date':                start_date,
-                'end_date':                  current_time,
+                'end_date':                  overall_end_time,
                 'skipped_orders':            skipped_orders,
                 'skipped_parts':             skipped_parts,
                 'parts_without_operations':  parts_without_operations,

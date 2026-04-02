@@ -1,10 +1,12 @@
-from pydantic import BaseModel
-from datetime import datetime, date
+from pydantic import BaseModel, Field
+from datetime import datetime, date, time
 from typing import List, Dict, Optional, Any
+from enum import Enum
 
 
 from DB.models.scheduling import PartScheduleStatus
 from DB.models.scheduling import OrderScheduleStatus
+# from DB.models.scheduling import ProductionLog
 
 
 class PartStatusUpdate(BaseModel):
@@ -38,21 +40,57 @@ class OrderScheduleStatusResponse(BaseModel):
     }
 
 
-# class StartOperationRequest(BaseModel):
-#     operator_id: Optional[int] = None
+# class ProductionLogStatus(str, Enum):
+#     PENDING = "pending"
+#     COMPLETED = "completed"
+#     REWORK = "rework"
 
 
-# class CompleteOperationRequest(BaseModel):
-#     produced_quantity: int
-#     rejected_quantity: int = 0
+# class ProductionLogBase(BaseModel):
+#     operation_id: int = Field(..., description="ID of the operation")
+#     operator_id: int = Field(..., description="ID of the operator")
+#     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor")
+#     notes: Optional[str] = Field(None, description="Additional notes")
+#     from_date: date = Field(..., description="Start date (yyyy-mm-dd)")
+#     from_time: time = Field(..., description="Start time (hh:mm:ss)")
+#     to_date: Optional[date] = Field(None, description="End date (yyyy-mm-dd)")
+#     to_time: Optional[time] = Field(None, description="End time (hh:mm:ss)")
+#     status: ProductionLogStatus = Field(ProductionLogStatus.PENDING, description="Status of production log")
 
 
-# class ProductionLogResponse(BaseModel):
-#     id: int
-#     machine_schedule_id: int
-#     status: str
-#     actual_start_time: Optional[datetime]
-#     actual_end_time: Optional[datetime]
+# class ProductionLogCreate(ProductionLogBase):
+#     pass
+
+
+# class ProductionLogUpdate(BaseModel):
+#     operation_id: Optional[int] = Field(None, description="ID of the operation")
+#     operator_id: Optional[int] = Field(None, description="ID of the operator")
+#     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor")
+#     notes: Optional[str] = Field(None, description="Additional notes")
+#     from_date: Optional[date] = Field(None, description="Start date (yyyy-mm-dd)")
+#     from_time: Optional[time] = Field(None, description="Start time (hh:mm:ss)")
+#     to_date: Optional[date] = Field(None, description="End date (yyyy-mm-dd)")
+#     to_time: Optional[time] = Field(None, description="End time (hh:mm:ss)")
+#     status: Optional[ProductionLogStatus] = Field(None, description="Status of production log")
+
+
+# class ProductionLogResponse(ProductionLogBase):
+#     id: int = Field(..., description="Production log ID")
+#     created_at: datetime = Field(..., description="When the production log was created")
 
 #     class Config:
 #         from_attributes = True
+
+
+# class ProductionLogWithDetails(ProductionLogResponse):
+#     operation: Optional[dict] = Field(None, description="Operation details")
+#     operator: Optional[dict] = Field(None, description="Operator details")
+#     supervisor: Optional[dict] = Field(None, description="Supervisor details")
+
+#     class Config:
+#         from_attributes = True
+
+
+# class ProductionLogStatusUpdate(BaseModel):
+#     status: ProductionLogStatus = Field(..., description="New status for production log")
+#     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor updating the status")
