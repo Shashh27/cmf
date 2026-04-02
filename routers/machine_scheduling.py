@@ -1091,10 +1091,15 @@ def view_schedule(db: Session = Depends(get_db)):
             }
 
         rows = (
-            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter)
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority)
             .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
             .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .outerjoin(
+                OrderPartPriority,
+                (OrderPartPriority.order_id == PlannedScheduleItem.sale_order_id) &
+                (OrderPartPriority.part_id == PlannedScheduleItem.part_id)
+            )
             .filter(PlannedScheduleItem.schedule_history_id == latest.id)
             .order_by(PlannedScheduleItem.planned_start_time)
             .all()
@@ -1107,6 +1112,8 @@ def view_schedule(db: Session = Depends(get_db)):
                 "sale_order_number":  item.sale_order_number,
                 "part_id":            item.part_id,
                 "part_number":        item.part_number,
+                "priority":           priority.priority if priority else None,
+                "order_part_priority_id": priority.id if priority else None,
                 "operation_id":       item.operation_id,
                 "operation_number":   op.operation_number,
                 "operation_name":     op.operation_name,
@@ -1127,7 +1134,7 @@ def view_schedule(db: Session = Depends(get_db)):
                 "remaining_quantity": item.remaining_quantity,
                 "status":             item.status,
             }
-            for item, op, machine, wc in rows
+            for item, op, machine, wc, priority in rows
         ]
 
         return {
@@ -1164,10 +1171,15 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
             raise HTTPException(404, "Schedule history not found")
 
         rows = (
-            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter)
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority)
             .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
             .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .outerjoin(
+                OrderPartPriority,
+                (OrderPartPriority.order_id == PlannedScheduleItem.sale_order_id) &
+                (OrderPartPriority.part_id == PlannedScheduleItem.part_id)
+            )
             .filter(PlannedScheduleItem.schedule_history_id == schedule_history_id)
             .order_by(PlannedScheduleItem.planned_start_time)
             .all()
@@ -1180,6 +1192,8 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
                 "sale_order_number":  item.sale_order_number,
                 "part_id":            item.part_id,
                 "part_number":        item.part_number,
+                "priority":           priority.priority if priority else None,
+                "order_part_priority_id": priority.id if priority else None,
                 "operation_id":       item.operation_id,
                 "operation_number":   op.operation_number,
                 "operation_name":     op.operation_name,
@@ -1200,7 +1214,7 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
                 "remaining_quantity": item.remaining_quantity,
                 "status":             item.status,
             }
-            for item, op, machine, wc in rows
+            for item, op, machine, wc, priority in rows
         ]
 
         return {
@@ -1601,4 +1615,128 @@ def get_schedule_history(db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch schedule history: {str(e)}")
 
+
+# =========================================================
+# GET MACHINE-WISE OPERATIONS
+# =========================================================
+@router.get("/machine-operations/{machine_id}")
+def get_machine_operations(
+    machine_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch all planned schedule items (operations) for a specific machine.
+    Returns operations from the planned_schedule_items table.
+    """
+    try:
+        # Check if machine exists
+        machine = db.query(Machine).filter(Machine.id == machine_id).first()
+        if not machine:
+            raise HTTPException(404, f"Machine with ID {machine_id} not found")
+
+        # Fetch all planned schedule items for this machine
+        items = db.query(PlannedScheduleItem).filter(
+            PlannedScheduleItem.machine_id == machine_id
+        ).order_by(PlannedScheduleItem.planned_start_time.asc()).all()
+
+        result = []
+        for item in items:
+            result.append({
+                "id": item.id,
+                "part_id": item.part_id,
+                "part_number": item.part_number,
+                "sale_order_id": item.sale_order_id,
+                "sale_order_number": item.sale_order_number,
+                "operation_id": item.operation_id,
+                "machine_id": item.machine_id,
+                "planned_start_time": item.planned_start_time,
+                "planned_end_time": item.planned_end_time,
+                "total_quantity": item.total_quantity,
+                "remaining_quantity": item.remaining_quantity,
+                "status": item.status,
+                "schedule_history_id": item.schedule_history_id,
+                "created_at": item.created_at,
+            })
+
+        return {
+            "machine_id": machine_id,
+            "machine_name": machine.machine_make if hasattr(machine, 'machine_make') else None,
+            "total_operations": len(result),
+            "operations": result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch machine operations: {str(e)}")
+
+
+# =========================================================
+# UPDATE OPERATION STATUS
+# =========================================================
+from pydantic import BaseModel
+
+class OperationStatusUpdate(BaseModel):
+    status: str  # PENDING, IN_PROGRESS, COMPLETED, REWORK
+
+@router.put("/schedule-item/{schedule_item_id}/status")
+def update_operation_status(
+    schedule_item_id: int,
+    data: OperationStatusUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update the status of a planned schedule item (operation).
+    
+    Workflow:
+    - Operator clicks "Start Operation": status → IN_PROGRESS
+    - Supervisor approves: status → COMPLETED
+    - Supervisor disapproves: status → REWORK
+    
+    Valid status values: PENDING, IN_PROGRESS, COMPLETED, REWORK
+    """
+    try:
+        # Valid status values
+        valid_statuses = ["PENDING", "IN-PROGRESS", "COMPLETED", "REWORK"]
+        
+        # Validate status
+        status_upper = data.status.upper()
+        if status_upper not in valid_statuses:
+            raise HTTPException(
+                400, 
+                f"Invalid status '{data.status}'. Valid values: {', '.join(valid_statuses)}"
+            )
+        
+        # Fetch the schedule item
+        item = db.query(PlannedScheduleItem).filter(
+            PlannedScheduleItem.id == schedule_item_id
+        ).first()
+        
+        if not item:
+            raise HTTPException(404, f"Schedule item with ID {schedule_item_id} not found")
+        
+        # Store old status for response
+        old_status = item.status
+        
+        # Update status
+        item.status = status_upper
+        
+        db.commit()
+        db.refresh(item)
+        
+        return {
+            "message": "Operation status updated successfully",
+            "schedule_item_id": schedule_item_id,
+            "part_number": item.part_number,
+            "sale_order_number": item.sale_order_number,
+            "operation_id": item.operation_id,
+            "previous_status": old_status,
+            "current_status": item.status,
+            "updated_at": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to update operation status: {str(e)}")
 
