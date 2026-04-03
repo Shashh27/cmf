@@ -14,7 +14,6 @@ from DB.models.oms import (
     PartType as PartTypeModel,
     Order as OrderModel,
     OperationDocument as OperationDocumentModel,
-    OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
     DocumentExtractedData as DocumentExtractedDataModel,
     OrderPartPriority as OrderPartPriorityModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
@@ -24,7 +23,7 @@ from DB.models.configuration import (
     Machine as MachineModel,
     PokayokeCompletedLog,
 )
-from DB.models.inventory import RawMaterial as RawMaterialModel, InventoryRequest, InventoryReturnRequest
+from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock, InventoryRequest, InventoryReturnRequest
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.oms import (
     Product,
@@ -327,11 +326,6 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
             OutSourcePartStatusModel.part_id.in_(part_ids)
         ).delete(synchronize_session=False)
 
-        # Delete raw material links
-        db.query(OrderPartsRawMaterialLinkedModel).filter(
-            OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-        
         # Delete inventory requests related to these parts (before deleting parts).
         # Use raw SQL instead of ORM to avoid mismatches with any optional columns.
         if part_ids:
@@ -473,6 +467,10 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
     # Simplified raw materials don't have status - always available
     raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
+    
+    # Get all raw material stocks for mapping
+    all_stocks = db.query(RawMaterialStock).all()
+    stock_map = {stock.id: stock for stock in all_stocks}
 
     # Get all part types for mapping (avoids N+1 per part in create_part_details)
     all_part_types = db.query(PartTypeModel).all()
@@ -598,6 +596,7 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'part_number': part.part_number,
             'type_id': part.type_id,
             'raw_material_id': part.raw_material_id,
+            'raw_material_stock_id': part.raw_material_stock_id,
             'part_detail': part.part_detail,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
@@ -611,6 +610,45 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'created_at': part.created_at,
             'updated_at': part.updated_at,
         }
+        
+        # Add stock details if stock_id exists
+        if part.raw_material_stock_id and part.raw_material_stock_id in stock_map:
+            stock = stock_map[part.raw_material_stock_id]
+            stock_details = {
+                "id": stock.id,
+                "form_type": stock.form_type,
+                "quantity": stock.quantity,
+                "diameter": stock.diameter,
+                "length": stock.length,
+                "breadth": stock.breadth,
+                "height": stock.height,
+                "inner_diameter": stock.inner_diameter,
+                "outer_diameter": stock.outer_diameter,
+                "status": stock.status
+            }
+            
+            # Format dimensions string
+            stock_form_type = stock.form_type
+            if stock_form_type == 'Round':
+                stock_dimensions = f"⌀{stock.diameter} × {stock.length}mm"
+            elif stock_form_type == 'Square':
+                stock_dimensions = f"{stock.breadth} × {stock.height} × {stock.length}mm"
+            elif stock_form_type == 'Pipe':
+                stock_dimensions = f"⌀{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm"
+            else:
+                stock_dimensions = "Custom"
+            
+            part_dict.update({
+                'raw_material_stock_details': stock_details,
+                'raw_material_stock_form_type': stock_form_type,
+                'raw_material_stock_dimensions': stock_dimensions
+            })
+        else:
+            part_dict.update({
+                'raw_material_stock_details': None,
+                'raw_material_stock_form_type': None,
+                'raw_material_stock_dimensions': None
+            })
         
         part_with_type = PartSchema(**part_dict)
         

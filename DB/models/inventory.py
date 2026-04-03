@@ -52,6 +52,8 @@ class RawMaterial(Base):
 
     cost_per_kg = Column(Float, nullable=True)  # Cost per kg in currency
 
+    user_id = Column(Integer, nullable=True)  # User who created this raw material
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -114,6 +116,17 @@ class RawMaterialStock(Base):
 
     source_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
 
+    order_status = Column(String, nullable=True)  # "enquiry", "purchase_request", "purchase_order", "received", etc.
+
+    # New columns for linking parts, vendors, and tracking who created
+    part_id = Column(String, nullable=True)  # Can store comma-separated IDs like "1,2,3"
+
+    vendor_id = Column(String, nullable=True)  # Store comma-separated vendor IDs for enquiry: "1,2,3"
+    
+    received_vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Final vendor who received the order
+
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
     status = Column(String, nullable=False, default="available")
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -128,7 +141,9 @@ class RawMaterialStock(Base):
 
     source_order = relationship("Order")
 
-    usage_links = relationship("OrderPartsRawMaterialLinked", back_populates="stock_item", cascade="all, delete-orphan")
+    vendor = relationship("Vendors", foreign_keys=[received_vendor_id])
+
+    creator = relationship("AccessUser", foreign_keys=[user_id])
 
 
 

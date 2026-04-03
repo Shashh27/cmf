@@ -42,7 +42,7 @@ from routers import (
 
     machines_router,
 
-    order_parts_raw_material_linked_router,
+
 
     operation_documents_router,
 
@@ -240,7 +240,7 @@ app.include_router(customers_router, prefix="/api/v1")
 
 app.include_router(orders_router, prefix="/api/v1")
 
-
+app.include_router(order_documents_router, prefix="/api/v1" )
 
 app.include_router(rawmaterials_router, prefix="/api/v1")
 
@@ -257,8 +257,6 @@ app.include_router(access_control_router, prefix="/api/v1")
 app.include_router(login_router, prefix="/api/v1")
 
 app.include_router(machines_router, prefix="/api/v1")
-
-app.include_router(order_parts_raw_material_linked_router, prefix="/api/v1")
 
 app.include_router(operation_documents_router, prefix="/api/v1")
 
@@ -415,8 +413,6 @@ def system_info():
             "work_centers": "/api/v1/workcenters",
 
             "machines": "/api/v1/machines",
-
-            "order_parts_raw_material_linked": "/api/v1/order-parts-raw-material-linked",
 
             "operation_documents": "/api/v1/operation-documents",
 

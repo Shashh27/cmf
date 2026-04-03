@@ -35,10 +35,7 @@ from .oms import (
     OperationDocumentCreate,
     OperationDocumentUpdate,
     OperationDocumentWithDetails,
-    OrderPartsRawMaterialLinked,
-    OrderPartsRawMaterialLinkedCreate,
-    OrderPartsRawMaterialLinkedUpdate,
-    OrderPartsRawMaterialLinkedWithDetails
+   
 )
 from .configuration import (
     WorkCenter,
@@ -104,10 +101,6 @@ __all__ = [
     "OperationDocumentCreate",
     "OperationDocumentUpdate",
     "OperationDocumentWithDetails",
-    "OrderPartsRawMaterialLinked",
-    "OrderPartsRawMaterialLinkedCreate",
-    "OrderPartsRawMaterialLinkedUpdate",
-    "OrderPartsRawMaterialLinkedWithDetails",
     "WorkCenter",
     "WorkCenterCreate",
     "WorkCenterUpdate",

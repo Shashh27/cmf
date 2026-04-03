@@ -10,7 +10,6 @@ from .oms import (
     Order,
     OrderDocument,
     OperationDocument,
-    OrderPartsRawMaterialLinked,
     OutSourcePartStatus
 )
 from .configuration import (
@@ -46,10 +45,8 @@ __all__ = [
     "Document",
     "ToolWithPart",
     "Order",
-    "OrderScheduleStatus",
     "OrderDocument",
     "OperationDocument",
-    "OrderPartsRawMaterialLinked",
     "OutSourcePartStatus",
     "WorkCenter",
     "Machine",

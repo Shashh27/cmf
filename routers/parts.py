@@ -16,13 +16,12 @@ from DB.models.oms import (
     Operation as OperationModel,
     Document as DocumentModel,
     ToolWithPart as ToolWithPartModel,
-    OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
     OperationDocument as OperationDocumentModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
     DocumentExtractedData as DocumentExtractedDataModel,
 )
 from DB.models.configuration import PokayokeCompletedLog
-from DB.models.inventory import RawMaterial
+from DB.models.inventory import RawMaterial, RawMaterialStock
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
 
@@ -33,30 +32,64 @@ router = APIRouter(
 
 
 def _build_part_maps(db: Session):
-    """Fetch PartType, RawMaterial, and AccessUser rows once and return id→value maps."""
+    """Fetch PartType, RawMaterial, RawMaterialStock, and AccessUser rows once and return id→value maps."""
     type_map = {pt.id: pt.type_name for pt in db.query(PartType).all()}
     rm_map = {rm.id: rm.material_name for rm in db.query(RawMaterial).all()}
+    stock_map = {stock.id: stock for stock in db.query(RawMaterialStock).all()}
     user_map = {u.id: u.user_name for u in db.query(AccessUser).all()}
-    return type_map, rm_map, user_map
+    return type_map, rm_map, stock_map, user_map
 
 
-def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, user_map: dict) -> dict:
+def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict, user_map: dict) -> dict:
+    # Get stock details if stock_id exists
+    stock_details = None
+    stock_form_type = None
+    stock_dimensions = None
+    
+    if part.raw_material_stock_id and part.raw_material_stock_id in stock_map:
+        stock = stock_map[part.raw_material_stock_id]
+        stock_details = {
+            "id": stock.id,
+            "form_type": stock.form_type,
+            "quantity": stock.quantity,
+            "diameter": stock.diameter,
+            "length": stock.length,
+            "breadth": stock.breadth,
+            "height": stock.height,
+            "inner_diameter": stock.inner_diameter,
+            "outer_diameter": stock.outer_diameter,
+            "status": stock.status
+        }
+        stock_form_type = stock.form_type
+        
+        # Format dimensions string
+        if stock.form_type == 'Round':
+            stock_dimensions = f"⌀{stock.diameter} × {stock.length}mm"
+        elif stock.form_type == 'Square':
+            stock_dimensions = f"{stock.breadth} × {stock.height} × {stock.length}mm"
+        elif stock.form_type == 'Pipe':
+            stock_dimensions = f"⌀{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm"
+        else:
+            stock_dimensions = "Custom"
+    
     return {
         "id": part.id,
         "part_name": part.part_name,
         "part_number": part.part_number,
         "type_id": part.type_id,
         "raw_material_id": part.raw_material_id,
+        "raw_material_stock_id": part.raw_material_stock_id,
         "part_detail": part.part_detail,
         "assembly_id": part.assembly_id,
         "product_id": part.product_id,
         "user_id": part.user_id,
-        "size": part.size,  # New optional size field
-        "qty": part.qty,    # New optional quantity field
-        "size": part.size,  # New optional size field
-        "qty": part.qty,    # New optional quantity field
+        "size": part.size,
+        "qty": part.qty,
         "type_name": type_map.get(part.type_id),
         "raw_material_name": rm_map.get(part.raw_material_id),
+        "raw_material_stock_details": stock_details,
+        "raw_material_stock_form_type": stock_form_type,
+        "raw_material_stock_dimensions": stock_dimensions,
         "user_name": user_map.get(part.user_id) if part.user_id else None,
         "created_at": part.created_at,
         "updated_at": part.updated_at,
@@ -94,8 +127,8 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     #             db.add(priority_entry)
     #         db.commit()
 
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return _part_to_dict(db_part, type_map, rm_map, user_map)
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map)
 
 
 @router.get("/", response_model=List[Part])
@@ -105,8 +138,8 @@ def get_parts(user_id: int | None = None, db: Session = Depends(get_db)):
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map) for p in parts]
 
 
 @router.get("/{part_id}", response_model=Part)
@@ -118,8 +151,8 @@ def get_part(part_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {part_id} not found"
         )
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return _part_to_dict(part, type_map, rm_map, user_map)
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+    return _part_to_dict(part, type_map, rm_map, stock_map, user_map)
 
 
 @router.get("/product/{product_id}", response_model=List[Part])
@@ -129,8 +162,8 @@ def get_parts_by_product(product_id: int, user_id: int | None = None, db: Sessio
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map) for p in parts]
 
 
 @router.get("/assembly/{assembly_id}", response_model=List[Part])
@@ -140,8 +173,8 @@ def get_parts_by_assembly(assembly_id: int, user_id: int | None = None, db: Sess
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map) for p in parts]
 
 
 @router.get("/type/{type_id}", response_model=List[Part])
@@ -151,8 +184,8 @@ def get_parts_by_type(type_id: int, user_id: int | None = None, db: Session = De
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map) for p in parts]
 
 
 @router.put("/{part_id}", response_model=Part)
@@ -171,8 +204,8 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(db_part)
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return _part_to_dict(db_part, type_map, rm_map, user_map)
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map)
 
 
 @router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -251,7 +284,6 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             DocumentExtractedDataModel.part_id == part_id
         ).delete(synchronize_session=False)
 
-        # Now delete the documents associated with this part
         db.query(DocumentModel).filter(DocumentModel.part_id == part_id).delete(
             synchronize_session=False
         )
@@ -261,12 +293,7 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             OutSourcePartStatusModel.part_id == part_id
         ).delete(synchronize_session=False)
 
-        # 6. Delete raw material links
-        db.query(OrderPartsRawMaterialLinkedModel).filter(
-            OrderPartsRawMaterialLinkedModel.part_id == part_id
-        ).delete(synchronize_session=False)
-
-        # 7. Delete component_issues records that reference this part
+        # 6. Delete component_issues records that reference this part
         db.execute(
             text("DELETE FROM maintenance.component_issues WHERE part_id = :pid"),
             {"pid": part_id}
@@ -663,17 +690,12 @@ def bulk_delete_parts_by_assembly(assembly_id: int, db: Session = Depends(get_db
             DocumentModel.part_id.in_(part_ids)
         ).delete(synchronize_session=False)
 
-        # ── 7. OutSource part status ──────────────────────────────────────────
+        # ── 7. Out-source part statuses ─────────────────────────────────────
         db.query(OutSourcePartStatusModel).filter(
             OutSourcePartStatusModel.part_id.in_(part_ids)
         ).delete(synchronize_session=False)
 
-        # ── 8. Raw material links ─────────────────────────────────────────────
-        db.query(OrderPartsRawMaterialLinkedModel).filter(
-            OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # ── 9. Maintenance component issues ──────────────────────────────────
+        # ── 8. Maintenance component issues ──────────────────────────────────
         db.execute(
             text(
                 "DELETE FROM maintenance.component_issues "

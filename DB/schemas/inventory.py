@@ -24,6 +24,8 @@ class RawMaterialBase(BaseModel):
 
     cost_per_kg: Optional[float] = None  # Cost per kg
 
+    user_id: Optional[int] = None  # User who created this raw material
+
 
 
 class RawMaterialCreate(RawMaterialBase):
@@ -40,6 +42,8 @@ class RawMaterialUpdate(BaseModel):
 
     cost_per_kg: Optional[float] = None
 
+    user_id: Optional[int] = None  # User who created this raw material
+
 
 
 class RawMaterial(RawMaterialBase):
@@ -49,6 +53,11 @@ class RawMaterial(RawMaterialBase):
     created_at: Optional[datetime] = None
 
     updated_at: Optional[datetime] = None
+
+    # Stock status fields
+    has_available_stock: Optional[bool] = False
+    total_stock_quantity: Optional[int] = 0
+    available_stock_count: Optional[int] = 0
 
 
 
@@ -95,6 +104,17 @@ class RawMaterialStockBase(BaseModel):
     source_type: str = "general"  # "general" or "order"
 
     source_order_id: Optional[int] = None
+
+    order_status: Optional[str] = None  # "enquiry", "purchase_request", "purchase_order", "received", etc.
+
+    # New linking fields
+    part_id: Optional[str] = None  # Can be single ID or comma-separated IDs like "1,2,3"
+
+    vendor_id: Optional[str] = None  # Store comma-separated vendor IDs for enquiry: "1,2,3"
+    
+    received_vendor_id: Optional[int] = None  # Final vendor who received the order
+
+    user_id: Optional[int] = None
 
     status: str = "available"
 
@@ -166,6 +186,16 @@ class RawMaterialStockUpdate(BaseModel):
 
     source_order_id: Optional[int] = None
 
+    order_status: Optional[str] = None
+
+    part_id: Optional[str] = None  # Can be single ID or comma-separated IDs like "1,2,3"
+
+    vendor_id: Optional[str] = None  # Store comma-separated vendor IDs for enquiry: "1,2,3"
+    
+    received_vendor_id: Optional[int] = None  # Final vendor who received the order
+
+    user_id: Optional[int] = None
+
     status: Optional[str] = None
 
 
@@ -191,6 +221,15 @@ class RawMaterialStockWithDetails(RawMaterialStock):
     material_name: Optional[str] = None
 
     source_order_number: Optional[str] = None
+
+    # Related entity names
+    part_name: Optional[str] = None
+    part_numbers: Optional[List[str]] = None
+    part_names: Optional[List[str]] = None
+
+    vendor_name: Optional[str] = None
+
+    creator_name: Optional[str] = None
 
     total_volume: Optional[float] = None  # volume * quantity
 

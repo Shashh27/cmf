@@ -24,7 +24,7 @@ from .workcenter import router as workcenter_router
 
 from .machines import router as machines_router
 
-from .order_parts_raw_material_linked import router as order_parts_raw_material_linked_router
+# from .order_parts_raw_material_linked import router as order_parts_raw_material_linked_router
 
 from .operation_documents import router as operation_documents_router
 
@@ -77,8 +77,6 @@ __all__ = [
     "workcenter_router",
 
     "machines_router",
-
-    "order_parts_raw_material_linked_router",
 
     "operation_documents_router",
 

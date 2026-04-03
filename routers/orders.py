@@ -11,7 +11,6 @@ from DB.models.oms import (
     OrderDocument,
     Part,
     OrderPartPriority,
-    OrderPartsRawMaterialLinked,
     PartType,
 )
 from DB.models.configuration import Customer, PokayokeCompletedLog
@@ -779,11 +778,6 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
 
         # Delete order part priorities
         db.query(OrderPartPriority).filter(OrderPartPriority.order_id == order_id).delete()
-
-        # Delete order-parts raw material links
-        db.query(OrderPartsRawMaterialLinked).filter(
-            OrderPartsRawMaterialLinked.order_id == order_id
-        ).delete()
 
         # Delete inventory-related records using raw SQL to respect FK relationships
         # 1) Delete tool issues that reference inventory requests for this order
