@@ -115,6 +115,7 @@ class PartBase(BaseModel):
     size: Optional[str] = None  # Optional size field (e.g., "25x25x160", "Ø210x110", "Tyre Coupling F160 Type:B")
     qty: Optional[int] = None  # Optional quantity field
     raw_material_required_quantity: Optional[float] = None  # Required quantity per part for order-linked materials
+    vendor_id: Optional[int] = None  # Vendor for outsourced parts
 
 
 class PartCreate(PartBase):
@@ -134,6 +135,7 @@ class PartUpdate(BaseModel):
     size: Optional[str] = None  # Optional size field
     qty: Optional[int] = None  # Optional quantity field
     raw_material_required_quantity: Optional[float] = None  # Required quantity per part for order-linked materials
+    vendor_id: Optional[int] = None  # Vendor for outsourced parts
 
 
 class Part(PartBase):
@@ -149,6 +151,8 @@ class Part(PartBase):
     user_name: Optional[str] = None
     size: Optional[str] = None  # Optional size field
     qty: Optional[int] = None  # Optional quantity field
+    vendor_id: Optional[int] = None  # Vendor for outsourced parts
+    vendor_name: Optional[str] = None  # Vendor company name
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -173,6 +177,7 @@ class OperationBase(BaseModel):
     user_id: Optional[int] = None
     work_instructions: Optional[str] = None
     notes: Optional[str] = None
+    vendor_id: Optional[int] = None  # Vendor for outsourced operations
 
     @field_validator('setup_time', 'cycle_time', mode='before')
     @classmethod
@@ -223,6 +228,7 @@ class OperationUpdate(BaseModel):
     user_id: Optional[int] = None
     work_instructions: Optional[str] = None
     notes: Optional[str] = None
+    vendor_id: Optional[int] = None  # Vendor for outsourced operations
 
     @field_validator('setup_time', 'cycle_time', mode='before')
     @classmethod
@@ -261,6 +267,8 @@ class Operation(OperationBase):
     work_center_name: Optional[str] = None
     machine_name: Optional[str] = None
     user_name: Optional[str] = None
+    vendor_id: Optional[int] = None  # Vendor for outsourced operations
+    vendor_name: Optional[str] = None  # Vendor company name
     operation_documents: List['OperationDocument'] = []
     tools: List['ToolWithPart'] = []
     created_at: Optional[datetime] = None
