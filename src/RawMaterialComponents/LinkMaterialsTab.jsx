@@ -10,6 +10,26 @@ const { Text } = Typography;
 const { Option } = Select;
 
 const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => {
+  // Add custom CSS to force vendor dropdown downward
+  React.useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      .vendor-dropdown-downward .ant-select-dropdown {
+        top: auto !important;
+        bottom: auto !important;
+        transform: translateY(0) !important;
+      }
+      .vendor-dropdown-downward .ant-select-dropdown-placement-bottomLeft {
+        top: auto !important;
+        bottom: auto !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
+
   const [orders, setOrders] = useState([]);
   const [rawMaterials, setRawMaterials] = useState(propRawMaterials || []);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -51,7 +71,8 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       const user = JSON.parse(stored);
       return user?.user_id || user?.id || null;
     } catch (error) {
-      console.error("Error getting user ID:", error);
+      // Error getting user ID
+      // console.error("Error getting user ID:", error);
       return null;
     }
   };
@@ -66,10 +87,13 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       const response = await axios.get(`${API_BASE_URL}/orders/`, {
         params: uid != null ? { admin_id: uid } : undefined,
       });
-      setOrders(response.data || []);
+      // Filter out orders that already have raw materials linked
+      const availableOrders = (response.data || []).filter(order => !order.has_raw_materials);
+      setOrders(availableOrders);
       setOrdersFetched(true);
     } catch (error) {
-      console.error("Error fetching orders:", error);
+      // Error fetching orders
+      // console.error("Error fetching orders:", error);
       setOrders([]);
     } finally {
       setOrdersLoading(false);
@@ -85,7 +109,8 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       setVendors(response.data || []);
       setVendorsFetched(true);
     } catch (error) {
-      console.error("Error fetching vendors:", error);
+      // Error fetching vendors
+      // console.error("Error fetching vendors:", error);
       setVendors([]);
     } finally {
       setVendorsLoading(false);
@@ -153,7 +178,8 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         setOrderPartsForStock(allParts);
       }
     } catch (error) {
-      console.error('Error loading order parts:', error);
+      // Error loading order parts
+      // console.error('Error loading order parts:', error);
       message.error('Failed to load order parts');
       setOrderPartsForStock([]);
     } finally {
@@ -175,6 +201,22 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
     if (!newStockForm.material_id) {
       message.error('Please select a material for enquiry');
       return;
+    }
+
+    // Validate that total quantity >= sum of all part quantities
+    if (newStockForm.part_id) {
+      const partIds = newStockForm.part_id.split(',');
+      let totalPartQuantity = 0;
+      
+      for (const partId of partIds) {
+        const partQty = newStockForm[`part_quantity_${partId}`] || 1;
+        totalPartQuantity += parseFloat(partQty) || 0;
+      }
+      
+      if (totalPartQuantity > newStockForm.quantity) {
+        message.error(`Total quantity (${newStockForm.quantity}) must be >= sum of part quantities (${totalPartQuantity})`);
+        return;
+      }
     }
 
     setAddStockLoading(true);
@@ -214,7 +256,37 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       const response = await axios.post(`${API_BASE_URL}/rawmaterials/stock/`, stockData);
       
       if (response.data) {
-        message.success(`Enquiry sent to ${newStockForm.vendor_ids.length} vendor(s) and stock created!`);
+        const createdStock = response.data;
+        
+        // Automatically allocate materials to parts if parts are selected
+        if (newStockForm.part_id && newStockForm.part_id.split(',').length > 0) {
+          const partIds = newStockForm.part_id.split(',');
+          
+          // Prepare bulk allocation data
+          const allocationData = partIds.map(partId => ({
+            part_id: parseInt(partId),
+            stock_id: createdStock.id,
+            required_quantity: newStockForm[`part_quantity_${partId}`] || 1,
+            user_id: userId
+          }));
+          
+          try {
+            const bulkAllocationResponse = await axios.post(
+              `${API_BASE_URL}/rawmaterials/tracking/allocate/bulk`,
+              allocationData
+            );
+            
+            if (bulkAllocationResponse.data.success) {
+              message.success(`Enquiry sent to ${newStockForm.vendor_ids.length} vendor(s) and materials allocated to ${bulkAllocationResponse.data.successful_allocations} parts!`);
+            } else {
+              message.warning(`Enquiry sent to ${newStockForm.vendor_ids.length} vendor(s) but ${bulkAllocationResponse.data.failed_allocations} allocations failed. Please allocate manually.`);
+            }
+          } catch (allocationError) {
+            message.warning(`Enquiry sent to ${newStockForm.vendor_ids.length} vendor(s) but allocation failed. Please allocate manually.`);
+          }
+        } else {
+          message.success(`Enquiry sent to ${newStockForm.vendor_ids.length} vendor(s) and stock created!`);
+        }
         
         // Reset form
         setNewStockForm({
@@ -228,10 +300,10 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           outer_diameter: '',
           quantity: 1,
           order_id: null,
-          part_id: null,
-          vendor_ids: [],
-          selected_vendor_id: null,
-          order_status: 'enquiry'
+          part_id: null, // This will be null, not empty string
+          vendor_ids: [], // Multiple vendors for enquiry phase
+          selected_vendor_id: null, // Final selected vendor for purchase
+          order_status: 'enquiry'  // Default to enquiry for multiple vendor workflow
         });
         setEnquiryMode(true);
         setSelectedOrderForStock(null);
@@ -243,7 +315,6 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         }
       }
     } catch (error) {
-      console.error('Error creating enquiry stock:', error);
       message.error('Failed to send enquiry: ' + (error.response?.data?.detail || error.message));
     } finally {
       setAddStockLoading(false);
@@ -291,6 +362,22 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       return;
     }
 
+    // Validate that total quantity >= sum of all part quantities
+    if (newStockForm.part_id) {
+      const partIds = newStockForm.part_id.split(',');
+      let totalPartQuantity = 0;
+      
+      for (const partId of partIds) {
+        const partQty = newStockForm[`part_quantity_${partId}`] || 1;
+        totalPartQuantity += parseFloat(partQty) || 0;
+      }
+      
+      if (totalPartQuantity > newStockForm.quantity) {
+        message.error(`Total quantity (${newStockForm.quantity}) must be >= sum of part quantities (${totalPartQuantity})`);
+        return;
+      }
+    }
+
     setAddStockLoading(true);
     try {
       const stockData = {
@@ -336,7 +423,37 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       const response = await axios.post(`${API_BASE_URL}/rawmaterials/stock/`, stockData);
       
       if (response.data) {
-        message.success('Stock added successfully!');
+        const createdStock = response.data;
+        
+        // Automatically allocate materials to parts if parts are selected
+        if (newStockForm.part_id && newStockForm.part_id.split(',').length > 0) {
+          const partIds = newStockForm.part_id.split(',');
+          
+          // Prepare bulk allocation data
+          const allocationData = partIds.map(partId => ({
+            part_id: parseInt(partId),
+            stock_id: createdStock.id,
+            required_quantity: newStockForm[`part_quantity_${partId}`] || 1,
+            user_id: userId
+          }));
+          
+          try {
+            const bulkAllocationResponse = await axios.post(
+              `${API_BASE_URL}/rawmaterials/tracking/allocate/bulk`,
+              allocationData
+            );
+            
+            if (bulkAllocationResponse.data.success) {
+              message.success(`Stock created and materials allocated to ${bulkAllocationResponse.data.successful_allocations} parts!`);
+            } else {
+              message.warning(`Stock created but ${bulkAllocationResponse.data.failed_allocations} allocations failed. Please allocate manually.`);
+            }
+          } catch (allocationError) {
+            message.warning(`Stock created but allocation failed. Please allocate manually.`);
+          }
+        } else {
+          message.success('Stock created successfully!');
+        }
         // Reset form
         setNewStockForm({
           material_id: null,
@@ -364,7 +481,8 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         }
       }
     } catch (error) {
-      console.error('Error adding stock:', error);
+      // Error adding stock
+      // console.error('Error adding stock:', error);
       message.error('Failed to add stock: ' + (error.response?.data?.detail || error.message));
     } finally {
       setAddStockLoading(false);
@@ -391,7 +509,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Material *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Material <span className="text-red-500">*</span></label>
               <Select
                 style={{ width: '100%' }}
                 placeholder="Select Material"
@@ -416,7 +534,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Form Type *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Form Type <span className="text-red-500">*</span></label>
               <Select
                 style={{ width: '100%' }}
                 value={newStockForm.form_type}
@@ -429,7 +547,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
             </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Order *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Order <span className="text-red-500">*</span></label>
             <Select
               style={{ width: '100%' }}
               placeholder="Select Order (Required)"
@@ -476,9 +594,37 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
             </div>
           )}
 
+          {/* Part Quantities Section */}
+          {newStockForm.part_id && newStockForm.part_id.split(',').length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Part Required Quantities</label>
+              <div className="space-y-2">
+                {orderPartsForStock
+                  .filter(part => newStockForm.part_id.split(',').includes(part.id.toString()))
+                  .map(part => (
+                    <div key={part.id} className="flex items-center space-x-2">
+                      <span className="text-sm flex-1">{part.part_number} - {part.part_name}</span>
+                      <InputNumber
+                        placeholder="Qty"
+                        min={0}
+                        step={0.1}
+                        style={{ width: '100px' }}
+                        value={newStockForm[`part_quantity_${part.id}`] || 1}
+                        onChange={(value) => setNewStockForm(prev => ({ 
+                          ...prev, 
+                          [`part_quantity_${part.id}`]: value || 1 
+                        }))}
+                      />
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+          )}
+
           {newStockForm.form_type === 'Round' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Diameter (mm)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Diameter (mm) <span className="text-red-500">*</span></label>
               <InputNumber
                 style={{ width: '100%' }}
                 placeholder="Diameter"
@@ -493,7 +639,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           {newStockForm.form_type === 'Square' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Breadth (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Breadth (mm) <span className="text-red-500">*</span></label>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Breadth"
@@ -504,7 +650,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Height (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Height (mm) <span className="text-red-500">*</span></label>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Height"
@@ -520,7 +666,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           {newStockForm.form_type === 'Pipe' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Outer Diameter (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Outer Diameter (mm) <span className="text-red-500">*</span></label>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Outer Diameter"
@@ -531,7 +677,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Inner Diameter (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Inner Diameter (mm) <span className="text-red-500">*</span></label>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Inner Diameter"
@@ -545,7 +691,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Length (mm)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Length (mm) <span className="text-red-500">*</span></label>
             <InputNumber
               style={{ width: '100%' }}
               placeholder="Length"
@@ -557,7 +703,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity <span className="text-red-500">*</span></label>
             <InputNumber
               style={{ width: '100%' }}
               placeholder="Quantity"
@@ -570,7 +716,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           {enquiryMode ? (
           <>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Vendors for Enquiry *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendors for Enquiry <span className="text-red-500">*</span></label>
               <Select
                 mode="multiple"
                 style={{ width: '100%' }}
@@ -582,6 +728,9 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
                 }}
                 showSearch
                 placement="bottomLeft"
+                getPopupContainer={() => document.body}
+                styles={{ popup: { root: { position: 'fixed', zIndex: 9999 } } }}
+                className="vendor-dropdown-downward"
                 filterOption={(input, option) =>
                   option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
                 }

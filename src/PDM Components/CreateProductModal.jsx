@@ -86,6 +86,8 @@ const CreateProductModal = ({
 
     raw_material_id: null,
 
+    raw_material_required_quantity: null,
+
     part_detail: null,
 
     size: '',
@@ -134,6 +136,11 @@ const CreateProductModal = ({
 
       } else if (createType === 'part') {
 
+        // Find the stock if raw_material_stock_id exists
+        const selectedStock = editingItem.raw_material_stock_id 
+          ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)
+          : null;
+
         newValues = {
 
           part_number: editingItem.part_number || '',
@@ -142,13 +149,13 @@ const CreateProductModal = ({
 
           type_id: editingItem.type_id || 1,
 
-          raw_material_id: editingItem.raw_material_id,
+          raw_material_id: selectedStock ? selectedStock.material_id : editingItem.raw_material_id,
 
-          raw_material_form_type: editingItem.raw_material_stock_id 
-            ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)?.form_type 
-            : null,
+          raw_material_form_type: selectedStock ? selectedStock.form_type : null,
 
           raw_material_stock_id: editingItem.raw_material_stock_id,
+
+          raw_material_required_quantity: editingItem.raw_material_required_quantity,
 
           part_detail: editingItem.part_detail ?? null,
 
@@ -214,7 +221,7 @@ const CreateProductModal = ({
 
     setFormData(prev => ({ ...prev, ...newValues }));
 
-  }, [selectedProduct, parentAssembly, mode, editingItem, createType]);
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType, rawMaterialStock]);
 
 
 
@@ -223,8 +230,6 @@ const CreateProductModal = ({
   useEffect(() => {
 
     let newValues = {};
-
-
 
     if (mode === 'edit' && editingItem) {
 
@@ -252,6 +257,11 @@ const CreateProductModal = ({
 
       } else if (createType === 'part') {
 
+        // Find the stock if raw_material_stock_id exists
+        const selectedStock = editingItem.raw_material_stock_id 
+          ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)
+          : null;
+
         newValues = {
 
           part_number: editingItem.part_number || '',
@@ -260,13 +270,13 @@ const CreateProductModal = ({
 
           type_id: editingItem.type_id || 1,
 
-          raw_material_id: editingItem.raw_material_id,
+          raw_material_id: selectedStock ? selectedStock.material_id : editingItem.raw_material_id,
 
-          raw_material_form_type: editingItem.raw_material_stock_id 
-            ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)?.form_type 
-            : null,
+          raw_material_form_type: selectedStock ? selectedStock.form_type : null,
 
           raw_material_stock_id: editingItem.raw_material_stock_id,
+
+          raw_material_required_quantity: editingItem.raw_material_required_quantity,
 
           part_detail: editingItem.part_detail ?? null,
 
@@ -331,12 +341,10 @@ const CreateProductModal = ({
     // Update form instance
 
     if (form && open) {
-
       form.setFieldsValue(newValues);
-
     }
 
-  }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open]);
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open, rawMaterialStock]);
 
 
 
@@ -599,6 +607,7 @@ const CreateProductModal = ({
           size: values.size || null,
 
           qty: values.qty || 1,
+          raw_material_required_quantity: values.raw_material_required_quantity || null,
 
           assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
 
@@ -1170,7 +1179,7 @@ const CreateProductModal = ({
                                       <div>
                                         <div style={{ fontWeight: 'bold' }}>{dimensions}</div>
                                         <div style={{ fontSize: '12px', color: '#666' }}>
-                                          Qty: {stock.quantity} | Status: {stock.status}
+                                          Total: {stock.quantity} | Available: {stock.available_quantity} | Status: {stock.status}
                                         </div>
                                       </div>
                                     </Select.Option>
@@ -1179,6 +1188,33 @@ const CreateProductModal = ({
                               </Select>
                             </Form.Item>
                           );
+                        }}
+                      </Form.Item>
+
+                      {/* Raw Material Required Quantity Field */}
+                      <Form.Item noStyle shouldUpdate={(prev, curr) => prev.raw_material_id !== curr.raw_material_id || prev.raw_material_stock_id !== curr.raw_material_stock_id}>
+                        {() => {
+                          const materialId = getFieldValue('raw_material_id');
+                          const stockId = getFieldValue('raw_material_stock_id');
+                          
+                          if (materialId && stockId) {
+                            return (
+                              <Form.Item
+                                name="raw_material_required_quantity"
+                                label={<span className="text-xs sm:text-sm">Required Quantity</span>}
+                                rules={isRequiredRawMaterial ? [{ required: true, message: 'Please enter required quantity!' }] : [{ required: false }]}
+                              >
+                                <Input 
+                                  type="number" 
+                                  placeholder="Enter required quantity" 
+                                  size="large"
+                                  min={0}
+                                  step={0.1}
+                                />
+                              </Form.Item>
+                            );
+                          }
+                          return null;
                         }}
                       </Form.Item>
                     </>

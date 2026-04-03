@@ -32,6 +32,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   const [statusEditCurrentLinkages, setStatusEditCurrentLinkages] = useState([]);
   const [statusEditPartsToRemove, setStatusEditPartsToRemove] = useState([]);
   const [statusEditPartsToAdd, setStatusEditPartsToAdd] = useState([]);
+  const [statusEditPartQuantities, setStatusEditPartQuantities] = useState({});
   const [statusEditAvailableParts, setStatusEditAvailableParts] = useState([]);
   const [orderHierarchyMap, setOrderHierarchyMap] = useState({});
   const [statusEditPartMetaById, setStatusEditPartMetaById] = useState({});
@@ -79,7 +80,19 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         params: uid != null ? { admin_id: uid } : undefined,
       });
       
-      setLinkedMaterials(response.data);
+      // Process data - use part_required_quantities from backend
+      const processedData = response.data.map(item => {
+        // Use the part_required_quantities that comes from backend
+        const partRequiredQuantities = item.part_required_quantities || [];
+        
+        return {
+          ...item,
+          // Keep the backend part_required_quantities as is
+          part_required_quantities: partRequiredQuantities
+        };
+      });
+      
+      setLinkedMaterials(processedData);
     } catch (error) {
       console.error("Error:", error);
     } finally {
@@ -324,12 +337,19 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
           updateData.received_vendor_id = statusEditReceivedVendorId;
         }
         
-        // Calculate and include part_ids
+        // Calculate and include part_ids and quantities
         const finalPartIds = statusEditCurrentLinkages
           .filter(l => !statusEditPartsToRemove.includes(l.id))
           .map(l => l.part_id);
         
         updateData.part_ids = finalPartIds.join(',');
+        
+        // Include part quantities
+        const partQuantities = {};
+        finalPartIds.forEach(partId => {
+          partQuantities[partId] = statusEditPartQuantities[partId] || 1;
+        });
+        updateData.part_quantities = partQuantities;
         
         await axios.put(
           `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/status/group/${groupId}`,
@@ -357,6 +377,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       setStatusEditCurrentLinkages([]);
       setStatusEditPartsToRemove([]);
       setStatusEditPartsToAdd([]);
+      setStatusEditPartQuantities({});
       setStatusEditReceivedVendorId(null);
     } catch (error) {
       console.error("Error updating status:", error);
@@ -438,43 +459,63 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     await fetchVendors();
     
     // Extract current linkages from the record
-    // The record has part_ids, part_numbers, part_names (can be strings or arrays)
     let currentLinkages = [];
     if (record.part_ids) {
-      // Handle both string and array formats
-      let partIds = record.part_ids;
-      let partNumbers = record.part_numbers || [];
-      let partNames = record.part_names || [];
-      
-      // If part_ids is a string, split it
-      if (typeof partIds === 'string') {
-        partIds = partIds.split(',').map(id => id.trim()).filter(id => id);
+      try {
+        const partIds = record.part_ids.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+        
+        if (partIds.length > 0) {
+          const partsResponse = await axios.get(`${API_BASE_URL}/parts/`, {
+            params: { ids: partIds.join(',') }
+          });
+          
+          const parts = partsResponse.data || [];
+          
+          // Create linkages with quantities
+          currentLinkages = partIds.map((partId, index) => {
+            const part = parts.find(p => p.id === partId);
+            return {
+              id: `${record.id}-${partId}`,
+              part_id: partId,
+              part_number: part?.part_number || `Part-${partId}`,
+              part_name: part?.part_name || 'Unknown Part',
+              raw_material_required_quantity: part?.raw_material_required_quantity || 1,
+              raw_material_id: record.raw_material_id,
+              order_id: record.order_id,
+              linkage_group_id: record.linkage_group_id
+            };
+          });
+        }
+      } catch (error) {
+        // Fallback to basic linkage creation
+        const partIds = record.part_ids.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+        const partNumbers = record.part_numbers || [];
+        const partNames = record.part_names || [];
+        
+        currentLinkages = partIds.map((partId, index) => ({
+          id: `${record.id}-${partId}`,
+          part_id: parseInt(partId),
+          part_number: Array.isArray(partNumbers) ? partNumbers[index] : partNumbers?.split(',')[index]?.trim() || `Part-${partId}`,
+          part_name: Array.isArray(partNames) ? partNames[index] : partNames?.split(',')[index]?.trim() || 'Unknown Part',
+          raw_material_required_quantity: 1,
+          raw_material_id: record.raw_material_id,
+          order_id: record.order_id,
+          linkage_group_id: record.linkage_group_id
+        }));
       }
-      
-      // If part_numbers is a string, split it
-      if (typeof partNumbers === 'string') {
-        partNumbers = partNumbers.split(',').map(name => name.trim()).filter(name => name);
-      }
-      
-      // If part_names is a string, split it
-      if (typeof partNames === 'string') {
-        partNames = partNames.split(',').map(name => name.trim()).filter(name => name);
-      }
-      
-      currentLinkages = partIds.map((partId, index) => ({
-        id: `${record.id}-${partId}`, // Create unique key using record.id + partId
-        part_id: parseInt(partId),
-        part_number: partNumbers[index] || `Part-${partId}`,
-        part_name: partNames[index] || 'Unknown Part',
-        raw_material_id: record.raw_material_id,
-        order_id: record.order_id,
-        linkage_group_id: record.linkage_group_id
-      }));
     }
     
     setStatusEditCurrentLinkages(currentLinkages);
     setStatusEditPartsToRemove([]);
     setStatusEditPartsToAdd([]);
+    
+    // Initialize part quantities from existing data
+    const initialQuantities = {};
+    currentLinkages.forEach(linkage => {
+      // Use existing quantity if available, default to 1
+      initialQuantities[linkage.part_id] = linkage.raw_material_required_quantity || 1;
+    });
+    setStatusEditPartQuantities(initialQuantities);
     
     try {
       const orderId = record.order_id;
@@ -736,6 +777,42 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       key: 'quantity',
       render: (value) => value != null ? value : <span className="text-gray-400">-</span>,
       onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Allocated</span>,
+      dataIndex: 'allocated_quantity',
+      key: 'allocated_quantity',
+      render: (value) => value != null ? <span className="text-blue-600 font-medium">{value}</span> : <span className="text-gray-400">-</span>,
+      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Available</span>,
+      dataIndex: 'available_quantity',
+      key: 'available_quantity',
+      render: (value) => {
+        if (value == null) return <span className="text-gray-400">-</span>;
+        const color = value > 0 ? 'text-green-600' : 'text-red-600';
+        return <span className={`font-medium ${color}`}>{value}</span>;
+      },
+      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Part Required Qty</span>,
+      dataIndex: 'part_required_quantities',
+      key: 'part_required_quantities',
+      render: (values) => {
+        if (!values || values.length === 0 || values[0] === undefined) {
+          return <span className="text-gray-400">-</span>;
+        }
+        
+        return (
+          <Space size="small" wrap>
+            {values.map((val, idx) => (
+              <Tag key={idx} color="purple">{val}</Tag>
+            ))}
+          </Space>
+        );
+      },
     },
     {
       title: <span className="font-semibold text-gray-700">Mass (kg)</span>,
@@ -1091,7 +1168,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
           {/* Parts Management */}
           <div className="space-y-3">
             <div className="flex items-center justify-between"><Text className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Linked Parts</Text><Text className="text-xs text-gray-400">{statusEditCurrentLinkages.filter(l => !statusEditPartsToRemove.includes(l.id)).length} Parts Linked</Text></div>
-            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 min-h-[60px] flex flex-wrap gap-2">
+            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 min-h-[60px] space-y-2">
               {statusEditCurrentLinkages
                 .filter(l => !statusEditPartsToRemove.includes(l.id))
                 .map(l => {
@@ -1101,24 +1178,47 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                     : meta?.isDirect
                       ? "Direct Part"
                       : "";
+                  const quantity = statusEditPartQuantities[l.part_id] || 1;
+                  
                   return (
-                    <Tag
-                      key={l.id}
-                      color="geekblue"
-                      closable
-                      onClose={() => setStatusEditPartsToRemove(prev => [...prev, l.id])}
-                      className="flex items-center px-2 py-1 rounded-md text-sm border-none shadow-sm"
-                    >
-                      <span className="font-semibold">{l.part_number}</span>
-                      <span className="mx-1 opacity-60">|</span>
-                      <span className="text-xs opacity-80">{l.part_name}</span>
-                      {pathLabel && (
-                        <>
-                          <span className="mx-1 opacity-40">|</span>
-                          <span className="text-[10px] opacity-70">{pathLabel}</span>
-                        </>
-                      )}
-                    </Tag>
+                    <div key={l.id} className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
+                      <div className="flex items-center flex-1 min-w-0">
+                        <Tag
+                          color="geekblue"
+                          closable
+                          onClose={() => setStatusEditPartsToRemove(prev => [...prev, l.id])}
+                          className="flex-shrink-0"
+                        >
+                          <span className="font-semibold">{l.part_number}</span>
+                          <span className="mx-1 opacity-60">|</span>
+                          <span className="text-xs opacity-80">{l.part_name}</span>
+                          {pathLabel && (
+                            <>
+                              <span className="mx-1 opacity-40">|</span>
+                              <span className="text-[10px] opacity-70">{pathLabel}</span>
+                            </>
+                          )}
+                        </Tag>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-xs font-medium text-gray-600">Qty:</span>
+                        <InputNumber
+                          size="small"
+                          min={0.1}
+                          step={0.1}
+                          value={quantity}
+                          onChange={(newQuantity) => {
+                            setStatusEditPartQuantities(prev => ({
+                              ...prev,
+                              [l.part_id]: newQuantity || 1
+                            }));
+                          }}
+                          style={{ width: '80px' }}
+                          className="text-xs"
+                          placeholder="1.0"
+                        />
+                      </div>
+                    </div>
                   );
                 })}
             </div>
@@ -1147,6 +1247,17 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                 
                 // Add to current linkages
                 setStatusEditCurrentLinkages(prev => [...prev, ...newLinkages]);
+                
+                // Initialize quantities for new parts (default to 1)
+                const newQuantities = {};
+                selectedValues.forEach(partId => {
+                  if (!statusEditPartQuantities[partId]) {
+                    newQuantities[partId] = 1;
+                  }
+                });
+                if (Object.keys(newQuantities).length > 0) {
+                  setStatusEditPartQuantities(prev => ({ ...prev, ...newQuantities }));
+                }
                 
                 // Clear the selection
                 setStatusEditPartsToAdd([]);

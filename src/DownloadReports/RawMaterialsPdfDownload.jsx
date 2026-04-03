@@ -105,7 +105,12 @@ const inventoryColumnWidths = {
   stockType: 65,
   qty: 45,
   dimensions: 110,
+  weight: 50,
+  cost: 50,
   status: 65,
+  user: 100,
+  materialDensity: 60,
+  materialCost: 50,
 };
 
 const statusColumnWidths = {
@@ -154,11 +159,11 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.mass }]}>
               KG
             </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.density }]}>
-              DENSITY
+            <Text style={[styles.headerCell, { width: inventoryColumnWidths.materialDensity }]}>
+              DENSITY (KG/M³)
             </Text>
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.volume }]}>
-              VOLUME
+              VOLUME (M³)
             </Text>
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.stockType }]}>
               STOCK TYPE
@@ -168,6 +173,18 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
             </Text>
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.dimensions }]}>
               DIMENSIONS
+            </Text>
+            <Text style={[styles.headerCell, { width: inventoryColumnWidths.weight }]}>
+              WEIGHT (N)
+            </Text>
+            <Text style={[styles.headerCell, { width: inventoryColumnWidths.cost }]}>
+              COST (₹)
+            </Text>
+            <Text style={[styles.headerCell, { width: inventoryColumnWidths.materialCost }]}>
+              COST PER KG (₹)
+            </Text>
+            <Text style={[styles.headerCell, { width: inventoryColumnWidths.user }]}>
+              USER NAME
             </Text>
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.status }]}>
               STATUS
@@ -191,7 +208,7 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
                 <Text style={[styles.cell, { width: inventoryColumnWidths.mass }]}>
                   {m.mass != null ? String(m.mass) : "-"}
                 </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.density }]}>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.materialDensity }]}>
                   {m.density != null ? String(m.density) : "-"}
                 </Text>
                 <Text style={[styles.cell, { width: inventoryColumnWidths.volume }]}>
@@ -205,6 +222,18 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
                 </Text>
                 <Text style={[styles.cell, { width: inventoryColumnWidths.dimensions }]}>
                   {m.stock_dimensions || "-"}
+                </Text>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.weight }]}>
+                  {m.weight != null ? String(m.weight) : "-"}
+                </Text>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.cost }]}>
+                  {m.cost != null ? `₹${m.cost}` : "-"}
+                </Text>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.materialCost }]}>
+                  {m.cost_per_kg != null ? `₹${m.cost_per_kg}` : "-"}
+                </Text>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.user }]}>
+                  {m.creator_name || "-"}
                 </Text>
                 <Text style={[styles.cell, { width: inventoryColumnWidths.status }]}>
                   {statusText}
@@ -398,11 +427,15 @@ export const RawMaterialsInventoryPdfDownload = ({
       "MATERIAL NAME",
       "SPECIFICATION",
       "KG",
-      "DENSITY",
-      "VOLUME",
+      "DENSITY (KG/M³)",
+      "VOLUME (M³)",
       "STOCK TYPE",
       "QTY",
       "DIMENSIONS",
+      "WEIGHT (N)",
+      "COST (₹)",
+      "COST PER KG (₹)",
+      "USER NAME",
       "STATUS"
     ];
 
@@ -443,12 +476,16 @@ export const RawMaterialsInventoryPdfDownload = ({
         m.material_name || "-",                       // Column B: MATERIAL NAME
         m.material_specification || "-",              // Column C: SPECIFICATION
         m.mass != null ? m.mass : "-",                // Column D: KG
-        m.density != null ? m.density : "-",          // Column E: DENSITY
-        m.volume != null ? m.volume : "-",            // Column F: VOLUME
+        m.density != null ? m.density : "-",          // Column E: DENSITY (KG/M³)
+        m.volume != null ? m.volume : "-",            // Column F: VOLUME (M³)
         m.stock_type || "-",                          // Column G: STOCK TYPE
         m.quantity != null ? m.quantity : "-",        // Column H: QTY
         m.stock_dimensions || "-",                    // Column I: DIMENSIONS
-        statusText                                    // Column J: STATUS
+        m.weight != null ? m.weight : "-",             // Column J: WEIGHT (N)
+        m.cost != null ? `₹${m.cost}` : "-",          // Column K: COST (₹)
+        m.cost_per_kg != null ? `₹${m.cost_per_kg}` : "-", // Column L: COST PER KG (₹)
+        m.creator_name || "-",                           // Column M: USER NAME
+        statusText                                     // Column N: STATUS
       ];
       
       // Write each row individually to ensure proper alignment
@@ -462,11 +499,15 @@ export const RawMaterialsInventoryPdfDownload = ({
       { wch: 20 },  // MATERIAL NAME
       { wch: 25 },  // SPECIFICATION
       { wch: 10 },  // KG
-      { wch: 12 },  // DENSITY
-      { wch: 12 },  // VOLUME
+      { wch: 15 },  // DENSITY (KG/M³)
+      { wch: 15 },  // VOLUME (M³)
       { wch: 15 },  // STOCK TYPE
       { wch: 8 },   // QTY
       { wch: 20 },  // DIMENSIONS
+      { wch: 15 },  // WEIGHT (N)
+      { wch: 15 },  // COST (₹)
+      { wch: 15 },  // COST PER KG (₹)
+      { wch: 20 },  // USER NAME
       { wch: 15 }   // STATUS
     ];
     ws['!cols'] = colWidths;
