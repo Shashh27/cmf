@@ -49,6 +49,8 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   const [workCentersLoading, setWorkCentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
   const [toolsLoading, setToolsLoading]             = useState(false);
+  const [vendorsLoading, setVendorsLoading]         = useState(false);
+  const [vendors, setVendors]                       = useState([]);
 
   const itemsWatch = Form.useWatch('items', form);
   
@@ -75,6 +77,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,     setAllMachines, setMachinesLoading,    allMachines.length > 0);
   const fetchTools       = () => fetchInto(`${API_BASE_URL}/tools-list/`,   setToolsList,   setToolsLoading,       toolsList.length > 0);
+  const fetchVendors     = () => fetchInto(`${API_BASE_URL}/rawmaterials/vendors`, setVendors, setVendorsLoading, vendors.length > 0);
 
   const getCurrentUserId = () => {
     try {
@@ -161,6 +164,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
         return {
           operation_name: item.operation_name,
           part_type_id: item.part_type_id ?? 1,
+          vendor_id: item.vendor_id || null,
           from_date: ts(item.from_date),
           to_date: ts(item.to_date),
           setup_time: out ? null : (item.setup_time?.format('HH:mm:ss') ?? null),
@@ -406,6 +410,35 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                             return current && !current.isAfter(dayjs(fd), 'day');
                                           }}
                                         />
+                                      </Form.Item>
+                                    </Col>
+                                  </Row>
+                                )}
+                                
+                                {/* Vendor Selection for Out-Source Operations */}
+                                {isOutSource && (
+                                  <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
+                                    <Col xs={24}>
+                                      <Form.Item
+                                        {...restField}
+                                        name={[name, 'vendor_id']}
+                                        label="Vendor"
+                                        rules={[{ required: true, message: 'Please select a vendor for outsourced operations!' }]}
+                                      >
+                                        <Select 
+                                          placeholder="Select vendor" 
+                                          allowClear 
+                                          showSearch 
+                                          optionFilterProp="children" 
+                                          loading={vendorsLoading} 
+                                          onOpenChange={o => { if (o) fetchVendors(); }}
+                                        >
+                                          {vendors.map(vendor => (
+                                            <Select.Option key={vendor.id} value={vendor.id}>
+                                              {vendor.company_name}
+                                            </Select.Option>
+                                          ))}
+                                        </Select>
                                       </Form.Item>
                                     </Col>
                                   </Row>

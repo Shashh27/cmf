@@ -65,14 +65,7 @@ const PDM = () => {
       
       <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {fromOms && (
-          <div style={{ padding: '0 4px 10px 4px' }}>
-            <Button onClick={() => navigate("/admin/oms/orders")}>
-              Back to Orders
-            </Button>
-          </div>
-        )}
-        {fromOms && (
-          <div style={{ padding: "0 4px 10px 4px" }}>
+          <div style={{ padding: '0 4px 10px 4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Tabs
               activeKey={activeTopTab}
               onChange={setActiveTopTab}
@@ -81,6 +74,9 @@ const PDM = () => {
                 { key: "pps", label: "PPS" },
               ]}
             />
+            <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
+              Back to Orders
+            </Button>
           </div>
         )}
 
@@ -156,29 +152,24 @@ const PDM = () => {
             </div>
           ) : (
             <>
-              {/* Top panel: only show detailed part view for parts; assemblies/products handled separately */}
+              {/* Top panel: ProductDetails now includes DocumentsPanel */}
               {selectedItem?.itemType === 'part' && (
                 <div 
                   style={{ 
-                    flexShrink: 0, 
-                    maxHeight: isMobile ? "30vh" : "38vh", 
+                    flex: 1, 
                     minHeight: 0, 
-                    overflow: "hidden" 
+                    overflow: "hidden",
+                    height: "100%"
                   }}
                 >
-                  <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments} />
+                  <ProductDetails selectedItem={selectedItem} />
                 </div>
               )}
-              <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                {selectedItem?.itemType === 'assembly' ? (
+              {selectedItem?.itemType === 'assembly' && (
+                <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
                   <AssemblyDocumentsPanel selectedItem={selectedItem} />
-                ) : (
-                  <DocumentsPanel
-                    selectedItem={selectedItem}
-                    onDocumentsLoaded={setPartDocuments}
-                  />
-                )}
-              </div>
+                </div>
+              )}
             </>
           )}
         </Content>

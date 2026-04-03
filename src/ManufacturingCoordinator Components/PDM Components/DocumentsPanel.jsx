@@ -80,12 +80,14 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
   const [scrollY, setScrollY] = useState(400);
 
   useEffect(() => {
+    // Use the container's own height so the table always gets an internal scroll area
+    // even when this panel sits inside another fixed-height/overflow-hidden layout (PDM).
     const update = () => {
       if (!ref.current) return;
       const h = ref.current.clientHeight || 0;
-      // Account for table header + a little breathing room so the last row isn't clipped.
-      // (Header is typically ~40-56px depending on density, plus horizontal scrollbar if any.)
-      setScrollY(Math.max(h - 110, 200));
+      // Reduced header space calculation to allow more room for operations
+      // (Header is typically ~30-40px with reduced padding, plus minimal breathing room)
+      setScrollY(Math.max(h - 40, 200));
     };
     const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
     if (ref.current) ro.observe(ref.current);
@@ -102,7 +104,7 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
 };
 
 // ── DocumentsPanel ──────────────────────────────────────────────────────────
-const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
+const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, onTabChange, externalActiveTab }) => {
   const [documents, setDocuments]   = useState([]);
   const [operations, setOperations] = useState([]);
   const [activeTab, setActiveTab]   = useState('mbom');
@@ -120,7 +122,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const [isViewModalOpen, setIsViewModalOpen]         = useState(false);
   const [modalTab, setModalTab]                       = useState('details');
   const [showAddToolForm, setShowAddToolForm]         = useState(false);
-  const [showImportModal, setShowImportModal]         = useState(false);
+  const [showImportModal, setShowImportModal]       = useState(false);
   const [importOperations, setImportOperations]       = useState([]);
   const [showReportModal, setShowReportModal] = useState(false);
 
@@ -169,11 +171,17 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (changed) setSelectedVersions(next);
   }, [latestPartDocs, groupedPartDocs]);
 
-    useEffect(() => {
+  useEffect(() => {
     if (!selectedItem) { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
     if (selectedItem.itemType === 'part') fetchDocuments();
     else { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); }
   }, [selectedItem]);
+
+  useEffect(() => {
+    if (externalActiveTab !== undefined && externalActiveTab !== activeTab) {
+      setActiveTab(externalActiveTab);
+    }
+  }, [externalActiveTab, activeTab]);
 
   const getCurrentUserId = () => {
     try {
@@ -473,6 +481,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               <Button size="small" icon={<DownloadOutlined />} onClick={() => setShowReportModal(true)} disabled={!isPart || loading} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Download Report</span><span className="sm:hidden">Report</span>
               </Button>
+             
               <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setImportOperations([]); openPartActionModal('operation'); }} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Add Operation</span><span className="sm:hidden">Add Op</span>
               </Button>
@@ -494,6 +503,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               })}
             />
           </div>
+          {/* Small separation line between operations and bottom sections */}
+          <div className="border-t border-slate-200 my-1"></div>
         </div>
       ),
     }] : []),
@@ -574,20 +585,22 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     <div className="flex-1 bg-white overflow-hidden flex flex-col h-full" style={{ height: '100%' }}>
       <style>{`
         .primary-btn-sm,.no-hover-btn,.primary-btn-sm:hover,.no-hover-btn:hover{background-color:#2563eb!important;color:#fff!important;border:none!important;}
-        .docs-ops-table .ant-table-tbody>tr>td,.docs-ops-table .ant-table-thead>tr>th{padding:8px 10px!important;}
+        .docs-ops-table .ant-table-tbody>tr>td,.docs-ops-table .ant-table-thead>tr>th{padding:${compactMode ? '4px 6px' : '6px 8px'}!important;}
         .docs-ops-table .ant-table-thead>tr>th{font-weight:600;color:#334155!important;}
         .custom-fit-table .ant-table-header{position:sticky;top:0;z-index:10;}
         .custom-fit-table .ant-table-body{overflow-y:auto!important;}
         @media(max-width:640px){
           .docs-ops-table .ant-table-tbody>tr>td,.docs-ops-table .ant-table-thead>tr>th,
-          .docs-ebom-table .ant-table-tbody>tr>td,.docs-ebom-table .ant-table-thead>tr>th{padding:5px 6px!important;font-size:11px!important;}
+          .docs-ebom-table .ant-table-tbody>tr>td,.docs-ebom-table .ant-table-thead>tr>th{padding:${compactMode ? '4px 6px' : '6px 8px'}!important;}
         }
         .pdm-tabs-full.ant-tabs{display:flex;flex-direction:column;height:100%;}
         .pdm-tabs-full .ant-tabs-content,.pdm-tabs-full .ant-tabs-tabpane,.pdm-tabs-full .ant-tabs-content-holder,.pdm-tabs-full .ant-tabs-body{flex:1;min-height:0;overflow:hidden;height:100%;}
+        .compact-mode .ant-tabs-nav{margin-bottom: ${compactMode ? '8px' : '16px'}!important;}
+        .compact-mode .ant-tabs-tab{padding: ${compactMode ? '4px 8px' : '8px 16px'}!important;font-size: ${compactMode ? '12px' : '14px'}!important;}
       `}</style>
 
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 pt-2 pb-3" style={{ height: '100%' }}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} className="flex-1 flex flex-col min-h-0 overflow-hidden pdm-tabs-full" style={{ height: '100%' }} />
+      <div className={`flex-1 flex flex-col min-h-0 overflow-hidden ${compactMode ? 'px-2 pt-1 pb-2' : 'px-3 pt-2 pb-3'}`} style={{ height: '100%' }}>
+        <Tabs activeKey={activeTab} onChange={(key) => { setActiveTab(key); if (onTabChange) onTabChange(key); }} items={tabItems} className={`flex-1 flex flex-col min-h-0 overflow-hidden pdm-tabs-full ${compactMode ? 'compact-mode' : ''}`} style={{ height: '100%' }} />
       </div>
 
       {/* Preview Modal */}

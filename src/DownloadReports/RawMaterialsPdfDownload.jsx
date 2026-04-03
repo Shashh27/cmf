@@ -11,6 +11,8 @@ import {
   Font,
 } from "@react-pdf/renderer";
 import * as XLSX from "xlsx";
+import axios from "axios";
+import { API_BASE_URL } from "../Config/auth";
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -93,34 +95,79 @@ const styles = StyleSheet.create({
     color: "#9ca3af",
     textAlign: "right",
   },
+  stockHeader: {
+    flexDirection: "row",
+    backgroundColor: "#f9fafb",
+    borderBottomWidth: 1,
+    borderBottomColor: "#e5e7eb",
+    borderBottomStyle: "solid",
+    borderTopWidth: 1,
+    borderTopColor: "#d1d5db",
+    borderTopStyle: "solid",
+  },
+  stockHeaderCell: {
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+    borderRightWidth: 1,
+    borderRightColor: "#e5e7eb",
+    borderRightStyle: "solid",
+    fontWeight: 600,
+    fontSize: 7,
+  },
+  stockRow: {
+    flexDirection: "row",
+    borderBottomWidth: 0.5,
+    borderBottomColor: "#f3f4f6",
+    borderBottomStyle: "solid",
+  },
+  stockCell: {
+    paddingVertical: 3,
+    paddingHorizontal: 2,
+    borderRightWidth: 0.5,
+    borderRightColor: "#f3f4f6",
+    borderRightStyle: "solid",
+    fontSize: 7,
+  },
 });
 
 const inventoryColumnWidths = {
-  slNo: 25,
-  name: 110,
-  spec: 140,
-  mass: 45,
-  density: 55,
-  volume: 55,
-  stockType: 65,
-  qty: 45,
-  dimensions: 110,
-  status: 65,
+  slNo: 40,
+  name: 150,
+  density: 80,
+  status: 80,
+};
+
+const stockColumnWidths = {
+  formType: 60,
+  dimensions: 100,
+  quantity: 50,
+  volume: 60,
+  mass: 60,
+  weight: 60,
+  cost: 60,
+  source: 50,
+  order: 70,
+  parts: 80,
+  userName: 70,
+  status: 50,
 };
 
 const statusColumnWidths = {
   slNo: 25,
   projectNumber: 75,
-  projectName: 110,
-  materialName: 110,
-  quantity: 35,
-  mass: 35,
+  partNumber: 80,
+  material: 100,
+  formType: 70,
+  quantity: 50,
+  mass: 60,
+  weight: 60,
+  cost: 110,
+  vendor: 90,
   status: 80,
-  partNumbers: 130,
-  partNames: 130,
+  orderStatus: 90,
 };
 
-const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
+const RawMaterialsInventoryPdfDocument = ({ rawMaterials, stockData }) => {
   const generatedAt = new Date().toLocaleString();
   const total = rawMaterials.length;
 
@@ -148,26 +195,8 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.name }]}>
               MATERIAL NAME
             </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.spec }]}>
-              SPECIFICATION
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.mass }]}>
-              KG
-            </Text>
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.density }]}>
-              DENSITY
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.volume }]}>
-              VOLUME
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.stockType }]}>
-              STOCK TYPE
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.qty }]}>
-              QTY
-            </Text>
-            <Text style={[styles.headerCell, { width: inventoryColumnWidths.dimensions }]}>
-              DIMENSIONS
+              DENSITY(kg/m³)
             </Text>
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.status }]}>
               STATUS
@@ -175,40 +204,119 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
           </View>
 
           {rawMaterials.map((m, index) => {
-            const qty = m.quantity ?? 0;
-            const statusText = qty > 0 ? "AVAILABLE" : "NOT AVAILABLE";
+            const materialStocks = stockData[m.id] || [];
+            const hasAvailableStock = materialStocks.some(stock => stock.status === 'available');
+            const statusText = hasAvailableStock ? "AVAILABLE" : "NOT AVAILABLE";
+            
             return (
-              <View key={m.id || index} style={styles.row}>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.slNo }]}>
-                  {index + 1}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.name }]}>
-                  {m.material_name || "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.spec }]}>
-                  {m.material_specification || "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.mass }]}>
-                  {m.mass != null ? String(m.mass) : "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.density }]}>
-                  {m.density != null ? String(m.density) : "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.volume }]}>
-                  {m.volume != null ? String(m.volume) : "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.stockType }]}>
-                  {m.stock_type || "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.qty }]}>
-                  {m.quantity != null ? String(m.quantity) : "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.dimensions }]}>
-                  {m.stock_dimensions || "-"}
-                </Text>
-                <Text style={[styles.cell, { width: inventoryColumnWidths.status }]}>
-                  {statusText}
-                </Text>
+              <View key={m.id || index}>
+                <View style={styles.row}>
+                  <Text style={[styles.cell, { width: inventoryColumnWidths.slNo }]}>
+                    {index + 1}
+                  </Text>
+                  <Text style={[styles.cell, { width: inventoryColumnWidths.name }]}>
+                    {m.material_name || "-"}
+                  </Text>
+                  <Text style={[styles.cell, { width: inventoryColumnWidths.density }]}>
+                    {m.density != null ? String(m.density) : "-"}
+                  </Text>
+                  <Text style={[styles.cell, { width: inventoryColumnWidths.status }]}>
+                    {statusText}
+                  </Text>
+                </View>
+                
+                {materialStocks.length > 0 && (
+                  <View>
+                    <View style={styles.stockHeader}>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.formType }]}>
+                        Form Type
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.dimensions }]}>
+                        Dimensions
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.quantity }]}>
+                        Quantity
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.volume }]}>
+                        Volume (m³)
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.mass }]}>
+                        Mass (kg)
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.weight }]}>
+                        Weight (N)
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.cost }]}>
+                        Cost (₹)
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.source }]}>
+                        Source
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.order }]}>
+                        Order
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.parts }]}>
+                        Parts
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.userName }]}>
+                        User Name
+                      </Text>
+                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.status }]}>
+                        Status
+                      </Text>
+                    </View>
+                    
+                    {materialStocks.map((stock, stockIndex) => {
+                      const getDimensions = (record) => {
+                        if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
+                        if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
+                        if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
+                        return '-';
+                      };
+                      
+                      return (
+                        <View key={stock.id || stockIndex} style={styles.stockRow}>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.formType }]}>
+                            {stock.form_type || "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.dimensions }]}>
+                            {getDimensions(stock)}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.quantity }]}>
+                            {stock.quantity != null ? String(stock.quantity) : "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.volume }]}>
+                            {stock.volume != null ? String(stock.volume.toFixed(6)) : "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.mass }]}>
+                            {stock.mass != null ? String(stock.mass.toFixed(3)) : "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.weight }]}>
+                            {stock.weight != null ? String(stock.weight.toFixed(3)) : "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.cost }]}>
+                            {stock.cost != null ? `₹${stock.cost.toFixed(2)}` : "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.source }]}>
+                            {stock.source_type === 'order' ? 'Order' : 'General'}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.order }]}>
+                            {stock.source_order_number || "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.parts }]}>
+                            {stock.part_numbers?.length > 0 ? stock.part_numbers.join(', ') : "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.userName }]}>
+                            {stock.creator_name || "-"}
+                          </Text>
+                          <Text style={[styles.stockCell, { width: stockColumnWidths.status }]}>
+                            {stock.status || "-"}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
               </View>
             );
           })}
@@ -227,41 +335,33 @@ const groupLinkedMaterials = (linkedMaterials) => {
 
   (linkedMaterials || []).forEach((item) => {
     if (!item) return;
-    const materialId = item.raw_material_id ?? "no-material";
-    const orderId = item.order_id ?? "no-order";
-    const key = `${materialId}-${orderId}`;
+    const key = item.id || `${item.raw_material_id}-${item.order_id}-${item.part_number}`;
 
     if (!groupedMap[key]) {
       groupedMap[key] = {
-        id: `${materialId}-${orderId}`,
+        id: key,
         raw_material_id: item.raw_material_id,
         order_id: item.order_id,
-        sale_order_number: item.sale_order_number,
+        sale_order_number: item.source_order_number || item.sale_order_number,
         project_name: item.project_name || item.product_name,
         material_name: item.material_name,
-        quantity: item.order_quantity,
+        part_number: item.part_numbers && item.part_numbers.length > 0 ? item.part_numbers.join(', ') : item.part_number,
+        form_type: item.form_type,
+        quantity: item.quantity || item.order_quantity,
         mass: item.mass,
-        material_status: item.material_status,
-        part_numbers: [],
-        part_names: [],
+        weight: item.weight,
+        cost: item.cost,
+        vendor: item.vendor_name || item.received_vendor_name,
+        material_status: item.material_status || item.status,
+        order_status: item.order_status,
       };
-    }
-
-    if (item.part_number) {
-      groupedMap[key].part_numbers.push(item.part_number);
-    }
-    if (item.part_name) {
-      groupedMap[key].part_names.push(item.part_name);
     }
   });
 
   const groupedData = Object.values(groupedMap).sort((a, b) => {
-    const aMat = a.raw_material_id ?? 0;
-    const bMat = b.raw_material_id ?? 0;
-    if (aMat !== bMat) return aMat - bMat;
-    const aOrder = a.order_id ?? 0;
-    const bOrder = b.order_id ?? 0;
-    return aOrder - bOrder;
+    const aOrder = a.sale_order_number || '';
+    const bOrder = b.sale_order_number || '';
+    return aOrder.localeCompare(bOrder);
   });
 
   return groupedData;
@@ -305,26 +405,35 @@ const PartsWithRawMaterialsStatusPdfDocument = ({ linkedMaterials }) => {
             <Text style={[styles.headerCell, { width: statusColumnWidths.projectNumber }]}>
               PROJECT NO
             </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.projectName }]}>
-              PROJECT NAME
+            <Text style={[styles.headerCell, { width: statusColumnWidths.partNumber }]}>
+              PART NO
             </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.materialName }]}>
-              MATERIAL NAME
+            <Text style={[styles.headerCell, { width: statusColumnWidths.material }]}>
+              MATERIAL
+            </Text>
+            <Text style={[styles.headerCell, { width: statusColumnWidths.formType }]}>
+              FORM TYPE
             </Text>
             <Text style={[styles.headerCell, { width: statusColumnWidths.quantity }]}>
               QTY
             </Text>
             <Text style={[styles.headerCell, { width: statusColumnWidths.mass }]}>
-              KG
+              MASS (KG)
+            </Text>
+            <Text style={[styles.headerCell, { width: statusColumnWidths.weight }]}>
+              WEIGHT (N)
+            </Text>
+            <Text style={[styles.headerCell, { width: statusColumnWidths.cost }]}>
+              COST
+            </Text>
+            <Text style={[styles.headerCell, { width: statusColumnWidths.vendor }]}>
+              VENDOR
             </Text>
             <Text style={[styles.headerCell, { width: statusColumnWidths.status }]}>
               STATUS
             </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.partNumbers }]}>
-              PART NUMBERS
-            </Text>
-            <Text style={[styles.headerCell, { width: statusColumnWidths.partNames }]}>
-              PART NAMES
+            <Text style={[styles.headerCell, { width: statusColumnWidths.orderStatus }]}>
+              ORDER STATUS
             </Text>
           </View>
 
@@ -336,11 +445,14 @@ const PartsWithRawMaterialsStatusPdfDocument = ({ linkedMaterials }) => {
               <Text style={[styles.cell, { width: statusColumnWidths.projectNumber }]}>
                 {row.sale_order_number || "-"}
               </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.projectName }]}>
-                {row.project_name || "-"}
+              <Text style={[styles.cell, { width: statusColumnWidths.partNumber }]}>
+                {row.part_number || "-"}
               </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.materialName }]}>
+              <Text style={[styles.cell, { width: statusColumnWidths.material }]}>
                 {row.material_name || "-"}
+              </Text>
+              <Text style={[styles.cell, { width: statusColumnWidths.formType }]}>
+                {row.form_type || "-"}
               </Text>
               <Text style={[styles.cell, { width: statusColumnWidths.quantity }]}>
                 {row.quantity != null ? String(row.quantity) : "-"}
@@ -348,14 +460,20 @@ const PartsWithRawMaterialsStatusPdfDocument = ({ linkedMaterials }) => {
               <Text style={[styles.cell, { width: statusColumnWidths.mass }]}>
                 {row.mass != null ? String(row.mass) : "-"}
               </Text>
+              <Text style={[styles.cell, { width: statusColumnWidths.weight }]}>
+                {row.weight != null ? String(row.weight) : "-"}
+              </Text>
+              <Text style={[styles.cell, { width: statusColumnWidths.cost }]}>
+                {row.cost != null ? `₹${new Intl.NumberFormat('en-IN').format(row.cost)}` : "-"}
+              </Text>
+              <Text style={[styles.cell, { width: statusColumnWidths.vendor }]}>
+                {row.vendor || "-"}
+              </Text>
               <Text style={[styles.cell, { width: statusColumnWidths.status }]}>
                 {formatStatus(row.material_status)}
               </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.partNumbers }]}>
-                {(row.part_numbers || []).join(", ") || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: statusColumnWidths.partNames }]}>
-                {(row.part_names || []).join(", ") || "-"}
+              <Text style={[styles.cell, { width: statusColumnWidths.orderStatus }]}>
+                {row.order_status || "-"}
               </Text>
             </View>
           ))}
@@ -374,6 +492,39 @@ export const RawMaterialsInventoryPdfDownload = ({
   fileName = "raw-materials-inventory.pdf",
 }) => {
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [stockData, setStockData] = useState({});
+  const [loadingStock, setLoadingStock] = useState(false);
+
+  const fetchAllStockData = async () => {
+    if (!rawMaterials || rawMaterials.length === 0) return;
+    
+    setLoadingStock(true);
+    try {
+      const stockPromises = rawMaterials.map(async (material) => {
+        try {
+          const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`, {
+            params: { material_id: material.id }
+          });
+          return { materialId: material.id, stocks: response.data || [] };
+        } catch (error) {
+          console.error(`Error fetching stock for material ${material.id}:`, error);
+          return { materialId: material.id, stocks: [] };
+        }
+      });
+      
+      const results = await Promise.all(stockPromises);
+      const stockMap = {};
+      results.forEach(({ materialId, stocks }) => {
+        stockMap[materialId] = stocks;
+      });
+      
+      setStockData(stockMap);
+    } catch (error) {
+      console.error('Error fetching stock data:', error);
+    } finally {
+      setLoadingStock(false);
+    }
+  };
 
   const handleDownloadExcel = () => {
     if (!rawMaterials || rawMaterials.length === 0) return;
@@ -392,17 +543,11 @@ export const RawMaterialsInventoryPdfDownload = ({
       []
     ], { origin: "A1" });
 
-    // Add table headers
+    // Add table headers for raw materials
     const headers = [
       "SL NO",
       "MATERIAL NAME",
-      "SPECIFICATION",
-      "KG",
-      "DENSITY",
-      "VOLUME",
-      "STOCK TYPE",
-      "QTY",
-      "DIMENSIONS",
+      "DENSITY(kg/m³)",
       "STATUS"
     ];
 
@@ -434,39 +579,82 @@ export const RawMaterialsInventoryPdfDownload = ({
       }
     }
 
-    // Prepare and add table data - ensure exact alignment with headers
+    // Prepare and add table data for raw materials
+    let currentRow = 8;
     rawMaterials.forEach((m, index) => {
-      const qty = m.quantity ?? 0;
-      const statusText = qty > 0 ? "AVAILABLE" : "NOT AVAILABLE";
+      const materialStocks = stockData[m.id] || [];
+      const hasAvailableStock = materialStocks.some(stock => stock.status === 'available');
+      const statusText = hasAvailableStock ? "AVAILABLE" : "NOT AVAILABLE";
+      
       const rowData = [
-        index + 1,                                    // Column A: SL NO
-        m.material_name || "-",                       // Column B: MATERIAL NAME
-        m.material_specification || "-",              // Column C: SPECIFICATION
-        m.mass != null ? m.mass : "-",                // Column D: KG
-        m.density != null ? m.density : "-",          // Column E: DENSITY
-        m.volume != null ? m.volume : "-",            // Column F: VOLUME
-        m.stock_type || "-",                          // Column G: STOCK TYPE
-        m.quantity != null ? m.quantity : "-",        // Column H: QTY
-        m.stock_dimensions || "-",                    // Column I: DIMENSIONS
-        statusText                                    // Column J: STATUS
+        index + 1,
+        m.material_name || "-",
+        m.density != null ? m.density : "-",
+        statusText
       ];
       
-      // Write each row individually to ensure proper alignment
-      const rowNum = 8 + index; // Start from row 8 (after headers)
-      XLSX.utils.sheet_add_aoa(ws, [rowData], { origin: `A${rowNum}` });
+      XLSX.utils.sheet_add_aoa(ws, [rowData], { origin: `A${currentRow}` });
+      currentRow++;
+      
+      // Add stock details if available
+      if (materialStocks.length > 0) {
+        // Add stock headers
+        const stockHeaders = [
+          "Form Type",
+          "Dimensions",
+          "Quantity",
+          "Volume (m³)",
+          "Mass (kg)",
+          "Weight (N)",
+          "Cost (₹)",
+          "Source",
+          "Order",
+          "Parts",
+          "User Name",
+          "Status"
+        ];
+        
+        XLSX.utils.sheet_add_aoa(ws, [stockHeaders], { origin: `A${currentRow}` });
+        currentRow++;
+        
+        // Add stock rows
+        materialStocks.forEach((stock) => {
+          const getDimensions = (record) => {
+            if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
+            if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
+            if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
+            return '-';
+          };
+          
+          const stockRowData = [
+            stock.form_type || "-",
+            getDimensions(stock),
+            stock.quantity != null ? stock.quantity : "-",
+            stock.volume != null ? stock.volume.toFixed(6) : "-",
+            stock.mass != null ? stock.mass.toFixed(3) : "-",
+            stock.weight != null ? stock.weight.toFixed(3) : "-",
+            stock.cost != null ? `₹${stock.cost.toFixed(2)}` : "-",
+            stock.source_type === 'order' ? 'Order' : 'General',
+            stock.source_order_number || "-",
+            stock.part_numbers?.length > 0 ? stock.part_numbers.join(', ') : "-",
+            stock.creator_name || "-",
+            stock.status || "-"
+          ];
+          
+          XLSX.utils.sheet_add_aoa(ws, [stockRowData], { origin: `A${currentRow}` });
+          currentRow++;
+        });
+        
+        // Add empty row for spacing
+        currentRow++;
+      }
     });
 
-    // Set column widths to match header order
+    // Set column widths
     const colWidths = [
       { wch: 8 },   // SL NO
-      { wch: 20 },  // MATERIAL NAME
-      { wch: 25 },  // SPECIFICATION
-      { wch: 10 },  // KG
-      { wch: 12 },  // DENSITY
-      { wch: 12 },  // VOLUME
-      { wch: 15 },  // STOCK TYPE
-      { wch: 8 },   // QTY
-      { wch: 20 },  // DIMENSIONS
+      { wch: 25 },  // MATERIAL NAME
+      { wch: 15 },  // DENSITY(kg/m³)
       { wch: 15 }   // STATUS
     ];
     ws['!cols'] = colWidths;
@@ -496,7 +684,10 @@ export const RawMaterialsInventoryPdfDownload = ({
       <Button 
         icon={<DownloadOutlined />} 
         size="middle"
-        onClick={() => setIsModalVisible(true)}
+        onClick={() => {
+          setIsModalVisible(true);
+          fetchAllStockData();
+        }}
       >
         Download Raw Materials
       </Button>
@@ -516,7 +707,7 @@ export const RawMaterialsInventoryPdfDownload = ({
           
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
             <PDFDownloadLink
-              document={<RawMaterialsInventoryPdfDocument rawMaterials={rawMaterials} />}
+              document={<RawMaterialsInventoryPdfDocument rawMaterials={rawMaterials} stockData={stockData} />}
               fileName={fileName}
               style={{ textDecoration: "none", width: "100%" }}
             >
@@ -527,7 +718,7 @@ export const RawMaterialsInventoryPdfDownload = ({
                   style={{ width: "100%", height: "50px" }}
                   type="default"
                 >
-                  {loading ? "Preparing PDF..." : "Download PDF"}
+                  {loading ? "Preparing PDF..." : (loadingStock ? "Loading Stock Data..." : "Download PDF")}
                 </Button>
               )}
             </PDFDownloadLink>
@@ -561,41 +752,33 @@ export const PartsWithRawMaterialsStatusPdfDownload = ({
     const groupedMap = {};
     (linkedMaterials || []).forEach((item) => {
       if (!item) return;
-      const materialId = item.raw_material_id ?? "no-material";
-      const orderId = item.order_id ?? "no-order";
-      const key = `${materialId}-${orderId}`;
+      const key = item.id || `${item.raw_material_id}-${item.order_id}-${item.part_number}`;
 
       if (!groupedMap[key]) {
         groupedMap[key] = {
-          id: `${materialId}-${orderId}`,
+          id: key,
           raw_material_id: item.raw_material_id,
           order_id: item.order_id,
-          sale_order_number: item.sale_order_number,
+          sale_order_number: item.source_order_number || item.sale_order_number,
           project_name: item.project_name || item.product_name,
           material_name: item.material_name,
-          quantity: item.order_quantity,
+          part_number: item.part_numbers && item.part_numbers.length > 0 ? item.part_numbers.join(', ') : item.part_number,
+          form_type: item.form_type,
+          quantity: item.quantity || item.order_quantity,
           mass: item.mass,
-          material_status: item.material_status,
-          part_numbers: [],
-          part_names: [],
+          weight: item.weight,
+          cost: item.cost,
+          vendor: item.vendor_name || item.received_vendor_name,
+          material_status: item.material_status || item.status,
+          order_status: item.order_status,
         };
-      }
-
-      if (item.part_number) {
-        groupedMap[key].part_numbers.push(item.part_number);
-      }
-      if (item.part_name) {
-        groupedMap[key].part_names.push(item.part_name);
       }
     });
 
     const groupedData = Object.values(groupedMap).sort((a, b) => {
-      const aMat = a.raw_material_id ?? 0;
-      const bMat = b.raw_material_id ?? 0;
-      if (aMat !== bMat) return aMat - bMat;
-      const aOrder = a.order_id ?? 0;
-      const bOrder = b.order_id ?? 0;
-      return aOrder - bOrder;
+      const aOrder = a.sale_order_number || '';
+      const bOrder = b.sale_order_number || '';
+      return aOrder.localeCompare(bOrder);
     });
 
     const formatStatus = (status) => {
@@ -625,13 +808,16 @@ export const PartsWithRawMaterialsStatusPdfDownload = ({
     const headers = [
       "SL NO",
       "PROJECT NO",
-      "PROJECT NAME",
-      "MATERIAL NAME",
+      "PART NO",
+      "MATERIAL",
+      "FORM TYPE",
       "QTY",
-      "KG",
+      "MASS (KG)",
+      "WEIGHT (N)",
+      "COST",
+      "VENDOR",
       "STATUS",
-      "PART NUMBERS",
-      "PART NAMES"
+      "ORDER STATUS"
     ];
 
     // Merge cells for header titles and metadata
@@ -667,13 +853,16 @@ export const PartsWithRawMaterialsStatusPdfDownload = ({
       const rowData = [
         index + 1,                                    // Column A: SL NO
         row.sale_order_number || "-",                 // Column B: PROJECT NO
-        row.project_name || "-",                      // Column C: PROJECT NAME
-        row.material_name || "-",                     // Column D: MATERIAL NAME
-        row.quantity != null ? row.quantity : "-",     // Column E: QTY
-        row.mass != null ? row.mass : "-",             // Column F: KG
-        formatStatus(row.material_status),            // Column G: STATUS
-        (row.part_numbers || []).join(", ") || "-",   // Column H: PART NUMBERS
-        (row.part_names || []).join(", ") || "-"      // Column I: PART NAMES
+        row.part_number || "-",                        // Column C: PART NO
+        row.material_name || "-",                       // Column D: MATERIAL
+        row.form_type || "-",                         // Column E: FORM TYPE
+        row.quantity != null ? row.quantity : "-",       // Column F: QTY
+        row.mass != null ? row.mass : "-",             // Column G: MASS (KG)
+        row.weight != null ? row.weight : "-",           // Column H: WEIGHT (N)
+        row.cost != null ? `₹${new Intl.NumberFormat('en-IN').format(row.cost)}` : "-",      // Column I: COST
+        row.vendor || "-",                            // Column J: VENDOR
+        formatStatus(row.material_status),                // Column K: STATUS
+        row.order_status || "-"                        // Column L: ORDER STATUS
       ];
       
       // Write each row individually to ensure proper alignment
@@ -685,13 +874,16 @@ export const PartsWithRawMaterialsStatusPdfDownload = ({
     const colWidths = [
       { wch: 8 },   // SL NO
       { wch: 15 },  // PROJECT NO
-      { wch: 20 },  // PROJECT NAME
-      { wch: 20 },  // MATERIAL NAME
+      { wch: 15 },  // PART NO
+      { wch: 20 },  // MATERIAL
+      { wch: 15 },  // FORM TYPE
       { wch: 8 },   // QTY
-      { wch: 10 },  // KG
+      { wch: 12 },  // MASS (KG)
+      { wch: 12 },  // WEIGHT (N)
+      { wch: 15 },  // COST
+      { wch: 15 },  // VENDOR
       { wch: 20 },  // STATUS
-      { wch: 25 },  // PART NUMBERS
-      { wch: 25 }   // PART NAMES
+      { wch: 20 }   // ORDER STATUS
     ];
     ws['!cols'] = colWidths;
 

@@ -418,6 +418,38 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     });
   };
 
+  const handleDeleteAllParts = async (product) => {
+    modal.confirm({
+      title: "Delete All Parts",
+      content: `Delete all parts for product "${product.product_name}"? This cannot be undone.`,
+      okText: 'Yes, Delete',
+      okType: 'danger',
+      cancelText: 'No',
+      onOk: async () => {
+        try {
+          const response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-product/${product.id}`);
+          
+          if (response.data?.deleted_count) {
+            message.success(`Successfully deleted ${response.data.deleted_count} parts from product "${product.product_name}".`);
+          } else {
+            message.success(`All parts deleted successfully from product "${product.product_name}".`);
+          }
+          
+          // Refresh the product hierarchy
+          await fetchProductHierarchy(product.id, true);
+          setExpandedItems(prev => ({
+            ...prev,
+            [getExpandKey('product', product.id)]: true
+          }));
+        } catch (error) {
+          console.error("Error deleting parts", error);
+          const errorMsg = error?.response?.data?.detail || error?.message || "Failed to delete parts";
+          message.error(errorMsg);
+        }
+      }
+    });
+  };
+
   const handleItemClick = async (item, type, productId = null) => {
     // Clear previous selection and set new one
     setActiveItemId(item.id);
@@ -510,6 +542,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const ActionButtons = ({ item, type, tagName, tagColor }) => {
     const productHierarchy = type === 'product' ? hierarchicalData[item.id] : null;
     const bomExport = productHierarchy?.bomExport;
+    const hasParts = type === 'product' && productHierarchy && (
+      (productHierarchy.parts && productHierarchy.parts.length > 0) ||
+      (productHierarchy.assemblies && productHierarchy.assemblies.length > 0)
+    );
     const buttons = {
       part: [
         { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit" },
@@ -530,7 +566,12 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         { icon: PartitionOutlined, onClick: () => handleCreateAssembly(item), title: "Add Assembly" },
         { icon: ToolOutlined, onClick: () => handleCreatePart(item), title: "Add Part" },
         { icon: EditOutlined, onClick: () => handleEditProduct(item), title: "Edit" },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'product'), danger: true, title: "Delete" }
+        { 
+          icon: DeleteOutlined, 
+          onClick: hasParts ? () => handleDeleteAllParts(item) : () => handleDelete(item, 'product'), 
+          danger: true, 
+          title: hasParts ? "Delete All Parts" : "Delete" 
+        }
       ]
     };
     return (
