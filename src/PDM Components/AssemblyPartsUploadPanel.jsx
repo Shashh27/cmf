@@ -609,10 +609,9 @@ const AssemblyPartsUploadPanel = ({
                     <Text strong className="text-base text-gray-700">
                       Click or drag your BOM file here
                     </Text>
-                    <Text type="secondary" className="text-sm">
-                      Supports <strong>.doc</strong> and{" "}
-                      <strong>.docx</strong>
-                    </Text>
+                   <Text type="secondary" className="text-sm">
+  Supports <strong>.doc</strong>, <strong>.docx</strong>, <strong>.xlsx</strong>, and <strong>.csv</strong>
+</Text>
                   </>
                 )}
               </div>

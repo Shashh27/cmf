@@ -116,8 +116,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       icon: <SettingOutlined />,
     },
     {
-      key: 'product-monitoring',
-      label: 'Product Monitoring',
+      key: 'production monitoring',
+      label: 'Production Monitoring',
       icon: <MonitorOutlined />,
       children: [
         { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`}>Live Monitoring</Link> },
@@ -232,8 +232,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <SettingOutlined />,
       },
       {
-        key: 'product-monitoring',
-        label: 'Product Monitoring',
+        key: 'production monitoring',
+        label: 'Production Monitoring',
         icon: <MonitorOutlined />,
         children: [
           { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`} onClick={() => setMobileDrawerOpen(false)}>Live Monitoring</Link> },

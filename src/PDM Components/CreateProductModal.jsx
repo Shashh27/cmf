@@ -36,9 +36,13 @@ const CreateProductModal = ({
 
   const [rawMaterials, setRawMaterials] = useState([]);
 
+  const [rawMaterialStock, setRawMaterialStock] = useState([]);
+
   const hasFetchedPartTypes = useRef(false);
 
   const hasFetchedRawMaterials = useRef(false);
+
+  const hasFetchedRawMaterialStock = useRef(false);
 
 
 
@@ -139,6 +143,12 @@ const CreateProductModal = ({
           type_id: editingItem.type_id || 1,
 
           raw_material_id: editingItem.raw_material_id,
+
+          raw_material_form_type: editingItem.raw_material_stock_id 
+            ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)?.form_type 
+            : null,
+
+          raw_material_stock_id: editingItem.raw_material_stock_id,
 
           part_detail: editingItem.part_detail ?? null,
 
@@ -251,6 +261,12 @@ const CreateProductModal = ({
           type_id: editingItem.type_id || 1,
 
           raw_material_id: editingItem.raw_material_id,
+
+          raw_material_form_type: editingItem.raw_material_stock_id 
+            ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)?.form_type 
+            : null,
+
+          raw_material_stock_id: editingItem.raw_material_stock_id,
 
           part_detail: editingItem.part_detail ?? null,
 
@@ -408,6 +424,8 @@ const CreateProductModal = ({
 
           await fetchRawMaterials();
 
+          await fetchRawMaterialStock();
+
         } catch (error) {
 
           console.error('Error fetching raw materials:', error);
@@ -453,6 +471,24 @@ const CreateProductModal = ({
     } catch (error) {
 
       console.error("Error fetching raw materials:", error);
+
+    }
+
+  };
+
+
+
+  const fetchRawMaterialStock = async () => {
+
+    try {
+
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`);
+
+      setRawMaterialStock(response.data);
+
+    } catch (error) {
+
+      console.error("Error fetching raw material stock:", error);
 
     }
 
@@ -555,6 +591,8 @@ const CreateProductModal = ({
           type_id: values.type_id,
 
           raw_material_id: values.raw_material_id || null,
+
+          raw_material_stock_id: values.raw_material_stock_id || null,
 
           part_detail: partDetail,
 
@@ -1021,41 +1059,133 @@ const CreateProductModal = ({
                 const isInHouse = !isOutSource;
 
                 if (isInHouse) {
-
                   return (
+                    <>
+                      {/* Step 1: Select Material */}
+                      <Form.Item
+                        name="raw_material_id"
+                        label={<span className="text-xs sm:text-sm">Raw Material</span>}
+                        rules={[{ required: false }]}
+                      >
+                        <Select 
+                          placeholder="Select material" 
+                          allowClear 
+                          showSearch 
+                          optionFilterProp="children" 
+                          size="large"
+                          onChange={() => {
+                            // Reset form type and stock when material changes
+                            form.setFieldsValue({ 
+                              raw_material_form_type: undefined, 
+                              raw_material_stock_id: undefined 
+                            });
+                          }}
+                        >
+                          {rawMaterials.map(material => (
+                            <Select.Option key={material.id} value={material.id}>
+                              {material.material_name}
+                            </Select.Option>
+                          ))}
+                        </Select>
+                      </Form.Item>
 
-                    <Form.Item
+                      {/* Step 2: Select Form Type (filtered by material) */}
+                      <Form.Item noStyle shouldUpdate={(prev, curr) => prev.raw_material_id !== curr.raw_material_id}>
+                        {({ getFieldValue }) => {
+                          const materialId = getFieldValue('raw_material_id');
+                          if (!materialId) return null;
+                          
+                          // Get available form types for selected material
+                          const availableForms = rawMaterialStock
+                            .filter(s => s.material_id === materialId)
+                            .map(s => s.form_type)
+                            .filter((v, i, a) => a.indexOf(v) === i); // unique
+                          
+                          if (availableForms.length === 0) return null;
+                          
+                          return (
+                            <Form.Item
+                              name="raw_material_form_type"
+                              label={<span className="text-xs sm:text-sm">Form Type</span>}
+                              rules={[{ required: false }]}
+                            >
+                              <Select 
+                                placeholder="Select form type" 
+                                allowClear 
+                                size="large"
+                                onChange={() => {
+                                  // Reset stock when form type changes
+                                  form.setFieldsValue({ raw_material_stock_id: undefined });
+                                }}
+                              >
+                                {availableForms.map(formType => (
+                                  <Select.Option key={formType} value={formType}>
+                                    {formType}
+                                  </Select.Option>
+                                ))}
+                              </Select>
+                            </Form.Item>
+                          );
+                        }}
+                      </Form.Item>
 
-                      name="raw_material_id"
-
-                      label={<span className="text-xs sm:text-sm">Raw Material</span>}
-
-                      rules={[{ required: false }]}
-
-                    >
-
-                      <Select placeholder="Select raw material " allowClear showSearch optionFilterProp="children" size="large">
-
-                        {rawMaterials.map(material => (
-
-                          <Select.Option key={material.id} value={material.id}>
-
-                            {material.material_name}
-
-                          </Select.Option>
-
-                        ))}
-
-                      </Select>
-
-                    </Form.Item>
-
+                      {/* Step 3: Select Dimensions (filtered by material + form) */}
+                      <Form.Item noStyle shouldUpdate={(prev, curr) => prev.raw_material_id !== curr.raw_material_id || prev.raw_material_form_type !== curr.raw_material_form_type}>
+                        {({ getFieldValue }) => {
+                          const materialId = getFieldValue('raw_material_id');
+                          const formType = getFieldValue('raw_material_form_type');
+                          if (!materialId || !formType) return null;
+                          
+                          // Get available stock items for selected material and form
+                          const availableStock = rawMaterialStock.filter(s => 
+                            s.material_id === materialId && s.form_type === formType
+                          );
+                          
+                          if (availableStock.length === 0) return null;
+                          
+                          const material = rawMaterials.find(m => m.id === materialId);
+                          
+                          return (
+                            <Form.Item
+                              name="raw_material_stock_id"
+                              label={<span className="text-xs sm:text-sm">Dimensions</span>}
+                              rules={[{ required: false }]}
+                            >
+                              <Select 
+                                placeholder="Select dimensions" 
+                                allowClear 
+                                size="large"
+                              >
+                                {availableStock.map(stock => {
+                                  const dimensions = stock.form_type === 'Round' 
+                                    ? `⌀${stock.diameter} × ${stock.length}mm`
+                                    : stock.form_type === 'Square'
+                                    ? `${stock.breadth} × ${stock.height} × ${stock.length}mm`
+                                    : stock.form_type === 'Pipe'
+                                    ? `⌀${stock.outer_diameter}/${stock.inner_diameter} × ${stock.length}mm`
+                                    : 'Custom';
+                                  
+                                  return (
+                                    <Select.Option key={stock.id} value={stock.id}>
+                                      <div>
+                                        <div style={{ fontWeight: 'bold' }}>{dimensions}</div>
+                                        <div style={{ fontSize: '12px', color: '#666' }}>
+                                          Qty: {stock.quantity} | Status: {stock.status}
+                                        </div>
+                                      </div>
+                                    </Select.Option>
+                                  );
+                                })}
+                              </Select>
+                            </Form.Item>
+                          );
+                        }}
+                      </Form.Item>
+                    </>
                   );
-
                 }
 
                 return (
-
                   <Form.Item
 
                     name="raw_material_id"

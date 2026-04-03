@@ -371,8 +371,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (!doc) return '';
     if (doc.document_url) {
       const segment = doc.document_url.split('/').filter(Boolean).pop();
-      if (segment) return segment.replace(/^\d{8}_\d{6}_[a-zA-Z0-9]+_/, ''); // strip timestamp and unique ID e.g. 20260330_094250_ab0e25a8_
+      if (segment) {
+        // Remove timestamp (YYYYMMDD_HHMMSS_) from the beginning
+        let cleanName = segment.replace(/^\d{8}_\d{6}_/, '');
+        
+        // Check if what remains starts with a UUID pattern (8+ alphanumeric chars followed by underscore)
+        const uuidMatch = cleanName.match(/^([a-zA-Z0-9]{8,})_/);
+        if (uuidMatch) {
+          // Remove the UUID and underscore
+          cleanName = cleanName.replace(/^([a-zA-Z0-9]{8,})_/, '');
+        }
+        
+        return cleanName || doc.document_name || '';
+      }
     }
+    // Fallback: return document_name as is
     return doc.document_name || '';
   };
 

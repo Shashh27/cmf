@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined } from "@ant-design/icons";
+import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
@@ -17,6 +17,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [hierarchicalData, setHierarchicalData] = useState({});
+  const [originalHierarchicalData, setOriginalHierarchicalData] = useState({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createType, setCreateType] = useState('');
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -30,7 +31,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [activeItemType, setActiveItemType] = useState(null);
   const [showToolsModal, setShowToolsModal] = useState(false);
   const [selectedProductForTools, setSelectedProductForTools] = useState(null);
-  const [originalHierarchicalData, setOriginalHierarchicalData] = useState(null);
   const hasFetchedData = useRef(false);
 
   const getExpandKey = (type, id) => `${type}-${id}`;
@@ -94,7 +94,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       hasFetchedData.current = true;
       const pid = initialProductId != null ? Number(initialProductId) : null;
       if (pid) {
-        // Opened from OMS: load only the selected product via hierarchy (no extra product list call)
+        // Opened from OMS: load only the selected product via hierarchy (no /products list call)
         (async () => {
           try {
             const data = await fetchProductHierarchy(pid);
@@ -105,12 +105,13 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         })();
       } else {
         // Standalone PDM access is no longer supported for Admin/MC roles.
+        // We set loading to false but don't fetch anything.
         setLoading(false);
       }
     }
   }, []);
 
-  // If opened with an initial product id (from OMS), auto-select it (do not auto-expand).
+  // If opened with an initial product id (e.g., from OMS), auto-select it (do not auto-expand).
   useEffect(() => {
     const pid = initialProductId != null ? Number(initialProductId) : null;
     if (!pid || loading) return;
@@ -218,6 +219,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         const data = response.data;
         const bomExport = flattenBOMForExport(data);
 
+        // Store original data for tools viewer
+        setOriginalHierarchicalData(prev => ({ ...prev, [productId]: data }));
+
         // Transformed view for this component (used to render tree quickly)
         const transformedData = {
           ...data,
@@ -242,9 +246,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         };
 
         setHierarchicalData(prev => ({ ...prev, [productId]: transformedData }));
-
-        // Store original hierarchical data for tools viewer
-        setOriginalHierarchicalData(data);
 
         // For external consumers (like ProductSummary) that need full PartDetails
         // including operations, pass the original hierarchy 'data'.
@@ -272,11 +273,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           })),
         child_assemblies: transformSubassemblies(sub.subassemblies || [])
       }));
-  };
-
-  const handleViewAllTools = (product) => {
-    setSelectedProductForTools(product);
-    setShowToolsModal(true);
   };
 
   const toggleExpand = (key) => {
@@ -348,6 +344,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       document: `Document "${newItem.document_name}" created successfully!`
     };
     message.success(messages[type]);
+  };
+
+  const handleViewAllTools = (product) => {
+    setSelectedProductForTools(product);
+    setShowToolsModal(true);
   };
 
   const handleProductCreated = async (newItem, type, action = 'create') => {
@@ -544,29 +545,29 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           )}
           {type === 'part' ? (
             <>
-              {buttons.part.map(({ icon: Icon, onClick, danger, title }, idx) => (
+              {buttons.part.map(({ icon: Icon, onClick, danger, title, color }, idx) => (
                 <Tooltip key={idx} title={title}>
                   <Button 
                     type="text" 
                     size="small" 
                     danger={danger}
                     onClick={(e) => { e.stopPropagation(); onClick(); }} 
-                    icon={<Icon style={{ fontSize: '14px' }} />}
+                    icon={<Icon style={{ fontSize: '14px', color: color || undefined }} />}
                     style={{ padding: 4, minWidth: 24, height: 24 }}
                   />
                 </Tooltip>
               ))}
-              {getRawMaterialStatusTag(item.raw_material_status)}
+              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details)}
             </>
           ) : (
-          buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
+          buttons[type].map(({ icon: Icon, onClick, danger, title, color }, idx) => (
             <Tooltip key={idx} title={title}>
               <Button 
                 type="text" 
                 size="small" 
                 danger={danger}
                 onClick={(e) => { e.stopPropagation(); onClick(); }} 
-                icon={<Icon style={{ fontSize: '14px' }} />}
+                icon={<Icon style={{ fontSize: '14px', color: color || undefined }} />}
                 style={{ padding: 4, minWidth: 24, height: 24 }}
               />
             </Tooltip>
@@ -580,11 +581,26 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
-  const getRawMaterialStatusTag = (status) => {
-    const s = (status || "N/A").toString().toLowerCase();
+  const getRawMaterialStatusTag = (status, stockStatus, stockDetails) => {
+    // Show stock status if available, otherwise fall back to material status
+    const statusToShow = stockStatus || status || "N/A";
+    const s = statusToShow.toString().toLowerCase();
+    
     if (s === "available") return <Tag className="m-0 text-[10px] shrink-0" color="success">Available</Tag>;
     if (s === "not available") return <Tag className="m-0 text-[10px] shrink-0" color="error">Not Available</Tag>;
-    return <Tag className="m-0 text-[10px] shrink-0">N/A</Tag>;
+    
+    // If we have stock details, show stock-specific status
+    if (stockDetails) {
+      if (stockDetails.status === 'available') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="success">In Stock</Tag>;
+      } else if (stockDetails.status === 'reserved') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="warning">Reserved</Tag>;
+      } else if (stockDetails.status === 'used') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="default">Used</Tag>;
+      }
+    }
+    
+    return <Tag className="m-0 text-[10px] shrink-0">{statusToShow}</Tag>;
   };
 
   const renderPartInTree = (part, level = 0, productId = null) => {
@@ -721,6 +737,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const filteredProductsBase = products.filter(product =>
     (product.product_name || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
+
   const initialPid = initialProductId != null ? Number(initialProductId) : null;
   const filteredProducts = initialPid
     ? filteredProductsBase.filter(p => Number(p.id) === initialPid)
@@ -752,27 +769,34 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                 <AppstoreOutlined className="text-indigo-600 text-sm sm:text-base" />
               </div>
               <h2 className="text-xs sm:text-sm font-semibold text-slate-800 m-0 truncate">
-                <span className="hidden sm:inline">Bill of Materials</span>
-                <span className="sm:hidden">BOM</span>
+                Bill of Materials
               </h2>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {products.length === 1 && (
+              {filteredProducts.length === 1 && (
                 <Button
                   type="default"
                   size="small"
                   icon={<ToolOutlined />}
-                  onClick={() => handleViewAllTools(products[0])}
+                  onClick={() => handleViewAllTools(filteredProducts[0])}
                   className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
                 >
                   View Tools
                 </Button>
               )}
+              {!disableProductCreate && (
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={handleCreateProduct}
+                  className="bom-primary-btn shrink-0"
+                >
+                  <span className="hidden sm:inline">New Product</span>
+                  <span className="sm:hidden">New</span>
+                </Button>
+              )}
             </div>
-
-
-
-
           </div>
           {!initialPid && (
             <Input 
@@ -816,12 +840,15 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         selectedPart={selectedPart}
         onActionCreated={handleActionCreated}
       />
-
+      
       <ProductToolsViewer
         visible={showToolsModal}
-        onClose={() => setShowToolsModal(false)}
+        onClose={() => {
+          setShowToolsModal(false);
+          setSelectedProductForTools(null);
+        }}
         product={selectedProductForTools}
-        hierarchicalData={originalHierarchicalData}
+        hierarchicalData={selectedProductForTools ? originalHierarchicalData[selectedProductForTools.id] : null}
       />
     </>
   );

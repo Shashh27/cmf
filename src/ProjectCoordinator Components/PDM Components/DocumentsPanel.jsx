@@ -383,10 +383,32 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     },
   ];
 
+  const getDocumentDisplayName = (doc) => {
+    if (!doc) return '';
+    if (doc.document_url) {
+      const segment = doc.document_url.split('/').filter(Boolean).pop();
+      if (segment) {
+        // Remove timestamp (YYYYMMDD_HHMMSS_) from the beginning
+        let cleanName = segment.replace(/^\d{8}_\d{6}_/, '');
+        
+        // Check if what remains starts with a UUID pattern (8+ alphanumeric chars followed by underscore)
+        const uuidMatch = cleanName.match(/^([a-zA-Z0-9]{8,})_/);
+        if (uuidMatch) {
+          // Remove the UUID and underscore
+          cleanName = cleanName.replace(/^([a-zA-Z0-9]{8,})_/, '');
+        }
+        
+        return cleanName || doc.document_name || '';
+      }
+    }
+    // Fallback: return document_name as is
+    return doc.document_name || '';
+  };
+
   // ── eBOM table columns ─────────────────────────────────────────────────────
   const eBomColumns = [
     { title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{cur.document_name}</Text></div>; }
+      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; const displayName = getDocumentDisplayName(cur); return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text></div>; }
     },
     { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
       render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
@@ -441,7 +463,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   const tabItems = [
     ...(isPart ? [{
-      key: 'mbom', label: <span className="font-medium">mBOM</span>,
+      key: 'mbom', label: <span className="font-medium">Process Plan</span>,
       children: (
         <div className="h-full flex flex-col min-h-0">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
@@ -478,7 +500,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       ),
     }] : []),
     {
-      key: 'ebom', label: <span className="font-medium">{isPart ? 'eBOM' : 'Documents'}</span>,
+      key: 'ebom', label: <span className="font-medium">{isPart ? 'Part Documents' : 'Documents'}</span>,
       children: (
         <div className="h-full flex flex-col min-h-0 overflow-hidden">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 shrink-0 gap-2">

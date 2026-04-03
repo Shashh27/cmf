@@ -557,7 +557,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                   />
                 </Tooltip>
               ))}
-              {getRawMaterialStatusTag(item.raw_material_status)}
+              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details)}
             </>
           ) : (
           buttons[type].map(({ icon: Icon, onClick, danger, title, color }, idx) => (
@@ -581,11 +581,26 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
-  const getRawMaterialStatusTag = (status) => {
-    const s = (status || "N/A").toString().toLowerCase();
+  const getRawMaterialStatusTag = (status, stockStatus, stockDetails) => {
+    // Show stock status if available, otherwise fall back to material status
+    const statusToShow = stockStatus || status || "N/A";
+    const s = statusToShow.toString().toLowerCase();
+    
     if (s === "available") return <Tag className="m-0 text-[10px] shrink-0" color="success">Available</Tag>;
     if (s === "not available") return <Tag className="m-0 text-[10px] shrink-0" color="error">Not Available</Tag>;
-    return <Tag className="m-0 text-[10px] shrink-0">N/A</Tag>;
+    
+    // If we have stock details, show stock-specific status
+    if (stockDetails) {
+      if (stockDetails.status === 'available') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="success">In Stock</Tag>;
+      } else if (stockDetails.status === 'reserved') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="warning">Reserved</Tag>;
+      } else if (stockDetails.status === 'used') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="default">Used</Tag>;
+      }
+    }
+    
+    return <Tag className="m-0 text-[10px] shrink-0">{statusToShow}</Tag>;
   };
 
   const renderPartInTree = (part, level = 0, productId = null) => {

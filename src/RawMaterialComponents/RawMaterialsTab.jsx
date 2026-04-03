@@ -1,18 +1,23 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, message } from "antd";
+import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, message, Tabs, App } from "antd";
 import { 
   ExperimentOutlined, 
   PlusOutlined, 
   EditOutlined, 
-  DeleteOutlined 
+  DeleteOutlined,
+  ShopOutlined,
+  DatabaseOutlined,
+  EyeOutlined
 } from "@ant-design/icons";
 import { RawMaterialsInventoryPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
 
 const { Option } = Select;
+const { TabPane } = Tabs;
 
 const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange, onRefresh }) => {
+  const { message } = App.useApp();
   const [form] = Form.useForm();
   const [rawMaterials, setRawMaterials] = useState(propRawMaterials || []);
   const [loading, setLoading] = useState(false);
@@ -21,9 +26,13 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const [rawMaterialModalOpen, setRawMaterialModalOpen] = useState(false);
   const [editingRawMaterial, setEditingRawMaterial] = useState(null);
   const [savingRawMaterial, setSavingRawMaterial] = useState(false);
-  const [selectedStockType, setSelectedStockType] = useState("");
-  const [isCustomStockType, setIsCustomStockType] = useState(false);
   const [decimalWarnings, setDecimalWarnings] = useState({});
+  const [vendors, setVendors] = useState([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [selectedMaterialStock, setSelectedMaterialStock] = useState(null);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [selectedMaterialForStock, setSelectedMaterialForStock] = useState(null);
 
   const fetchingRawMaterials = useRef(false);
   const initializedRef = useRef(false);
@@ -53,11 +62,13 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     setLoading(true);
     try {
       const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
-      const data = response.data;
-      const newData = Array.isArray(data) ? data : [];
-      setRawMaterials(newData);
+      const materials = response.data || [];
+      
+      // Backend already returns materials with stock status
+      // No need for individual stock calls
+      setRawMaterials(materials);
       if (onRawMaterialsChange) {
-        onRawMaterialsChange(newData);
+        onRawMaterialsChange(materials);
       }
     } catch (error) {
       console.error("Error fetching raw materials:", error);
@@ -71,29 +82,53 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     }
   };
 
+  const fetchVendors = async () => {
+    setVendorsLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+      setVendors(response.data || []);
+    } catch (error) {
+      console.error("Error fetching vendors:", error);
+      setVendors([]);
+    } finally {
+      setVendorsLoading(false);
+    }
+  };
+
+  const fetchStockForMaterial = async (materialId) => {
+    setStockLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`, {
+        params: { material_id: materialId }
+      });
+      setSelectedMaterialStock(response.data || []);
+    } catch (error) {
+      console.error("Error fetching stock:", error);
+      setSelectedMaterialStock([]);
+    } finally {
+      setStockLoading(false);
+    }
+  };
+
+  const openStockModal = (material) => {
+    setSelectedMaterialForStock(material);
+    setSelectedMaterialStock(null);
+    setStockModalOpen(true);
+    fetchStockForMaterial(material.id);
+  };
+
   const openCreateRawMaterial = () => {
     setEditingRawMaterial(null);
-    setSelectedStockType("");
-    setIsCustomStockType(false);
     form.resetFields();
     setRawMaterialModalOpen(true);
   };
 
   const openEditRawMaterial = (material) => {
     setEditingRawMaterial(material);
-    const stockType = material.stock_type || "";
-    const isCustom = !["Sheet Metal", "Rod", "Solid Bar"].includes(stockType);
-    setSelectedStockType(isCustom ? "Other" : stockType);
-    setIsCustomStockType(isCustom);
     form.setFieldsValue({
       material_name: material.material_name || "",
-      material_specification: material.material_specification || "",
-      mass: material.mass ?? "",
       density: material.density ?? "",
-      volume: material.volume ?? "",
-      stock_type: stockType,
-      quantity: material.quantity ?? "",
-      stock_dimensions: material.stock_dimensions || "",
+      cost: material.cost_per_kg ?? "",
     });
     setRawMaterialModalOpen(true);
   };
@@ -101,8 +136,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const closeRawMaterialModal = () => {
     setRawMaterialModalOpen(false);
     setEditingRawMaterial(null);
-    setSelectedStockType("");
-    setIsCustomStockType(false);
   };
 
   const limitDecimals = (value, fieldName, precision = 3) => {
@@ -210,6 +243,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
         stock_type: values.stock_type,
         quantity: values.quantity === "" ? 0 : Number(values.quantity) || 0,
         stock_dimensions: values.stock_dimensions,
+        cost_per_kg: values.cost === "" ? null : Number(values.cost) || null,
         user_id: getCurrentUserId(),
       };
 
@@ -294,23 +328,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
         </Tooltip>
       ),
     },
-    {
-      title: <span className="font-semibold text-gray-700">Specification</span>,
-      dataIndex: 'material_specification',
-      key: 'material_specification',
-      ellipsis: true,
-      render: (text) => (
-        <Tooltip title={text}>
-          <span className="text-gray-600">{text || "-"}</span>
-        </Tooltip>
-      ),
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Mass (kg)</span>,
-      dataIndex: 'mass',
-      key: 'mass',
-      render: (text) => text !== null && text !== undefined ? text : "-",
-    },
+    
     {
       title: <span className="font-semibold text-gray-700">Density (kg/m³)</span>,
       dataIndex: 'density',
@@ -318,51 +336,43 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
       render: (text) => text !== null && text !== undefined ? text : "-",
     },
     {
-      title: <span className="font-semibold text-gray-700">Volume (m³)</span>,
-      dataIndex: 'volume',
-      key: 'volume',
-      render: (text) => text !== null && text !== undefined ? text : "-",
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Stock Type</span>,
-      dataIndex: 'stock_type',
-      key: 'stock_type',
-      render: (text) => text ? <Tag>{text}</Tag> : "-",
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Qty</span>,
-      dataIndex: 'quantity',
-      key: 'quantity',
-      render: (text) => text !== null && text !== undefined ? text : "-",
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Dimensions</span>,
-      dataIndex: 'stock_dimensions',
-      key: 'stock_dimensions',
-      ellipsis: true,
-      render: (text) => (
-        <Tooltip title={text}>
-          <span className="text-gray-600 font-mono text-xs">{text || "-"}</span>
-        </Tooltip>
-      ),
+      title: <span className="font-semibold text-gray-700">Created By</span>,
+      dataIndex: 'user_id',
+      key: 'user_id',
+      width: 100,
+      render: (userId) => {
+        if (!userId) return <span className="text-gray-400">-</span>;
+        return <span className="text-gray-600 font-mono">ID: {userId}</span>;
+      },
     },
     {
       title: <span className="font-semibold text-gray-700">Status</span>,
       dataIndex: 'status',
       key: 'status',
       render: (_, record) => {
-        const qty = record.quantity ?? 0;
-        const text = qty > 0 ? 'AVAILABLE' : 'NOT AVAILABLE';
-        const color = qty > 0 ? 'success' : 'error';
+        // Use has_available_stock from backend response
+        // If at least one stock has 'available' status, show as AVAILABLE
+        const hasAvailableStock = record.has_available_stock;
+        const text = hasAvailableStock ? 'AVAILABLE' : 'NOT AVAILABLE';
+        const color = hasAvailableStock ? 'success' : 'error';
         return <Tag color={color}>{text}</Tag>;
       },
     },
     {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: 'actions',
-      width: 140,
+      width: 180,
       render: (_, record) => (
         <Space>
+          <Tooltip title="View Stock">
+            <Button
+              type="text"
+              size="small"
+              icon={<DatabaseOutlined />}
+              className="text-green-500 hover:bg-green-50"
+              onClick={() => openStockModal(record)}
+            />
+          </Tooltip>
           <Tooltip title="Edit">
             <Button
               type="text"
@@ -465,57 +475,47 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
         className="rounded-xl overflow-hidden"
       >
         <Form form={form} layout="vertical" onFinish={handleSaveRawMaterial} className="pt-4">
-          <Row gutter={[12, 0]}>
-            <Col xs={24} sm={12}>
-              <Form.Item name="material_name" label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Material Name</span>} rules={[{ required: true, message: 'Please enter material name' }, { pattern: /^[a-zA-Z0-9 ]*$/, message: 'Only letters, numbers, and spaces are allowed' }]} normalize={(v) => (v || '').replace(/[^a-zA-Z0-9 ]/g, '')}>
-                <Input placeholder="Enter material name" size="large" className="rounded-md" autoComplete="off" />
+          <Row gutter={[16, 16]}>
+            <Col xs={24}>
+              <Form.Item 
+                name="material_name" 
+                label={<span className="font-semibold text-gray-700">Material Name</span>} 
+                rules={[{ required: true, message: 'Please enter material name' }]}
+              >
+                <Input placeholder="Enter material name (e.g., MS Plate, SS Rod)" size="large" className="rounded-md" />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="material_specification" label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Specification</span>} rules={[{ pattern: /^[a-zA-Z0-9 ]*$/, message: 'Only letters, numbers, and spaces are allowed' }]} normalize={(v) => (v || '').replace(/[^a-zA-Z0-9 ]/g, '')}>
-                <Input placeholder="Enter specification" size="large" className="rounded-md" autoComplete="off" />
+            <Col xs={12}>
+              <Form.Item 
+                name="density" 
+                label={<span className="font-semibold text-gray-700">Density (kg/m³)</span>}
+                rules={[{ required: true, message: 'Please enter density' }]}
+              >
+                <InputNumber 
+                  style={{ width: '100%' }} 
+                  min={0} 
+                  precision={3} 
+                  step={0.001} 
+                  placeholder="e.g., 7850 for steel" 
+                  size="large" 
+                  className="rounded-md" 
+                />
               </Form.Item>
             </Col>
-            <Col xs={12} sm={8}>
-              <Form.Item name="mass" label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Mass (kg)</span>} validateStatus={decimalWarnings['mass'] ? 'warning' : ''} help={decimalWarnings['mass']}>
-                <InputNumber style={{ width: '100%' }} min={0} precision={3} step={0.001} placeholder="0.000 kg" size="large" className="rounded-md" stringMode parser={(v) => limitDecimals(v, 'mass', 3)} onKeyDown={(e) => blockExtraDecimals(e, 'mass', 3)} />
-              </Form.Item>
-            </Col>
-            <Col xs={12} sm={8}>
-              <Form.Item name="density" label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Density (kg/m³)</span>} validateStatus={decimalWarnings['density'] ? 'warning' : ''} help={decimalWarnings['density']}>
-                <InputNumber style={{ width: '100%' }} min={0} precision={3} step={0.001} placeholder="0.000 kg/m³" size="large" className="rounded-md" stringMode parser={(v) => limitDecimals(v, 'density', 3)} onKeyDown={(e) => blockExtraDecimals(e, 'density', 3)} />
-              </Form.Item>
-            </Col>
-            <Col xs={12} sm={8}>
-              <Form.Item name="volume" label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Volume (m³)</span>} validateStatus={decimalWarnings['volume'] ? 'warning' : ''} help={decimalWarnings['volume']}>
-                <InputNumber style={{ width: '100%' }} min={0} precision={3} step={0.001} placeholder="0.000 m³" size="large" className="rounded-md" stringMode parser={(v) => limitDecimals(v, 'volume', 3)} onKeyDown={(e) => blockExtraDecimals(e, 'volume', 3)} />
-              </Form.Item>
-            </Col>
-            <Col xs={12} sm={12}>
-              <Form.Item name="stock_type" label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Stock Type</span>}>
-                {isCustomStockType ? (
-                  <div className="flex gap-2">
-                    <Input placeholder="Enter custom stock type" size="large" className="rounded-md flex-1" autoComplete="off" onChange={(e) => form.setFieldValue('stock_type', e.target.value)} />
-                    <Button type="default" size="large" onClick={() => { setIsCustomStockType(false); setSelectedStockType(""); form.setFieldValue('stock_type', ''); form.setFieldValue('stock_dimensions', ''); }} className="rounded-md">Back</Button>
-                  </div>
-                ) : (
-                  <Select placeholder="Select stock type" size="large" className="rounded-md" value={selectedStockType} onChange={(v) => { if (v === "Other") { setSelectedStockType("Other"); setIsCustomStockType(true); form.setFieldValue('stock_type', ''); } else { setSelectedStockType(v); setIsCustomStockType(false); form.setFieldValue('stock_type', v); } form.setFieldValue('stock_dimensions', ''); }} allowClear>
-                    <Option value="Sheet Metal">Sheet Metal</Option>
-                    <Option value="Rod">Rod</Option>
-                    <Option value="Solid Bar">Solid Bar</Option>
-                    <Option value="Other">Other (Custom)</Option>
-                  </Select>
-                )}
-              </Form.Item>
-            </Col>
-            <Col xs={12} sm={12}>
-              <Form.Item name="quantity" label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Quantity</span>} validateStatus={decimalWarnings['modal-qty'] ? 'warning' : ''} help={decimalWarnings['modal-qty']}>
-                <InputNumber style={{ width: '100%' }} min={0} precision={0} step={1} max={99999} placeholder="0" size="large" className="rounded-md" autoComplete="off" stringMode parser={(v) => limitDecimals(v, 'modal-qty', 0)} onKeyDown={(e) => blockExtraDecimals(e, 'modal-qty', 0)} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} sm={12}>
-              <Form.Item name="stock_dimensions" label={<span className="font-semibold text-gray-700 text-xs sm:text-sm">Dimensions (mm)</span>}>
-                <Input placeholder={selectedStockType === "Sheet Metal" ? "Length × Width × Thickness (mm)" : selectedStockType === "Rod" ? "Diameter × Length (mm)" : selectedStockType === "Solid Bar" ? "Length × Width × Height (mm)" : "Enter dimensions (mm)"} size="large" className="rounded-md" autoComplete="off" />
+            <Col xs={12}>
+              <Form.Item 
+                name="cost" 
+                label={<span className="font-semibold text-gray-700">Cost (₹/kg)</span>}
+              >
+                <InputNumber 
+                  style={{ width: '100%' }} 
+                  min={0} 
+                  precision={2} 
+                  step={0.01} 
+                  placeholder="Optional cost per kg" 
+                  size="large" 
+                  className="rounded-md" 
+                />
               </Form.Item>
             </Col>
           </Row>
@@ -527,7 +527,252 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
           </div>
         </Form>
       </Modal>
+
+      {/* Stock View Modal */}
+      <Modal
+        open={stockModalOpen}
+        onCancel={() => setStockModalOpen(false)}
+        width="95%"
+        style={{ maxWidth: 1000 }}
+        title={
+          <div className="flex items-center gap-2">
+            <DatabaseOutlined className="text-green-500" />
+            <span className="font-bold text-gray-800 text-sm sm:text-base">Stock Details</span>
+          </div>
+        }
+        footer={null}
+        className="rounded-xl overflow-hidden"
+      >
+        <div className="pt-4">
+          <Tabs 
+            defaultActiveKey="1"
+            items={[
+              {
+                key: "1",
+                label: "View Stock",
+                children: stockLoading ? (
+                  <div className="text-center py-8">Loading stock...</div>
+                ) : selectedMaterialStock && selectedMaterialStock.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <Table
+                      dataSource={selectedMaterialStock}
+                      rowKey="id"
+                      size="small"
+                      bordered
+                      pagination={{ pageSize: 5, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
+                      scroll={{ x: 1200 }}
+                      columns={[
+                        { title: 'Form Type', dataIndex: 'form_type', key: 'form_type', width: 100 },
+                        { title: 'Dimensions', key: 'dimensions', width: 200, render: (_, record) => {
+                          if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
+                          if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
+                          if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
+                          return '-';
+                        }},
+                        { title: 'Quantity', dataIndex: 'quantity', key: 'quantity', width: 80 },
+                        { title: 'Volume (m³)', dataIndex: 'volume', key: 'volume', width: 120, render: (v) => v?.toFixed(6) || '-' },
+                        { title: 'Mass (kg)', dataIndex: 'mass', key: 'mass', width: 100, render: (m) => m?.toFixed(3) },
+                        { title: 'Weight (N)', dataIndex: 'weight', key: 'weight', width: 100, render: (w) => w?.toFixed(3) },
+                        { title: 'Cost (₹)', dataIndex: 'cost', key: 'cost', width: 100, render: (c) => c ? `₹${c?.toFixed(2)}` : '-' },
+                        { title: 'Source', dataIndex: 'source_type', key: 'source_type', width: 80, render: (s) => 
+                          s === 'order' ? 'Order' : 'General'
+                        },
+                        { title: 'Order', dataIndex: 'source_order_number', key: 'source_order_number', width: 120, render: (order) => order || '-' },
+                        { title: 'Parts', dataIndex: 'part_numbers', key: 'part_numbers', width: 150, render: (parts) => 
+                          parts?.length > 0 ? parts.join(', ') : '-'
+                        },
+                        { title: 'User Name', dataIndex: 'creator_name', key: 'creator_name', minWidth: 100, render: (name) => name || '-' },
+                        { title: 'Status', dataIndex: 'status', key: 'status', width: 80, render: (s) => <Tag color={s === 'available' ? 'green' : 'red'}>{s}</Tag> },
+                      ]}
+                    />
+                  </div>
+                ) : (
+                  <Empty description="No stock available for this material" />
+                )
+              },
+              {
+                key: "2",
+                label: "Add Stock",
+                children: (
+                  <div className="w-full">
+                    <StockForm 
+                      materialId={selectedMaterialForStock?.id}
+                      materialCost={selectedMaterialForStock?.cost}
+                      onSuccess={() => fetchStockForMaterial(selectedMaterialForStock?.id)}
+                    />
+                  </div>
+                )
+              }
+            ]}
+          />
+        </div>
+      </Modal>
     </div>
+  );
+};
+
+const StockForm = ({ materialId, materialCost, onSuccess }) => {
+  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
+  const [formType, setFormType] = useState("Round");
+
+  const getCurrentUserId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      return u?.id ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleSubmit = async (values) => {
+    if (!materialId) return;
+    setSaving(true);
+    try {
+      const payload = {
+        material_id: materialId,
+        form_type: values.form_type,
+        quantity: Number(values.quantity),
+        source_type: "general",
+        cost: materialCost || null,
+        user_id: getCurrentUserId(),
+        ...getDimensions(values)
+      };
+      
+      await axios.post(`${API_BASE_URL}/rawmaterials/stock/`, payload);
+      message.success("Stock added successfully!");
+      form.resetFields();
+      onSuccess?.();
+    } catch (error) {
+      console.error("Error adding stock:", error);
+      message.error(error.response?.data?.detail || "Failed to add stock");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const getDimensions = (values) => {
+    const type = values.form_type;
+    const dims = {};
+    
+    if (type === "Round") {
+      if (values.diameter) dims.diameter = Number(values.diameter);
+      if (values.length) dims.length = Number(values.length);
+    }
+    if (type === "Square") {
+      if (values.breadth) dims.breadth = Number(values.breadth);
+      if (values.height) dims.height = Number(values.height);
+      if (values.length) dims.length = Number(values.length);
+    }
+    if (type === "Pipe") {
+      if (values.inner_diameter) dims.inner_diameter = Number(values.inner_diameter);
+      if (values.outer_diameter) dims.outer_diameter = Number(values.outer_diameter);
+      if (values.length) dims.length = Number(values.length);
+    }
+    return dims;
+  };
+
+  const renderDimensionFields = () => {
+    if (formType === "Round") {
+      return (
+        <>
+          <Col xs={12} sm={8}>
+            <Form.Item name="diameter" label="Diameter (mm)" rules={[{ required: true }]}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+            </Form.Item>
+          </Col>
+          <Col xs={12} sm={8}>
+            <Form.Item name="length" label="Length (mm)" rules={[{ required: true }]}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+            </Form.Item>
+          </Col>
+        </>
+      );
+    }
+    if (formType === "Square") {
+      return (
+        <>
+          <Col xs={12} sm={8}>
+            <Form.Item name="breadth" label="Breadth (mm)" rules={[{ required: true }]}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+            </Form.Item>
+          </Col>
+          <Col xs={12} sm={8}>
+            <Form.Item name="height" label="Height (mm)" rules={[{ required: true }]}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+            </Form.Item>
+          </Col>
+          <Col xs={12} sm={8}>
+            <Form.Item name="length" label="Length (mm)" rules={[{ required: true }]}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+            </Form.Item>
+          </Col>
+        </>
+      );
+    }
+    if (formType === "Pipe") {
+      return (
+        <>
+          <Col xs={12} sm={8}>
+            <Form.Item name="inner_diameter" label="Inner ⌀ (mm)" rules={[{ required: true, message: 'Required' }]}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+            </Form.Item>
+          </Col>
+          <Col xs={12} sm={8}>
+            <Form.Item name="outer_diameter" label="Outer ⌀ (mm)" rules={[{ required: true, message: 'Required' }, ({ getFieldValue }) => ({
+              validator(_, value) {
+                if (!value || getFieldValue('inner_diameter') < value) {
+                  return Promise.resolve();
+                }
+                return Promise.reject(new Error('Outer diameter must be > inner diameter'));
+              },
+            })]}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+            </Form.Item>
+          </Col>
+          <Col xs={12} sm={8}>
+            <Form.Item name="length" label="Length (mm)" rules={[{ required: true, message: 'Required' }]}>
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+            </Form.Item>
+          </Col>
+        </>
+      );
+    }
+  };
+
+  return (
+    <Form form={form} layout="vertical" onFinish={handleSubmit}>
+      <Row gutter={[16, 0]}>
+        <Col xs={24} sm={8}>
+          <Form.Item 
+            name="form_type" 
+            label="Form Type" 
+            initialValue="Round"
+            rules={[{ required: true }]}
+          >
+            <Select onChange={setFormType}>
+              <Option value="Round">Round Bar</Option>
+              <Option value="Square">Square Bar</Option>
+              <Option value="Pipe">Pipe/Tube</Option>
+            </Select>
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={12}>
+          <Form.Item name="quantity" label="Quantity" rules={[{ required: true }]}>
+            <InputNumber style={{ width: '100%' }} min={1} precision={0} placeholder="Units" />
+          </Form.Item>
+        </Col>
+        {renderDimensionFields()}
+      </Row>
+      <div className="flex justify-end gap-3 mt-4">
+        <Button onClick={() => form.resetFields()}>Reset</Button>
+        <Button type="primary" htmlType="submit" loading={saving} style={{ backgroundColor: '#2563eb' }}>
+          Add Stock
+        </Button>
+      </div>
+    </Form>
   );
 };
 
