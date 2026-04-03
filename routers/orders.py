@@ -14,7 +14,7 @@ from DB.models.oms import (
     PartType,
 )
 from DB.models.configuration import Customer, PokayokeCompletedLog
-from DB.models.inventory import InventoryRequest, InventoryReturnRequest
+from DB.models.inventory import InventoryRequest, InventoryReturnRequest, RawMaterialStock
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import (
     Order as OrderResponse,
@@ -39,6 +39,12 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 # CRUD operations
 def _order_to_response(order, db: Session):
     """Build order response dict with customer, product, and role user names."""
+    # Check if order has raw materials linked
+    has_raw_materials = db.query(RawMaterialStock).filter(
+        RawMaterialStock.source_order_id == order.id,
+        RawMaterialStock.source_type == "order"
+    ).first() is not None
+    
     return {
         "id": order.id,
         "sale_order_number": order.sale_order_number,
@@ -59,6 +65,7 @@ def _order_to_response(order, db: Session):
         "project_coordinator_name": order.project_coordinator.user_name if order.project_coordinator else None,
         "admin_name": order.admin.user_name if order.admin else None,
         "manufacturing_coordinator_name": order.manufacturing_coordinator.user_name if order.manufacturing_coordinator else None,
+        "has_raw_materials": has_raw_materials,
         "created_at": order.created_at,
         "updated_at": order.updated_at,
     }

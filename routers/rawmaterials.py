@@ -76,6 +76,7 @@ def get_raw_materials(
             "material_name": material.material_name,
             "density": material.density,
             "cost_per_kg": material.cost_per_kg,
+            "user_id": material.user_id,
             "created_at": material.created_at,
             "updated_at": material.updated_at,
             "has_available_stock": has_available_stock,
@@ -235,6 +236,8 @@ def get_order_parts_raw_material_linked(
             "inner_diameter": stock_details["inner_diameter"],
             "outer_diameter": stock_details["outer_diameter"],
             "quantity": stock_details["quantity"],
+            "allocated_quantity": stock_details.get("allocated_quantity", 0),
+            "available_quantity": stock_details.get("available_quantity", 0),
             "mass": stock_details["mass"],
             "weight": stock_details["weight"],
             "cost": stock_details["cost"],
@@ -257,6 +260,7 @@ def get_order_parts_raw_material_linked(
             "part_ids": stock_details.get("part_ids", []),
             "part_numbers": stock_details.get("part_numbers", []),
             "part_names": stock_details.get("part_names", []),
+            "part_required_quantities": stock_details.get("part_required_quantities", []),
             "source_order_number": stock_details.get("source_order_number"),
             "linkage_ids": [stock_details["id"]], # Single item array for compatibility
             "linkage_group_id": stock_details["id"],
@@ -326,9 +330,9 @@ def update_raw_material(raw_material_id: int, raw_material: RawMaterialUpdate, d
     return db_raw_material
 
 
-@router.delete("/{raw_material_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{raw_material_id}", status_code=status.HTTP_200_OK)
 def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
-    """Delete a raw material"""
+    """Delete a raw material and clean up all references"""
     db_raw_material = db.query(RawMaterialModel).filter(RawMaterialModel.id == raw_material_id).first()
     if not db_raw_material:
         raise HTTPException(
@@ -336,46 +340,55 @@ def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
             detail=f"Raw material with id {raw_material_id} not found"
         )
     
-    # Check if material has stock items
-    stock_items = db.query(RawMaterialStockModel).filter(
-        RawMaterialStockModel.material_id == raw_material_id
-    ).all()
-    if stock_items:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete raw material '{db_raw_material.material_name}'. It has {len(stock_items)} stock item(s). Delete stock items first."
-        )
-    
-    # Check if material is referenced by parts (legacy check)
-    referencing_parts = (
-        db.query(PartModel)
-        .filter(PartModel.raw_material_id == raw_material_id)
-        .order_by(PartModel.id.asc())
-        .all()
-    )
-    if referencing_parts:
-        part_numbers = [p.part_number for p in referencing_parts if p.part_number]
-        pn = ", ".join(part_numbers[:10]) + (f", +{len(part_numbers) - 10} more" if len(part_numbers) > 10 else "")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f'Cannot delete raw material "{db_raw_material.material_name}". '
-                f"It is still selected on {len(referencing_parts)} part(s). "
-                f"Part numbers: {pn or '-'}."
-            ),
-        )
-
     try:
+        # Step 1: Find all parts that reference this material
+        referencing_parts = (
+            db.query(PartModel)
+            .filter(
+                (PartModel.raw_material_id == raw_material_id) |
+                (PartModel.raw_material_stock_id.in_(
+                    db.query(RawMaterialStockModel.id)
+                    .filter(RawMaterialStockModel.material_id == raw_material_id)
+                ))
+            )
+            .all()
+        )
+        
+        # Step 2: Clear all part references
+        for part in referencing_parts:
+            part.raw_material_id = None
+            part.raw_material_stock_id = None
+            part.raw_material_required_quantity = None
+        
+        # Step 3: Find and delete all stock items for this material
+        stock_items = db.query(RawMaterialStockModel).filter(
+            RawMaterialStockModel.material_id == raw_material_id
+        ).all()
+        
+        for stock in stock_items:
+            # Deallocate any allocated materials before deleting stock
+            if stock.allocated_quantity > 0:
+                stock.allocated_quantity = 0
+                stock.available_quantity = stock.quantity
+            db.delete(stock)
+        
+        # Step 4: Delete the raw material itself
         db.delete(db_raw_material)
+        
+        # Commit all changes
         db.commit()
-    except IntegrityError:
+        
+        return {
+            "message": f"Raw material '{db_raw_material.material_name}' deleted successfully",
+            "parts_updated": len(referencing_parts),
+            "stock_items_deleted": len(stock_items)
+        }
+        
+    except Exception as e:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f'Cannot delete raw material "{db_raw_material.material_name}". '
-                "It is still referenced by other records. Remove the links/usages first and try again."
-            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting raw material: {str(e)}"
         )
     return None
 
@@ -430,6 +443,10 @@ def create_raw_material_stock(stock: RawMaterialStockCreate, db: Session = Depen
     stock_data = stock.model_dump()
     stock_data.update(properties)
     
+    # Set initial quantities for new stock
+    stock_data["allocated_quantity"] = 0  # Start with no allocations
+    stock_data["available_quantity"] = stock_data.get("quantity", 0)  # All quantity is initially available
+    
     # Set default order_status for order type
     if stock_data.get("source_type") == "order" and not stock_data.get("order_status"):
         stock_data["order_status"] = "enquiry"  # Default status for new orders
@@ -441,13 +458,16 @@ def create_raw_material_stock(stock: RawMaterialStockCreate, db: Session = Depen
         else:
             stock_data["status"] = "not available"
     else:
-        # For general stock, use available if quantity > 0
-        stock_data["status"] = "available" if stock_data.get("quantity", 0) > 0 else "not available"
+        # For general stock, use available if available_quantity > 0
+        stock_data["status"] = "available" if stock_data.get("available_quantity", 0) > 0 else "not available"
     
     db_stock = RawMaterialStockModel(**stock_data)
     db.add(db_stock)
     db.commit()
     db.refresh(db_stock)
+    
+    # Frontend handles allocation directly via /rawmaterials/tracking/allocate API
+    # No auto-allocation needed here
     
     # Return with details
     return _stock_with_details(db_stock, db)
@@ -582,9 +602,9 @@ def update_raw_material_stock(stock_id: int, stock: RawMaterialStockUpdate, db: 
     return _stock_with_details(db_stock, db)
 
 
-@router.delete("/stock/{stock_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/stock/{stock_id}", status_code=status.HTTP_200_OK)
 def delete_raw_material_stock(stock_id: int, db: Session = Depends(get_db)):
-    """Delete a raw material stock item"""
+    """Delete a raw material stock item and clean up part references"""
     db_stock = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
     if not db_stock:
         raise HTTPException(
@@ -593,15 +613,36 @@ def delete_raw_material_stock(stock_id: int, db: Session = Depends(get_db)):
         )
     
     try:
+        # Find all parts that reference this stock item
+        referencing_parts = (
+            db.query(PartModel)
+            .filter(PartModel.raw_material_stock_id == stock_id)
+            .all()
+        )
+        
+        # Clear all part references to this stock
+        for part in referencing_parts:
+            part.raw_material_stock_id = None
+            part.raw_material_required_quantity = None
+            # Keep raw_material_id if it exists, as the material might still be available
+        
+        # Delete the stock item
         db.delete(db_stock)
+        
+        # Commit all changes
         db.commit()
-    except IntegrityError:
+        
+        return {
+            "message": f"Stock item deleted successfully",
+            "parts_updated": len(referencing_parts)
+        }
+        
+    except Exception as e:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete stock item. It is still referenced by other records."
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting stock item: {str(e)}"
         )
-    return None
 
 
 @router.post("/stock/{stock_id}/use", status_code=status.HTTP_200_OK)
@@ -631,11 +672,11 @@ def use_raw_material_stock(stock_id: int, used_quantity: int, db: Session = Depe
     
     # Update status based on new logic
     if db_stock.source_type == "general":
-        # For general stock: available if quantity > 0
-        db_stock.status = "available" if db_stock.quantity > 0 else "exhausted"
+        # For general stock: available if available_quantity > 0
+        db_stock.status = "available" if db_stock.available_quantity > 0 else "exhausted"
     elif db_stock.source_type == "order":
-        # For order stock: available only if order_status = "received" AND quantity > 0
-        if db_stock.quantity <= 0:
+        # For order stock: available only if order_status = "received" AND available_quantity > 0
+        if db_stock.available_quantity <= 0:
             db_stock.status = "exhausted"
         elif db_stock.order_status == "received":
             db_stock.status = "available"
@@ -665,11 +706,11 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
     # Determine the actual status based on source type and order status
     def get_stock_status(stock_item):
         if stock_item.source_type == "general":
-            # For general stock: available if quantity > 0
-            return "available" if stock_item.quantity > 0 else "exhausted"
+            # For general stock: available only if available_quantity > 0
+            return "available" if stock_item.available_quantity > 0 else "exhausted"
         elif stock_item.source_type == "order":
-            # For order stock: available only if order_status = "received" AND quantity > 0
-            if stock_item.quantity <= 0:
+            # For order stock: available only if order_status = "received" AND available_quantity > 0
+            if stock_item.available_quantity <= 0:
                 return "exhausted"
             elif stock_item.order_status == "received":
                 return "available"
@@ -689,6 +730,8 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
         "inner_diameter": stock.inner_diameter,
         "outer_diameter": stock.outer_diameter,
         "quantity": stock.quantity,
+        "allocated_quantity": stock.allocated_quantity,
+        "available_quantity": stock.available_quantity,
         "volume": stock.volume,
         "mass": stock.mass,
         "weight": stock.weight,
@@ -700,7 +743,7 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
         "vendor_id": stock.vendor_id,  # Comma-separated vendor IDs for enquiry
         "received_vendor_id": stock.received_vendor_id,  # Final vendor who received the order
         "user_id": stock.user_id,
-        "status": get_stock_status(stock),  # Use calculated status
+        "status": stock.calculated_status,  # Use calculated status property
         "created_at": stock.created_at,
         "updated_at": stock.updated_at,
     }
@@ -728,9 +771,19 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
                 result["part_numbers"] = [part.part_number for part in parts]
                 result["part_names"] = [f"{part.part_number} - {part.part_name}" for part in parts]
                 result["part_ids"] = stock.part_id  # Keep original string format
+                
+                # Add part required quantities
+                part_required_quantities = []
+                for part in parts:
+                    if part.raw_material_required_quantity:
+                        part_required_quantities.append(str(part.raw_material_required_quantity))
+                    else:
+                        part_required_quantities.append("0")
+                result["part_required_quantities"] = part_required_quantities
         except (ValueError, AttributeError):
             # If part_id is not valid comma-separated integers, just store as is
             result["part_ids"] = stock.part_id
+            result["part_required_quantities"] = []
     
     # Add vendor details (handle both comma-separated vendor IDs and received vendor)
     if stock.received_vendor_id:
@@ -759,25 +812,11 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
     if stock.volume:
         result["total_volume"] = round(stock.volume * stock.quantity, 6)
     if stock.mass:
-        result["total_mass"] = round(stock.mass, 3)
+        result["total_mass"] = round(stock.mass * stock.quantity, 3)
     if stock.weight:
         result["total_weight"] = round(stock.weight * stock.quantity, 3)
     if stock.cost:
         result["total_cost"] = round(stock.cost * stock.quantity, 2)
-    
-    # Calculate status based on business logic
-    calculated_status = "not available"
-    if stock.source_type == "general":
-        # For general stock, status depends only on quantity
-        if stock.quantity > 0:
-            calculated_status = "available"
-    elif stock.source_type == "order":
-        # For order stock, status depends on order_status
-        if stock.order_status == "received" and stock.quantity > 0:
-            calculated_status = "available"
-    
-    # Update the status in the result
-    result["status"] = calculated_status
     
     return result
 
@@ -880,11 +919,117 @@ def update_order_parts_status_group(group_id: int, status_data: dict, db: Sessio
     
     # Update part_ids if provided
     if 'part_ids' in status_data:
-        stock.part_id = status_data['part_ids']  # Store as comma-separated string
+        from DB.models.oms import Part
+        old_part_ids = set()
+        new_part_ids = set()
+        
+        # Get old part IDs before update
+        if stock.part_id:
+            old_part_ids = set(pid.strip() for pid in stock.part_id.split(',') if pid.strip())
+        
+        # Get new part IDs from update
+        if status_data['part_ids']:
+            new_part_ids = set(pid.strip() for pid in status_data['part_ids'].split(',') if pid.strip())
+        
+        # Update stock part_ids
+        stock.part_id = status_data['part_ids']
+        
+        # Handle removed parts - set their fields to NULL
+        removed_part_ids = old_part_ids - new_part_ids
+        if removed_part_ids:
+            for part_id_str in removed_part_ids:
+                try:
+                    part_id = int(part_id_str)
+                    part = db.query(Part).filter(Part.id == part_id).first()
+                    if part:
+                        part.raw_material_stock_id = None
+                        part.raw_material_required_quantity = None
+                except (ValueError, TypeError):
+                    continue
+        
+        # Update quantity if provided
+    if 'order_quantity' in status_data:
+        new_quantity = status_data['order_quantity']
+        
+        # Validate that new quantity is not less than allocated quantity
+        if stock.allocated_quantity and new_quantity < stock.allocated_quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot reduce quantity to {new_quantity}. Already allocated quantity is {stock.allocated_quantity}. Please remove parts or reduce part quantities first."
+            )
+        
+        stock.quantity = new_quantity
+        
+        # Recalculate available quantity after quantity update
+        stock.available_quantity = stock.quantity - stock.allocated_quantity
+    
+    # Update part quantities if provided
+    if 'part_quantities' in status_data:
+        part_quantities = status_data['part_quantities']
+        
+        if stock.part_id and part_quantities:
+            part_ids = [pid.strip() for pid in stock.part_id.split(',') if pid.strip()]
+            
+            # Validate total required quantity doesn't exceed available quantity
+            total_required = 0
+            for part_id_str in part_ids:
+                if str(part_id_str) in part_quantities:
+                    try:
+                        total_required += float(part_quantities[str(part_id_str)])
+                    except (ValueError, TypeError):
+                        continue
+            
+            if total_required > stock.quantity:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Total required quantity ({total_required}) exceeds available stock quantity ({stock.quantity}). Please increase stock quantity or reduce part quantities."
+                )
+            
+            for part_id_str in part_ids:
+                try:
+                    part_id = int(part_id_str)
+                    part = db.query(Part).filter(Part.id == part_id).first()
+                    if part and str(part_id) in part_quantities:
+                        part.raw_material_required_quantity = float(part_quantities[str(part_id)])
+                        # Also update the stock_id reference
+                        part.raw_material_stock_id = stock.id
+                except (ValueError, TypeError):
+                    continue
+        
+        # Recalculate stock quantities based on current parts
+        if new_part_ids:
+            total_allocated = 0
+            for part_id_str in new_part_ids:
+                try:
+                    part_id = int(part_id_str)
+                    part = db.query(Part).filter(Part.id == part_id).first()
+                    if part and part.raw_material_required_quantity:
+                        total_allocated += float(part.raw_material_required_quantity)
+                except (ValueError, TypeError):
+                    continue
+            
+            stock.allocated_quantity = total_allocated
+            stock.available_quantity = stock.quantity - total_allocated
+        else:
+            # No parts linked
+            stock.allocated_quantity = 0
+            stock.available_quantity = stock.quantity
     
     # Update quantity if provided
     if 'order_quantity' in status_data:
-        stock.quantity = status_data['order_quantity']
+        new_quantity = status_data['order_quantity']
+        
+        # Validate that new quantity is not less than allocated quantity
+        if stock.allocated_quantity and new_quantity < stock.allocated_quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot reduce quantity to {new_quantity}. Already allocated quantity is {stock.allocated_quantity}. Please remove parts or reduce part quantities first."
+            )
+        
+        stock.quantity = new_quantity
+        
+        # Recalculate available quantity after quantity update
+        stock.available_quantity = stock.quantity - stock.allocated_quantity
     
     # Update form_type if provided
     if 'form_type' in status_data:
@@ -975,7 +1120,7 @@ def bulk_create_order_parts_raw_material_linked(bulk_data: dict, db: Session = D
 
 @router.delete("/order-parts-raw-material-linked/{stock_id}")
 def delete_order_parts_raw_material_linked(stock_id: int, db: Session = Depends(get_db)):
-    """Delete order-linked raw material stock"""
+    """Delete order-linked raw material stock and clear part references"""
     stock = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
     if not stock:
         raise HTTPException(
@@ -983,13 +1128,22 @@ def delete_order_parts_raw_material_linked(stock_id: int, db: Session = Depends(
             detail="Stock item not found"
         )
     
-    # Optional: Check if user is authorized to delete this stock
-    # if stock.user_id != current_user_id:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_403_FORBIDDEN,
-    #         detail="Not authorized to delete this stock item"
-    #     )
+    # Step 1: Clear part references before deleting stock
+    if stock.part_id:
+        from DB.models.oms import Part as PartModel
+        part_ids = [pid.strip() for pid in stock.part_id.split(',') if pid.strip()]
+        
+        for part_id in part_ids:
+            try:
+                part = db.query(PartModel).filter(PartModel.id == int(part_id)).first()
+                if part and part.raw_material_stock_id == stock_id:
+                    # Clear the raw material references
+                    part.raw_material_stock_id = None
+                    part.raw_material_required_quantity = None
+            except Exception:
+                pass  # Silently ignore errors
     
+    # Step 2: Delete the stock
     db.delete(stock)
     db.commit()
     return {"message": "Stock item deleted successfully"}

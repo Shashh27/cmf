@@ -117,6 +117,10 @@ class RawMaterialStockBase(BaseModel):
     user_id: Optional[int] = None
 
     status: str = "available"
+    
+    allocated_quantity: int = 0  # Quantity allocated to parts
+    
+    available_quantity: int = 0  # Quantity available for use
 
 
 
@@ -197,6 +201,10 @@ class RawMaterialStockUpdate(BaseModel):
     user_id: Optional[int] = None
 
     status: Optional[str] = None
+    
+    allocated_quantity: Optional[int] = None
+    
+    available_quantity: Optional[int] = None
 
 
 

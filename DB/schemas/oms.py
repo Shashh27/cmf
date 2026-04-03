@@ -1,7 +1,10 @@
-from pydantic import BaseModel, field_validator
 from typing import Optional, List, Text, TYPE_CHECKING
+
 from datetime import datetime, time
+
 from typing_extensions import Self
+
+from pydantic import BaseModel, field_validator
 from .inventory import ToolsList
 
 if TYPE_CHECKING:
@@ -111,6 +114,7 @@ class PartBase(BaseModel):
     user_id: Optional[int] = None
     size: Optional[str] = None  # Optional size field (e.g., "25x25x160", "Ø210x110", "Tyre Coupling F160 Type:B")
     qty: Optional[int] = None  # Optional quantity field
+    raw_material_required_quantity: Optional[float] = None  # Required quantity per part for order-linked materials
 
 
 class PartCreate(PartBase):
@@ -129,6 +133,7 @@ class PartUpdate(BaseModel):
     user_id: Optional[int] = None
     size: Optional[str] = None  # Optional size field
     qty: Optional[int] = None  # Optional quantity field
+    raw_material_required_quantity: Optional[float] = None  # Required quantity per part for order-linked materials
 
 
 class Part(PartBase):
@@ -446,6 +451,7 @@ class OrderWithCustomerAndProduct(Order):
     company_name: Optional[str] = None
     product_name: Optional[str] = None
     user_name: Optional[str] = None
+    has_raw_materials: bool = False
 
     class Config:
         from_attributes = True

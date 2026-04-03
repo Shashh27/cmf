@@ -116,14 +116,22 @@ def get_all_production_logs(
                     # Get raw materials through the part relationship
                     if operation.part:
                         raw_materials = []
-                        for rm_link in operation.part.raw_material_links:
-                            if rm_link.stock_item and rm_link.stock_item.raw_material:
-                                raw_materials.append({
-                                    "id": rm_link.stock_item.raw_material.id,
-                                    "name": rm_link.stock_item.raw_material.name,
-                                    "quantity": rm_link.quantity,
-                                    "unit": rm_link.stock_item.raw_material.unit
-                                })
+                        # Check if part has a raw material stock assigned
+                        if operation.part.raw_material_stock and operation.part.raw_material_stock.material:
+                            raw_materials.append({
+                                "id": operation.part.raw_material_stock.material.id,
+                                "name": operation.part.raw_material_stock.material.material_name,
+                                "quantity": operation.part.raw_material_stock.quantity,
+                                "unit": "kg"  # Default unit since RawMaterial doesn't have unit field
+                            })
+                        # Also check legacy raw_material relationship
+                        elif operation.part.raw_material:
+                            raw_materials.append({
+                                "id": operation.part.raw_material.id,
+                                "name": operation.part.raw_material.material_name,
+                                "quantity": 1,  # Legacy field doesn't track quantity
+                                "unit": "kg"  # Default unit
+                            })
                         operation_data["raw_materials"] = raw_materials
                     
                     response.operation = operation_data
@@ -215,14 +223,22 @@ def get_production_log(log_id: int, db: Session = Depends(get_db)):
                 # Get raw materials through the part relationship
                 if operation.part:
                     raw_materials = []
-                    for rm_link in operation.part.raw_material_links:
-                        if rm_link.stock_item and rm_link.stock_item.raw_material:
-                            raw_materials.append({
-                                "id": rm_link.stock_item.raw_material.id,
-                                "name": rm_link.stock_item.raw_material.name,
-                                "quantity": rm_link.quantity,
-                                "unit": rm_link.stock_item.raw_material.unit
-                            })
+                    # Check if part has a raw material stock assigned
+                    if operation.part.raw_material_stock and operation.part.raw_material_stock.material:
+                        raw_materials.append({
+                            "id": operation.part.raw_material_stock.material.id,
+                            "name": operation.part.raw_material_stock.material.material_name,
+                            "quantity": operation.part.raw_material_stock.quantity,
+                            "unit": "kg"  # Default unit since RawMaterial doesn't have unit field
+                        })
+                    # Also check legacy raw_material relationship
+                    elif operation.part.raw_material:
+                        raw_materials.append({
+                            "id": operation.part.raw_material.id,
+                            "name": operation.part.raw_material.material_name,
+                            "quantity": 1,  # Legacy field doesn't track quantity
+                            "unit": "kg"  # Default unit
+                        })
                     operation_data["raw_materials"] = raw_materials
                 
                 response.operation = operation_data
