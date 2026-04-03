@@ -9,6 +9,7 @@ import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../DownloadReports/ProductBOMPdfDownload";
 import ProductToolsViewer from "./ProductToolsViewer";
+import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 
 const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
   const { message, modal } = App.useApp();
@@ -774,15 +775,24 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {filteredProducts.length === 1 && (
-                <Button
-                  type="default"
-                  size="small"
-                  icon={<ToolOutlined />}
-                  onClick={() => handleViewAllTools(filteredProducts[0])}
-                  className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
-                >
-                  View Tools
-                </Button>
+                <>
+                  <AssemblyPartsUploadPanel
+                    selectedItem={{ ...filteredProducts[0], itemType: 'product' }}
+                    onPartsCreated={() => {
+                      // Refresh the product hierarchy after parts are uploaded
+                      fetchProductHierarchy(filteredProducts[0].id, true);
+                    }}
+                  />
+                  <Button
+                    type="default"
+                    size="small"
+                    icon={<ToolOutlined />}
+                    onClick={() => handleViewAllTools(filteredProducts[0])}
+                    className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
+                  >
+                    View Tools
+                  </Button>
+                </>
               )}
               {!disableProductCreate && (
                 <Button

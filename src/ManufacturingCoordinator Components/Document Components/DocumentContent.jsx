@@ -96,11 +96,11 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     try {
       let url = '';
       if (selectedNode.type === 'general-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${selectedNode.folderId}/documents`;
+        url = `${config.API_BASE_URL}/general-documents/folders/${selectedNode.folderId}/documents`;
       } else if (selectedNode.type === 'common-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/folders/${selectedNode.folderId}/documents`;
+        url = `${config.API_BASE_URL}/common-documents/folders/${selectedNode.folderId}/documents`;
       } else if (selectedNode.type === 'common-root') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/all/documents`;
+        url = `${config.API_BASE_URL}/common-documents/all/documents`;
       } else if (selectedNode.type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
       } else if (selectedNode.type === 'operation-folder') {
@@ -108,9 +108,9 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       } else if (selectedNode.type === 'folder' && selectedNode.category === 'Reports') {
         url = `${config.API_BASE_URL}/order-documents/order/${selectedNode.orderId}`;
       } else if (selectedNode.type === 'machine-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/folders/${selectedNode.folderId}/documents`;
+        url = `${config.API_BASE_URL}/machine-documents/folders/${selectedNode.folderId}/documents`;
       } else if (selectedNode.type === 'machine') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/machines/${selectedNode.machineId}/documents`;
+        url = `${config.API_BASE_URL}/machine-documents/machines/${selectedNode.machineId}/documents`;
       }
 
       if (!url) {
@@ -461,7 +461,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       let body = {};
 
       if (editingDocument.doc_source_type === 'general-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${editingDocument.id}`;
+        url = `${config.API_BASE_URL}/general-documents/documents/${editingDocument.id}`;
         body = { file_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/${editingDocument.id}`;
@@ -470,13 +470,13 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         url = `${config.API_BASE_URL}/operation-documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'machine-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${editingDocument.id}`;
+        url = `${config.API_BASE_URL}/machine-documents/documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'machine') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${editingDocument.id}`;
+        url = `${config.API_BASE_URL}/machine-documents/documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'common-folder' || editingDocument.doc_source_type === 'common-root') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/documents/${editingDocument.id}`;
+        url = `${config.API_BASE_URL}/common-documents/documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'folder') {
         url = `${config.API_BASE_URL}/order-documents/${editingDocument.id}`;
@@ -513,7 +513,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   const handleDownloadDocument = (document) => {
     let downloadUrl = '';
     if (document.doc_source_type === 'general-folder') {
-      downloadUrl = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${document.id}/download`;
+      downloadUrl = `${config.API_BASE_URL}/general-documents/documents/${document.id}/download`;
     } else if (document.doc_source_type === 'part-category') {
       downloadUrl = `${config.API_BASE_URL}/documents/${document.id}/download`;
     } else if (document.doc_source_type === 'operation-folder') {
@@ -563,7 +563,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     try {
       // For general folders, we need to fetch all versions from the backend
       if (document.doc_source_type === 'general-folder') {
-        const response = await fetch(`http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/folders/${document.general_folder_id}/documents`);
+        const response = await fetch(`${config.API_BASE_URL}/general-documents/folders/${document.general_folder_id}/documents`);
         if (response.ok) {
           const allDocs = await response.json();
           const familyDocs = allDocs.filter(doc => 
@@ -625,21 +625,21 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       let url = '';
       
       if (uploadingDocument.doc_source_type === 'general-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
+        url = `${config.API_BASE_URL}/general-documents/upload`;
         formData.append('folder_id', uploadingDocument.general_folder_id.toString());
         // Use the actual uploaded file name instead of parent document name
         formData.append('file_name', file.name);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
       } else if (uploadingDocument.doc_source_type === 'machine-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
+        url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('folder_id', (uploadingDocument.machine_folder_id || selectedNode.folderId).toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
       } else if (uploadingDocument.doc_source_type === 'machine') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
+        url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
       } else if (uploadingDocument.doc_source_type === 'common-folder' || uploadingDocument.doc_source_type === 'common-root') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
+        url = `${config.API_BASE_URL}/common-documents/upload`;
         if (uploadingDocument.folder_id !== null && uploadingDocument.folder_id !== undefined) {
           formData.append('folder_id', uploadingDocument.folder_id.toString());
         }
@@ -730,12 +730,12 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       let url = '';
       
       if (selectedNode.type === 'general-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/upload`;
+        url = `${config.API_BASE_URL}/general-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('file_name', addFileList[0].originFileObj.name);
         formData.append('user_id', userId.toString());
       } else if (selectedNode.type === 'common-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
+        url = `${config.API_BASE_URL}/common-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
         console.log('Uploading common documents:', {
@@ -744,7 +744,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
           fileCount: addFileList.length
         });
       } else if (selectedNode.type === 'common-root') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/upload`;
+        url = `${config.API_BASE_URL}/common-documents/upload`;
         formData.append('user_id', userId.toString());
         console.log('Uploading common documents to root:', {
           url,
@@ -752,7 +752,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
           fileCount: addFileList.length
         });
       } else if (selectedNode.type === 'machine-folder') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
+        url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('folder_id', selectedNode.folderId.toString());
         formData.append('user_id', userId.toString());
         console.log('Uploading machine documents:', {
@@ -761,7 +761,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
           fileCount: addFileList.length
         });
       } else if (selectedNode.type === 'machine') {
-        url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/upload`;
+        url = `${config.API_BASE_URL}/machine-documents/upload`;
         formData.append('machine_id', selectedNode.machineId.toString());
         formData.append('user_id', userId.toString());
         console.log('Uploading machine documents directly to machine:', {
@@ -855,17 +855,17 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         try {
           let url = '';
           if (document.doc_source_type === 'general-folder') {
-            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}general-documents/documents/${document.id}`;
+            url = `${config.API_BASE_URL}/general-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'part-category') {
             url = `${config.API_BASE_URL}/documents/${document.id}`;
           } else if (document.doc_source_type === 'operation-folder') {
             url = `${config.API_BASE_URL}/operation-documents/${document.id}`;
           } else if (document.doc_source_type === 'machine-folder') {
-            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${document.id}`;
+            url = `${config.API_BASE_URL}/machine-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'machine') {
-            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}machine-documents/documents/${document.id}`;
+            url = `${config.API_BASE_URL}/machine-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'common-folder' || document.doc_source_type === 'common-root') {
-            url = `http://${config.API_BASE_URL.replace('http://', '').replace('api/v1', '')}common-documents/documents/${document.id}`;
+            url = `${config.API_BASE_URL}/common-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'folder') {
             url = `${config.API_BASE_URL}/order-documents/${document.id}`;
           }
