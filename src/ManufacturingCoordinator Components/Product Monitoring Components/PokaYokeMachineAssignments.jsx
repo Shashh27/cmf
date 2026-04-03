@@ -72,7 +72,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           machine_id: selectedMachine,
           frequency: values.frequency,
           shift: values.frequency === 'Daily' ? values.shift : null,
-          scheduled_day: values.frequency === 'Weekly' ? (values.dayOfWeek ? values.dayOfWeek.format('dddd') : null) : (values.frequency === 'Monthly' ? (values.dayOfMonth ? values.dayOfMonth.format('D') : null) : null)
+          scheduled_day: values.frequency === 'Weekly' ? values.dayOfWeek : (values.frequency === 'Monthly' ? (values.dayOfMonth ? values.dayOfMonth.format('D') : null) : null)
         }),
       });
 
@@ -459,11 +459,13 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                     label="Select Day of Week"
                     rules={[{ required: true, message: 'Please select day' }]}
                   >
-                    <DatePicker 
-                      style={{ width: '100%' }} 
-                      placeholder="Select a day"
-                      format="dddd"
-                    />
+                    <Select placeholder="Select a day">
+                      <Option value="Monday">Monday</Option>
+                      <Option value="Tuesday">Tuesday</Option>
+                      <Option value="Wednesday">Wednesday</Option>
+                      <Option value="Thursday">Thursday</Option>
+                      <Option value="Friday">Friday</Option>
+                    </Select>
                   </Form.Item>
                 );
               } else if (frequency === 'Monthly') {
