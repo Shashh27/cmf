@@ -72,9 +72,11 @@ const EditOperationModal = ({
   const [preview, setPreview]                   = useState(null); // { url, title, type }
   const [viewingDoc, setViewingDoc]             = useState(null); // { url, title, type, id, name }
   const [partTypes, setPartTypes]               = useState([]);
+  const [vendors, setVendors]                 = useState([]);
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
   const [workCentersLoading, setWorkCentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
+  const [vendorsLoading, setVendorsLoading]         = useState(false);
   const [toolsSelectorVisible, setToolsSelectorVisible] = useState(false);
 
   const fromDateWatch = Form.useWatch('from_date', form);
@@ -85,6 +87,7 @@ const EditOperationModal = ({
   const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,    setAllMachines, setMachinesLoading,    allMachines.length > 0);
+  const fetchVendors     = () => fetchInto(`${API_BASE_URL}/rawmaterials/vendors`,     setVendors,     setVendorsLoading,     vendors.length > 0);
 
   const getCurrentUserId = () => {
     try {
@@ -161,6 +164,7 @@ const EditOperationModal = ({
       machine_id:        operation.machine_id,
       work_instructions: operation.work_instructions,
       notes:             operation.notes,
+      vendor_id:         operation.vendor_id,
     });
     if (!showAddToolForm) fetchDocuments(); 
     else {
@@ -299,6 +303,7 @@ const EditOperationModal = ({
         machine_id:        out ? null : (machine_id ?? null),
         work_instructions: out ? null : (rest.work_instructions ?? null),
         notes:             out ? null : (rest.notes ?? null),
+        vendor_id:         rest.vendor_id ?? null,
       };
       const url    = isCreateMode ? `${API_BASE_URL}/operations/` : `${API_BASE_URL}/operations/${operation.id}`;
       const body   = isCreateMode ? { ...payload, part_id: partId } : payload;
@@ -588,7 +593,32 @@ const EditOperationModal = ({
       </Row>
       <Form.Item noStyle shouldUpdate={(p, c) => p.part_type_id !== c.part_type_id}>
         {({ getFieldValue }) => getFieldValue('part_type_id') === 2
-          ? <OutSourceDates form={form} fromDateWatch={fromDateWatch} />
+          ? (
+            <>
+              <OutSourceDates form={form} fromDateWatch={fromDateWatch} />
+              {/* Vendor Selection for Out-Source Operations */}
+              <Row gutter={[12, 0]} style={{ marginTop: 12 }}>
+                <Col xs={24}>
+                  <Form.Item name="vendor_id" label="Vendor" rules={[{ required: true, message: 'Please select a vendor for outsourced operations!' }]}>
+                    <Select 
+                      placeholder="Select vendor" 
+                      allowClear 
+                      showSearch 
+                      optionFilterProp="children"
+                      loading={vendorsLoading}
+                      onOpenChange={o => { if (o) fetchVendors(); }}
+                    >
+                      {vendors.map(vendor => (
+                        <Select.Option key={vendor.id} value={vendor.id}>
+                          {vendor.company_name}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          )
           : (
             <>
               <Row gutter={[12, 0]}>

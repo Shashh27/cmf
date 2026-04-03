@@ -38,11 +38,15 @@ const CreateProductModal = ({
 
   const [rawMaterialStock, setRawMaterialStock] = useState([]);
 
+  const [vendors, setVendors] = useState([]);
+
   const hasFetchedPartTypes = useRef(false);
 
   const hasFetchedRawMaterials = useRef(false);
 
   const hasFetchedRawMaterialStock = useRef(false);
+
+  const hasFetchedVendors = useRef(false);
 
 
 
@@ -93,6 +97,8 @@ const CreateProductModal = ({
     size: '',
 
     qty: 1,
+
+    vendor_id: null,
 
     assembly_id: null,
 
@@ -434,6 +440,8 @@ const CreateProductModal = ({
 
           await fetchRawMaterialStock();
 
+          await fetchVendors();
+
         } catch (error) {
 
           console.error('Error fetching raw materials:', error);
@@ -497,6 +505,24 @@ const CreateProductModal = ({
     } catch (error) {
 
       console.error("Error fetching raw material stock:", error);
+
+    }
+
+  };
+
+
+
+  const fetchVendors = async () => {
+
+    try {
+
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+
+      setVendors(response.data);
+
+    } catch (error) {
+
+      console.error("Error fetching vendors:", error);
 
     }
 
@@ -608,6 +634,8 @@ const CreateProductModal = ({
 
           qty: values.qty || 1,
           raw_material_required_quantity: values.raw_material_required_quantity || null,
+
+          vendor_id: values.vendor_id || null,
 
           assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
 
@@ -1252,6 +1280,32 @@ const CreateProductModal = ({
 
               }}
 
+            </Form.Item>
+
+            {/* Vendor Selection for Out-Source Parts */}
+            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.type_id !== curr.type_id}>
+              {({ getFieldValue }) => {
+                const typeId = getFieldValue('type_id');
+                const isOutSource = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('out');
+                
+                if (!isOutSource) return null;
+                
+                return (
+                  <Form.Item
+                    name="vendor_id"
+                    label={<span className="text-xs sm:text-sm">Vendor</span>}
+                    rules={[{ required: true, message: 'Please select a vendor for outsourced parts!' }]}
+                  >
+                    <Select placeholder="Select vendor" allowClear showSearch optionFilterProp="children" size="large">
+                      {vendors.map(vendor => (
+                        <Select.Option key={vendor.id} value={vendor.id}>
+                          {vendor.company_name}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                );
+              }}
             </Form.Item>
 
           </>
