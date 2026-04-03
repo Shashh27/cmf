@@ -11,7 +11,7 @@ class ProductionLogStatus(str, Enum):
 
 
 class ProductionLogBase(BaseModel):
-    operation_id: int = Field(..., description="ID of the operation")
+    planned_schedule_items_id: int = Field(..., description="ID of the planned schedule item")
     operator_id: int = Field(..., description="ID of the operator")
     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor")
     notes: Optional[str] = Field(None, description="Additional notes")
@@ -27,7 +27,7 @@ class ProductionLogCreate(ProductionLogBase):
 
 
 class ProductionLogUpdate(BaseModel):
-    operation_id: Optional[int] = Field(None, description="ID of the operation")
+    planned_schedule_items_id: Optional[int] = Field(None, description="ID of the planned schedule item")
     operator_id: Optional[int] = Field(None, description="ID of the operator")
     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor")
     notes: Optional[str] = Field(None, description="Additional notes")
@@ -47,7 +47,9 @@ class ProductionLogResponse(ProductionLogBase):
 
 
 class ProductionLogWithDetails(ProductionLogResponse):
+    planned_schedule_item: Optional[dict] = Field(None, description="Planned schedule item details")
     operation: Optional[dict] = Field(None, description="Operation details")
+    machine: Optional[dict] = Field(None, description="Machine details")
     operator: Optional[dict] = Field(None, description="Operator details")
     supervisor: Optional[dict] = Field(None, description="Supervisor details")
 

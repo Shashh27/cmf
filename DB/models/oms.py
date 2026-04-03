@@ -310,8 +310,6 @@ class Operation(Base):
 
     tools = relationship("ToolWithPart", back_populates="operation", cascade="all, delete-orphan")
 
-    production_logs = relationship("ProductionLog", back_populates="operation")
-
 
 
     @property

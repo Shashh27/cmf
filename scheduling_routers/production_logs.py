@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from DB.database import get_db
-from DB.models import ProductionLog, Operation, AccessUser
+from DB.models import ProductionLog, AccessUser, Operation
+from DB.models.configuration import Machine
 from DB.schemas import (
     ProductionLogCreate,
     ProductionLogUpdate,
@@ -22,12 +23,16 @@ router = APIRouter(
 
 @router.post("/", response_model=ProductionLogResponse, status_code=status.HTTP_201_CREATED)
 def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db)):
-    # Verify operation exists
-    operation = db.query(Operation).filter(Operation.id == log.operation_id).first()
-    if not operation:
+    # Verify planned schedule item exists
+    # Note: Since PlannedScheduleItem model is not defined in this microservice,
+    # we'll use raw SQL to verify its existence
+    from sqlalchemy import text
+    
+    result = db.execute(text("SELECT id FROM scheduling.planned_schedule_items WHERE id = :item_id"), {"item_id": log.planned_schedule_items_id})
+    if not result.fetchone():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Operation with id {log.operation_id} not found"
+            detail=f"Planned schedule item with id {log.planned_schedule_items_id} not found"
         )
     
     # Verify operator exists
@@ -49,7 +54,7 @@ def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db
 def get_all_production_logs(
     status: Optional[ProductionLogStatus] = None,
     operator_id: Optional[int] = None,
-    operation_id: Optional[int] = None,
+    planned_schedule_items_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     query = db.query(ProductionLog)
@@ -58,21 +63,28 @@ def get_all_production_logs(
         query = query.filter(ProductionLog.status == status)
     if operator_id:
         query = query.filter(ProductionLog.operator_id == operator_id)
-    if operation_id:
-        query = query.filter(ProductionLog.operation_id == operation_id)
+    if planned_schedule_items_id:
+        query = query.filter(ProductionLog.planned_schedule_items_id == planned_schedule_items_id)
     
     logs = query.all()
     
     # Build detailed responses with related entities
     detailed_logs = []
     for log in logs:
-        operation = db.query(Operation).filter(Operation.id == log.operation_id).first()
+        # Get planned schedule item details
+        from sqlalchemy import text
+        item_result = db.execute(text("""
+            SELECT id, status, operation_id, machine_id 
+            FROM scheduling.planned_schedule_items 
+            WHERE id = :item_id
+        """), {"item_id": log.planned_schedule_items_id}).first()
+        
         operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
         supervisor = db.query(AccessUser).filter(AccessUser.id == log.supervisor_id).first() if log.supervisor_id else None
         
         response = ProductionLogWithDetails(
             id=log.id,
-            operation_id=log.operation_id,
+            planned_schedule_items_id=log.planned_schedule_items_id,
             operator_id=log.operator_id,
             supervisor_id=log.supervisor_id,
             notes=log.notes,
@@ -83,13 +95,50 @@ def get_all_production_logs(
             status=log.status,
             created_at=log.created_at
         )
-        if operation:
-            response.operation = {
-                "id": operation.id,
-                "operation_number": operation.operation_number,
-                "operation_name": operation.operation_name,
-                "machine_id": operation.machine_id
+        
+        # Add planned schedule item details
+        if item_result:
+            response.planned_schedule_item = {
+                "id": item_result[0],
+                "status": item_result[1]
             }
+            
+            # Get operation details using the operation model
+            if item_result[2]:  # operation_id exists
+                operation = db.query(Operation).filter(Operation.id == item_result[2]).first()
+                if operation:
+                    operation_data = {
+                        "id": operation.id,
+                        "operation_number": operation.operation_number,
+                        "operation_name": operation.operation_name
+                    }
+                    
+                    # Get raw materials through the part relationship
+                    if operation.part:
+                        raw_materials = []
+                        for rm_link in operation.part.raw_material_links:
+                            if rm_link.stock_item and rm_link.stock_item.raw_material:
+                                raw_materials.append({
+                                    "id": rm_link.stock_item.raw_material.id,
+                                    "name": rm_link.stock_item.raw_material.name,
+                                    "quantity": rm_link.quantity,
+                                    "unit": rm_link.stock_item.raw_material.unit
+                                })
+                        operation_data["raw_materials"] = raw_materials
+                    
+                    response.operation = operation_data
+            
+            # Get machine details using the machine model
+            if item_result[3]:  # machine_id exists
+                machine = db.query(Machine).filter(Machine.id == item_result[3]).first()
+                if machine:
+                    response.machine = {
+                        "id": machine.id,
+                        "make": machine.make,
+                        "model": machine.model
+                    }
+        
+        # Add operator details
         if operator:
             response.operator = {
                 "id": operator.id,
@@ -97,6 +146,8 @@ def get_all_production_logs(
                 "gmail": operator.gmail,
                 "role": operator.role
             }
+        
+        # Add supervisor details
         if supervisor:
             response.supervisor = {
                 "id": supervisor.id,
@@ -104,6 +155,7 @@ def get_all_production_logs(
                 "gmail": supervisor.gmail,
                 "role": supervisor.role
             }
+        
         detailed_logs.append(response)
     
     return detailed_logs
@@ -117,15 +169,21 @@ def get_production_log(log_id: int, db: Session = Depends(get_db)):
             detail=f"Production log with id {log_id} not found"
         )
     
-    # Get related data
-    operation = db.query(Operation).filter(Operation.id == log.operation_id).first()
+    # Get planned schedule item details
+    from sqlalchemy import text
+    item_result = db.execute(text("""
+        SELECT id, status, operation_id, machine_id 
+        FROM scheduling.planned_schedule_items 
+        WHERE id = :item_id
+    """), {"item_id": log.planned_schedule_items_id}).first()
+    
     operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
     supervisor = db.query(AccessUser).filter(AccessUser.id == log.supervisor_id).first() if log.supervisor_id else None
     
     # Build response manually to avoid ORM mapping issues
     response = ProductionLogWithDetails(
         id=log.id,
-        operation_id=log.operation_id,
+        planned_schedule_items_id=log.planned_schedule_items_id,
         operator_id=log.operator_id,
         supervisor_id=log.supervisor_id,
         notes=log.notes,
@@ -136,12 +194,50 @@ def get_production_log(log_id: int, db: Session = Depends(get_db)):
         status=log.status,
         created_at=log.created_at
     )
-    if operation:
-        response.operation = {
-            "id": operation.id,
-            "operation_number": operation.operation_number,
-            "operation_name": operation.operation_name
+    
+    # Add planned schedule item details
+    if item_result:
+        response.planned_schedule_item = {
+            "id": item_result[0],
+            "status": item_result[1]
         }
+        
+        # Get operation details using the operation model
+        if item_result[2]:  # operation_id exists
+            operation = db.query(Operation).filter(Operation.id == item_result[2]).first()
+            if operation:
+                operation_data = {
+                    "id": operation.id,
+                    "operation_number": operation.operation_number,
+                    "operation_name": operation.operation_name
+                }
+                
+                # Get raw materials through the part relationship
+                if operation.part:
+                    raw_materials = []
+                    for rm_link in operation.part.raw_material_links:
+                        if rm_link.stock_item and rm_link.stock_item.raw_material:
+                            raw_materials.append({
+                                "id": rm_link.stock_item.raw_material.id,
+                                "name": rm_link.stock_item.raw_material.name,
+                                "quantity": rm_link.quantity,
+                                "unit": rm_link.stock_item.raw_material.unit
+                            })
+                    operation_data["raw_materials"] = raw_materials
+                
+                response.operation = operation_data
+        
+        # Get machine details using the machine model
+        if item_result[3]:  # machine_id exists
+            machine = db.query(Machine).filter(Machine.id == item_result[3]).first()
+            if machine:
+                response.machine = {
+                    "id": machine.id,
+                    "make": machine.make,
+                    "model": machine.model
+                }
+    
+    # Add operator details
     if operator:
         response.operator = {
             "id": operator.id,
@@ -149,6 +245,8 @@ def get_production_log(log_id: int, db: Session = Depends(get_db)):
             "gmail": operator.gmail,
             "role": operator.role
         }
+    
+    # Add supervisor details
     if supervisor:
         response.supervisor = {
             "id": supervisor.id,
@@ -175,12 +273,13 @@ def update_production_log(
     update_data = log_update.model_dump(exclude_unset=True)
     
     # Verify foreign keys if they are being updated
-    if "operation_id" in update_data:
-        operation = db.query(Operation).filter(Operation.id == update_data["operation_id"]).first()
-        if not operation:
+    if "planned_schedule_items_id" in update_data:
+        from sqlalchemy import text
+        result = db.execute(text("SELECT id FROM scheduling.planned_schedule_items WHERE id = :item_id"), {"item_id": update_data["planned_schedule_items_id"]})
+        if not result.fetchone():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Operation with id {update_data['operation_id']} not found"
+                detail=f"Planned schedule item with id {update_data['planned_schedule_items_id']} not found"
             )
     
     if "operator_id" in update_data:
@@ -242,7 +341,34 @@ def update_production_log_status(
             )
         db_log.supervisor_id = status_update.supervisor_id
     
+    old_status = db_log.status
     db_log.status = status_update.status
+    
+    # Update planned_schedule_items table based on status changes
+    from sqlalchemy import text
+    try:
+        if status_update.status == "completed" and old_status != "completed":
+            # Change to completed
+            db.execute(
+                text("UPDATE scheduling.planned_schedule_items SET status = 'completed' WHERE id = :item_id"),
+                {"item_id": db_log.planned_schedule_items_id}
+            )
+        elif status_update.status == "rework" and old_status == "completed":
+            # Change from completed back to rework - set to inprogress
+            db.execute(
+                text("UPDATE scheduling.planned_schedule_items SET status = 'inprogress' WHERE id = :item_id"),
+                {"item_id": db_log.planned_schedule_items_id}
+            )
+        elif status_update.status == "rework" and old_status != "completed" and old_status != "rework":
+            # Change to rework from other status (pending) - set to inprogress
+            db.execute(
+                text("UPDATE scheduling.planned_schedule_items SET status = 'inprogress' WHERE id = :item_id"),
+                {"item_id": db_log.planned_schedule_items_id}
+            )
+    except Exception as e:
+        # Log the error but don't fail the operation
+        print(f"Error updating planned_schedule_items status: {e}")
+    
     db.commit()
     db.refresh(db_log)
     return db_log
@@ -270,22 +396,23 @@ def get_production_logs_by_operator(
     logs = query.offset(skip).all()
     return logs
 
-@router.get("/operation/{operation_id}", response_model=List[ProductionLogResponse])
-def get_production_logs_by_operation(
-    operation_id: int,
+@router.get("/planned-schedule-item/{planned_schedule_items_id}", response_model=List[ProductionLogResponse])
+def get_production_logs_by_planned_schedule_item(
+    planned_schedule_items_id: int,
     skip: int = 0,
     status: Optional[ProductionLogStatus] = None,
     db: Session = Depends(get_db)
 ):
-    # Verify operation exists
-    operation = db.query(Operation).filter(Operation.id == operation_id).first()
-    if not operation:
+    # Verify planned schedule item exists
+    from sqlalchemy import text
+    result = db.execute(text("SELECT id FROM scheduling.planned_schedule_items WHERE id = :item_id"), {"item_id": planned_schedule_items_id})
+    if not result.fetchone():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Operation with id {operation_id} not found"
+            detail=f"Planned schedule item with id {planned_schedule_items_id} not found"
         )
     
-    query = db.query(ProductionLog).filter(ProductionLog.operation_id == operation_id)
+    query = db.query(ProductionLog).filter(ProductionLog.planned_schedule_items_id == planned_schedule_items_id)
     
     if status:
         query = query.filter(ProductionLog.status == status)

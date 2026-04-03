@@ -1,6 +1,8 @@
-from sqlalchemy import Column, Integer, String, DATE, TIME, ForeignKey, TIMESTAMP, func, Text
+from sqlalchemy import Column, Integer, String, DATE, TIME, ForeignKey, TIMESTAMP, DateTime, func, Text
 from sqlalchemy.orm import relationship
 from ..database import Base
+
+
 
 
 class ProductionLog(Base):
@@ -8,7 +10,7 @@ class ProductionLog(Base):
     __table_args__ = {'schema': 'scheduling'}
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    operation_id = Column(Integer, ForeignKey('oms.operations.id'), nullable=False)
+    planned_schedule_items_id = Column(Integer, nullable=False)
     operator_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=False)
     supervisor_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=True)
     notes = Column(Text, nullable=True)
@@ -20,6 +22,5 @@ class ProductionLog(Base):
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
 
     # Relationships
-    operation = relationship("Operation", back_populates="production_logs")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
     supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
