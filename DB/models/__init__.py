@@ -35,6 +35,9 @@ from .documents import (
     CommonFolder,
     CommonDocument
 )
+from .scheduling import (
+    ProductionLog
+)
 
 __all__ = [
     "Product",
@@ -63,5 +66,6 @@ __all__ = [
     "MachineDocument",
     "CommonFolder",
     "CommonDocument",
+    "ProductionLog",
     "Base"
 ]
