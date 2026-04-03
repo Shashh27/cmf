@@ -21,7 +21,7 @@ from DB.models.oms import (
     DocumentExtractedData as DocumentExtractedDataModel,
 )
 from DB.models.configuration import PokayokeCompletedLog
-from DB.models.inventory import RawMaterial, RawMaterialStock
+from DB.models.inventory import RawMaterial, RawMaterialStock, Vendors
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
 
@@ -32,15 +32,16 @@ router = APIRouter(
 
 
 def _build_part_maps(db: Session):
-    """Fetch PartType, RawMaterial, RawMaterialStock, and AccessUser rows once and return id→value maps."""
+    """Fetch PartType, RawMaterial, RawMaterialStock, AccessUser, and Vendors rows once and return id→value maps."""
     type_map = {pt.id: pt.type_name for pt in db.query(PartType).all()}
     rm_map = {rm.id: rm.material_name for rm in db.query(RawMaterial).all()}
     stock_map = {stock.id: stock for stock in db.query(RawMaterialStock).all()}
     user_map = {u.id: u.user_name for u in db.query(AccessUser).all()}
-    return type_map, rm_map, stock_map, user_map
+    vendor_map = {v.id: v.company_name for v in db.query(Vendors).all()}
+    return type_map, rm_map, stock_map, user_map, vendor_map
 
 
-def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict, user_map: dict) -> dict:
+def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict, user_map: dict, vendor_map: dict) -> dict:
     # Get stock details if stock_id exists
     stock_details = None
     stock_form_type = None
@@ -85,12 +86,14 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict
         "user_id": part.user_id,
         "size": part.size,
         "qty": part.qty,
+        "vendor_id": part.vendor_id,
         "type_name": type_map.get(part.type_id),
         "raw_material_name": rm_map.get(part.raw_material_id),
         "raw_material_stock_details": stock_details,
         "raw_material_stock_form_type": stock_form_type,
         "raw_material_stock_dimensions": stock_dimensions,
         "user_name": user_map.get(part.user_id) if part.user_id else None,
+        "vendor_name": vendor_map.get(part.vendor_id) if part.vendor_id else None,
         "created_at": part.created_at,
         "updated_at": part.updated_at,
     }
@@ -127,8 +130,8 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     #             db.add(priority_entry)
     #         db.commit()
 
-    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
-    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map)
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map, vendor_map)
 
 
 @router.get("/", response_model=List[Part])
@@ -138,8 +141,8 @@ def get_parts(user_id: int | None = None, db: Session = Depends(get_db)):
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/{part_id}", response_model=Part)
@@ -151,8 +154,8 @@ def get_part(part_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {part_id} not found"
         )
-    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
-    return _part_to_dict(part, type_map, rm_map, stock_map, user_map)
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(part, type_map, rm_map, stock_map, user_map, vendor_map)
 
 
 @router.get("/product/{product_id}", response_model=List[Part])
@@ -162,8 +165,8 @@ def get_parts_by_product(product_id: int, user_id: int | None = None, db: Sessio
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/assembly/{assembly_id}", response_model=List[Part])
@@ -173,8 +176,8 @@ def get_parts_by_assembly(assembly_id: int, user_id: int | None = None, db: Sess
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/type/{type_id}", response_model=List[Part])
@@ -184,8 +187,8 @@ def get_parts_by_type(type_id: int, user_id: int | None = None, db: Session = De
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
 
 
 @router.put("/{part_id}", response_model=Part)
@@ -204,8 +207,8 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(db_part)
-    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
-    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map)
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map, vendor_map)
 
 
 @router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -582,9 +585,10 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
 
 
 class BulkDeleteResult(BaseModel):
-    assembly_id:   int
+    assembly_id: int | None = None
+    product_id: int | None = None
     deleted_count: int
-    part_ids:      list[int]
+    part_ids: list[int]
 
 
 @router.delete(
@@ -744,6 +748,168 @@ def bulk_delete_parts_by_assembly(assembly_id: int, db: Session = Depends(get_db
 
     return BulkDeleteResult(
         assembly_id=assembly_id,
+        deleted_count=len(part_ids),
+        part_ids=part_ids,
+    )
+
+
+@router.delete(
+    "/bulk-by-product/{product_id}",
+    response_model=BulkDeleteResult,
+    status_code=status.HTTP_200_OK,
+)
+def bulk_delete_parts_by_product(product_id: int, db: Session = Depends(get_db)):
+    """
+    Delete ALL parts linked to given product_id in a single call,
+    along with every dependent record for each part — identical cleanup
+    logic to single-part DELETE /{part_id} endpoint.
+
+    Called from BillOfMaterials when user clicks
+    "Delete All Parts" for a product.
+
+    Returns count and IDs of deleted parts so the frontend can
+    update its local state without a refetch.
+    """
+    # ── 1. Find all part IDs for this product ────────────────────────────────
+    parts = (
+        db.query(PartModel)
+        .filter(PartModel.product_id == product_id)
+        .all()
+    )
+
+    if not parts:
+        # Nothing to delete — return gracefully (not a 404)
+        return BulkDeleteResult(
+            product_id=product_id,
+            deleted_count=0,
+            part_ids=[],
+        )
+
+    part_ids = [p.id for p in parts]
+
+    try:
+        # ── 2. Pokayoke logs ──────────────────────────────────────────────────
+        for part_id in part_ids:
+            result = db.execute(
+                text(
+                    "SELECT id FROM configuration.pokayoke_completed_logs "
+                    "WHERE part_id = :pid"
+                ),
+                {"pid": part_id},
+            )
+            log_ids = [row[0] for row in result]
+            for log_id in log_ids:
+                log_obj = (
+                    db.query(PokayokeCompletedLog)
+                    .filter(PokayokeCompletedLog.id == log_id)
+                    .first()
+                )
+                if log_obj:
+                    db.delete(log_obj)
+        db.flush()
+
+        # ── 3. Scheduling: part_schedule_status ──────────────────────────────
+        db.execute(
+            text(
+                "DELETE FROM scheduling.part_schedule_status "
+                "WHERE part_id = ANY(:pids)"
+            ),
+            {"pids": part_ids},
+        )
+
+        # ── 4. Order part priorities ──────────────────────────────────────────
+        db.query(OrderPartPriority).filter(
+            OrderPartPriority.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # ── 5. Operations → planned_schedule_items, documents, tools ─────────
+        operations = (
+            db.query(OperationModel)
+            .filter(OperationModel.part_id.in_(part_ids))
+            .all()
+        )
+        operation_ids = [op.id for op in operations]
+
+        if operation_ids:
+            db.execute(
+                text(
+                    "DELETE FROM scheduling.planned_schedule_items "
+                    "WHERE operation_id = ANY(:oids)"
+                ),
+                {"oids": operation_ids},
+            )
+            db.query(OperationDocumentModel).filter(
+                OperationDocumentModel.operation_id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+            db.query(ToolWithPartModel).filter(
+                ToolWithPartModel.operation_id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+            db.query(OperationModel).filter(
+                OperationModel.id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+
+        # ── 6. Part documents + extracted data ───────────────────────────────
+        db.query(DocumentExtractedDataModel).filter(
+            DocumentExtractedDataModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+        db.query(DocumentModel).filter(
+            DocumentModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # ── 7. Out-source part statuses ─────────────────────────────────────
+        db.query(OutSourcePartStatusModel).filter(
+            OutSourcePartStatusModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # ── 8. Maintenance component issues ──────────────────────────────────
+        db.execute(
+            text(
+                "DELETE FROM maintenance.component_issues "
+                "WHERE part_id = ANY(:pids)"
+            ),
+            {"pids": part_ids},
+        )
+
+        # ── 10. Tools with part (not operation-linked) ────────────────────────
+        db.query(ToolWithPartModel).filter(
+            ToolWithPartModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # ── 11. Inventory return requests + inventory requests ────────────────
+        db.execute(
+            text(
+                "DELETE FROM inventory.inventory_return_requests "
+                "WHERE requested_id IN ("
+                "  SELECT id FROM inventory.inventory_requests "
+                "  WHERE part_id = ANY(:pids)"
+                ")"
+            ),
+            {"pids": part_ids},
+        )
+        db.execute(
+            text(
+                "DELETE FROM inventory.inventory_requests "
+                "WHERE part_id = ANY(:pids)"
+            ),
+            {"pids": part_ids},
+        )
+
+        # ── 12. Finally delete all parts ──────────────────────────────────────
+        db.query(PartModel).filter(
+            PartModel.id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        db.commit()
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Bulk delete failed: {str(exc)}",
+        )
+
+    return BulkDeleteResult(
+        product_id=product_id,
         deleted_count=len(part_ids),
         part_ids=part_ids,
     )

@@ -208,6 +208,8 @@ class Part(Base):
 
     qty = Column(Integer, nullable=True, default=1)  # Optional quantity field, defaults to 1
 
+    vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Vendor for outsourced parts
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -219,6 +221,8 @@ class Part(Base):
     raw_material = relationship("RawMaterial")
 
     raw_material_stock = relationship("RawMaterialStock")
+
+    vendor = relationship("Vendors", foreign_keys=[vendor_id])
 
     assembly = relationship("Assembly", back_populates="parts")
 
@@ -294,6 +298,8 @@ class Operation(Base):
 
     notes = Column(Text, nullable=True)
 
+    vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Vendor for outsourced operations
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -305,6 +311,8 @@ class Operation(Base):
     part_type = relationship("PartType", back_populates="operations")
 
     machine = relationship("DB.models.configuration.Machine")
+
+    vendor = relationship("Vendors", foreign_keys=[vendor_id])
 
     user = relationship("AccessUser")
 

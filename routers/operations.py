@@ -21,6 +21,7 @@ from DB.models.oms import (
     PartType as PartTypeModel
 )
 from DB.models.configuration import WorkCenter as WorkCenterModel, Machine as MachineModel
+from DB.models.inventory import Vendors
 from DB.schemas.oms import Operation, OperationCreate, OperationUpdate
 
 router = APIRouter(
@@ -401,9 +402,11 @@ def get_operations(user_id: int | None = None, db: Session = Depends(get_db)):
     work_center_ids = {op.workcenter_id for op in operations if op.workcenter_id is not None}
     machine_ids = {op.machine_id for op in operations if op.machine_id is not None}
     part_type_ids = {op.part_type_id for op in operations if op.part_type_id is not None}
+    vendor_ids = {op.vendor_id for op in operations if op.vendor_id is not None}
     work_center_map = {}
     machine_map = {}
     part_type_map = {}
+    vendor_map = {}
     if work_center_ids:
         work_centers = db.query(WorkCenterModel).filter(WorkCenterModel.id.in_(work_center_ids)).all()
         work_center_map = {wc.id: wc.work_center_name for wc in work_centers}
@@ -413,11 +416,15 @@ def get_operations(user_id: int | None = None, db: Session = Depends(get_db)):
     if part_type_ids:
         part_types = db.query(PartTypeModel).filter(PartTypeModel.id.in_(part_type_ids)).all()
         part_type_map = {pt.id: pt.type_name for pt in part_types}
+    if vendor_ids:
+        vendors = db.query(Vendors).filter(Vendors.id.in_(vendor_ids)).all()
+        vendor_map = {v.id: v.company_name for v in vendors}
 
     for op in operations:
         op.work_center_name = work_center_map.get(op.workcenter_id)
         op.machine_name = machine_map.get(op.machine_id)
         op.part_type_name = part_type_map.get(op.part_type_id)
+        op.vendor_name = vendor_map.get(op.vendor_id)
 
     return operations
 
@@ -444,9 +451,16 @@ def get_operation(operation_id: int, db: Session = Depends(get_db)):
     part_type = None
     if operation.part_type_id is not None:
         part_type = db.query(PartTypeModel).filter(PartTypeModel.id == operation.part_type_id).first()
+    
+    vendor_name = None
+    if operation.vendor_id:
+        vendor = db.query(Vendors).filter(Vendors.id == operation.vendor_id).first()
+        vendor_name = vendor.company_name if vendor else None
+    operation.vendor_name = vendor_name
+    
+    operation.part_type_name = part_type.type_name if part_type else None
     operation.work_center_name = work_center.work_center_name if work_center else None
     operation.machine_name = machine.make if machine else None
-    operation.part_type_name = part_type.type_name if part_type else None
     return operation
 
 
@@ -469,9 +483,11 @@ def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session
     work_center_ids = {op.workcenter_id for op in operations if op.workcenter_id is not None}
     machine_ids = {op.machine_id for op in operations if op.machine_id is not None}
     part_type_ids = {op.part_type_id for op in operations if op.part_type_id is not None}
+    vendor_ids = {op.vendor_id for op in operations if op.vendor_id is not None}
     work_center_map = {}
     machine_map = {}
     part_type_map = {}
+    vendor_map = {}
     if work_center_ids:
         work_centers = db.query(WorkCenterModel).filter(WorkCenterModel.id.in_(work_center_ids)).all()
         work_center_map = {wc.id: wc.work_center_name for wc in work_centers}
@@ -481,11 +497,15 @@ def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session
     if part_type_ids:
         part_types = db.query(PartTypeModel).filter(PartTypeModel.id.in_(part_type_ids)).all()
         part_type_map = {pt.id: pt.type_name for pt in part_types}
+    if vendor_ids:
+        vendors = db.query(Vendors).filter(Vendors.id.in_(vendor_ids)).all()
+        vendor_map = {v.id: v.company_name for v in vendors}
 
     for op in operations:
         op.work_center_name = work_center_map.get(op.workcenter_id)
         op.machine_name = machine_map.get(op.machine_id)
         op.part_type_name = part_type_map.get(op.part_type_id)
+        op.vendor_name = vendor_map.get(op.vendor_id)
         if op.tools:
             op.tools.sort(key=lambda x: x.id)
 

@@ -244,7 +244,6 @@ app.include_router(orders_router, prefix="/api/v1")
 
 app.include_router(order_documents_router, prefix="/api/v1")
 
-app.include_router(order_documents_router, prefix="/api/v1" )
 
 app.include_router(rawmaterials_router, prefix="/api/v1")
 
