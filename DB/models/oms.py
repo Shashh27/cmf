@@ -90,7 +90,8 @@ class Part(Base):
     part_detail = Column(String, nullable=True)
 
     type_id = Column(Integer, ForeignKey("oms.part_types.id"))
-    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"))
+    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=True)
+    raw_material_stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=True)  # New field for specific stock
     assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
     product_id = Column(Integer, ForeignKey("oms.products.id"))
 
@@ -98,8 +99,13 @@ class Part(Base):
     size = Column(String, nullable=True)
     qty = Column(Integer, nullable=True, default=1)
 
+    raw_material_required_quantity = Column(Float, nullable=True)  # Required quantity per part for order-linked materials
+
+
+
     type = relationship("PartType", back_populates="parts")
     raw_material = relationship("RawMaterial")
+    raw_material_stock = relationship("RawMaterialStock")
     assembly = relationship("Assembly", back_populates="parts")
     product = relationship("Product", back_populates="parts")
 

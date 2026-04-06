@@ -79,7 +79,7 @@ class RawMaterialStock(Base):
 
     source_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
 
-    status = Column(String, nullable=False, default="available")
+    order_status = Column(String, nullable=True)  # "enquiry", "purchase_request", "purchase_order", "received", etc.
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -95,6 +95,22 @@ class RawMaterialStock(Base):
 
     # usage_links = relationship("OrderPartsRawMaterialLinked", back_populates="stock_item", cascade="all, delete-orphan")
 
+    @property
+    def calculated_status(self):
+        """Calculate status based on quantity and source type"""
+        if self.source_type == "general":
+            # For general stock: available only if quantity > 0
+            return "available" if self.quantity > 0 else "exhausted"
+        elif self.source_type == "order":
+            # For order stock: available only if order_status = "received" AND quantity > 0
+            if self.quantity <= 0:
+                return "exhausted"
+            elif self.order_status == "received":
+                return "available"
+            else:
+                return self.order_status or "pending"  # Show order status if not received
+        else:
+            return self.status  # Fallback to stored status
 
 
 # =======================

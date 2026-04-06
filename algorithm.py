@@ -596,19 +596,73 @@ class SchedulerEngine:
             # ── Raw-material gate ────────────────────────────────────── #
             rm_status_map: Dict[int, str] = {}
             for pid, part in part_map.items():
-                if part.raw_material_id is None:
-                    rm_status_map[pid] = 'No Raw Material'   # not assigned → block
-                else:
-                    rm = part.raw_material
-                    if rm is None:
-                        rm_status_map[pid] = 'No Raw Material'
-                    else:
-                        # Check if RawMaterial has status attribute (new model doesn't)
-                        if hasattr(rm, 'status') and rm.status:
-                            rm_status_map[pid] = rm.status.strip()
+                print(f"[DEBUG] Raw material check for part {pid} ({part.part_number})")
+                
+                # Check raw_material_stock_id first (new logic)
+                if hasattr(part, 'raw_material_stock_id') and getattr(part, 'raw_material_stock_id', None):
+                    print(f"[DEBUG]   Part has raw_material_stock_id: {part.raw_material_stock_id}")
+                    try:
+                        rm_stock = part.raw_material_stock
+                        if rm_stock is None:
+                            print(f"[DEBUG]   Raw material stock relationship is None")
+                            rm_status_map[pid] = 'No Raw Material Stock Assigned'
                         else:
-                            # New model: RawMaterial doesn't have status, assume available
-                            rm_status_map[pid] = 'Available'
+                            print(f"[DEBUG]   Raw material stock found:")
+                            print(f"[DEBUG]     - Stock ID: {rm_stock.id}")
+                            print(f"[DEBUG]     - Material ID: {rm_stock.material_id}")
+                            print(f"[DEBUG]     - Form Type: {rm_stock.form_type}")
+                            print(f"[DEBUG]     - Quantity: {rm_stock.quantity}")
+                            print(f"[DEBUG]     - Source Type: {rm_stock.source_type}")
+                            print(f"[DEBUG]     - Order Status: {rm_stock.order_status}")
+                            print(f"[DEBUG]     - Source Order ID: {rm_stock.source_order_id}")
+                            
+                            # Use calculated_status property for stock items
+                            if hasattr(rm_stock, 'calculated_status'):
+                                status = rm_stock.calculated_status
+                                print(f"[DEBUG]     - Calculated Status: {status}")
+                                rm_status_map[pid] = status
+                            else:
+                                # Fallback: check quantity
+                                status = 'Available' if getattr(rm_stock, 'quantity', 0) > 0 else 'Exhausted'
+                                print(f"[DEBUG]     - Fallback Status (based on quantity): {status}")
+                                rm_status_map[pid] = status
+                    except Exception as e:
+                        print(f"[DEBUG]   Error accessing raw_material_stock for part {pid}: {e}")
+                        rm_status_map[pid] = 'Stock Access Error'
+                        
+                elif hasattr(part, 'raw_material_id') and getattr(part, 'raw_material_id', None):
+                    print(f"[DEBUG]   Part has raw_material_id: {part.raw_material_id} (fallback)")
+                    # Fallback to raw_material_id if stock_id not present
+                    try:
+                        rm = part.raw_material
+                        if rm is None:
+                            print(f"[DEBUG]   Raw material relationship is None")
+                            rm_status_map[pid] = 'No Raw Material'
+                        else:
+                            print(f"[DEBUG]   Raw material found:")
+                            print(f"[DEBUG]     - Material ID: {rm.id}")
+                            print(f"[DEBUG]     - Material Name: {rm.material_name}")
+                            print(f"[DEBUG]     - Density: {rm.density}")
+                            print(f"[DEBUG]     - Cost per kg: {rm.cost_per_kg}")
+                            
+                            # Check if RawMaterial has status attribute
+                            if hasattr(rm, 'status') and rm.status:
+                                status = rm.status.strip()
+                                print(f"[DEBUG]     - Status: {status}")
+                                rm_status_map[pid] = status
+                            else:
+                                # New model: RawMaterial doesn't have status, assume available
+                                print(f"[DEBUG]     - No status attribute, assuming Available")
+                                rm_status_map[pid] = 'Available'
+                    except Exception as e:
+                        print(f"[DEBUG]   Error accessing raw_material for part {pid}: {e}")
+                        rm_status_map[pid] = 'Material Access Error'
+                else:
+                    # Neither stock_id nor material_id assigned
+                    print(f"[DEBUG]   No raw material stock_id or material_id found")
+                    rm_status_map[pid] = 'No Raw Material Assigned'
+                
+                print(f"[DEBUG]   Final raw material status for part {pid}: {rm_status_map[pid]}")
 
             print(f"[DEBUG] _load_parts_for_order: order_id={order_id}, building result with {len(ordered_ids)} parts")
             # ── Build result list ────────────────────────────────────── #
@@ -616,6 +670,21 @@ class SchedulerEngine:
             for pid in ordered_ids:
                 p = part_map[pid]
                 rm_stat = rm_status_map.get(pid, 'Available')
+                
+                # Evaluate raw material availability
+                is_available = (
+                    rm_stat.lower() in ('available', 'in stock', 'ready', '') or 
+                    (not rm_stat.startswith('No Raw') and 
+                     rm_stat.lower() not in ('exhausted', 'pending', 'enquiry', 'purchase_request', 'purchase_order', 'not available'))
+                )
+                
+                print(f"[DEBUG] Part {pid} ({p.part_number}) raw material evaluation:")
+                print(f"[DEBUG]   - Status: '{rm_stat}'")
+                print(f"[DEBUG]   - Available: {is_available}")
+                print(f"[DEBUG]   - Status lower: '{rm_stat.lower()}'")
+                print(f"[DEBUG]   - Starts with 'No Raw': {rm_stat.startswith('No Raw')}")
+                print(f"[DEBUG]   - In unavailable list: {rm_stat.lower() in ('exhausted', 'pending', 'enquiry', 'purchase_request', 'purchase_order', 'not available')}")
+                
                 result.append({
                     'part_id':              p.id,
                     'part_number':          p.part_number,
@@ -623,12 +692,12 @@ class SchedulerEngine:
                     'order_id':             order_id,
                     'sale_order_number':    order['sale_order_number'],
                     'quantity':             getattr(p, 'qty', None) or order['quantity'],
-                    'raw_material_ok':      rm_stat.lower() in ('available', 'in stock', 'ready', '') or not rm_stat.startswith('No Raw'),
+                    'raw_material_ok':      is_available,
                     'raw_material_status':  rm_stat,
                     # Used in C2.1 to apply/break the cascade per part
                     'part_activation_time': part_activation_map[pid],
                 })
-                print(f"[DEBUG] _load_parts_for_order: added part_id={pid}, rm_ok={rm_stat.lower() in ('available', 'in stock', 'ready', '') or not rm_stat.startswith('No Raw')}")
+                print(f"[DEBUG] _load_parts_for_order: added part_id={pid}, rm_ok={is_available}")
             print(f"[DEBUG] _load_parts_for_order: returning {len(result)} parts for order {order_id}")
             return result
 

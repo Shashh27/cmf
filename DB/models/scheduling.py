@@ -191,17 +191,13 @@ class ScheduleHistory(Base):
     version = Column(Integer, nullable=False)
     is_active = Column(Boolean, default=False, nullable=False)
     generated_at = Column(DateTime, nullable=False, default=func.now())
+    message = Column(String, nullable=True)
     
     planned_schedule_items = relationship("PlannedScheduleItem",back_populates="schedule_history")
 
 
-
-
-
-
 # class ScheduleVersion
 # class RescheduleHistory
-
 
 # =======================
 # Capacity Planning
