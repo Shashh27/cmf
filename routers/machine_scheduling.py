@@ -1649,37 +1649,59 @@ def get_machine_operations(
             .all()
         )
 
-        result = [
-            {
-                "schedule_id":        item.id,
-                "sale_order_id":      item.sale_order_id,
-                "sale_order_number":  item.sale_order_number,
-                "part_id":            item.part_id,
-                "part_number":        item.part_number,
-                "priority":           priority.priority if priority else None,
-                "order_part_priority_id": priority.id if priority else None,
-                "operation_id":       item.operation_id,
-                "operation_number":   op.operation_number,
-                "operation_name":     op.operation_name,
-                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
-                "machine_id":         item.machine_id,
-                "machine_make":       machine.make if machine else None,
-                "machine_model":      machine.model if machine else None,
-                "machine_type":       machine.type if machine else None,
-                "work_center_id":     wc.id if wc else None,
-                "work_center_name":   wc.work_center_name if wc else None,
-                "planned_start_time": item.planned_start_time,
-                "planned_end_time":   item.planned_end_time,
-                "duration_hours":     round(
-                    (item.planned_end_time - item.planned_start_time).total_seconds() / 3600.0,
-                    4
-                ),
-                "total_quantity":     item.total_quantity,
-                "remaining_quantity": item.remaining_quantity,
-                "status":             item.status,
-            }
-            for item, op, machine, wc, priority in rows
-        ]
+        # Group operations by operation_id to consolidate multiple time spans
+        operation_groups = {}
+        for item, op, machine, wc, priority in rows:
+            op_id = item.operation_id
+            if op_id not in operation_groups:
+                # Initialize group with first operation
+                operation_groups[op_id] = {
+                    "schedule_id": item.id,
+                    "sale_order_id": item.sale_order_id,
+                    "sale_order_number": item.sale_order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "priority": priority.priority if priority else None,
+                    "order_part_priority_id": priority.id if priority else None,
+                    "operation_id": item.operation_id,
+                    "operation_number": op.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "machine_id": item.machine_id,
+                    "machine_make": machine.make if machine else None,
+                    "machine_model": machine.model if machine else None,
+                    "machine_type": machine.type if machine else None,
+                    "work_center_id": wc.id if wc else None,
+                    "work_center_name": wc.work_center_name if wc else None,
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time": item.planned_end_time,
+                    "total_quantity": item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
+                    "status": item.status,
+                }
+            else:
+                # Update start_time to earliest and end_time to latest
+                group = operation_groups[op_id]
+                if item.planned_start_time < group["planned_start_time"]:
+                    group["planned_start_time"] = item.planned_start_time
+                if item.planned_end_time > group["planned_end_time"]:
+                    group["planned_end_time"] = item.planned_end_time
+                    # Update schedule_id to the latest operation's ID
+                    group["schedule_id"] = item.id
+                # Update status to the most recent operation's status
+                group["status"] = item.status
+
+        # Calculate duration_hours for consolidated operations
+        result = []
+        for group in operation_groups.values():
+            duration_hours = round(
+                (group["planned_end_time"] - group["planned_start_time"]).total_seconds() / 3600.0,
+                4
+            )
+            result.append({
+                **group,
+                "duration_hours": duration_hours
+            })
 
         return {
             "machine_id": machine_id,

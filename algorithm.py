@@ -345,13 +345,47 @@ class SchedulerEngine:
           • the end of the current shift, or
           • the start of an upcoming machine OFF window.
 
+        Tracks remaining_quantity for each segment based on setup_time, cycle_time,
+        and available window hours.
+
         Returns (list_of_items, op_end_time).
         """
+        def _secs(t: Optional[time]) -> int:
+            if t is None:
+                return 0
+            return t.hour * 3600 + t.minute * 60 + t.second
+
+        setup_seconds = _secs(operation.setup_time)
+        cycle_seconds = _secs(operation.cycle_time)
+        
+        # Handle case where both setup and cycle times are zero
+        if setup_seconds == 0 and cycle_seconds == 0:
+            # Create single item with full quantity
+            items = [
+                PlannedScheduleItem(
+                    part_id             = part_data['part_id'],
+                    part_number         = part_data['part_number'],
+                    sale_order_id       = part_data['order_id'],
+                    sale_order_number   = part_data['sale_order_number'],
+                    operation_id        = operation.id,
+                    machine_id          = machine.id,
+                    planned_start_time  = op_start,
+                    planned_end_time    = op_start,
+                    total_quantity      = quantity,
+                    remaining_quantity  = quantity,
+                    status              = 'pending',
+                    schedule_history_id = schedule_history_id,
+                )
+            ]
+            return items, op_start
+
         remaining_hours = self._operation_duration_hours(operation, quantity)
+        remaining_quantity = quantity
         items: List[PlannedScheduleItem] = []
         cur = op_start
+        setup_applied = False
 
-        while remaining_hours > 1e-9:              # float guard
+        while remaining_hours > 1e-9 and remaining_quantity > 0:  # float guard and quantity guard
             shift_end = self._shift_end_dt(cur)
 
             # Machine OFF window starting after cur but before shift_end
@@ -377,14 +411,50 @@ class SchedulerEngine:
                 if next_off and window_end == next_off.available_from:
                     if next_off.available_to:
                         cur = self.adjust_to_shift(next_off.available_to)
+                        setup_applied = False  # Reset setup when moving to new time period
                     else:
                         break                       # machine permanently OFF
                 else:
                     cur = self._next_shift_start(cur)
+                    setup_applied = False  # Reset setup when moving to new shift
                 continue
 
-            segment_hours = min(remaining_hours, window_hours)
-            segment_end   = cur + timedelta(hours=segment_hours)
+            # Calculate how much quantity can be processed in this window
+            if not setup_applied:
+                # Need to apply setup time for this segment
+                available_production_seconds = window_hours * 3600 - setup_seconds
+                if available_production_seconds <= 0:
+                    # Not enough time for setup, move to next window
+                    if next_off and window_end == next_off.available_from:
+                        if next_off.available_to:
+                            cur = self.adjust_to_shift(next_off.available_to)
+                        else:
+                            break
+                    else:
+                        cur = self._next_shift_start(cur)
+                    continue
+                
+                segment_quantity = min(remaining_quantity, int(available_production_seconds / cycle_seconds))
+                setup_applied = True
+            else:
+                # Setup already applied, only production time needed
+                segment_quantity = min(remaining_quantity, int(window_hours * 3600 / cycle_seconds))
+
+            # Use the full window when there's remaining work, otherwise use exact time needed
+            if segment_quantity < remaining_quantity:
+                # More work remains after this segment - use full window
+                segment_hours = window_hours
+                segment_end = window_end
+            else:
+                # This is the final segment - use exact time needed
+                if not setup_applied:
+                    segment_hours = (setup_seconds + segment_quantity * cycle_seconds) / 3600.0
+                else:
+                    segment_hours = (segment_quantity * cycle_seconds) / 3600.0
+                segment_end = cur + timedelta(hours=segment_hours)
+
+            # Update remaining quantity
+            remaining_quantity -= segment_quantity
 
             items.append(
                 PlannedScheduleItem(
@@ -397,21 +467,23 @@ class SchedulerEngine:
                     planned_start_time  = cur,
                     planned_end_time    = segment_end,
                     total_quantity      = quantity,
-                    remaining_quantity  = 0,
+                    remaining_quantity  = remaining_quantity,
                     status              = 'pending',
                     schedule_history_id = schedule_history_id,
                 )
             )
             remaining_hours -= segment_hours
 
-            if remaining_hours > 1e-9:
+            if remaining_hours > 1e-9 and remaining_quantity > 0:
                 if next_off and segment_end >= next_off.available_from:
                     if next_off.available_to:
                         cur = self.adjust_to_shift(next_off.available_to)
+                        setup_applied = False  # Reset setup when moving to new time period
                     else:
                         break
                 else:
                     cur = self._next_shift_start(segment_end)
+                    setup_applied = False  # Reset setup when moving to new shift
 
         op_end = items[-1].planned_end_time if items else op_start
         return items, op_end
