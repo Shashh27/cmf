@@ -5,7 +5,17 @@ import { FilePdfOutlined, FileExcelOutlined } from '@ant-design/icons';
 import { PDFDownloadLink, Document, Page, Text, View, StyleSheet, Font } from '@react-pdf/renderer';
 import * as XLSX from 'xlsx';
 
-Font.registerHyphenationCallback(word => [word]);
+Font.registerHyphenationCallback(word => { 
+  // Break long words, especially URLs
+  if (word.length > 25) {
+    const chunks = [];
+    for (let i = 0; i < word.length; i += 25) {
+      chunks.push(word.slice(i, i + 25));
+    }
+    return chunks;
+  }
+  return [word];
+});
 
 const styles = StyleSheet.create({
   page: { paddingTop: 32, paddingBottom: 32, paddingHorizontal: 24, fontSize: 9, fontFamily: 'Helvetica' },
@@ -20,7 +30,7 @@ const styles = StyleSheet.create({
   headerCell: { padding: 5, fontWeight: 'bold', borderRightWidth: 1, borderRightColor: '#e5e7eb', textAlign: 'center', height: '100%' },
   row: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#f3f4f6', alignItems: 'flex-start', minHeight: 20 },
   cell: { padding: 4, borderRightWidth: 1, borderRightColor: '#f3f4f6', textAlign: 'left', height: '100%' },
-  textCell: { padding: 4, borderRightWidth: 1, borderRightColor: '#f3f4f6', textAlign: 'left', height: '100%', flexWrap: 'wrap' },
+  textCell: { padding: 4, borderRightWidth: 1, borderRightColor: '#f3f4f6', textAlign: 'left', height: '100%', flexWrap: 'wrap', wordBreak: 'break-word' },
   footer: { position: 'absolute', bottom: 32, left: 24, right: 24, fontSize: 7, color: '#9ca3af', textAlign: 'right' },
 });
 
@@ -135,7 +145,7 @@ const PartReportPdfDocument = ({ partData }) => {
               <View style={[styles.cell, { width: '35%' }]}><Text>{item.document_name}</Text></View>
               <View style={[styles.cell, { width: '15%' }]}><Text>{item.document_type}</Text></View>
               <View style={[styles.cell, { width: '10%' }]}><Text>{item.document_version}</Text></View>
-              <View style={[styles.cell, { width: '40%' }]}><Text>{item.document_url || '-'}</Text></View>
+              <View style={[styles.textCell, { width: '40%' }]}><Text>{item.document_url || '-'}</Text></View>
             </View>
           ))}
         </View>

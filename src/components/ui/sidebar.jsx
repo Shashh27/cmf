@@ -116,7 +116,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       icon: <SettingOutlined />,
     },
     {
-      key: 'product-monitoring',
+      key: 'production monitoring',
       label: 'Production Monitoring',
       icon: <MonitorOutlined />,
       children: [
@@ -207,7 +207,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <ShoppingCartOutlined />,
         children: [
           { key: `${prefix}/oms/orders`, label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link> },
-          // { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
+          { key: `${prefix}/oms/parts-priority`, label: <Link to={`${prefix}/oms/parts-priority`} onClick={() => setMobileDrawerOpen(false)}>Parts Priority</Link> },
         ],
       },
       {
@@ -232,8 +232,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <SettingOutlined />,
       },
       {
-        key: 'product-monitoring',
-        label: 'Product Monitoring',
+        key: 'production monitoring',
+        label: 'Production Monitoring',
         icon: <MonitorOutlined />,
         children: [
           { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`} onClick={() => setMobileDrawerOpen(false)}>Live Monitoring</Link> },

@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
-import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, UpOutlined, DownOutlined, LeftOutlined, RightOutlined, ExpandOutlined } from "@ant-design/icons";
+import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, UpOutlined, DownOutlined, LeftOutlined, RightOutlined, ExpandOutlined, DownloadOutlined } from "@ant-design/icons";
 import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
+import DocumentsPanel from "./DocumentsPanel";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
 const { Text } = Typography;
 
-const ProductDetails = ({ selectedItem, partDocuments }) => {
+const ProductDetails = ({ selectedItem }) => {
   const [rawMaterials, setRawMaterials] = useState([]);
   const [extractedMaterials, setExtractedMaterials] = useState([]);
   const [threeDDocuments, setThreeDDocuments] = useState([]);
@@ -15,6 +16,8 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   const [loadingThreeD, setLoadingThreeD] = useState(false);
   const [viewerModalOpen, setViewerModalOpen] = useState(false);
   const [selectedView, setSelectedView] = useState('default');
+  const [partDocuments, setPartDocuments] = useState([]);
+  const [activeTab, setActiveTab] = useState('mbom');
   const extractedDocsSigRef = useRef("");
   const extractedPartIdRef = useRef(null);
 
@@ -126,25 +129,39 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
     if (!selectedItem || selectedItem.itemType !== "part") {
       setThreeDDocuments([]);
       setSelectedThreeDDocumentId(null);
+      setPartDocuments([]);
       return;
     }
 
-    setLoadingThreeD(true);
-    const source = Array.isArray(partDocuments) ? partDocuments : [];
-    const filtered = source.filter(doc => {
-      const url = (doc.document_url || "").toLowerCase();
-      const name = (doc.document_name || "").toLowerCase();
-      const target = url || name;
-      return [".stl", ".step", ".stp"].some(ext => target.endsWith(ext));
-    });
-    const sorted = [...filtered].sort((a, b) => {
-      // Sort by ID in FIFO order (ascending)
-      return (a.id || 0) - (b.id || 0);
-    });
-    setThreeDDocuments(sorted);
-    setSelectedThreeDDocumentId(sorted[0]?.id || null);
-    setLoadingThreeD(false);
-  }, [selectedItem, partDocuments]);
+    // Fetch documents for this part
+    const fetchDocuments = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/documents/part/${selectedItem.id}`);
+        const docs = response.data || [];
+        setPartDocuments(docs);
+        
+        // Filter and sort 3D documents
+        const filtered = docs.filter(doc => {
+          const url = (doc.document_url || "").toLowerCase();
+          const name = (doc.document_name || "").toLowerCase();
+          const target = url || name;
+          return [".stl", ".step", ".stp"].some(ext => target.endsWith(ext));
+        });
+        const sorted = [...filtered].sort((a, b) => {
+          return (a.id || 0) - (b.id || 0);
+        });
+        setThreeDDocuments(sorted);
+        setSelectedThreeDDocumentId(sorted[0]?.id || null);
+      } catch (error) {
+        console.error('Error fetching documents:', error);
+        setPartDocuments([]);
+        setThreeDDocuments([]);
+        setSelectedThreeDDocumentId(null);
+      }
+    };
+
+    fetchDocuments();
+  }, [selectedItem]);
 
   if (!selectedItem) {
     return (
@@ -314,183 +331,14 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       </Space>
     );
   };
-  const extractedMaterialColumns = [
-    {
-      title: 'Document',
-      dataIndex: 'document_name',
-      key: 'document_name',
-      width: 120,
-      ellipsis: { showTitle: false },
-      onHeaderCell: headerNoWrap,
-      render: (text) => cellWithTooltip(text, 'N/A')
-    },
-    {
-      title: 'Version',
-      dataIndex: 'document_version',
-      key: 'document_version',
-      width: 70,
-      align: 'center',
-      onHeaderCell: headerNoWrap,
-      render: (text, row) => {
-        const variants = Array.isArray(row?._variants) ? row._variants : [];
-        const v = text || '1.0';
-        if (variants.length <= 1) {
-          const label = String(v).startsWith('v') ? v : `v${v}`;
-          return (
-            <Select
-              size="small"
-              value={row.document_id}
-              disabled
-              suffixIcon={null}
-              style={{ width: 74 }}
-              options={[{ value: row.document_id, label }]}
-            />
-          );
-        }
-        return (
-          <Select
-            size="small"
-            value={row.document_id}
-            style={{ width: 74 }}
-            onChange={(nextDocId) => {
-              setExtractedMaterials((prev) =>
-                prev.map((r) => {
-                  if (r._rootId !== row._rootId) return r;
-                  const next = (r._variants || []).find((vv) => vv.document_id === nextDocId);
-                  if (!next) return r;
-                  return {
-                    ...r,
-                    ...next.ex,
-                    document_id: next.document_id,
-                    document_name: next.document_name,
-                    document_version: next.document_version,
-                  };
-                })
-              );
-            }}
-            options={variants.map((vv) => {
-              const raw = vv.document_version || '1.0';
-              const label = String(raw).startsWith('v') ? raw : `v${raw}`;
-              return { value: vv.document_id, label };
-            })}
-          />
-        );
-      }
-    },
-    {
-      title: 'Material',
-      dataIndex: 'material',
-      key: 'material',
-      width: 95,
-      ellipsis: { showTitle: false },
-      onHeaderCell: headerNoWrap,
-      render: (text) => cellWithTooltip(text, 'N/A')
-    },
-    {
-      title: 'Stock Size',
-      dataIndex: 'stock_size',
-      key: 'stock_size',
-      width: 95,
-      ellipsis: { showTitle: false },
-      onHeaderCell: headerNoWrap,
-      render: (text) => cellWithTooltip(text, 'N/A')
-    },
-    {
-      title: 'Stocksize KG',
-      dataIndex: 'stocksize_kg',
-      key: 'stocksize_kg',
-      width: 95,
-      onHeaderCell: headerNoWrap,
-      render: (text) => cellWithTooltip(text, 'N/A')
-    },
-    {
-      title: 'Net WT KG',
-      dataIndex: 'net_wt_kg',
-      key: 'net_wt_kg',
-      width: 92,
-      onHeaderCell: headerNoWrap,
-      render: (text) => cellWithTooltip(text, 'N/A')
-    },
-    {
-      title: 'Note',
-      dataIndex: 'note',
-      key: 'note',
-      width: 130,
-      ellipsis: { showTitle: false },
-      onHeaderCell: headerNoWrap,
-      render: (text) => text ? <Tooltip title={text}><span className="text-xs block truncate">{text}</span></Tooltip> : <Text type="secondary" italic>N/A</Text>
-    },
-    {
-      title: 'Title',
-      dataIndex: 'title',
-      key: 'title',
-      width: 90,
-      ellipsis: { showTitle: false },
-      onHeaderCell: headerNoWrap,
-      render: (text) => cellWithTooltip(text, 'N/A')
-    },
-  ];
-
-  const items = [
-    {
-      key: 'materials',
-      label: <span className="text-sm">Raw Materials ({rawMaterials.length})</span>,
-      children: (
-        <div className="space-y-3">
-          {rawMaterials.length > 0 ? (
-            <div>
-              <Text type="secondary" className="text-xs mb-1 block">Assigned Materials</Text>
-              <Table 
-                dataSource={rawMaterials} 
-                columns={materialColumns} 
-                rowKey="id" 
-                size="small" 
-                pagination={false} 
-                scroll={{ y: 120 }} 
-                bordered 
-              />
-            </div>
-          ) : (
-            <div className="py-6 text-center border border-dashed border-gray-300 rounded-md bg-gray-50">
-              <Text className="text-sm font-medium text-gray-500">No raw materials assigned to this part</Text>
-            </div>
-          )}
-          
-          {itemType === 'part' && (
-            <div>
-              <div className="flex items-center gap-1 mb-1 flex-wrap">
-                <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
-                <Text type="secondary" className="text-xs">Extracted from 2D Files</Text>
-                <span className="text-[10px] text-slate-400 ml-1 sm:hidden">— scroll →</span>
-              </div>
-              {extractedMaterials.length > 0 ? (
-                <div className="w-full overflow-x-auto overflow-y-hidden -mx-px">
-                  <Table 
-                    dataSource={extractedMaterials} 
-                    columns={extractedMaterialColumns} 
-                    rowKey="_rootId" 
-                    size="small" 
-                    pagination={false} 
-                    scroll={{ x: 'max-content', y: 120 }} 
-                    bordered 
-                    className="extracted-materials-table"
-                  />
-                </div>
-              ) : (
-                <div className="py-6 text-center border border-dashed border-gray-300 rounded-md bg-gray-50">
-                  <Text className="text-sm font-medium text-gray-500">No material data extracted from 2D files</Text>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )
-    }
-  ];
 
   return (
     <div className="flex flex-col bg-white border-b border-slate-200 h-full overflow-hidden">
-      <Card variant="borderless" className="shadow-none rounded-none flex flex-col" styles={{ body: { padding: 'clamp(6px, 1.5vw, 12px)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } }}>
+      <Card 
+        variant="borderless"
+        className="flex-1 shadow-none rounded-none bg-transparent"
+        styles={{ body: { padding: '8px', height: '100%', display: 'flex', flexDirection: 'column' } }}
+      >
         <div className="flex items-baseline gap-2 shrink-0 mb-1 flex-wrap">
           <span className="font-semibold text-slate-800 truncate" style={{ fontSize: 'clamp(12px, 2.5vw, 14px)' }}>{itemName || 'Unknown Item'}</span>
           <span className="font-mono text-xs text-slate-500 truncate">({itemNumber || 'N/A'})</span>
@@ -502,61 +350,145 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
           )}
           {partDetailLabel != null && <Tag color="blue" className="text-xs m-0">{partDetailLabel}</Tag>}
         </div>
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 min-h-0">
-            <div className="overflow-auto pr-1 min-h-0">
-              <Tabs defaultActiveKey="info" items={items} size="small" className="product-details-tabs" />
+        
+        <div className="flex-1 min-h-0 flex flex-col" style={{ flex: 1, height: '100%' }}>
+          {/* Top section: Process Plan and Part Documents tabs - Full height when bottom is hidden, 68% when visible */}
+          <div style={{ flex: activeTab === 'mbom' ? 0.68 : 1, minHeight: 0, marginBottom: activeTab === 'mbom' ? '2px' : 0 }}>
+            <DocumentsPanel selectedItem={selectedItem} onDocumentsLoaded={() => {}} compactMode={true} onTabChange={setActiveTab} externalActiveTab={activeTab} />
+          </div>
+          
+          {/* Bottom section: Single container with 2 sub-sections side-by-side - Only show for Process Plan tab */}
+          {activeTab === 'mbom' && (
+            <div style={{ flex: 0.32, minHeight: 0, display: 'flex', gap: '8px' }}>
+              {/* Sub-section 1: Raw Materials */}
+            <div style={{ flex: 0.6, minWidth: 0, overflow: 'hidden' }}>
+              <div className="bg-slate-50/80 rounded-lg p-2 border border-slate-200 h-full">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-2">
+                  <FileTextOutlined className="text-slate-500" />
+                  <span>Raw Materials ({rawMaterials.length})</span>
+                </div>
+                <div style={{ height: 'calc(100% - 24px)', overflow: 'auto' }}>
+                  {rawMaterials.length > 0 ? (
+                    <Table 
+                      dataSource={rawMaterials} 
+                      columns={materialColumns} 
+                      rowKey="id" 
+                      size="small" 
+                      pagination={false} 
+                      scroll={{ y: 'calc(100% - 20px)' }} 
+                      bordered 
+                    />
+                  ) : (
+                    <div className="py-4 text-center border border-dashed border-gray-300 rounded-md bg-gray-50 h-full flex items-center justify-center">
+                      <Text className="text-sm font-medium text-gray-500">No raw materials assigned</Text>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="bg-slate-50/80 rounded-lg p-1.5 flex flex-col border border-slate-200 min-h-[100px] sm:min-h-[120px]">
-              <div className="flex items-center justify-between shrink-0 mb-1 flex-wrap gap-1">
-                <span className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
-                  <CodepenOutlined className="text-slate-500" />
-                  <span className="hidden sm:inline">3D Model Viewer</span>
-                  <span className="sm:hidden">3D</span>
-                </span>
-                {threeDDocuments.length > 0 && (
-                  <div className="flex items-center gap-1 sm:gap-2">
-                    <Tooltip title="Open 3D viewer">
+
+            {/* Sub-section 2: Extracted from 2D Files - Expanded */}
+            {itemType === 'part' && (
+              <div style={{ flex: 2, minWidth: 0, overflow: 'hidden' }}>
+                <div className="bg-slate-50/80 rounded-lg p-2 border border-slate-200 h-full">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
+                      <Text className="text-xs font-medium text-slate-600">Extracted from 2D Files ({extractedMaterials.length})</Text>
+                    </div>
+                    {threeDDocuments.length > 0 && (
                       <Button
-                        type="text"
+                        type="primary"
                         size="small"
                         icon={<EyeOutlined />}
                         onClick={() => openViewModal()}
+                      >
+                        3D Viewer
+                      </Button>
+                    )}
+                  </div>
+                  <div style={{ height: 'calc(100% - 32px)', overflow: 'auto' }}>
+                    {extractedMaterials.length > 0 ? (
+                      <Table 
+                        dataSource={extractedMaterials} 
+                        columns={[
+                          {
+                            title: 'Document',
+                            dataIndex: 'document_name',
+                            key: 'document_name',
+                            width: 120,
+                            ellipsis: { showTitle: false },
+                            render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Version',
+                            dataIndex: 'document_version',
+                            key: 'document_version',
+                            width: 80,
+                            render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Material',
+                            dataIndex: 'material',
+                            key: 'material',
+                            width: 100,
+                            render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Stock Size',
+                            dataIndex: 'stock_size',
+                            key: 'stock_size',
+                            width: 100,
+                            render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Stock Size Kg',
+                            dataIndex: 'stock_size_kg',
+                            key: 'stock_size_kg',
+                            width: 120,
+                            render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Net Wt Kg',
+                            dataIndex: 'net_wt_kg',
+                            key: 'net_wt_kg',
+                            width: 90,
+                            render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Note',
+                            dataIndex: 'note',
+                            key: 'note',
+                            width: 120,
+                            ellipsis: { showTitle: false },
+                            render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Title',
+                            dataIndex: 'title',
+                            key: 'title',
+                            width: 120,
+                            ellipsis: { showTitle: false },
+                            render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                        ]}
+                        rowKey="_rootId" 
+                        size="small" 
+                        pagination={false} 
+                        scroll={{ x: 'max-content', y: 'calc(100% - 20px)' }} 
+                        bordered 
                       />
-                    </Tooltip>
-                    <Select
-                      size="small"
-                      value={selectedThreeDDocumentId}
-                      onChange={setSelectedThreeDDocumentId}
-                      style={{ minWidth: 'clamp(100px, 20vw, 140px)', fontSize: '11px' }}
-                      options={threeDDocuments.map(doc => {
-                        const v = doc.document_version;
-                        const vStr = v ? (v.startsWith('v') ? v : `v${v}`) : "";
-                        return {
-                          value: doc.id,
-                          label: `${doc.document_name || "3D Model"}${vStr ? ` (${vStr})` : ""}`,
-                        };
-                      })}
-                    />
+                    ) : (
+                      <div className="py-4 text-center border border-dashed border-gray-300 rounded-md bg-gray-50 h-full flex items-center justify-center">
+                        <Text className="text-sm font-medium text-gray-500">No material data extracted from 2D files</Text>
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
-              <div className="flex-1 min-h-0">
-                {loadingThreeD ? (
-                  <Spin size="small" tip="Loading...">
-                    <div className="w-full min-h-[100px]" />
-                  </Spin>
-                ) : threeDDocuments.length === 0 || !selectedThreeDDocumentId ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-[10px]">
-                    <span>No 3D models</span>
-                    <span className="font-mono mt-0.5">{itemNumber || "N/A"}</span>
-                  </div>
-                ) : (
-                  <ModelViewer3D documentId={selectedThreeDDocumentId} showEdgeButton={false} />
-                )}
-              </div>
-            </div>
+            )}
           </div>
+          )}
         </div>
       </Card>
       <Modal
@@ -576,7 +508,24 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
           </div>
         ) : (
           <div>
-            <div className="flex justify-end mb-2">
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex items-center gap-2">
+                <Text className="text-sm font-medium text-slate-700">Select 3D Model:</Text>
+                <Select
+                  size="small"
+                  value={selectedThreeDDocumentId}
+                  onChange={setSelectedThreeDDocumentId}
+                  style={{ width: '200px' }}
+                  options={threeDDocuments.map(doc => {
+                    const v = doc.document_version;
+                    const vStr = v ? (v.startsWith('v') ? v : `v${v}`) : "v1.0";
+                    return {
+                      value: doc.id,
+                      label: `${doc.document_name || 'Unnamed'} - ${vStr}`,
+                    };
+                  })}
+                />
+              </div>
               <ViewControls onOpenModal={openViewModal} size="middle" />
             </div>
             <div style={{ height: 'clamp(280px, 50vh, 420px)' }}>

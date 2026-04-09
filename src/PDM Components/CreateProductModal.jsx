@@ -36,9 +36,17 @@ const CreateProductModal = ({
 
   const [rawMaterials, setRawMaterials] = useState([]);
 
+  const [rawMaterialStock, setRawMaterialStock] = useState([]);
+
+  const [vendors, setVendors] = useState([]);
+
   const hasFetchedPartTypes = useRef(false);
 
   const hasFetchedRawMaterials = useRef(false);
+
+  const hasFetchedRawMaterialStock = useRef(false);
+
+  const hasFetchedVendors = useRef(false);
 
 
 
@@ -82,11 +90,15 @@ const CreateProductModal = ({
 
     raw_material_id: null,
 
+    raw_material_required_quantity: null,
+
     part_detail: null,
 
     size: '',
 
     qty: 1,
+
+    vendor_id: null,
 
     assembly_id: null,
 
@@ -130,6 +142,11 @@ const CreateProductModal = ({
 
       } else if (createType === 'part') {
 
+        // Find the stock if raw_material_stock_id exists
+        const selectedStock = editingItem.raw_material_stock_id 
+          ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)
+          : null;
+
         newValues = {
 
           part_number: editingItem.part_number || '',
@@ -138,7 +155,13 @@ const CreateProductModal = ({
 
           type_id: editingItem.type_id || 1,
 
-          raw_material_id: editingItem.raw_material_id,
+          raw_material_id: selectedStock ? selectedStock.material_id : editingItem.raw_material_id,
+
+          raw_material_form_type: selectedStock ? selectedStock.form_type : null,
+
+          raw_material_stock_id: editingItem.raw_material_stock_id,
+
+          raw_material_required_quantity: editingItem.raw_material_required_quantity,
 
           part_detail: editingItem.part_detail ?? null,
 
@@ -204,7 +227,7 @@ const CreateProductModal = ({
 
     setFormData(prev => ({ ...prev, ...newValues }));
 
-  }, [selectedProduct, parentAssembly, mode, editingItem, createType]);
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType, rawMaterialStock]);
 
 
 
@@ -213,8 +236,6 @@ const CreateProductModal = ({
   useEffect(() => {
 
     let newValues = {};
-
-
 
     if (mode === 'edit' && editingItem) {
 
@@ -242,6 +263,11 @@ const CreateProductModal = ({
 
       } else if (createType === 'part') {
 
+        // Find the stock if raw_material_stock_id exists
+        const selectedStock = editingItem.raw_material_stock_id 
+          ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)
+          : null;
+
         newValues = {
 
           part_number: editingItem.part_number || '',
@@ -250,7 +276,13 @@ const CreateProductModal = ({
 
           type_id: editingItem.type_id || 1,
 
-          raw_material_id: editingItem.raw_material_id,
+          raw_material_id: selectedStock ? selectedStock.material_id : editingItem.raw_material_id,
+
+          raw_material_form_type: selectedStock ? selectedStock.form_type : null,
+
+          raw_material_stock_id: editingItem.raw_material_stock_id,
+
+          raw_material_required_quantity: editingItem.raw_material_required_quantity,
 
           part_detail: editingItem.part_detail ?? null,
 
@@ -315,12 +347,10 @@ const CreateProductModal = ({
     // Update form instance
 
     if (form && open) {
-
       form.setFieldsValue(newValues);
-
     }
 
-  }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open]);
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open, rawMaterialStock]);
 
 
 
@@ -408,6 +438,10 @@ const CreateProductModal = ({
 
           await fetchRawMaterials();
 
+          await fetchRawMaterialStock();
+
+          await fetchVendors();
+
         } catch (error) {
 
           console.error('Error fetching raw materials:', error);
@@ -453,6 +487,42 @@ const CreateProductModal = ({
     } catch (error) {
 
       console.error("Error fetching raw materials:", error);
+
+    }
+
+  };
+
+
+
+  const fetchRawMaterialStock = async () => {
+
+    try {
+
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`);
+
+      setRawMaterialStock(response.data);
+
+    } catch (error) {
+
+      console.error("Error fetching raw material stock:", error);
+
+    }
+
+  };
+
+
+
+  const fetchVendors = async () => {
+
+    try {
+
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+
+      setVendors(response.data);
+
+    } catch (error) {
+
+      console.error("Error fetching vendors:", error);
 
     }
 
@@ -556,11 +626,16 @@ const CreateProductModal = ({
 
           raw_material_id: values.raw_material_id || null,
 
+          raw_material_stock_id: values.raw_material_stock_id || null,
+
           part_detail: partDetail,
 
           size: values.size || null,
 
           qty: values.qty || 1,
+          raw_material_required_quantity: values.raw_material_required_quantity || null,
+
+          vendor_id: values.vendor_id || null,
 
           assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
 
@@ -1021,41 +1096,160 @@ const CreateProductModal = ({
                 const isInHouse = !isOutSource;
 
                 if (isInHouse) {
-
                   return (
+                    <>
+                      {/* Step 1: Select Material */}
+                      <Form.Item
+                        name="raw_material_id"
+                        label={<span className="text-xs sm:text-sm">Raw Material</span>}
+                        rules={[{ required: false }]}
+                      >
+                        <Select 
+                          placeholder="Select material" 
+                          allowClear 
+                          showSearch 
+                          optionFilterProp="children" 
+                          size="large"
+                          onChange={() => {
+                            // Reset form type and stock when material changes
+                            form.setFieldsValue({ 
+                              raw_material_form_type: undefined, 
+                              raw_material_stock_id: undefined 
+                            });
+                          }}
+                        >
+                          {rawMaterials.map(material => (
+                            <Select.Option key={material.id} value={material.id}>
+                              {material.material_name}
+                            </Select.Option>
+                          ))}
+                        </Select>
+                      </Form.Item>
 
-                    <Form.Item
+                      {/* Step 2: Select Form Type (filtered by material) */}
+                      <Form.Item noStyle shouldUpdate={(prev, curr) => prev.raw_material_id !== curr.raw_material_id}>
+                        {({ getFieldValue }) => {
+                          const materialId = getFieldValue('raw_material_id');
+                          if (!materialId) return null;
+                          
+                          // Get available form types for selected material
+                          const availableForms = rawMaterialStock
+                            .filter(s => s.material_id === materialId)
+                            .map(s => s.form_type)
+                            .filter((v, i, a) => a.indexOf(v) === i); // unique
+                          
+                          if (availableForms.length === 0) return null;
+                          
+                          return (
+                            <Form.Item
+                              name="raw_material_form_type"
+                              label={<span className="text-xs sm:text-sm">Form Type</span>}
+                              rules={[{ required: false }]}
+                            >
+                              <Select 
+                                placeholder="Select form type" 
+                                allowClear 
+                                size="large"
+                                onChange={() => {
+                                  // Reset stock when form type changes
+                                  form.setFieldsValue({ raw_material_stock_id: undefined });
+                                }}
+                              >
+                                {availableForms.map(formType => (
+                                  <Select.Option key={formType} value={formType}>
+                                    {formType}
+                                  </Select.Option>
+                                ))}
+                              </Select>
+                            </Form.Item>
+                          );
+                        }}
+                      </Form.Item>
 
-                      name="raw_material_id"
+                      {/* Step 3: Select Dimensions (filtered by material + form) */}
+                      <Form.Item noStyle shouldUpdate={(prev, curr) => prev.raw_material_id !== curr.raw_material_id || prev.raw_material_form_type !== curr.raw_material_form_type}>
+                        {({ getFieldValue }) => {
+                          const materialId = getFieldValue('raw_material_id');
+                          const formType = getFieldValue('raw_material_form_type');
+                          if (!materialId || !formType) return null;
+                          
+                          // Get available stock items for selected material and form
+                          const availableStock = rawMaterialStock.filter(s => 
+                            s.material_id === materialId && s.form_type === formType
+                          );
+                          
+                          if (availableStock.length === 0) return null;
+                          
+                          const material = rawMaterials.find(m => m.id === materialId);
+                          
+                          return (
+                            <Form.Item
+                              name="raw_material_stock_id"
+                              label={<span className="text-xs sm:text-sm">Dimensions</span>}
+                              rules={[{ required: false }]}
+                            >
+                              <Select 
+                                placeholder="Select dimensions" 
+                                allowClear 
+                                size="large"
+                              >
+                                {availableStock.map(stock => {
+                                  const dimensions = stock.form_type === 'Round' 
+                                    ? `⌀${stock.diameter} × ${stock.length}mm`
+                                    : stock.form_type === 'Square'
+                                    ? `${stock.breadth} × ${stock.height} × ${stock.length}mm`
+                                    : stock.form_type === 'Pipe'
+                                    ? `⌀${stock.outer_diameter}/${stock.inner_diameter} × ${stock.length}mm`
+                                    : 'Custom';
+                                  
+                                  return (
+                                    <Select.Option key={stock.id} value={stock.id}>
+                                      <div>
+                                        <div style={{ fontWeight: 'bold' }}>{dimensions}</div>
+                                        <div style={{ fontSize: '12px', color: '#666' }}>
+                                          Total: {stock.quantity} | Available: {stock.available_quantity} | Status: {stock.status}
+                                        </div>
+                                      </div>
+                                    </Select.Option>
+                                  );
+                                })}
+                              </Select>
+                            </Form.Item>
+                          );
+                        }}
+                      </Form.Item>
 
-                      label={<span className="text-xs sm:text-sm">Raw Material</span>}
-
-                      rules={[{ required: false }]}
-
-                    >
-
-                      <Select placeholder="Select raw material " allowClear showSearch optionFilterProp="children" size="large">
-
-                        {rawMaterials.map(material => (
-
-                          <Select.Option key={material.id} value={material.id}>
-
-                            {material.material_name}
-
-                          </Select.Option>
-
-                        ))}
-
-                      </Select>
-
-                    </Form.Item>
-
+                      {/* Raw Material Required Quantity Field */}
+                      <Form.Item noStyle shouldUpdate={(prev, curr) => prev.raw_material_id !== curr.raw_material_id || prev.raw_material_stock_id !== curr.raw_material_stock_id}>
+                        {() => {
+                          const materialId = getFieldValue('raw_material_id');
+                          const stockId = getFieldValue('raw_material_stock_id');
+                          
+                          if (materialId && stockId) {
+                            return (
+                              <Form.Item
+                                name="raw_material_required_quantity"
+                                label={<span className="text-xs sm:text-sm">Required Quantity</span>}
+                                rules={isRequiredRawMaterial ? [{ required: true, message: 'Please enter required quantity!' }] : [{ required: false }]}
+                              >
+                                <Input 
+                                  type="number" 
+                                  placeholder="Enter required quantity" 
+                                  size="large"
+                                  min={0}
+                                  step={0.1}
+                                />
+                              </Form.Item>
+                            );
+                          }
+                          return null;
+                        }}
+                      </Form.Item>
+                    </>
                   );
-
                 }
 
                 return (
-
                   <Form.Item
 
                     name="raw_material_id"
@@ -1086,6 +1280,32 @@ const CreateProductModal = ({
 
               }}
 
+            </Form.Item>
+
+            {/* Vendor Selection for Out-Source Parts */}
+            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.type_id !== curr.type_id}>
+              {({ getFieldValue }) => {
+                const typeId = getFieldValue('type_id');
+                const isOutSource = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('out');
+                
+                if (!isOutSource) return null;
+                
+                return (
+                  <Form.Item
+                    name="vendor_id"
+                    label={<span className="text-xs sm:text-sm">Vendor</span>}
+                    rules={[{ required: true, message: 'Please select a vendor for outsourced parts!' }]}
+                  >
+                    <Select placeholder="Select vendor" allowClear showSearch optionFilterProp="children" size="large">
+                      {vendors.map(vendor => (
+                        <Select.Option key={vendor.id} value={vendor.id}>
+                          {vendor.company_name}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                );
+              }}
             </Form.Item>
 
           </>

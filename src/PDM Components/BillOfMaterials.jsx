@@ -9,6 +9,7 @@ import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../DownloadReports/ProductBOMPdfDownload";
 import ProductToolsViewer from "./ProductToolsViewer";
+import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 
 const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
   const { message, modal } = App.useApp();
@@ -418,6 +419,38 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     });
   };
 
+  const handleDeleteAllParts = async (product) => {
+    modal.confirm({
+      title: "Delete All Parts",
+      content: `Delete all parts for product "${product.product_name}"? This cannot be undone.`,
+      okText: 'Yes, Delete',
+      okType: 'danger',
+      cancelText: 'No',
+      onOk: async () => {
+        try {
+          const response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-product/${product.id}`);
+          
+          if (response.data?.deleted_count) {
+            message.success(`Successfully deleted ${response.data.deleted_count} parts from product "${product.product_name}".`);
+          } else {
+            message.success(`All parts deleted successfully from product "${product.product_name}".`);
+          }
+          
+          // Refresh the product hierarchy
+          await fetchProductHierarchy(product.id, true);
+          setExpandedItems(prev => ({
+            ...prev,
+            [getExpandKey('product', product.id)]: true
+          }));
+        } catch (error) {
+          console.error("Error deleting parts", error);
+          const errorMsg = error?.response?.data?.detail || error?.message || "Failed to delete parts";
+          message.error(errorMsg);
+        }
+      }
+    });
+  };
+
   const handleItemClick = async (item, type, productId = null) => {
     // Clear previous selection and set new one
     setActiveItemId(item.id);
@@ -510,6 +543,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const ActionButtons = ({ item, type, tagName, tagColor }) => {
     const productHierarchy = type === 'product' ? hierarchicalData[item.id] : null;
     const bomExport = productHierarchy?.bomExport;
+    const hasParts = type === 'product' && productHierarchy && (
+      (productHierarchy.parts && productHierarchy.parts.length > 0) ||
+      (productHierarchy.assemblies && productHierarchy.assemblies.length > 0)
+    );
     const buttons = {
       part: [
         { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit" },
@@ -530,7 +567,12 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         { icon: PartitionOutlined, onClick: () => handleCreateAssembly(item), title: "Add Assembly" },
         { icon: ToolOutlined, onClick: () => handleCreatePart(item), title: "Add Part" },
         { icon: EditOutlined, onClick: () => handleEditProduct(item), title: "Edit" },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'product'), danger: true, title: "Delete" }
+        { 
+          icon: DeleteOutlined, 
+          onClick: hasParts ? () => handleDeleteAllParts(item) : () => handleDelete(item, 'product'), 
+          danger: true, 
+          title: hasParts ? "Delete All Parts" : "Delete" 
+        }
       ]
     };
     return (
@@ -557,7 +599,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                   />
                 </Tooltip>
               ))}
-              {getRawMaterialStatusTag(item.raw_material_status)}
+              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details)}
             </>
           ) : (
           buttons[type].map(({ icon: Icon, onClick, danger, title, color }, idx) => (
@@ -581,11 +623,26 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
-  const getRawMaterialStatusTag = (status) => {
-    const s = (status || "N/A").toString().toLowerCase();
+  const getRawMaterialStatusTag = (status, stockStatus, stockDetails) => {
+    // Show stock status if available, otherwise fall back to material status
+    const statusToShow = stockStatus || status || "N/A";
+    const s = statusToShow.toString().toLowerCase();
+    
     if (s === "available") return <Tag className="m-0 text-[10px] shrink-0" color="success">Available</Tag>;
     if (s === "not available") return <Tag className="m-0 text-[10px] shrink-0" color="error">Not Available</Tag>;
-    return <Tag className="m-0 text-[10px] shrink-0">N/A</Tag>;
+    
+    // If we have stock details, show stock-specific status
+    if (stockDetails) {
+      if (stockDetails.status === 'available') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="success">In Stock</Tag>;
+      } else if (stockDetails.status === 'reserved') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="warning">Reserved</Tag>;
+      } else if (stockDetails.status === 'used') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="default">Used</Tag>;
+      }
+    }
+    
+    return <Tag className="m-0 text-[10px] shrink-0">{statusToShow}</Tag>;
   };
 
   const renderPartInTree = (part, level = 0, productId = null) => {
@@ -759,15 +816,24 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {filteredProducts.length === 1 && (
-                <Button
-                  type="default"
-                  size="small"
-                  icon={<ToolOutlined />}
-                  onClick={() => handleViewAllTools(filteredProducts[0])}
-                  className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
-                >
-                  View Tools
-                </Button>
+                <>
+                  <AssemblyPartsUploadPanel
+                    selectedItem={{ ...filteredProducts[0], itemType: 'product' }}
+                    onPartsCreated={() => {
+                      // Refresh the product hierarchy after parts are uploaded
+                      fetchProductHierarchy(filteredProducts[0].id, true);
+                    }}
+                  />
+                  <Button
+                    type="default"
+                    size="small"
+                    icon={<ToolOutlined />}
+                    onClick={() => handleViewAllTools(filteredProducts[0])}
+                    className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
+                  >
+                    View Tools
+                  </Button>
+                </>
               )}
               {!disableProductCreate && (
                 <Button

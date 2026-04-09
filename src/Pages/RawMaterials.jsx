@@ -53,25 +53,15 @@ const RawMaterialsContent = () => {
 
 
   const fetchSharedRawMaterials = async () => {
-
     try {
-
       const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
-
       const data = response.data;
-
       setSharedRawMaterials(Array.isArray(data) ? data : []);
-
     } catch (error) {
-
       console.error("Error fetching shared raw materials:", error);
-
     } finally {
-
       setRawMaterialsLoading(false);
-
     }
-
   };
 
 

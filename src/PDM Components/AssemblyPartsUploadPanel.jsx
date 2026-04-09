@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Button,
   Modal,
@@ -110,6 +110,30 @@ const AssemblyPartsUploadPanel = ({
 
   // New state for delete parts functionality
   const [deletingParts, setDeletingParts] = useState(false);
+
+  // Internal part types state - fetched from API if not provided via props
+  const [internalPartTypes, setInternalPartTypes] = useState([]);
+
+  // Use provided partTypes or internal ones
+  const effectivePartTypes = partTypes.length > 0 ? partTypes : internalPartTypes;
+
+  // Fetch part types on mount if not provided via props
+  useEffect(() => {
+    if (partTypes.length === 0) {
+      fetchPartTypes();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fetchPartTypes = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/part-types/`);
+      setInternalPartTypes(res.data || []);
+    } catch (e) {
+      console.error("Error fetching part types:", e);
+      // Keep default empty array on error
+    }
+  };
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const getCurrentUserId = () => {
@@ -250,8 +274,8 @@ const AssemblyPartsUploadPanel = ({
         type_id:         row.type_id || 1,
         raw_material_id: row.raw_material_id ?? null,
         part_detail:     row.part_detail ?? null,
-        assembly_id:     selectedItem?.id ?? null,
-        product_id:      selectedItem?.product_id ?? null,
+        assembly_id:     selectedItem?.itemType === "product" ? null : (selectedItem?.id ?? null),
+        product_id:      selectedItem?.itemType === "product" ? selectedItem?.id : (selectedItem?.product_id ?? null),
         user_id:         uid,
         size:            row.size || null,
         qty:             row.qty || 1,
@@ -321,18 +345,26 @@ const AssemblyPartsUploadPanel = ({
 
   // ── BULK DELETE PARTS ─────────────────────────────────────────────────────
   const handleBulkDeleteParts = async () => {
-    if (!selectedItem || selectedItem.itemType !== "assembly") return;
+    if (!selectedItem) return;
     
     setDeletingParts(true);
     try {
-      const response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-assembly/${selectedItem.id}`);
+      let response;
+      if (selectedItem.itemType === "product") {
+        // Delete parts for product
+        response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-product/${selectedItem.id}`);
+      } else {
+        // Delete parts for assembly (existing logic)
+        response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-assembly/${selectedItem.id}`);
+      }
+      
       const { deleted_count, part_ids } = response.data;
       
       if (deleted_count > 0) {
         message.success(`${deleted_count} part(s) deleted successfully`);
         onPartsCreated?.(); // Refresh parts list if callback exists
       } else {
-        message.info("No parts found to delete for this assembly");
+        message.info("No parts found to delete");
       }
     } catch (e) {
       console.error("Error bulk deleting parts", e);
@@ -449,8 +481,8 @@ const AssemblyPartsUploadPanel = ({
           onChange={(v) => updateRow(record._key, "type_id", v)}
           style={{ width: 130 }}
           options={
-            partTypes.length > 0
-              ? partTypes.map((pt) => ({ value: pt.id, label: pt.type_name }))
+            effectivePartTypes.length > 0
+              ? effectivePartTypes.map((pt) => ({ value: pt.id, label: pt.type_name }))
               : [{ value: 1, label: "In-house (default)" }]
           }
         />
@@ -505,26 +537,6 @@ const AssemblyPartsUploadPanel = ({
         >
           Upload Parts
         </Button>
-        
-        <Popconfirm
-          title="Delete All Parts"
-          description={`Delete all parts for "${selectedItem?.label || selectedItem?.name || 'this assembly'}"? This cannot be undone.`}
-          onConfirm={handleBulkDeleteParts}
-          okText="Yes, Delete"
-          cancelText="Cancel"
-          okButtonProps={{ danger: true }}
-        >
-          <Button
-            type="primary"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            loading={deletingParts}
-            className="bg-red-600 hover:bg-red-700 border-red-600"
-          >
-            {deletingParts ? "Deleting…" : "Delete Parts"}
-          </Button>
-        </Popconfirm>
       </div>
 
       <Modal
@@ -535,7 +547,7 @@ const AssemblyPartsUploadPanel = ({
               {step === "upload"
                 ? "Upload Parts from BOM Document"
                 : `Review Extracted Parts — ${
-                    selectedItem?.label || selectedItem?.name || "Assembly"
+                    selectedItem?.label || selectedItem?.name || (selectedItem?.itemType === "product" ? "Product" : "Assembly")
                   }`}
             </span>
           </div>
@@ -609,10 +621,9 @@ const AssemblyPartsUploadPanel = ({
                     <Text strong className="text-base text-gray-700">
                       Click or drag your BOM file here
                     </Text>
-                    <Text type="secondary" className="text-sm">
-                      Supports <strong>.doc</strong> and{" "}
-                      <strong>.docx</strong>
-                    </Text>
+                   <Text type="secondary" className="text-sm">
+  Supports <strong>.doc</strong>, <strong>.docx</strong>, <strong>.xlsx</strong>, and <strong>.csv</strong>
+</Text>
                   </>
                 )}
               </div>
