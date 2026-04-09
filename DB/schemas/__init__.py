@@ -55,6 +55,14 @@ from .configuration import (
     CustomerCreate,
     CustomerUpdate
 )
+from .production_logs import (
+    ProductionLogCreate,
+    ProductionLogUpdate,
+    ProductionLogResponse,
+    ProductionLogWithDetails,
+    ProductionLogStatusUpdate,
+    ProductionLogStatus
+)
 # from .inventory import (
 #     RawMaterial,
 #     RawMaterialCreate,
@@ -118,6 +126,12 @@ __all__ = [
     "Customer",
     "CustomerCreate",
     "CustomerUpdate",
+    "ProductionLogCreate",
+    "ProductionLogUpdate",
+    "ProductionLogResponse",
+    "ProductionLogWithDetails",
+    "ProductionLogStatusUpdate",
+    "ProductionLogStatus",
     "RawMaterial",
     "RawMaterialCreate",
     "RawMaterialUpdate",

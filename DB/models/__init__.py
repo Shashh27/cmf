@@ -29,7 +29,8 @@ from .scheduling import (
     MachineDowntime,
     ShiftHoursConfiguration,
     ShiftTimingConfiguration,
-    PartScheduleStatus
+    PartScheduleStatus,
+    ProductionLog
 )
 
 __all__ = [
@@ -57,5 +58,6 @@ __all__ = [
     "Base",
     "AccessUser",
     "OrderPartPriority",
-    "PartScheduleStatus"
+    "PartScheduleStatus",
+    "ProductionLog"
 ]

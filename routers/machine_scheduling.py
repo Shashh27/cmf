@@ -13,12 +13,12 @@ from sqlalchemy import exists, text
 from DB.database import get_db
 
 from DB.models.oms import Order
-from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration
+from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration, OperationStatus
 from DB.models.oms import Order, Part, Product
 from DB.models.configuration import Machine, WorkCenter
 from DB.models.oms import Operation, Part, Order, PartType, OrderPartPriority
 
-from DB.schemas.machine_scheduling import PartStatusUpdate, UpdatePartStatusResponse, OrderScheduleStatusResponse
+from DB.schemas.machine_scheduling import PartStatusUpdate, UpdatePartStatusResponse, OrderScheduleStatusResponse, OperationStatusResponse, OperationStatusUpdate, OperationStatusWithDetails
 from DB.schemas.oms import OrderPartPrioritySwap
 
 from datetime import datetime, timedelta, timezone
@@ -313,6 +313,24 @@ def set_order_status(
         # When an order is deactivated, remove its priorities and
         # shift remaining orders' priorities to close the gap
         _remove_order_priority(sale_order_id, db)
+        
+        # CLEANUP: Remove operation status entries for deactivated order
+        # that are no longer in planned_schedule_items
+        operations_to_cleanup = db.execute(text("""
+            SELECT DISTINCT os.operation_id
+            FROM scheduling.operation_status os
+            LEFT JOIN scheduling.planned_schedule_items psi ON os.operation_id = psi.operation_id
+            WHERE os.order_id = :order_id
+            AND psi.operation_id IS NULL
+        """), {"order_id": sale_order_id}).fetchall()
+        
+        if operations_to_cleanup:
+            operation_ids_to_delete = [op[0] for op in operations_to_cleanup]
+            deleted_count = db.query(OperationStatus).filter(
+                OperationStatus.operation_id.in_(operation_ids_to_delete)
+            ).delete(synchronize_session=False)
+            
+            print(f"[DEBUG] Cleaned up {deleted_count} operation status entries for deactivated order {sale_order_id}")
 
 
     # -----------------------------
@@ -783,6 +801,29 @@ def update_part_status(
                 _resequence_active_order_part_priorities(db)
         else:
             priority_row.status = "active"
+
+    # ----------------------------
+    # CLEANUP: Remove operation status entries for deactivated parts
+    # ----------------------------
+    if status == "inactive":
+        # Remove operation status entries for operations of this part
+        # that are no longer in planned_schedule_items
+        operations_to_cleanup = db.execute(text("""
+            SELECT DISTINCT os.operation_id
+            FROM scheduling.operation_status os
+            LEFT JOIN scheduling.planned_schedule_items psi ON os.operation_id = psi.operation_id
+            WHERE os.part_id = :part_id 
+            AND os.order_id = :order_id
+            AND psi.operation_id IS NULL
+        """), {"part_id": part_id, "order_id": sale_order_id}).fetchall()
+        
+        if operations_to_cleanup:
+            operation_ids_to_delete = [op[0] for op in operations_to_cleanup]
+            deleted_count = db.query(OperationStatus).filter(
+                OperationStatus.operation_id.in_(operation_ids_to_delete)
+            ).delete(synchronize_session=False)
+            
+            print(f"[DEBUG] Cleaned up {deleted_count} operation status entries for deactivated part {part_id}")
 
     # ----------------------------
     # SYNC OrderScheduleStatus
@@ -1635,7 +1676,7 @@ def get_machine_operations(
             raise HTTPException(404, f"Machine with ID {machine_id} not found")
 
         rows = (
-            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority)
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority, OperationStatus)
             .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
             .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
@@ -1644,6 +1685,7 @@ def get_machine_operations(
                 (OrderPartPriority.order_id == PlannedScheduleItem.sale_order_id) &
                 (OrderPartPriority.part_id == PlannedScheduleItem.part_id)
             )
+            .outerjoin(OperationStatus, OperationStatus.operation_id == PlannedScheduleItem.operation_id)
             .filter(PlannedScheduleItem.machine_id == machine_id)
             .order_by(PlannedScheduleItem.planned_start_time)
             .all()
@@ -1651,7 +1693,7 @@ def get_machine_operations(
 
         # Group operations by operation_id to consolidate multiple time spans
         operation_groups = {}
-        for item, op, machine, wc, priority in rows:
+        for item, op, machine, wc, priority, operation_status in rows:
             op_id = item.operation_id
             if op_id not in operation_groups:
                 # Initialize group with first operation
@@ -1678,6 +1720,9 @@ def get_machine_operations(
                     "total_quantity": item.total_quantity,
                     "remaining_quantity": item.remaining_quantity,
                     "status": item.status,
+                    "operation_status": operation_status.status if operation_status else None,
+                    "operation_started_at": operation_status.started_at if operation_status else None,
+                    "operation_completed_at": operation_status.completed_at if operation_status else None,
                 }
             else:
                 # Update start_time to earliest and end_time to latest
@@ -1783,4 +1828,416 @@ def update_operation_status(
         raise
     except Exception as e:
         raise HTTPException(500, f"Failed to update operation status: {str(e)}")
+
+
+# =========================================================
+# OPERATION STATUS MANAGEMENT
+# =========================================================
+
+@router.get("/operation-status/", response_model=List[OperationStatusWithDetails])
+def get_all_operation_status(
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all operation status records, optionally filtered by status.
+    """
+    try:
+        query = (
+            db.query(OperationStatus, Operation, Part, Order)
+            .join(Operation, OperationStatus.operation_id == Operation.id)
+            .join(Part, OperationStatus.part_id == Part.id)
+            .join(Order, OperationStatus.order_id == Order.id)
+        )
+        
+        if status:
+            query = query.filter(OperationStatus.status == status.lower())
+            
+        results = query.all()
+        
+        response = []
+        for op_status, operation, part, order in results:
+            response.append({
+                "id": op_status.id,
+                "order_id": op_status.order_id,
+                "part_id": op_status.part_id,
+                "operation_id": op_status.operation_id,
+                "status": op_status.status,
+                "started_at": op_status.started_at,
+                "completed_at": op_status.completed_at,
+                "created_at": op_status.created_at,
+                "updated_at": op_status.updated_at,
+                "operation": {
+                    "id": operation.id,
+                    "operation_number": operation.operation_number,
+                    "operation_name": operation.operation_name
+                },
+                "part": {
+                    "id": part.id,
+                    "part_number": part.part_number,
+                    "part_name": part.part_name
+                },
+                "order": {
+                    "id": order.id,
+                    "sale_order_number": order.sale_order_number
+                }
+            })
+            
+        return response
+        
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch operation status: {str(e)}")
+
+
+@router.get("/operation-status/{operation_id}", response_model=OperationStatusWithDetails)
+def get_operation_status(
+    operation_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get operation status for a specific operation ID.
+    """
+    try:
+        result = (
+            db.query(OperationStatus, Operation, Part, Order)
+            .join(Operation, OperationStatus.operation_id == Operation.id)
+            .join(Part, OperationStatus.part_id == Part.id)
+            .join(Order, OperationStatus.order_id == Order.id)
+            .filter(OperationStatus.operation_id == operation_id)
+            .first()
+        )
+        
+        if not result:
+            raise HTTPException(404, f"Operation status for operation ID {operation_id} not found")
+            
+        op_status, operation, part, order = result
+        
+        return {
+            "id": op_status.id,
+            "order_id": op_status.order_id,
+            "part_id": op_status.part_id,
+            "operation_id": op_status.operation_id,
+            "status": op_status.status,
+            "started_at": op_status.started_at,
+            "completed_at": op_status.completed_at,
+            "created_at": op_status.created_at,
+            "updated_at": op_status.updated_at,
+            "operation": {
+                "id": operation.id,
+                "operation_number": operation.operation_number,
+                "operation_name": operation.operation_name
+            },
+            "part": {
+                "id": part.id,
+                "part_number": part.part_number,
+                "part_name": part.part_name
+            },
+            "order": {
+                "id": order.id,
+                "sale_order_number": order.sale_order_number
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch operation status: {str(e)}")
+
+
+@router.put("/operation-status/{operation_id}", response_model=OperationStatusResponse)
+def update_operation_status(
+    operation_id: int,
+    data: OperationStatusUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update operation status (pending -> inprogress -> completed).
+    
+    When status changes to 'inprogress', sets started_at timestamp.
+    When status changes to 'completed', sets completed_at timestamp.
+    """
+    try:
+        # Validate status values
+        valid_statuses = ["pending", "inprogress", "completed"]
+        new_status = data.status.lower()
+        
+        if new_status not in valid_statuses:
+            raise HTTPException(
+                400,
+                f"Invalid status '{data.status}'. Valid values: {', '.join(valid_statuses)}"
+            )
+        
+        # Get existing operation status
+        op_status = db.query(OperationStatus).filter(
+            OperationStatus.operation_id == operation_id
+        ).first()
+        
+        if not op_status:
+            raise HTTPException(404, f"Operation status for operation ID {operation_id} not found")
+        
+        old_status = op_status.status
+        
+        # Update status and timestamps based on transition
+        op_status.status = new_status
+        
+        if new_status == "inprogress" and old_status != "inprogress":
+            op_status.started_at = datetime.now()
+        elif new_status == "completed" and old_status != "completed":
+            op_status.completed_at = datetime.now()
+        
+        op_status.updated_at = datetime.now()
+        
+        db.commit()
+        db.refresh(op_status)
+        
+        return {
+            "id": op_status.id,
+            "order_id": op_status.order_id,
+            "part_id": op_status.part_id,
+            "operation_id": op_status.operation_id,
+            "status": op_status.status,
+            "started_at": op_status.started_at,
+            "completed_at": op_status.completed_at,
+            "created_at": op_status.created_at,
+            "updated_at": op_status.updated_at
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to update operation status: {str(e)}")
+
+
+@router.post("/operation-status/{operation_id}/activate", response_model=OperationStatusResponse)
+def activate_job_card(
+    operation_id: int,
+    operator_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Activate a job card - changes status from 'pending' to 'inprogress'
+    and sets the started_at timestamp and operator_id.
+    
+    Args:
+        operation_id: ID of the operation to activate
+        operator_id: ID of the operator activating the job card
+    """
+    try:
+        # Verify operator exists
+        from DB.models import AccessUser
+        operator = db.query(AccessUser).filter(AccessUser.id == operator_id).first()
+        if not operator:
+            raise HTTPException(404, f"Operator with ID {operator_id} not found")
+        
+        op_status = db.query(OperationStatus).filter(
+            OperationStatus.operation_id == operation_id
+        ).first()
+        
+        if not op_status:
+            raise HTTPException(404, f"Operation status for operation ID {operation_id} not found")
+        
+        if op_status.status != "pending":
+            raise HTTPException(
+                400,
+                f"Cannot activate job card. Current status is '{op_status.status}', expected 'pending'"
+            )
+        
+        # Update status, start time, and operator
+        op_status.status = "inprogress"
+        op_status.started_at = datetime.now()
+        op_status.operator_id = operator_id
+        op_status.updated_at = datetime.now()
+        
+        db.commit()
+        db.refresh(op_status)
+        
+        return {
+            "id": op_status.id,
+            "order_id": op_status.order_id,
+            "part_id": op_status.part_id,
+            "operation_id": op_status.operation_id,
+            "operator_id": op_status.operator_id,
+            "status": op_status.status,
+            "started_at": op_status.started_at,
+            "completed_at": op_status.completed_at,
+            "created_at": op_status.created_at,
+            "updated_at": op_status.updated_at
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to activate job card: {str(e)}")
+
+
+@router.post("/operation-status/{operation_id}/complete", response_model=OperationStatusResponse)
+def complete_job_card(
+    operation_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Complete a job card - changes status to 'completed'
+    and sets the completed_at timestamp.
+    """
+    try:
+        op_status = db.query(OperationStatus).filter(
+            OperationStatus.operation_id == operation_id
+        ).first()
+        
+        if not op_status:
+            raise HTTPException(404, f"Operation status for operation ID {operation_id} not found")
+        
+        if op_status.status == "completed":
+            raise HTTPException(
+                400,
+                f"Job card is already completed"
+            )
+        
+        # Update status and completion time
+        op_status.status = "completed"
+        op_status.completed_at = datetime.now()
+        op_status.updated_at = datetime.now()
+        
+        # Ensure started_at is set if it wasn't already
+        if not op_status.started_at:
+            op_status.started_at = op_status.completed_at
+        
+        db.commit()
+        db.refresh(op_status)
+        
+        return {
+            "id": op_status.id,
+            "order_id": op_status.order_id,
+            "part_id": op_status.part_id,
+            "operation_id": op_status.operation_id,
+            "status": op_status.status,
+            "started_at": op_status.started_at,
+            "completed_at": op_status.completed_at,
+            "created_at": op_status.created_at,
+            "updated_at": op_status.updated_at
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to complete job card: {str(e)}")
+
+
+# =========================================================
+# OPERATION STATUS CLEANUP AND MAINTENANCE
+# =========================================================
+
+@router.get("/operation-status/cleanup/report")
+def get_operation_status_integrity_report(
+    db: Session = Depends(get_db)
+):
+    """
+    Get data integrity report for operation status vs planned schedule items.
+    """
+    try:
+        from utils.operation_status_cleanup import get_data_integrity_report
+        
+        report = get_data_integrity_report(db)
+        
+        if not report["success"]:
+            raise HTTPException(500, f"Failed to generate integrity report: {report.get('error', 'Unknown error')}")
+        
+        return report
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get integrity report: {str(e)}")
+
+
+@router.post("/operation-status/cleanup/orphaned")
+def cleanup_orphaned_operation_status(
+    db: Session = Depends(get_db)
+):
+    """
+    Clean up orphaned operation status entries (status without planned schedule items).
+    """
+    try:
+        from utils.operation_status_cleanup import cleanup_orphaned_operation_status
+        
+        result = cleanup_orphaned_operation_status(db)
+        
+        if not result["success"]:
+            raise HTTPException(500, f"Cleanup failed: {result.get('error', 'Unknown error')}")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to cleanup orphaned entries: {str(e)}")
+
+
+@router.post("/operation-status/cleanup/inactive-orders")
+def cleanup_inactive_orders_status(
+    db: Session = Depends(get_db)
+):
+    """
+    Clean up operation status entries for orders that have no active parts.
+    """
+    try:
+        from utils.operation_status_cleanup import cleanup_for_inactive_orders
+        
+        result = cleanup_for_inactive_orders(db)
+        
+        if not result["success"]:
+            raise HTTPException(500, f"Cleanup failed: {result.get('error', 'Unknown error')}")
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to cleanup inactive orders: {str(e)}")
+
+
+@router.post("/operation-status/cleanup/all")
+def cleanup_all_operation_status(
+    db: Session = Depends(get_db)
+):
+    """
+    Perform comprehensive cleanup of operation status entries.
+    This includes orphaned entries and inactive orders cleanup.
+    """
+    try:
+        from utils.operation_status_cleanup import (
+            cleanup_orphaned_operation_status, 
+            cleanup_for_inactive_orders,
+            get_data_integrity_report
+        )
+        
+        # Get initial state
+        initial_report = get_data_integrity_report(db)
+        
+        # Clean up orphaned entries
+        orphaned_result = cleanup_orphaned_operation_status(db)
+        
+        # Clean up inactive orders
+        inactive_result = cleanup_for_inactive_orders(db)
+        
+        # Get final state
+        final_report = get_data_integrity_report(db)
+        
+        return {
+            "success": True,
+            "initial_state": initial_report,
+            "orphaned_cleanup": orphaned_result,
+            "inactive_cleanup": inactive_result,
+            "final_state": final_report,
+            "message": "Comprehensive cleanup completed",
+            "timestamp": datetime.now()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to perform comprehensive cleanup: {str(e)}")
 

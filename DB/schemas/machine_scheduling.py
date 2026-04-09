@@ -6,7 +6,7 @@ from enum import Enum
 
 from DB.models.scheduling import PartScheduleStatus
 from DB.models.scheduling import OrderScheduleStatus
-# from DB.models.scheduling import ProductionLog
+from DB.models.scheduling import OperationStatus
 
 
 class PartStatusUpdate(BaseModel):
@@ -94,3 +94,44 @@ class OrderScheduleStatusResponse(BaseModel):
 # class ProductionLogStatusUpdate(BaseModel):
 #     status: ProductionLogStatus = Field(..., description="New status for production log")
 #     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor updating the status")
+
+
+# =======================
+# Operation Status Schemas
+# =======================
+class OperationStatusBase(BaseModel):
+    order_id: int = Field(..., description="ID of the order")
+    part_id: int = Field(..., description="ID of the part")
+    operation_id: int = Field(..., description="ID of the operation")
+    operator_id: Optional[int] = Field(None, description="ID of the operator who activated the job card")
+    status: str = Field(default="pending", description="Status of operation: pending/inprogress/completed")
+
+
+class OperationStatusCreate(OperationStatusBase):
+    pass
+
+
+class OperationStatusUpdate(BaseModel):
+    status: str = Field(..., description="New status for operation: pending/inprogress/completed")
+
+
+class OperationStatusResponse(OperationStatusBase):
+    id: int = Field(..., description="Operation status ID")
+    started_at: Optional[datetime] = Field(None, description="When operation was started")
+    completed_at: Optional[datetime] = Field(None, description="When operation was completed")
+    created_at: datetime = Field(..., description="When the record was created")
+    updated_at: datetime = Field(..., description="When the record was last updated")
+
+    model_config = {
+        "from_attributes": True
+    }
+
+
+class OperationStatusWithDetails(OperationStatusResponse):
+    operation: Optional[dict] = Field(None, description="Operation details")
+    part: Optional[dict] = Field(None, description="Part details")
+    order: Optional[dict] = Field(None, description="Order details")
+
+    model_config = {
+        "from_attributes": True
+    }

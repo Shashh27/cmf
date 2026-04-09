@@ -260,23 +260,51 @@ class MachineSchedule(Base):
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
 
-# class ProductionLog(Base):
-#     __tablename__ = "production_logs"
-#     __table_args__ = {'schema': 'scheduling'}
+class OperationStatus(Base):
+    __tablename__ = "operation_status"
+    __table_args__ = (
+        UniqueConstraint("operation_id", name="uq_operation_status_operation_id"),
+        {"schema": "scheduling"}
+    )
 
-#     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-#     operation_id = Column(Integer, ForeignKey('oms.operations.id'), nullable=False)
-#     operator_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=False)
-#     supervisor_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=True)
-#     notes = Column(Text, nullable=True)
-#     from_date = Column(DATE, nullable=False)
-#     from_time = Column(TIME, nullable=False)
-#     to_date = Column(DATE)
-#     to_time = Column(TIME)
-#     status = Column(String, default='pending', nullable=False)
-#     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    id = Column(Integer, primary_key=True, index=True)
 
-#     # Relationships
-#     operation = relationship("Operation", back_populates="production_logs")
-#     operator = relationship("AccessUser", foreign_keys=[operator_id])
-#     supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
+    order_id = Column(Integer, ForeignKey("oms.orders.id"))
+    part_id = Column(Integer, ForeignKey("oms.parts.id"))
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False, unique=True)
+    operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # Operator who activated the job card
+
+    status = Column(String, nullable=False, default="pending")  # pending/inprogress/completed
+
+    started_at = Column(DateTime, nullable=True)  # Set when status changes to inprogress
+    completed_at = Column(DateTime, nullable=True)  # Set when status changes to completed
+    
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+# =======================
+# Production Log
+# =======================
+class ProductionLog(Base):
+    __tablename__ = "production_logs"
+    __table_args__ = {'schema': 'scheduling'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    operation_id = Column(Integer, ForeignKey('oms.operations.id'), nullable=False)
+    operator_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=False)
+    supervisor_id = Column(Integer, ForeignKey('accesscontrol.access_users.id'), nullable=True)
+    notes = Column(Text, nullable=True)
+    remarks = Column(Text, nullable=True)
+    from_date = Column(DATE, nullable=False)
+    from_time = Column(TIME, nullable=False)
+    to_date = Column(DATE)
+    to_time = Column(TIME)
+    status = Column(String, default='pending', nullable=False)
+    produced_quantity = Column(Integer, nullable=False)
+    approved_quantity = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+    # Relationships
+    operator = relationship("AccessUser", foreign_keys=[operator_id])
+    supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])

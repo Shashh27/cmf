@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, time, timezone
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, text
 
 # ── OMS models ────────────────────────────────────────────────────────────
 from DB.models.oms import (
@@ -46,6 +46,7 @@ from DB.models.scheduling import (
     ShiftHoursConfiguration, # date (Date), working_day (Boolean), number_of_shifts (Integer)
     MachineStatus,           # machine_id, status_id (1=ON / 2=OFF), available_from, available_to
     EfficiencyFactor,        # efficiency_factor (Float)
+    OperationStatus,         # operation status tracking
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -837,14 +838,103 @@ class SchedulerEngine:
     def _clear_existing_schedule(self) -> None:
         """
         Delete PlannedScheduleItem rows first (FK → ScheduleHistory),
-        then ScheduleHistory rows.
+        then ScheduleHistory rows, then clean up orphaned OperationStatus entries.
         """
         try:
+            # Get operation IDs that will be orphaned before deleting planned items
+            orphaned_operations = self.db.execute(text("""
+                SELECT DISTINCT os.operation_id
+                FROM scheduling.operation_status os
+                LEFT JOIN scheduling.planned_schedule_items psi ON os.operation_id = psi.operation_id
+                WHERE psi.operation_id IS NOT NULL
+            """)).fetchall()
+            
+            # Delete planned schedule items and history
             self.db.query(PlannedScheduleItem).delete()
             self.db.query(ScheduleHistory).delete()
+            
+            # Clean up operation status entries for operations that no longer have planned items
+            if orphaned_operations:
+                # Find operations that are now orphaned after planned items deletion
+                newly_orphaned = self.db.execute(text("""
+                    SELECT DISTINCT os.operation_id
+                    FROM scheduling.operation_status os
+                    LEFT JOIN scheduling.planned_schedule_items psi ON os.operation_id = psi.operation_id
+                    WHERE psi.operation_id IS NULL
+                """)).fetchall()
+                
+                if newly_orphaned:
+                    operation_ids_to_delete = [op[0] for op in newly_orphaned]
+                    deleted_count = self.db.query(OperationStatus).filter(
+                        OperationStatus.operation_id.in_(operation_ids_to_delete)
+                    ).delete(synchronize_session=False)
+                    
+                    print(f"[DEBUG] Cleaned up {deleted_count} orphaned operation status entries during schedule clear")
+            
             self.db.commit()
         except Exception as e:
             print(f"[ERROR] _clear_existing_schedule: {e}")
+            self.db.rollback()
+            raise
+
+    def _create_operation_status_entries(self, operation_ids: set[int]) -> None:
+        """
+        Create OperationStatus entries for operations that don't already have one.
+        This ensures each operation has exactly one status tracking record.
+        """
+        try:
+            # Find operations that already have status entries
+            existing_ops = (
+                self.db.query(OperationStatus.operation_id)
+                .filter(OperationStatus.operation_id.in_(operation_ids))
+                .all()
+            )
+            existing_op_ids = {op[0] for op in existing_ops}
+            
+            # Create status entries only for operations that don't have one yet
+            new_operations = operation_ids - existing_op_ids
+            
+            if new_operations:
+                # Get operation details in the same order as planned_schedule_items
+                # Use a subquery to get the first occurrence of each operation_id in order
+                operations_to_create = (
+                    self.db.query(
+                        PlannedScheduleItem.operation_id,
+                        PlannedScheduleItem.part_id,
+                        PlannedScheduleItem.sale_order_id
+                    )
+                    .filter(PlannedScheduleItem.operation_id.in_(new_operations))
+                    .order_by(PlannedScheduleItem.id)
+                    .all()
+                )
+                
+                # Remove duplicates while preserving order (keep first occurrence)
+                seen_operations = set()
+                unique_operations = []
+                for operation_id, part_id, order_id in operations_to_create:
+                    if operation_id not in seen_operations:
+                        seen_operations.add(operation_id)
+                        unique_operations.append((operation_id, part_id, order_id))
+                
+                # Create OperationStatus entries in the same order as planned items
+                status_entries = []
+                for operation_id, part_id, order_id in unique_operations:
+                    status_entries.append(
+                        OperationStatus(
+                            order_id=order_id,
+                            part_id=part_id,
+                            operation_id=operation_id,
+                            status="pending"
+                        )
+                    )
+                
+                if status_entries:
+                    self.db.add_all(status_entries)
+                    self.db.commit()
+                    print(f"[DEBUG] Created {len(status_entries)} OperationStatus entries in planned order")
+            
+        except Exception as e:
+            print(f"[ERROR] _create_operation_status_entries: {e}")
             self.db.rollback()
             raise
 
@@ -938,6 +1028,9 @@ class SchedulerEngine:
                 for wc_machines in machines_by_wc.values()
                 for m in wc_machines
             }
+
+            # Track operations to create OperationStatus entries
+            scheduled_operations: set[int] = set()
 
             # ── Phase C: Global Operation Queue for Maximum Machine Utilization ── #
             # STRATEGY: Instead of processing parts sequentially, create a global
@@ -1092,6 +1185,10 @@ class SchedulerEngine:
                             schedule_history_id = history_id,
                         )
                     )
+                    
+                    # Track operation for OperationStatus creation
+                    scheduled_operations.add(operation.id)
+                    
                     # Update part completion time
                     part_last_end_time[part_id] = os_end
                     continue
@@ -1152,6 +1249,9 @@ class SchedulerEngine:
                 )
                 all_items.extend(blocks)
                 
+                # Track operation for OperationStatus creation
+                scheduled_operations.add(operation.id)
+                
                 print(f"[DEBUG]   Scheduled on {machine.make if machine else 'None'} from {cand_start} to {op_end}")
                 
                 # Update machine availability and part completion time
@@ -1173,6 +1273,10 @@ class SchedulerEngine:
             if all_items:
                 self.db.add_all(all_items)
             self.db.commit()
+            
+            # Create OperationStatus entries for newly scheduled operations
+            if scheduled_operations:
+                self._create_operation_status_entries(scheduled_operations)
 
             return {
                 'success':              True,
