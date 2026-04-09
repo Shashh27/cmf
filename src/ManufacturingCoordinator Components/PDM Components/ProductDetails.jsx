@@ -494,6 +494,12 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
         <div className="flex items-baseline gap-2 shrink-0 mb-1 flex-wrap">
           <span className="font-semibold text-slate-800 truncate" style={{ fontSize: 'clamp(12px, 2.5vw, 14px)' }}>{itemName || 'Unknown Item'}</span>
           <span className="font-mono text-xs text-slate-500 truncate">({itemNumber || 'N/A'})</span>
+          {itemType === 'part' && item?.size && (
+            <Tag color="cyan" className="text-xs m-0">{item.size}</Tag>
+          )}
+          {itemType === 'part' && item?.qty != null && (
+            <Tag color="blue" className="text-xs m-0">Qty: {item.qty}</Tag>
+          )}
           {partDetailLabel != null && <Tag color="blue" className="text-xs m-0">{partDetailLabel}</Tag>}
         </div>
         <div className="flex-1 min-h-0 flex flex-col">

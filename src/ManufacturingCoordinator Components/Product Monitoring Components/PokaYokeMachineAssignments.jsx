@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Modal, Form, Select, message, Space, Popconfirm,Tag,Card,Typography,Input,Divider } from 'antd';
+import { Table, Button, Modal, Form, Select, message, Space, Popconfirm,Tag,Card,Typography,Input,Divider, DatePicker } from 'antd';
 import { PlusOutlined, DeleteOutlined,SettingOutlined,CheckCircleOutlined,ClockCircleOutlined,ReloadOutlined,LinkOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
+import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -67,7 +68,12 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ machine_id: selectedMachine }),
+        body: JSON.stringify({ 
+          machine_id: selectedMachine,
+          frequency: values.frequency,
+          shift: values.frequency === 'Daily' ? values.shift : null,
+          scheduled_day: values.frequency === 'Weekly' ? (values.dayOfWeek ? values.dayOfWeek.format('dddd') : null) : (values.frequency === 'Monthly' ? (values.dayOfMonth ? values.dayOfMonth.format('D') : null) : null)
+        }),
       });
 
       if (!response.ok) {
@@ -138,6 +144,41 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           {count} items
         </Tag>
       ),
+    },
+    {
+      title: 'Frequency',
+      dataIndex: 'frequency',
+      key: 'frequency',
+      width: 120,
+      align: 'center',
+      className: 'table-header-styled',
+      render: (freq) => freq ? (
+        <Tag color="blue">{freq}</Tag>
+      ) : '-',
+    },
+    {
+      title: 'Shift',
+      dataIndex: 'shift',
+      key: 'shift',
+      width: 120,
+      align: 'center',
+      className: 'table-header-styled',
+      render: (shift, record) => record.frequency === 'Daily' ? (
+        <Tag color="orange">{shift || 'Both'}</Tag>
+      ) : '-',
+    },
+    {
+      title: 'Scheduled Day',
+      dataIndex: 'scheduled_day',
+      key: 'scheduled_day',
+      width: 150,
+      align: 'center',
+      className: 'table-header-styled',
+      render: (day, record) => {
+        if (record.frequency === 'Weekly') return <Tag color="purple">{day}</Tag>;
+        if (record.frequency === 'Monthly') return <Tag color="cyan">Day {day}</Tag>;
+        return '-';
+      },
     },
     {
       title: 'Assigned At',
@@ -376,6 +417,72 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                 </Option>
               ))}
             </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="frequency"
+            label="Frequency"
+            rules={[{ required: true, message: 'Please select frequency' }]}
+          >
+            <Select placeholder="Select frequency">
+              <Option value="Daily">Daily</Option>
+              <Option value="Weekly">Weekly</Option>
+              <Option value="Monthly">Monthly</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            noStyle
+            shouldUpdate={(prevValues, currentValues) => prevValues.frequency !== currentValues.frequency}
+          >
+            {({ getFieldValue }) => {
+              const frequency = getFieldValue('frequency');
+              if (frequency === 'Daily') {
+                return (
+                  <Form.Item
+                    name="shift"
+                    label="Select Shift"
+                    rules={[{ required: true, message: 'Please select shift' }]}
+                    initialValue="Both"
+                  >
+                    <Select placeholder="Select shift">
+                      <Option value="Morning">Morning Shift</Option>
+                      <Option value="Evening">Evening Shift</Option>
+                      <Option value="Both">Both</Option>
+                    </Select>
+                  </Form.Item>
+                );
+              } else if (frequency === 'Weekly') {
+                return (
+                  <Form.Item
+                    name="dayOfWeek"
+                    label="Select Day of Week"
+                    rules={[{ required: true, message: 'Please select day' }]}
+                  >
+                    <DatePicker 
+                      style={{ width: '100%' }} 
+                      placeholder="Select a day"
+                      format="dddd"
+                    />
+                  </Form.Item>
+                );
+              } else if (frequency === 'Monthly') {
+                return (
+                  <Form.Item
+                    name="dayOfMonth"
+                    label="Select Day of Month"
+                    rules={[{ required: true, message: 'Please select date' }]}
+                  >
+                    <DatePicker 
+                      style={{ width: '100%' }} 
+                      placeholder="Select a date"
+                      format="D"
+                    />
+                  </Form.Item>
+                );
+              }
+              return null;
+            }}
           </Form.Item>
           
           <div style={{ 

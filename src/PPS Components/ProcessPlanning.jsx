@@ -285,15 +285,15 @@ const ProcessPlanning = ({ initialOrderId }) => {
   );
 
   // Fetch all part operation details for in-house parts to get start/end times
-  useEffect(() => {
-    if (!selectedOrderId || inHouseParts.length === 0) return;
+  // useEffect(() => {
+  //   if (!selectedOrderId || inHouseParts.length === 0) return;
     
-    inHouseParts.forEach(part => {
-      if (!partOpDetails[part.id]) {
-        fetchPartOperationDetails(part.id);
-      }
-    });
-  }, [selectedOrderId, inHouseParts.length]);
+  //   inHouseParts.forEach(part => {
+  //     if (!partOpDetails[part.id]) {
+  //       fetchPartOperationDetails(part.id);
+  //     }
+  //   });
+  // }, [selectedOrderId, inHouseParts.length]);
 
   const outSourceParts = useMemo(() => allParts.filter(p => p.type_name.includes("out")), [allParts]);
 

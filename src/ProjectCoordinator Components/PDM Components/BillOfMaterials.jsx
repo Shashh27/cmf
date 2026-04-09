@@ -2,15 +2,15 @@ import React, { useState, useEffect, useRef } from "react";
 import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
-import { Input, Button, message, Modal, Tooltip, Empty, Spin, Tag, Typography } from "antd";
+import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
 
 const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
 
-const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = null }) => {
-  
+const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null, singleProductId = null }) => {
+  const { message, modal } = App.useApp();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
@@ -26,6 +26,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
   const [showPartActionModal, setShowPartActionModal] = useState(false);
   const [partActionType, setPartActionType] = useState('');
   const [activeItemId, setActiveItemId] = useState(null);
+  const [activeItemType, setActiveItemType] = useState(null);
   const hasFetchedData = useRef(false);
   const singleProductFetched = useRef(false);
 
@@ -111,23 +112,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
     }
     if (!hasFetchedData.current) {
       hasFetchedData.current = true;
-      fetchProducts().finally(() => setLoading(false));
+      setLoading(false);
     }
   }, [singleProductId]);
-
-  const fetchProducts = async () => {
-    try {
-      // Filter by user_id: each admin sees only their own products. For those products, operations/documents from project coordinator and manufacturing coordinator are still shown (no filter when fetching by part/operation).
-      const adminId = getCurrentUserId();
-      const response = await axios.get(`${API_BASE_URL}/products/`, {
-        params: adminId != null ? { user_id: adminId } : undefined,
-      });
-      setProducts(response.data);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      message.error('Failed to fetch products');
-    }
-  };
 
   const flattenBOMForExport = (data) => {
     const assemblies = [];
@@ -356,7 +343,13 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
   };
 
   const handleProductCreated = async (newItem, type, action = 'create') => {
-    await fetchProducts();
+    if (type === 'product') {
+      if (action === 'edit') {
+        setProducts(prev => prev.map(p => p.id === newItem.id ? { ...p, ...newItem } : p));
+      } else {
+        setProducts(prev => [...prev, newItem]);
+      }
+    }
     const actionText = action === 'edit' ? 'updated' : 'created';
     const messages = {
       product: `Product "${newItem.product_name}" ${actionText} successfully!`,
@@ -378,7 +371,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
     const endpoints = { product: `/products/${item.id}`, assembly: `/assemblies/${item.id}`, part: `/parts/${item.id}` };
     const names = { product: item.product_name, assembly: item.assembly_name, part: item.part_name };
     
-    Modal.confirm({
+    modal.confirm({
       title: `Delete ${type}`,
       content: `Are you sure you want to delete ${type} "${names[type]}"? This cannot be undone.`,
       okText: 'Yes',
@@ -389,7 +382,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
           await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
           message.success(`${type.charAt(0).toUpperCase() + type.slice(1)} "${names[type]}" deleted successfully.`);
           if (type === 'product') {
-            await fetchProducts();
+            setProducts(prev => prev.filter(p => p.id !== item.id));
             setHierarchicalData(prev => {
               const newData = { ...prev };
               delete newData[item.id];
@@ -416,8 +409,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
     });
   };
 
-  const handleItemClick = async (item, type, productId) => {
+  const handleItemClick = async (item, type, productId = null) => {
+    // Clear previous selection and set new one
     setActiveItemId(item.id);
+    setActiveItemType(type);
 
     if (type === 'product') {
       if (!hierarchicalData[item.id]) {
@@ -427,10 +422,43 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
 
     toggleExpand(getExpandKey(type, item.id));
 
-    const itemWithMeta = { ...item, itemType: type, productId };
+    const itemWithMeta = { ...item, itemType: type, productId: productId || (type === 'product' ? item.id : null) };
     if (onItemSelected) {
       onItemSelected(itemWithMeta);
     }
+  };
+
+  // Helper function to find productId for a part or assembly
+  const findProductIdForItem = (itemId) => {
+    for (const productId in hierarchicalData) {
+      const product = hierarchicalData[productId];
+      
+      // Check if it's a direct part
+      if (product.parts?.some(p => p.id === itemId)) {
+        return productId;
+      }
+      
+      // Check in assemblies recursively
+      const checkAssemblies = (assemblies) => {
+        for (const assembly of assemblies) {
+          if (assembly.id === itemId) {
+            return productId;
+          }
+          if (assembly.parts?.some(p => p.id === itemId)) {
+            return productId;
+          }
+          if (assembly.child_assemblies) {
+            const found = checkAssemblies(assembly.child_assemblies);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      
+      const found = checkAssemblies(product.assemblies || []);
+      if (found) return found;
+    }
+    return null;
   };
 
   const getNestedAssemblies = (assemblyId) => {
@@ -526,14 +554,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
     );
   };
 
-  const renderPartInTree = (part, level = 0) => {
-    const isSelected = activeItemId === part.id;
+  const renderPartInTree = (part, level = 0, productId = null) => {
+    const isSelected = activeItemId === part.id && activeItemType === 'part';
     return (
       <div
         key={`part-${part.id}`}
         className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
         style={{ marginLeft: `${level * 14}px` }}
-        onClick={() => handleItemClick(part, 'part')}
+        onClick={() => handleItemClick(part, 'part', productId || findProductIdForItem(part.id))}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
@@ -549,7 +577,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
     );
   };
 
-  const renderAssemblyTree = (assembly, level = 0) => {
+  const renderAssemblyTree = (assembly, level = 0, productId = null) => {
     const childAssemblies = getNestedAssemblies(assembly.id);
     const assemblyParts = getPartsForAssembly(assembly.id);
     const combinedChildren = [
@@ -558,14 +586,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
     ].sort((a, b) => (a.id || 0) - (b.id || 0));
     const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
     const hasChildren = combinedChildren.length > 0;
-    const isSelected = activeItemId === assembly.id;
+    const isSelected = activeItemId === assembly.id && activeItemType === 'assembly';
 
     return (
       <div key={`assembly-${assembly.id}`} className="select-none">
         <div
           className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
           style={{ marginLeft: `${level * 14}px` }}
-          onClick={() => handleItemClick(assembly, 'assembly')}
+          onClick={() => handleItemClick(assembly, 'assembly', productId || findProductIdForItem(assembly.id))}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0 w-5 flex justify-center">
@@ -589,8 +617,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
           <div className="mt-0.5">
             {combinedChildren.map(child =>
               child.__childType === 'part'
-                ? renderPartInTree(child, level + 1)
-                : renderAssemblyTree(child, level + 1)
+                ? renderPartInTree(child, level + 1, productId)
+                : renderAssemblyTree(child, level + 1, productId)
             )}
           </div>
         )}
@@ -610,7 +638,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
     const isExpanded = expandedItems[getExpandKey('product', product.id)];
     const hasChildren = combinedChildren.length > 0;
     const showArrow = !hasData || hasChildren;
-    const isSelected = activeItemId === product.id;
+    const isSelected = activeItemId === product.id && activeItemType === 'product';
 
     return (
       <div key={product.id} className="select-none mb-1">
@@ -640,8 +668,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, singleProductId = 
           <div className="mt-0.5 ml-2 border-l border-slate-200 pl-1">
             {combinedChildren.map(child =>
               child.__childType === 'part'
-                ? renderPartInTree(child, 1)
-                : renderAssemblyTree(child, 1)
+                ? renderPartInTree(child, 1, product.id)
+                : renderAssemblyTree(child, 1, product.id)
             )}
           </div>
         )}

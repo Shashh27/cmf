@@ -357,17 +357,17 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   return (
     <div style={{ maxWidth: '100%' }}>
       {/* KPI Cards */}
-      <Row gutter={16} style={{ marginTop: 10, marginBottom: 12 }}>
+      <Row gutter={12} style={{ marginTop: 8, marginBottom: 10 }}>
         <Col xs={24} sm={12} md={8}>
           <Card 
             style={{ 
-              borderRadius: '12px', 
-              borderBottom: '4px solid #1890ff',
+              borderRadius: '8px', 
+              borderBottom: '3px solid #1890ff',
               boxShadow: activeCard === 'all'
-                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(24,144,255,0.35)'
+                ? '0 3px 10px rgba(0,0,0,0.12), 0 0 0 2px rgba(24,144,255,0.35)'
                 : hoveredCard === 'all'
-                  ? '0 6px 18px rgba(0,0,0,0.12)'
-                  : '0 2px 10px rgba(0,0,0,0.05)',
+                  ? '0 4px 12px rgba(0,0,0,0.12)'
+                  : '0 1px 6px rgba(0,0,0,0.08)',
               transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
               cursor: 'pointer',
               transform: hoveredCard === 'all' ? 'translateY(-1px)' : 'none',
@@ -375,7 +375,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: '#f0f7ff'
             }}
             hoverable
-            bodyStyle={{ padding: '16px 20px' }}
+            bodyStyle={{ padding: '12px 16px' }}
             onClick={() => handleKpiClick('all')}
             onMouseEnter={() => setHoveredCard('all')}
             onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
@@ -405,13 +405,13 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         <Col xs={24} sm={12} md={8}>
           <Card 
             style={{ 
-              borderRadius: '12px', 
-              borderBottom: '4px solid #52c41a',
+              borderRadius: '8px', 
+              borderBottom: '3px solid #52c41a',
               boxShadow: activeCard === 'consumables'
-                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(82,196,26,0.35)'
+                ? '0 3px 10px rgba(0,0,0,0.12), 0 0 0 2px rgba(82,196,26,0.35)'
                 : hoveredCard === 'consumables'
-                  ? '0 6px 18px rgba(0,0,0,0.12)'
-                  : '0 2px 10px rgba(0,0,0,0.05)',
+                  ? '0 4px 12px rgba(0,0,0,0.12)'
+                  : '0 1px 6px rgba(0,0,0,0.08)',
               transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
               cursor: 'pointer',
               transform: hoveredCard === 'consumables' ? 'translateY(-1px)' : 'none',
@@ -419,7 +419,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: '#f6ffed'
             }}
             hoverable
-            bodyStyle={{ padding: '16px 20px' }}
+            bodyStyle={{ padding: '12px 16px' }}
             onClick={() => handleKpiClick('consumables')}
             onMouseEnter={() => setHoveredCard('consumables')}
             onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}
@@ -449,13 +449,13 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         <Col xs={24} sm={12} md={8}>
           <Card 
             style={{ 
-              borderRadius: '12px', 
-              borderBottom: '4px solid #ff4d4f',
+              borderRadius: '8px', 
+              borderBottom: '3px solid #ff4d4f',
               boxShadow: activeCard === 'non-consumables'
-                ? '0 4px 14px rgba(0,0,0,0.12), 0 0 0 3px rgba(255,77,79,0.35)'
+                ? '0 3px 10px rgba(0,0,0,0.12), 0 0 0 2px rgba(255,77,79,0.35)'
                 : hoveredCard === 'non-consumables'
-                  ? '0 6px 18px rgba(0,0,0,0.12)'
-                  : '0 2px 10px rgba(0,0,0,0.05)',
+                  ? '0 4px 12px rgba(0,0,0,0.12)'
+                  : '0 1px 6px rgba(0,0,0,0.08)',
               transition: 'box-shadow 0.2s ease, transform 0.1s ease, background-color 0.2s ease',
               cursor: 'pointer',
               transform: hoveredCard === 'non-consumables' ? 'translateY(-1px)' : 'none',
@@ -463,7 +463,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
               background: '#fff1f0'
             }}
             hoverable
-            bodyStyle={{ padding: '16px 20px' }}
+            bodyStyle={{ padding: '12px 16px' }}
             onClick={() => handleKpiClick('non-consumables')}
             onMouseEnter={() => setHoveredCard('non-consumables')}
             onMouseLeave={() => { setHoveredCard(null); setActiveCard(null); }}

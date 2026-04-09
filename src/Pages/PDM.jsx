@@ -8,6 +8,7 @@ import ProductSummary from "../PDM Components/ProductSummary";
 import DocumentsPanel from "../PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "../PDM Components/AssemblyDocumentsPanel";
 import ProcessPlanning from "../PPS Components/ProcessPlanning";
+import QualityManagement from "../Quality Management Components/QualityManagement";
 
 const { Sider, Content } = Layout;
 
@@ -79,6 +80,7 @@ const PDM = () => {
               items={[
                 { key: "pdm", label: "PDM" },
                 { key: "pps", label: "PPS" },
+                { key: "quality", label: "Quality Management" },
               ]}
             />
           </div>
@@ -183,9 +185,17 @@ const PDM = () => {
           )}
         </Content>
       </Layout>
-      ) : (
+      ) : activeTopTab === "pps" ? (
         <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#f5f5f5" }}>
           <ProcessPlanning initialOrderId={initialOrderId} />
+        </div>
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#f5f5f5" }}>
+          <QualityManagement 
+            initialProductId={fromOms ? initialProductId : null} 
+            initialOrderId={initialOrderId}
+            fromOms={fromOms} 
+          />
         </div>
       )}
       </div>

@@ -177,8 +177,9 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
       title: "Machine",
       dataIndex: "machine_name",
       key: "machine_name",
+      width: 120,
       render: (t) => (
-        <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 13 }}>
+        <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 11, lineHeight: "1.3" }}>
           {t || "N/A"}
         </Tag>
       ),
@@ -186,10 +187,10 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     {
       title: "Setup Time",
       key: "setup",
-      width: 130,
+      width: 100,
       render: (_, r) => (
         // ✅ Same orange Tag as op table's setup column
-        <Tag color="orange" style={{ margin: 0, fontFamily: "monospace", fontSize: 13 }}>
+        <Tag color="orange" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
           {formatHms(r.setup_seconds)}
         </Tag>
       ),
@@ -197,10 +198,10 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     {
       title: "Cycle Time",
       key: "cycle",
-      width: 130,
+      width: 100,
       render: (_, r) => (
         // ✅ Same green Tag as op table's cycle column
-        <Tag color="green" style={{ margin: 0, fontFamily: "monospace", fontSize: 13 }}>
+        <Tag color="green" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
           {formatHms(r.cycle_seconds)}
         </Tag>
       ),
@@ -208,9 +209,9 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     {
       title: "Total",
       key: "total",
-      width: 130,
+      width: 100,
       render: (_, r) => (
-        <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#1e293b", fontSize: 13 }}>
+        <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#1e293b", fontSize: 11 }}>
           {formatHms(r.total_seconds)}
         </span>
       ),
@@ -222,12 +223,13 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     {
       title: "Part",
       key: "part",
+      width: 140,
       render: (_, r) => (
         <div className="min-w-0">
-          <div style={{ fontWeight: 500, color: "#1e293b", wordBreak: "break-word", lineHeight: "1.4", fontSize: 13 }}>
+          <div style={{ fontWeight: 500, color: "#1e293b", wordBreak: "break-word", lineHeight: "1.3", fontSize: 11 }}>
             {r.part_name}
           </div>
-          <div style={{ fontSize: 13, color: "#64748b", fontFamily: "monospace", wordBreak: "break-all" }}>
+          <div style={{ fontSize: 10, color: "#64748b", fontFamily: "monospace", wordBreak: "break-all" }}>
             {r.part_number}
           </div>
         </div>
@@ -237,34 +239,37 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
       title: "Op #",
       dataIndex: "operation_number",
       key: "op_num",
-      width: 70,
+      width: 60,
       render: (t) => (
-        <Tag color="cyan" style={{ margin: 0, fontFamily: "monospace", fontSize: 13 }}>{t}</Tag>
+        <Tag color="cyan" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>{t}</Tag>
       ),
     },
     {
       title: "Operation",
       dataIndex: "operation_name",
       key: "op_name",
-      render: (t) => <span style={{ wordBreak: "break-word", fontSize: 13 }}>{t}</span>,
+      width: 150,
+      render: (t) => <span style={{ wordBreak: "break-word", fontSize: 11, lineHeight: "1.3" }}>{t}</span>,
     },
     {
       title: "Machine",
       dataIndex: "machine_name",
       key: "machine",
-      width: 160,
+      width: 120,
       render: (t) => (
-        <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 13 }}>{t || "N/A"}</Tag>
+        <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 10, lineHeight: "1.3" }}>
+          {t || "N/A"}
+        </Tag>
       ),
     },
     {
       title: "Setup",
       dataIndex: "setup_time",
       key: "setup",
-      width: 110,
+      width: 90,
       render: (t) => (
         // ✅ Orange Tag — reference color for machine table
-        <Tag color="orange" style={{ margin: 0, fontFamily: "monospace", fontSize: 13 }}>
+        <Tag color="orange" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
           {t || "00:00:00"}
         </Tag>
       ),
@@ -273,10 +278,10 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
       title: "Cycle",
       dataIndex: "cycle_time",
       key: "cycle",
-      width: 110,
+      width: 90,
       render: (t) => (
         // ✅ Green Tag — reference color for machine table
-        <Tag color="green" style={{ margin: 0, fontFamily: "monospace", fontSize: 13 }}>
+        <Tag color="green" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
           {t || "00:00:00"}
         </Tag>
       ),
@@ -284,9 +289,9 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     {
       title: "Total",
       key: "total",
-      width: 110,
+      width: 90,
       render: (_, r) => (
-        <span style={{ fontFamily: "monospace", color: "#475569", fontSize: 13 }}>
+        <span style={{ fontFamily: "monospace", color: "#475569", fontSize: 11 }}>
           {formatHms(r.total_seconds)}
         </span>
       ),
@@ -306,31 +311,51 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
         /* ── Unified font size for ALL table cells and headers ── */
         .ps-table .ant-table-thead > tr > th {
           background: #f8fafc;
-          font-size: 13px !important;
+          font-size: 11px !important;
           font-weight: 600;
           color: #475569;
-          padding: 8px 12px !important;
+          padding: 6px 8px !important;
           white-space: nowrap;
           position: sticky;
           top: 0;
           z-index: 2;
         }
         .ps-table .ant-table-tbody > tr > td {
-          padding: 8px 12px !important;
-          font-size: 13px !important;
+          padding: 6px 8px !important;
+          font-size: 11px !important;
           vertical-align: middle;
         }
         .ps-table .ant-table-tbody > tr:hover > td {
           background: #f0f7ff !important;
         }
-        /* Scrollbar styling */
-        .ps-table-scroll::-webkit-scrollbar { width: 6px; }
-        .ps-table-scroll::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
-        .ps-table-scroll::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
-        .ps-table-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        /* Scrollbar styling - more visible and user-friendly */
+        .ps-table-scroll::-webkit-scrollbar { 
+          width: 8px; 
+          height: 8px; 
+        }
+        .ps-table-scroll::-webkit-scrollbar-track { 
+          background: #f1f5f9; 
+          border-radius: 4px;
+          border: 1px solid #e2e8f0;
+        }
+        .ps-table-scroll::-webkit-scrollbar-thumb { 
+          background: #94a3b8; 
+          border-radius: 4px;
+          border: 1px solid #cbd5e1;
+        }
+        .ps-table-scroll::-webkit-scrollbar-thumb:hover { 
+          background: #64748b; 
+        }
+        .ps-table-scroll::-webkit-scrollbar-corner {
+          background: #f1f5f9;
+        }
+        /* Add subtle shadow to indicate scrollable content */
+        .ps-table-scroll {
+          box-shadow: inset -1px 0 2px rgba(0,0,0,0.05);
+        }
         /* Ensure Ant Design Tag text respects font size override */
         .ps-table .ant-tag {
-          font-size: 13px !important;
+          font-size: 11px !important;
         }
       `}</style>
 
@@ -362,7 +387,7 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
             title="Machine-wise Total Hours"
             count={summary.machineRows.length}
           />
-          <div className="ps-table-scroll" style={{ overflowY: "auto", overflowX: "hidden", maxHeight: 320 }}>
+          <div className="ps-table-scroll" style={{ overflowY: "auto", overflowX: "auto", maxHeight: 320 }}>
             <Table
               className="ps-table"
               columns={machineColumns}
@@ -370,7 +395,7 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
               rowKey={(r) => r.machine_name}
               pagination={false}
               size="small"
-              tableLayout="fixed"
+              scroll={{ x: 420 }}
               locale={{ emptyText: <Empty description="No IN-House operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
             />
           </div>
@@ -383,7 +408,7 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
             title="Part Operations (IN-House)"
             count={summary.rows.length}
           />
-          <div className="ps-table-scroll" style={{ overflowY: "auto", overflowX: "hidden", maxHeight: 420 }}>
+          <div className="ps-table-scroll" style={{ overflowY: "auto", overflowX: "auto", maxHeight: 420 }}>
             <Table
               className="ps-table"
               columns={opColumns}
@@ -391,7 +416,7 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
               rowKey="key"
               pagination={false}
               size="small"
-              tableLayout="fixed"
+              scroll={{ x: 740 }}
               locale={{ emptyText: <Empty description="No IN-House operations found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
             />
           </div>

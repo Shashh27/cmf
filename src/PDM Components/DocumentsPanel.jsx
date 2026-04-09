@@ -11,6 +11,7 @@ import { normalizeVersion, fetchInto } from "./operationUtils";
 import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
+import PartDocumentReport from "../DownloadReports/PartDocumentReport";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -121,8 +122,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const [isViewModalOpen, setIsViewModalOpen]         = useState(false);
   const [modalTab, setModalTab]                       = useState('details');
   const [showAddToolForm, setShowAddToolForm]         = useState(false);
-  const [showImportModal, setShowImportModal]         = useState(false);
+  const [showImportModal, setShowImportModal]       = useState(false);
   const [importOperations, setImportOperations]       = useState([]);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // eBOM version selection
   const [selectedVersions, setSelectedVersions] = useState({});
@@ -169,7 +171,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (changed) setSelectedVersions(next);
   }, [latestPartDocs, groupedPartDocs]);
 
-    useEffect(() => {
+  useEffect(() => {
     if (!selectedItem) { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
     if (selectedItem.itemType === 'part') fetchDocuments();
     else { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); }
@@ -369,7 +371,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (!doc) return '';
     if (doc.document_url) {
       const segment = doc.document_url.split('/').filter(Boolean).pop();
-      if (segment) return segment.replace(/^\d+_\d+_/, ''); // strip leading timestamp e.g. 20260312_155636_
+      if (segment) return segment.replace(/^\d{8}_\d{6}_[a-zA-Z0-9]+_/, ''); // strip timestamp and unique ID e.g. 20260330_094250_ab0e25a8_
     }
     return doc.document_name || '';
   };
@@ -457,6 +459,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               <Button size="small" icon={<UploadOutlined />} onClick={() => setShowImportModal(true)} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Upload MPP</span><span className="sm:hidden">MPP</span>
               </Button>
+              <Button size="small" icon={<DownloadOutlined />} onClick={() => setShowReportModal(true)} disabled={!isPart || loading} className="primary-btn-sm flex-1 sm:flex-initial">
+                <span className="hidden sm:inline">Download Report</span><span className="sm:hidden">Report</span>
+              </Button>
+             
               <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setImportOperations([]); openPartActionModal('operation'); }} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Add Operation</span><span className="sm:hidden">Add Op</span>
               </Button>
@@ -605,9 +611,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         </Modal>
       )}
 
-      <OperationImportModal open={showImportModal} onCancel={() => setShowImportModal(false)} onUseOperations={ops => { setImportOperations(ops); setShowImportModal(false); openPartActionModal('operation'); }} />
-      <PartActionModal open={showPartActionModal} onCancel={() => setShowPartActionModal(false)} actionType={partActionType} selectedPart={selectedItem} onActionCreated={handleActionCreated} initialOperations={importOperations} />
+      <OperationImportModal open={showImportModal} onCancel={() => setShowImportModal(false)} existingOperations={operations} onUseOperations={ops => { setImportOperations(ops); setShowImportModal(false); openPartActionModal('operation'); }} />
+      <PartActionModal open={showPartActionModal} onCancel={() => setShowPartActionModal(false)} actionType={partActionType} selectedPart={selectedItem} onActionCreated={handleActionCreated} initialOperations={importOperations} existingOperations={operations} />
       <EditOperationModal open={isOperationModalOpen} onCancel={() => { setIsOperationModalOpen(false); setSelectedOperation(null); }} operation={selectedOperation} defaultTab={modalTab} showAddToolForm={showAddToolForm} onUpdate={async () => { await fetchDocuments(); }} />
+      <PartDocumentReport partData={{ operations, documents, rawMaterials: selectedItem?.raw_material_status ? [{ material_name: selectedItem.raw_material_name || selectedItem.part_name, material_status: selectedItem.raw_material_status }] : [], partName: selectedItem?.part_name, partNumber: selectedItem?.part_number }} open={showReportModal} onCancel={() => setShowReportModal(false)} />
 
       {/* Operation View Modal */}
       <Modal
