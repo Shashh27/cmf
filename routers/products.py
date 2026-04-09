@@ -597,6 +597,7 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'type_id': part.type_id,
             'raw_material_id': part.raw_material_id,
             'raw_material_stock_id': part.raw_material_stock_id,
+            'raw_material_required_quantity': part.raw_material_required_quantity,
             'part_detail': part.part_detail,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,

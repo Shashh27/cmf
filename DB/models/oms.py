@@ -207,6 +207,8 @@ class Part(Base):
     size = Column(String, nullable=True)  # Optional size field (e.g., "25x25x160", "Ø210x110", "Tyre Coupling F160 Type:B")
 
     qty = Column(Integer, nullable=True, default=1)  # Optional quantity field, defaults to 1
+    
+    raw_material_required_quantity = Column(Float, nullable=True)  # Required quantity per part for order-linked materials
 
     vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Vendor for outsourced parts
 

@@ -86,6 +86,7 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict
         "user_id": part.user_id,
         "size": part.size,
         "qty": part.qty,
+        "raw_material_required_quantity": part.raw_material_required_quantity,
         "vendor_id": part.vendor_id,
         "type_name": type_map.get(part.type_id),
         "raw_material_name": rm_map.get(part.raw_material_id),
@@ -109,10 +110,45 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
             detail=f"Part with number {part.part_number} already exists"
         )
 
+    # Check if raw material allocation is needed
+    needs_allocation = part.raw_material_stock_id and part.raw_material_required_quantity
+    
+    if needs_allocation:
+        # Validate stock availability before creating part
+        stock = db.query(RawMaterialStock).filter(RawMaterialStock.id == part.raw_material_stock_id).first()
+        if not stock:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Stock item with id {part.raw_material_stock_id} not found"
+            )
+        
+        if stock.available_quantity < part.raw_material_required_quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient material. Available: {stock.available_quantity}, Required: {part.raw_material_required_quantity}"
+            )
+
+    # Create the part first
     db_part = PartModel(**part.model_dump())
     db.add(db_part)
     db.commit()
     db.refresh(db_part)
+    
+    # Now do the allocation since we have the part ID
+    if needs_allocation:
+        try:
+            from services.raw_material_tracking import RawMaterialTrackingService
+            allocation_result = RawMaterialTrackingService.allocate_raw_material_to_part(
+                db, db_part.id, part.raw_material_stock_id, part.raw_material_required_quantity, part.user_id or 30
+            )
+        except Exception as e:
+            # If allocation fails, delete the part and raise error
+            db.delete(db_part)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Raw material allocation failed: {str(e)}"
+            )
 
     # Automatic OrderPartPriority creation disabled
     # if db_part.product_id and db_part.type_id:
@@ -202,8 +238,74 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
         )
 
     update_data = part.model_dump(exclude_unset=True)
+    
+    # Check if raw material allocation is being updated
+    is_updating_raw_material = any(key in update_data for key in [
+        'raw_material_stock_id', 'raw_material_required_quantity'
+    ])
+    
+    # If updating raw material allocation, handle the allocation logic
+    if is_updating_raw_material:
+        new_stock_id = update_data.get('raw_material_stock_id')
+        new_required_quantity = update_data.get('raw_material_required_quantity')
+        
+        # Case 1: Same stock, different quantity (partial update)
+        if new_stock_id == db_part.raw_material_stock_id and new_required_quantity is not None:
+            if new_required_quantity != db_part.raw_material_required_quantity:
+                try:
+                    from services.raw_material_tracking import RawMaterialTrackingService
+                    RawMaterialTrackingService.update_raw_material_allocation(
+                        db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
+                    )
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Raw material allocation update failed: {str(e)}"
+                    )
+        
+        # Case 2: Different stock or new allocation
+        elif new_stock_id != db_part.raw_material_stock_id:
+            # If there's an existing allocation, deallocate it first
+            if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+                try:
+                    from services.raw_material_tracking import RawMaterialTrackingService
+                    RawMaterialTrackingService.deallocate_raw_material_from_part(
+                        db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
+                    )
+                except Exception as e:
+                    # Log error but continue with new allocation
+                    print(f"Warning: Could not deallocate previous material: {e}")
+            
+            # If new allocation is provided, allocate it
+            if new_stock_id and new_required_quantity:
+                try:
+                    from services.raw_material_tracking import RawMaterialTrackingService
+                    RawMaterialTrackingService.allocate_raw_material_to_part(
+                        db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
+                    )
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Raw material allocation failed: {str(e)}"
+                    )
+        
+        # Case 3: Clearing allocation (setting to null/0)
+        elif not new_stock_id or not new_required_quantity:
+            # If there's an existing allocation, deallocate it
+            if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+                try:
+                    from services.raw_material_tracking import RawMaterialTrackingService
+                    RawMaterialTrackingService.deallocate_raw_material_from_part(
+                        db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
+                    )
+                except Exception as e:
+                    # Log error but continue
+                    print(f"Warning: Could not deallocate material: {e}")
+    
+    # Update other fields normally (but skip raw material fields as they're handled above)
     for field, value in update_data.items():
-        setattr(db_part, field, value)
+        if field not in ['raw_material_stock_id', 'raw_material_required_quantity']:
+            setattr(db_part, field, value)
 
     db.commit()
     db.refresh(db_part)
@@ -332,6 +434,18 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             text("DELETE FROM inventory.inventory_requests WHERE part_id = :pid"),
             {"pid": part_id}
         )
+
+        # 10. Deallocate raw material if this part has any allocated
+        if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+            try:
+                from services.raw_material_tracking import RawMaterialTrackingService
+                RawMaterialTrackingService.deallocate_raw_material_from_part(
+                    db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 30
+                )
+                print(f" Deallocated {db_part.raw_material_required_quantity} units from stock {db_part.raw_material_stock_id}")
+            except Exception as e:
+                # Log error but don't fail the deletion
+                print(f"Warning: Could not deallocate raw material: {e}")
 
         # Finally, delete the part itself
         db.delete(db_part)
@@ -540,7 +654,7 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
     duplicates: list[str]  = []
     errors:     list[dict] = []
  
-    type_map, rm_map, user_map = _build_part_maps(db)
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
  
     # Pre-check all part numbers in ONE query to avoid N round-trips
     incoming_numbers = [item.part_number for item in payload.parts if item.part_number]
@@ -563,12 +677,12 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
             db_part = PartModel(**item.model_dump())
             db.add(db_part)
             db.flush()   # assign id without committing yet
-            created.append(_part_to_dict(db_part, type_map, rm_map, user_map))
+            created.append(_part_to_dict(db_part, type_map, rm_map, stock_map, user_map))
             existing_numbers.add(item.part_number)   # prevent intra-batch dupes
         except Exception as exc:
             db.rollback()
             errors.append({"part_number": item.part_number, "error": str(exc)})
-            type_map, rm_map, user_map = _build_part_maps(db)
+            type_map, rm_map, stock_map, user_map = _build_part_maps(db)
  
     # Single commit for all successful inserts
     if created:
