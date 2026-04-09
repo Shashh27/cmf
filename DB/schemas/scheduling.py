@@ -11,15 +11,18 @@ class ProductionLogStatus(str, Enum):
 
 
 class ProductionLogBase(BaseModel):
-    planned_schedule_items_id: int = Field(..., description="ID of the planned schedule item")
+    operation_id: int = Field(..., description="ID of the operation")
     operator_id: int = Field(..., description="ID of the operator")
     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor")
     notes: Optional[str] = Field(None, description="Additional notes")
+    remarks: Optional[str] = Field(None, description="Supervisor remarks when updating status")
     from_date: date = Field(..., description="Start date (yyyy-mm-dd)")
     from_time: time = Field(..., description="Start time (hh:mm:ss)")
     to_date: Optional[date] = Field(None, description="End date (yyyy-mm-dd)")
     to_time: Optional[time] = Field(None, description="End time (hh:mm:ss)")
     status: ProductionLogStatus = Field(ProductionLogStatus.PENDING, description="Status of production log")
+    produced_quantity: int = Field(..., gt=0, description="Quantity produced by operator (must be greater than 0)")
+    approved_quantity: Optional[int] = Field(None, description="Quantity approved by supervisor")
 
 
 class ProductionLogCreate(ProductionLogBase):
@@ -27,27 +30,30 @@ class ProductionLogCreate(ProductionLogBase):
 
 
 class ProductionLogUpdate(BaseModel):
-    planned_schedule_items_id: Optional[int] = Field(None, description="ID of the planned schedule item")
+    operation_id: Optional[int] = Field(None, description="ID of the operation")
     operator_id: Optional[int] = Field(None, description="ID of the operator")
     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor")
     notes: Optional[str] = Field(None, description="Additional notes")
+    remarks: Optional[str] = Field(None, description="Supervisor remarks when updating status")
     from_date: Optional[date] = Field(None, description="Start date (yyyy-mm-dd)")
     from_time: Optional[time] = Field(None, description="Start time (hh:mm:ss)")
     to_date: Optional[date] = Field(None, description="End date (yyyy-mm-dd)")
     to_time: Optional[time] = Field(None, description="End time (hh:mm:ss)")
     status: Optional[ProductionLogStatus] = Field(None, description="Status of production log")
+    produced_quantity: Optional[int] = Field(None, description="Quantity produced by operator")
+    approved_quantity: Optional[int] = Field(None, description="Quantity approved by supervisor")
 
 
 class ProductionLogResponse(ProductionLogBase):
     id: int = Field(..., description="Production log ID")
     created_at: datetime = Field(..., description="When the production log was created")
+    rework_quantity: Optional[int] = Field(None, description="Calculated rework quantity (produced - approved)")
 
     class Config:
         from_attributes = True
 
 
 class ProductionLogWithDetails(ProductionLogResponse):
-    planned_schedule_item: Optional[dict] = Field(None, description="Planned schedule item details")
     operation: Optional[dict] = Field(None, description="Operation details")
     machine: Optional[dict] = Field(None, description="Machine details")
     operator: Optional[dict] = Field(None, description="Operator details")
@@ -60,3 +66,5 @@ class ProductionLogWithDetails(ProductionLogResponse):
 class ProductionLogStatusUpdate(BaseModel):
     status: ProductionLogStatus = Field(..., description="New status for production log")
     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor updating the status")
+    remarks: Optional[str] = Field(None, description="Supervisor remarks when updating status")
+    approved_quantity: Optional[int] = Field(None, description="Quantity approved by supervisor")
