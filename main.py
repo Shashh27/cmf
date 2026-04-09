@@ -246,11 +246,11 @@ app.include_router(rawmaterials_router, prefix="/api/v1")
 
 app.include_router(workcenter_router, prefix="/api/v1")
 
-app.include_router(general_documents_router)
+app.include_router(general_documents_router, prefix="/api/v1")
 
-app.include_router(machine_documents_router)
+app.include_router(machine_documents_router, prefix="/api/v1")
 
-app.include_router(common_documents_router)
+app.include_router(common_documents_router,prefix="/api/v1")
 
 app.include_router(access_control_router, prefix="/api/v1")
 
