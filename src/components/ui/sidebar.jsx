@@ -104,10 +104,10 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       label: 'PPS',
       icon: <AppstoreOutlined />,
       children: [
-        { key: `${prefix}/pps/process-planning`, label: <Link to={`${prefix}/pps/process-planning`}>Process Planning</Link> },
-        { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`}>Machine Scheduling</Link> },
+        // { key: `${prefix}/pps/process-planning`, label: <Link to={`${prefix}/pps/process-planning`}>Process Planning</Link> },
         { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`}>Assets Availability</Link> },
         { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`}>Capacity Planning</Link> },
+        { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`}>Machine Scheduling</Link> },
       ],
     },
     {
@@ -127,11 +127,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         { key: `${prefix}/product-monitoring/pokayoke-checklists`, label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`}>Preventive Maintenance</Link> },
       ],
     },
-    {
-      key: `${prefix}/quality-management`,
-      label: <Link to={`${prefix}/quality-management`} onClick={() => setMobileDrawerOpen(false)}>Quality Management</Link>,
-      icon: <SafetyCertificateOutlined />,
-    },
+    // {
+    //   key: `${prefix}/quality-management`,
+    //   label: <Link to={`${prefix}/quality-management`} onClick={() => setMobileDrawerOpen(false)}>Quality Management</Link>,
+    //   icon: <SafetyCertificateOutlined />,
+    // },
     {
       key: 'inventory-management',
       label: 'Inventory Management',
@@ -220,7 +220,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: 'PPS',
         icon: <AppstoreOutlined />,
         children: [
-          { key: `${prefix}/pps/process-planning`, label: <Link to={`${prefix}/pps/process-planning`} onClick={() => setMobileDrawerOpen(false)}>Process Planning</Link> },
           { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link> },
           { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link> },
           { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`} onClick={() => setMobileDrawerOpen(false)}>Capacity Planning</Link> },
@@ -269,7 +268,13 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       },
     ];
   } else if (prefix === '/supervisor') {
-    items = [];
+    items = [
+      {
+        key: `${prefix}/production_logs`,
+        label: <Link to={`${prefix}/production_logs`} onClick={() => setMobileDrawerOpen(false)}>Production logs</Link>,
+        icon: <FileTextOutlined />,
+      },
+    ];
   } else if (prefix === '/inventory_supervisor') {
     items = [
       {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 
 import axios from "axios";
 
-import { API_BASE_URL } from "../../Config/auth";
+import { API_BASE_URL } from "../Config/auth";
 
 import { Modal, Form, Input, Select, Button, App, Badge } from "antd";
 

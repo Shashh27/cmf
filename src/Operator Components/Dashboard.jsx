@@ -6,6 +6,10 @@ import PokaYokeChecklist from './PokaYokeChecklist';
 import ReportIssue from './ReportIssue';
 import SelectJob from './SelectJob';
 import PartDocumentTab from './PartDocumentTab';
+import ProductionLog from './ProductionLog';
+import { API_BASE_URL } from '../Config/auth.js';
+import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
+import { message } from 'antd';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -22,6 +26,33 @@ const Dashboard = () => {
   const [showReportIssue, setShowReportIssue] = useState(false);
   const [showSelectJob, setShowSelectJob] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [checklistPending, setChecklistPending] = useState(false);
+  const [isActivated, setIsActivated] = useState(false);
+  const [completedQuantity, setCompletedQuantity] = useState(0);
+  const [reworkData, setReworkData] = useState(null);
+
+  // Fetch rework data for the selected job
+  const fetchReworkData = async (operationId) => {
+    if (!operationId) {
+      setReworkData(null);
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
+      if (response.ok) {
+        const data = await response.json();
+        // Find the rework entry (status === 'rework')
+        const reworkEntry = data.find(log => log.status === 'rework');
+        setReworkData(reworkEntry || null);
+      } else {
+        setReworkData(null);
+      }
+    } catch (error) {
+      console.error('Error fetching rework data:', error);
+      setReworkData(null);
+    }
+  };
 
   useEffect(() => {
     try {
@@ -44,9 +75,96 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
+    const checkChecklistStatus = async () => {
+      if (!machineId) return;
+
+      try {
+        // 1. Fetch all assignments for this machine
+        const assignRes = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`);
+        const assignData = await assignRes.json();
+        const assignments = Array.isArray(assignData) ? assignData : [];
+
+        // 2. Filter assignments due today (Same logic as in PokaYokeChecklist.jsx)
+        const today = new Date();
+        const istOptions = { timeZone: 'Asia/Kolkata' };
+        const dayOfWeek = today.toLocaleDateString('en-US', { ...istOptions, weekday: 'long' });
+        const dayOfMonth = today.toLocaleDateString('en-US', { ...istOptions, day: 'numeric' });
+        const currentHour = parseInt(today.toLocaleTimeString('en-US', { ...istOptions, hour: 'numeric', hour12: false }));
+
+        const dueToday = assignments.filter(item => {
+          const frequency = (item?.frequency || '').toLowerCase();
+          const scheduledDay = (item?.scheduled_day || '');
+
+          if (frequency === 'daily') return true; // Show all daily checklists
+          if (frequency === 'weekly') return scheduledDay.toLowerCase() === dayOfWeek.toLowerCase();
+          if (frequency === 'monthly') return String(scheduledDay) === String(dayOfMonth);
+          return false;
+        });
+
+        if (dueToday.length === 0) {
+          setChecklistPending(false);
+          return;
+        }
+
+        // 3. Fetch completed logs for today
+        const logsRes = await fetch(`${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`);
+        const logsData = await logsRes.json();
+        const logs = Array.isArray(logsData) ? logsData : [];
+
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        const completedTodayIds = new Set(
+          logs
+            .filter(log => new Date(log.completed_at) >= startOfToday)
+            .map(log => String(log.checklist_id))
+        );
+
+        // 4. Check if all due today are completed
+        // Modified logic: Any ONE daily checklist completion satisfies the daily requirement.
+        // Weekly and Monthly checklists still require all to be completed if due.
+        
+        const dueDaily = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'daily');
+        const dueWeekly = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'weekly');
+        const dueMonthly = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'monthly');
+
+        const isCompleted = (item) => {
+          const cid = item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id;
+          return completedTodayIds.has(String(cid));
+        };
+
+        const dailyRequirementMet = dueDaily.length === 0 || dueDaily.some(isCompleted);
+        const weeklyRequirementMet = dueWeekly.every(isCompleted);
+        const monthlyRequirementMet = dueMonthly.every(isCompleted);
+
+        const pending = !dailyRequirementMet || !weeklyRequirementMet || !monthlyRequirementMet;
+
+        setChecklistPending(pending);
+      } catch (error) {
+        console.error('Error checking checklist status:', error);
+      }
+    };
+
+    checkChecklistStatus();
+  }, [machineId, showChecklist]); // Re-check when machine changes or checklist modal closes
+
+  useEffect(() => {
     const id = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  const handleSelectJobClick = () => {
+    if (checklistPending) {
+      message.warning('Please complete the due Poka Yoke checklist before selecting a job.');
+      setShowChecklist(true);
+    } else {
+      setShowSelectJob(true);
+    }
+  };
+
+  const handleProductionSubmit = (submittedQuantity) => {
+    setCompletedQuantity(prev => prev + submittedQuantity);
+  };
 
   const hourOptions = Array.from({ length: 24 }, (_, i) => i);
   const minuteOptions = [0, 15, 30, 45];
@@ -138,7 +256,7 @@ const Dashboard = () => {
           <Button 
             type="primary" 
             size="large"
-            onClick={() => setShowSelectJob(true)}
+            onClick={handleSelectJobClick}
           >
             Select Job
           </Button>
@@ -173,7 +291,7 @@ const Dashboard = () => {
             }
             style={{ borderRadius: '16px', height: cardHeight, display: 'flex', flexDirection: 'column' }}
             headStyle={{ borderRadius: '16px 16px 0 0' }}
-            bodyStyle={{ padding: 16, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}
+            bodyStyle={{ padding: 16, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'auto' }}
           >
             <div
               style={{
@@ -201,9 +319,6 @@ const Dashboard = () => {
                     alt="Machine"
                     style={{ width: 200, height: 160, objectFit: 'contain' }}
                   />
-                  <div style={{ position: 'absolute', right: -8, top: -8, background: '#FFF0F6', border: '1px solid #f0d5e5', borderRadius: 12, padding: 6, boxShadow: '0 2px 6px rgba(0,0,0,0.06)' }}>
-                    <SettingOutlined style={{ color: '#faad14' }} />
-                  </div>
                 </div>
               </div>
             </div>
@@ -217,96 +332,61 @@ const Dashboard = () => {
                 <div style={{ marginTop: 6, fontWeight: 700, color: '#52C41A' }}>0</div>
               </div>
             </div>
+            
+            {/* Rework Information */}
+            {reworkData && (
+              <div style={{ 
+                marginTop: 16, 
+                background: '#FFF2E8', 
+                borderRadius: 12, 
+                padding: 12, 
+                border: '1px solid #FFBB96',
+                minHeight: 'auto'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                  <WarningOutlined style={{ color: '#FA8C16', fontSize: 16, flexShrink: 0 }} />
+                  <Text strong style={{ color: '#FA8C16', fontSize: 14 }}>Rework Required</Text>
+                </div>
+                <div style={{ display: 'flex', gap: 12, flexDirection: window.innerWidth < 768 ? 'column' : 'row' }}>
+                  <div style={{ 
+                    flex: 1, 
+                    minWidth: window.innerWidth < 768 ? '100%' : 'auto',
+                    marginBottom: window.innerWidth < 768 ? 8 : 0
+                  }}>
+                    <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rework Quantity</Text>
+                    <div style={{ marginTop: 4, fontWeight: 700, color: '#FA8C16', fontSize: 16 }}>
+                      {reworkData.rework_quantity || 0}
+                    </div>
+                  </div>
+                  <div style={{ 
+                    flex: 2, 
+                    minWidth: window.innerWidth < 768 ? '100%' : 'auto'
+                  }}>
+                    <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Remarks</Text>
+                    <div style={{ 
+                      marginTop: 4, 
+                      fontWeight: 600, 
+                      color: '#8C4A00', 
+                      fontSize: 12,
+                      wordBreak: 'break-word',
+                      maxWidth: '100%'
+                    }}>
+                      {reworkData.remarks || 'No remarks'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </Card>
         </Col>
 
         <Col xs={24} lg={8}>
-          <Card
-            title={
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Space>
-                  <ProfileOutlined style={{ color: '#1677FF' }} />
-                  <span>Production Progress</span>
-                </Space>
-                <Tag color="default">No operation</Tag>
-              </div>
-            }
-            style={{ borderRadius: '16px', height: cardHeight, display: 'flex', flexDirection: 'column' }}
-            headStyle={{ borderRadius: '16px 16px 0 0' }}
-            bodyStyle={{ padding: 16, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}
-          >
-            <div
-              style={{
-                background: '#E6F4FF',
-                border: '1px solid #e6e6e6',
-                borderRadius: 12,
-                padding: 16,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <Text style={{ fontWeight: 600 }}>Production Log Entry</Text>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 12, color: '#64748b' }}>
-                <span style={{ fontWeight: 600, color: '#1677FF' }}>Time</span>
-                <span>Qty</span>
-                <span>Log</span>
-              </div>
-              <Row gutter={12} style={{ marginBottom: 12 }}>
-                <Col xs={24} md={12}>
-                  <Text style={{ display: 'block', marginBottom: 6 }}>From Date & Time</Text>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <DatePicker style={{ flex: 1 }} />
-                    <Select placeholder="Hour" style={{ width: 90 }}>
-                      {hourOptions.map(h => <Option key={h} value={h}>{h}</Option>)}
-                    </Select>
-                    <Select placeholder="Minute" style={{ width: 110 }}>
-                      {minuteOptions.map(m => <Option key={m} value={m}>{m}</Option>)}
-                    </Select>
-                  </div>
-                </Col>
-                <Col xs={24} md={12}>
-                  <Text style={{ display: 'block', marginBottom: 6 }}>To Date & Time</Text>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <DatePicker style={{ flex: 1 }} />
-                    <Select placeholder="Hour" style={{ width: 90 }}>
-                      {hourOptions.map(h => <Option key={h} value={h}>{h}</Option>)}
-                    </Select>
-                    <Select placeholder="Minute" style={{ width: 110 }}>
-                      {minuteOptions.map(m => <Option key={m} value={m}>{m}</Option>)}
-                    </Select>
-                  </div>
-                </Col>
-              </Row>
-              <Text style={{ display: 'block', marginBottom: 6 }}>Notes (optional)</Text>
-              <TextArea rows={3} placeholder="Enter notes" />
-              <Button
-                disabled
-                block
-                style={{
-                  marginTop: 12,
-                  background: '#EEF2FF',
-                  color: '#64748b',
-                  borderColor: '#e6e6e6',
-                }}
-              >
-                Submit Production Log
-              </Button>
-            </div>
-            <div
-              style={{
-                marginTop: 12,
-                background: '#FFFFFF',
-                border: '1px solid #e6e6e6',
-                borderRadius: 12,
-                padding: 16,
-                textAlign: 'center',
-                color: '#64748b',
-              }}
-            >
-              <div style={{ fontSize: 13 }}>No operation selected</div>
-              <div style={{ fontSize: 12 }}>Select an operation to log production</div>
-            </div>
-          </Card>
+          <ProductionLog 
+            isActivated={isActivated} 
+            selectedJob={selectedJob} 
+            cardHeight={cardHeight} 
+            onProductionSubmit={handleProductionSubmit}
+          />
         </Col>
 
         <Col xs={24} lg={8}>
@@ -319,7 +399,7 @@ const Dashboard = () => {
             }
             style={{ borderRadius: '16px', height: cardHeight, display: 'flex', flexDirection: 'column' }}
             headStyle={{ borderRadius: '16px 16px 0 0' }}
-            bodyStyle={{ padding: 16, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}
+            bodyStyle={{ padding: 16, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'auto' }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ background: '#E6F4FF', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
@@ -337,21 +417,41 @@ const Dashboard = () => {
                   {selectedJob?.part_number || 'None'}
                 </div>
                 <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                  {selectedJob?.operation_name || selectedJob?.part_name || 'No description'}
+                  {selectedJob?.part_name || 'No description'}
                 </div>
               </div>
-              <div style={{ background: '#fff', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={{ color: '#64748b' }}>Current Operation</Text>
-                  <Tag>{selectedJob ? 'Selected' : 'Not Selected'}</Tag>
+              {selectedJob && (
+                <div style={{ background: '#f0f7ff', borderRadius: 12, padding: 12, border: '1px solid #d4e8ff' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                    <ClockCircleOutlined style={{ color: '#52c41a', fontSize: 14 }} />
+                    <Text strong style={{ color: '#1677FF', fontSize: 13 }}>Job Schedule</Text>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ marginBottom: 6 }}>
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Start Date & Time</Text>
+                      <Text strong style={{ fontSize: 12, color: '#52c41a' }}>
+                        {selectedJob.planned_start_time
+                          ? (() => { 
+                              const d = new Date(selectedJob.planned_start_time); 
+                              return d.toLocaleDateString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); 
+                            })()
+                          : 'N/A'}
+                      </Text>
+                    </div>
+                    <div>
+                      <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>End Date & Time</Text>
+                      <Text strong style={{ fontSize: 12, color: '#f5222d' }}>
+                        {selectedJob.planned_end_time
+                          ? (() => { 
+                              const d = new Date(selectedJob.planned_end_time); 
+                              return d.toLocaleDateString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }); 
+                            })()
+                          : 'N/A'}
+                      </Text>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ marginTop: 8, color: '#94a3b8' }}>
-                  {selectedJob ? 'Operation in progress' : 'No operation selected'}
-                </div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                  {selectedJob ? 'View details in the Operations tab' : 'Select an operation from the Select Job'}
-                </div>
-              </div>
+              )}
             </div>
           </Card>
         </Col>
@@ -361,7 +461,12 @@ const Dashboard = () => {
       <Row gutter={[24, 24]} style={{ marginTop: 24, marginBottom: 8 }}>
         {/* Documents / Operations */}
         <Col xs={24} lg={16}>
-          <PartDocumentTab selectedJob={selectedJob} />
+          <PartDocumentTab 
+            selectedJob={selectedJob} 
+            isActivated={isActivated}
+            onActivate={() => setIsActivated(true)}
+            completedQuantity={completedQuantity}
+          />
         </Col>
 
         {/* Poka Yoke & Operator Handover (single card) */}
@@ -421,7 +526,16 @@ const Dashboard = () => {
         onClose={() => setShowSelectJob(false)}
         onSelectJob={(job) => {
           setSelectedJob(job);
+          const isJobActivated = [job.status, job.operation_status].some(s => {
+            const up = s?.toString().toUpperCase();
+            return up === 'INPROGRESS' || up === 'IN-PROGRESS' || up === 'IN PROGRESS';
+          });
+          setIsActivated(isJobActivated);
           setShowSelectJob(false);
+          
+          // Fetch rework data for this operation
+          const operationId = job.id || job.operation_id || job.job_id || job.schedule_id;
+          fetchReworkData(operationId);
         }}
       />
     </div>

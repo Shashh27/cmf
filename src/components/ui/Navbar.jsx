@@ -114,6 +114,7 @@ const Navbar = ({ collapsed }) => {
 
   const getTitle = () => {
     const path = location.pathname;
+    if (path.includes('/production_logs')) return 'Production Logs';
     if (path.includes('/dashboard')) return 'Dashboard';
     if (path.includes('/oms/orders')) return 'Orders';
     if (path.includes('/oms/parts-priority')) {
@@ -126,7 +127,7 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/pdm')) return 'Product Data Management';
     if (path.includes('/pps')) return 'Production Planning System';
     if (path.includes('/configuration')) return 'Configuration';
-    if (path.includes('/product-monitoring')) return 'Product Monitoring';
+    if (path.includes('/product-monitoring')) return 'Production Monitoring';
     if (path.includes('/quality-management')) return 'Quality Management';
     if (path.includes('/inventory-management')) return 'Inventory Management';
     if (path.includes('/document-management')) return 'Document Management';
