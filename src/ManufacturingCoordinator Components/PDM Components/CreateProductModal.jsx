@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 
 import axios from "axios";
 
-import { API_BASE_URL } from "../../Config/auth";
+import { API_BASE_URL } from "../Config/auth";
 
 import { Modal, Form, Input, Select, Button, message, Badge } from "antd";
 
@@ -1064,22 +1064,10 @@ const CreateProductModal = ({
 
                   </Form.Item>
 
-                  {/* Vendor Selection for Out-Source Parts */}
-                  <Form.Item
-                    name="vendor_id"
-                    label={<span className="text-xs sm:text-sm">Vendor</span>}
-                    rules={[{ required: true, message: 'Please select a vendor for outsourced parts!' }]}
-                  >
-                    <Select placeholder="Select vendor" allowClear showSearch optionFilterProp="children" size="large">
-                      {vendors.map(vendor => (
-                        <Select.Option key={vendor.id} value={vendor.id}>
-                          {vendor.company_name}
-                        </Select.Option>
-                      ))}
-                    </Select>
-                  </Form.Item>
                 );
+
               }}
+
             </Form.Item>
 
 
@@ -1256,6 +1244,32 @@ const CreateProductModal = ({
 
               }}
 
+            </Form.Item>
+
+            {/* Vendor Selection for Out-Source Parts */}
+            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.type_id !== curr.type_id}>
+              {({ getFieldValue }) => {
+                const typeId = getFieldValue('type_id');
+                const isOutSource = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('out');
+                
+                if (!isOutSource) return null;
+                
+                return (
+                  <Form.Item
+                    name="vendor_id"
+                    label={<span className="text-xs sm:text-sm">Vendor</span>}
+                    rules={[{ required: true, message: 'Please select a vendor for outsourced parts!' }]}
+                  >
+                    <Select placeholder="Select vendor" allowClear showSearch optionFilterProp="children" size="large">
+                      {vendors.map(vendor => (
+                        <Select.Option key={vendor.id} value={vendor.id}>
+                          {vendor.company_name}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                );
+              }}
             </Form.Item>
 
           </>
