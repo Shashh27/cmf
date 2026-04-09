@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from "react-
 import Layout from "./components/Layout";
 import Login from "./Pages/Login";
 import OMS from "./Pages/OMS";
-import PartsPriority from "./OMS Components/PartsPriority";
+import PartsPriority from "./ManufacturingCoordinator Components/OMS Components/PartsPriority";
 import RawMaterials from "./Pages/RawMaterials";
 import PDM from "./Pages/PDM";
 import Configuration from "./Pages/Configuration";
@@ -20,6 +20,7 @@ import Notification from "./Pages/Notification";
 import AccessControl from "./Pages/AccessControl";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
+import SupervisorDashboard from "./Pages/SupervisorDashboard";
 
 function App() {
   return (
@@ -85,7 +86,7 @@ function App() {
           <Route path="/manufacturing_coordinator/dashboard" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/oms" element={<Navigate to="/manufacturing_coordinator/oms/orders" replace />} />
           <Route path="/manufacturing_coordinator/oms/orders" element={<ManufacturingCoordinator />} />
-          <Route path="/manufacturing_coordinator/oms/parts-priority" element={<Navigate to="/manufacturing_coordinator/dashboard" replace />} />
+          <Route path="/manufacturing_coordinator/oms/parts-priority" element={<PartsPriority />} />
           <Route path="/manufacturing_coordinator/oms/pdm" element={<Navigate to="/manufacturing_coordinator/dashboard" replace />} />
           <Route path="/manufacturing_coordinator/rawmaterials" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/oms/product/:productId" element={<ManufacturingCoordinator />} />
@@ -111,7 +112,8 @@ function App() {
           <Route path="/manufacturing_coordinator/configuration" element={<Configuration />} />
           
           {/* Supervisor */}
-          <Route path="/supervisor" element={<Navigate to="/login" replace />} />
+          <Route path="/supervisor" element={<Navigate to="/supervisor/production_logs" replace />} />
+          <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
           
           {/* Inventory Supervisor */}
           <Route path="/inventory_supervisor" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />

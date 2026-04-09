@@ -65,7 +65,7 @@ const getTimeRange = (viewType, dateRange, scheduleData) => {
   let start, end;
   if (dateRange && dateRange[0] && dateRange[1]) {
     start = moment(dateRange[0]).hour(8).minute(30).second(0).toDate();
-    end   = moment(dateRange[1]).hour(17).minute(30).second(0).toDate();
+    end   = moment(dateRange[1]).hour(17).minute(0).second(0).toDate();
   } else {
     switch (viewType) {
       case 'year':
@@ -78,12 +78,12 @@ const getTimeRange = (viewType, dateRange, scheduleData) => {
         break;
       case 'day':
         start = now.clone().startOf('day').hour(8).minute(30).toDate();
-        end   = now.clone().endOf('day').hour(17).minute(30).toDate();
+        end   = now.clone().endOf('day').hour(17).minute(0).toDate();
         break;
       case 'week':
       default:
         start = now.clone().startOf('isoWeek').hour(8).minute(30).toDate();
-        end   = now.clone().startOf('isoWeek').add(4,'days').hour(17).minute(30).toDate();
+        end   = now.clone().startOf('isoWeek').add(4,'days').hour(17).minute(0).toDate();
     }
   }
 
@@ -142,6 +142,11 @@ const MachineScheduling = () => {
   const [helpOpen,                 setHelpOpen]                 = useState(false);
   const [updateModalOpen,          setUpdateModalOpen]          = useState(false);
   const [updateScheduleLoading,    setUpdateScheduleLoading]    = useState(false);
+  const [skippedData,              setSkippedData]              = useState({
+    skipped_orders: [],
+    skipped_parts: [],
+    parts_without_operations: []
+  });
 
   const timelineRef          = useRef(null);
   const timelineContainerRef = useRef(null);
@@ -187,8 +192,17 @@ const MachineScheduling = () => {
         headers: { 'accept': 'application/json' },
       });
       if (res.ok) {
+        const data = await res.json();
         setUpdateModalOpen(false);
         message.success('Schedule generated');
+        
+        // Store skipped data
+        setSkippedData({
+          skipped_orders: data.skipped_orders || [],
+          skipped_parts: data.skipped_parts || [],
+          parts_without_operations: data.parts_without_operations || []
+        });
+        
         await fetchSchedule();
       } else {
         const err = await res.text().catch(() => '');
@@ -303,7 +317,7 @@ const MachineScheduling = () => {
             return {
               id:        index,
               group:     op.machineId,
-              content:   `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.production_order}</div><div style="font-size:10px;opacity:0.85;">${op.component} · ${op.description}</div></div>`,
+              content:   `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.component}</div><div style="font-size:10px;opacity:0.85;">${op.production_order} · ${op.description}</div></div>`,
               start:     start,
               end:       end,
               className: `order-${op.production_order.replace(/[^a-zA-Z0-9]/g, '-')}`,
@@ -419,7 +433,7 @@ const MachineScheduling = () => {
           hiddenDates: [
             // Standardize hidden periods to avoid fractional shifts on subsequent days
             { start:'1970-01-01 00:00:00', end:'1970-01-01 09:00:00', repeat:'daily' },
-            { start:'1970-01-01 18:00:00', end:'1970-01-01 23:59:59', repeat:'daily' },
+            { start:'1970-01-01 17:00:00', end:'1970-01-01 23:59:59', repeat:'daily' },
             // Weekend hide (exact day boundaries)
             { start:'1970-01-03 00:00:00', end:'1970-01-05 00:00:00', repeat:'weekly' },
           ],
@@ -513,6 +527,7 @@ const MachineScheduling = () => {
 
                 <DatePicker.RangePicker
                   size="small"
+                  format="DD-MM-YYYY"
                   value={
                     dateRange
                       ? [dayjs(dateRange[0].format('YYYY-MM-DD')), dayjs(dateRange[1].format('YYYY-MM-DD'))]
@@ -536,7 +551,7 @@ const MachineScheduling = () => {
                     return label.toLowerCase().includes(input.toLowerCase());
                   }}
                   value={selectedMachines} onChange={setSelectedMachines}
-                  style={{ minWidth:190 }} allowClear size="small" maxTagCount={1}
+                  style={{ minWidth:210 }} allowClear size="small" maxTagCount={1}
                 >
                   {availableMachines.map(m => (
                     <Option key={m.machineId} value={m.machineId} label={m.displayName}>
@@ -575,7 +590,7 @@ const MachineScheduling = () => {
                   }}
                   value={selectedComponents}
                   onChange={setSelectedComponents}
-                  style={{ minWidth:160 }} allowClear size="small" maxTagCount={1}
+                  style={{ minWidth:260 }} allowClear size="small" maxTagCount={1}
                 >
                   {parts.map(p => (
                     <Option key={p.id} value={p.part_number} label={`${p.part_name || ''} (${p.part_number})`}>
@@ -602,6 +617,41 @@ const MachineScheduling = () => {
 
                 <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background:'#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
                 <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
+              </div>
+
+              {/* Skipped Information Box */}
+              <div style={{ padding:'0 16px 12px' }}>
+                <Card size="small" style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
+                  <div style={{ display:'flex', gap:16, flexWrap:'wrap', fontSize:'12px' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ fontWeight:600, color:'#1677ff' }}>Skipped Orders:</span>
+                      <span style={{ color:'#666' }}>
+                        {skippedData.skipped_orders.length > 0 
+                          ? skippedData.skipped_orders.join(', ')
+                          : 'No orders skipped'
+                        }
+                      </span>
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ fontWeight:600, color:'#1677ff' }}>Skipped Parts:</span>
+                      <span style={{ color:'#666' }}>
+                        {skippedData.skipped_parts.length > 0 
+                          ? skippedData.skipped_parts.join(', ')
+                          : 'No parts skipped'
+                        }
+                      </span>
+                    </div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ fontWeight:600, color:'#1677ff' }}>Parts Without Operations:</span>
+                      <span style={{ color:'#666' }}>
+                        {skippedData.parts_without_operations.length > 0 
+                          ? skippedData.parts_without_operations.map(part => part.part_number).join(', ')
+                          : 'No parts without operations'
+                        }
+                      </span>
+                    </div>
+                  </div>
+                </Card>
               </div>
 
               {/* Timeline - scrollable when many machines */}

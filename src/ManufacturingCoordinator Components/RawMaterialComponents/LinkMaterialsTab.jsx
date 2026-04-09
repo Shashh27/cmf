@@ -66,7 +66,9 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       const response = await axios.get(`${API_BASE_URL}/orders/`, {
         params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
       });
-      setOrders(response.data || []);
+      // Filter out orders that already have raw materials linked
+      const availableOrders = (response.data || []).filter(order => !order.has_raw_materials);
+      setOrders(availableOrders);
       setOrdersFetched(true);
     } catch (error) {
       console.error("Error fetching orders:", error);
@@ -243,7 +245,6 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         }
       }
     } catch (error) {
-      console.error('Error creating enquiry stock:', error);
       message.error('Failed to send enquiry: ' + (error.response?.data?.detail || error.message));
     } finally {
       setAddStockLoading(false);
@@ -364,7 +365,6 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         }
       }
     } catch (error) {
-      console.error('Error adding stock:', error);
       message.error('Failed to add stock: ' + (error.response?.data?.detail || error.message));
     } finally {
       setAddStockLoading(false);

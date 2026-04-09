@@ -165,9 +165,9 @@ const Login = () => {
           } else if (actual.includes('manufacturing coordinator')) {
              navigate('/manufacturing_coordinator/dashboard');
           } else if (actual.includes('inventory supervisor')) {
-             navigate('/inventory_supervisor/dashboard');
+             navigate('/inventory_supervisor/inventory-management/inventory-master');
           } else if (actual.includes('supervisor')) {
-             navigate('/supervisor/dashboard');
+             navigate('/supervisor/production_logs');
           } else {
              navigate('/operator/dashboard');
           }
