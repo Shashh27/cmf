@@ -192,7 +192,9 @@ class Part(Base):
 
     type_id = Column(Integer, ForeignKey("oms.part_types.id"))
 
-    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"))
+    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=True)  # Legacy field
+    
+    raw_material_stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=True)  # New field for specific stock
 
     part_detail = Column(String, nullable=True)  # For out-source: WITH_RAW_MATERIAL | WITHOUT_RAW_MATERIAL
 
@@ -205,6 +207,10 @@ class Part(Base):
     size = Column(String, nullable=True)  # Optional size field (e.g., "25x25x160", "Ø210x110", "Tyre Coupling F160 Type:B")
 
     qty = Column(Integer, nullable=True, default=1)  # Optional quantity field, defaults to 1
+    
+    raw_material_required_quantity = Column(Float, nullable=True)  # Required quantity per part for order-linked materials
+
+    vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Vendor for outsourced parts
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -215,6 +221,10 @@ class Part(Base):
     type = relationship("PartType", back_populates="parts")
 
     raw_material = relationship("RawMaterial")
+
+    raw_material_stock = relationship("RawMaterialStock")
+
+    vendor = relationship("Vendors", foreign_keys=[vendor_id])
 
     assembly = relationship("Assembly", back_populates="parts")
 
@@ -237,8 +247,6 @@ class Part(Base):
     documents = relationship("Document", back_populates="part", cascade="all, delete-orphan")
 
     tools = relationship("ToolWithPart", back_populates="part", cascade="all, delete-orphan")
-
-    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="part", cascade="all, delete-orphan")
 
 
 
@@ -292,6 +300,8 @@ class Operation(Base):
 
     notes = Column(Text, nullable=True)
 
+    vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Vendor for outsourced operations
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -303,6 +313,8 @@ class Operation(Base):
     part_type = relationship("PartType", back_populates="operations")
 
     machine = relationship("DB.models.configuration.Machine")
+
+    vendor = relationship("Vendors", foreign_keys=[vendor_id])
 
     user = relationship("AccessUser")
 
@@ -480,8 +492,6 @@ class Order(Base):
 
     order_documents = relationship("OrderDocument", back_populates="order", cascade="all, delete-orphan")
 
-    raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="order", cascade="all, delete-orphan")
-
     part_priorities = relationship("OrderPartPriority", back_populates="order", cascade="all, delete-orphan")
 
 
@@ -597,63 +607,6 @@ class OperationDocument(Base):
 
 
 # =======================
-
-# Order Parts Raw Material Linked
-
-# =======================
-
-class OrderPartsRawMaterialLinked(Base):
-
-    __tablename__ = "order_parts_raw_material_linked"
-
-    __table_args__ = {'schema': 'oms'}
-
-
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-
-    stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=False)
-
-    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
-
-    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
-
-    used_quantity = Column(Integer, nullable=False, default=1)  # Quantity used from this stock
-
-    linkage_group_id = Column(String, nullable=True)  # Segregates demand batches (e.g. 20 kg vs 5 kg)
-
-    # Procurement fields
-    is_procurement = Column(Boolean, nullable=False, default=False)  # True if this is a procurement request
-    procurement_quantity = Column(Integer, nullable=True)  # Quantity to procure
-    procurement_weight = Column(Float, nullable=True)  # Weight in kg to procure
-    vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Selected vendor
-    procurement_status = Column(String, nullable=False, default="pending")  # pending, ordered, received
-
-     # Manufacturing coordinator responsible for this linkage (optional)
-
-    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
-
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
-
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-
-
-    # Relationships
-
-    stock_item = relationship("RawMaterialStock", back_populates="usage_links")
-
-    part = relationship("Part")
-
-    order = relationship("Order")
-
-    user = relationship("AccessUser")
-
-    vendor = relationship("Vendors")
-
-
-
-
 
 # =======================
 

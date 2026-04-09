@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, func
+from sqlalchemy.orm import relationship
 from ..database import Base
 
 class AccessUser(Base):
@@ -14,3 +15,4 @@ class AccessUser(Base):
     password = Column(String, nullable=False)
     createdAt = Column(DateTime, default=func.now())
     updatedAt = Column(DateTime, default=func.now(), onupdate=func.now())
+

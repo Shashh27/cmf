@@ -10,7 +10,6 @@ from DB.models.oms import (
     Operation as OperationModel,
     Document as DocumentModel,
     ToolWithPart as ToolWithPartModel,
-    OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
     OrderPartPriority as OrderPartPriorityModel,
     Order as OrderModel,
     OperationDocument as OperationDocumentModel,
@@ -222,10 +221,6 @@ def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
 
         db.query(ToolWithPartModel).filter(
             ToolWithPartModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        db.query(OrderPartsRawMaterialLinkedModel).filter(
-            OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
         ).delete(synchronize_session=False)
 
         db.query(PartModel).filter(PartModel.id.in_(part_ids)).delete(

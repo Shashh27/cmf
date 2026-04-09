@@ -16,13 +16,12 @@ from DB.models.oms import (
     Operation as OperationModel,
     Document as DocumentModel,
     ToolWithPart as ToolWithPartModel,
-    OrderPartsRawMaterialLinked as OrderPartsRawMaterialLinkedModel,
     OperationDocument as OperationDocumentModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
     DocumentExtractedData as DocumentExtractedDataModel,
 )
 from DB.models.configuration import PokayokeCompletedLog
-from DB.models.inventory import RawMaterial
+from DB.models.inventory import RawMaterial, RawMaterialStock, Vendors
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
 
@@ -33,31 +32,69 @@ router = APIRouter(
 
 
 def _build_part_maps(db: Session):
-    """Fetch PartType, RawMaterial, and AccessUser rows once and return id→value maps."""
+    """Fetch PartType, RawMaterial, RawMaterialStock, AccessUser, and Vendors rows once and return id→value maps."""
     type_map = {pt.id: pt.type_name for pt in db.query(PartType).all()}
     rm_map = {rm.id: rm.material_name for rm in db.query(RawMaterial).all()}
+    stock_map = {stock.id: stock for stock in db.query(RawMaterialStock).all()}
     user_map = {u.id: u.user_name for u in db.query(AccessUser).all()}
-    return type_map, rm_map, user_map
+    vendor_map = {v.id: v.company_name for v in db.query(Vendors).all()}
+    return type_map, rm_map, stock_map, user_map, vendor_map
 
 
-def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, user_map: dict) -> dict:
+def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict, user_map: dict, vendor_map: dict) -> dict:
+    # Get stock details if stock_id exists
+    stock_details = None
+    stock_form_type = None
+    stock_dimensions = None
+    
+    if part.raw_material_stock_id and part.raw_material_stock_id in stock_map:
+        stock = stock_map[part.raw_material_stock_id]
+        stock_details = {
+            "id": stock.id,
+            "form_type": stock.form_type,
+            "quantity": stock.quantity,
+            "diameter": stock.diameter,
+            "length": stock.length,
+            "breadth": stock.breadth,
+            "height": stock.height,
+            "inner_diameter": stock.inner_diameter,
+            "outer_diameter": stock.outer_diameter,
+            "status": stock.status
+        }
+        stock_form_type = stock.form_type
+        
+        # Format dimensions string
+        if stock.form_type == 'Round':
+            stock_dimensions = f"⌀{stock.diameter} × {stock.length}mm"
+        elif stock.form_type == 'Square':
+            stock_dimensions = f"{stock.breadth} × {stock.height} × {stock.length}mm"
+        elif stock.form_type == 'Pipe':
+            stock_dimensions = f"⌀{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm"
+        else:
+            stock_dimensions = "Custom"
+    
     return {
         "id": part.id,
         "part_name": part.part_name,
         "part_number": part.part_number,
         "type_id": part.type_id,
         "raw_material_id": part.raw_material_id,
+        "raw_material_stock_id": part.raw_material_stock_id,
         "part_detail": part.part_detail,
         "assembly_id": part.assembly_id,
         "product_id": part.product_id,
         "user_id": part.user_id,
-        "size": part.size,  # New optional size field
-        "qty": part.qty,    # New optional quantity field
-        "size": part.size,  # New optional size field
-        "qty": part.qty,    # New optional quantity field
+        "size": part.size,
+        "qty": part.qty,
+        "raw_material_required_quantity": part.raw_material_required_quantity,
+        "vendor_id": part.vendor_id,
         "type_name": type_map.get(part.type_id),
         "raw_material_name": rm_map.get(part.raw_material_id),
+        "raw_material_stock_details": stock_details,
+        "raw_material_stock_form_type": stock_form_type,
+        "raw_material_stock_dimensions": stock_dimensions,
         "user_name": user_map.get(part.user_id) if part.user_id else None,
+        "vendor_name": vendor_map.get(part.vendor_id) if part.vendor_id else None,
         "created_at": part.created_at,
         "updated_at": part.updated_at,
     }
@@ -73,10 +110,45 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
             detail=f"Part with number {part.part_number} already exists"
         )
 
+    # Check if raw material allocation is needed
+    needs_allocation = part.raw_material_stock_id and part.raw_material_required_quantity
+    
+    if needs_allocation:
+        # Validate stock availability before creating part
+        stock = db.query(RawMaterialStock).filter(RawMaterialStock.id == part.raw_material_stock_id).first()
+        if not stock:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Stock item with id {part.raw_material_stock_id} not found"
+            )
+        
+        if stock.available_quantity < part.raw_material_required_quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient material. Available: {stock.available_quantity}, Required: {part.raw_material_required_quantity}"
+            )
+
+    # Create the part first
     db_part = PartModel(**part.model_dump())
     db.add(db_part)
     db.commit()
     db.refresh(db_part)
+    
+    # Now do the allocation since we have the part ID
+    if needs_allocation:
+        try:
+            from services.raw_material_tracking import RawMaterialTrackingService
+            allocation_result = RawMaterialTrackingService.allocate_raw_material_to_part(
+                db, db_part.id, part.raw_material_stock_id, part.raw_material_required_quantity, part.user_id or 30
+            )
+        except Exception as e:
+            # If allocation fails, delete the part and raise error
+            db.delete(db_part)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Raw material allocation failed: {str(e)}"
+            )
 
     # Automatic OrderPartPriority creation disabled
     # if db_part.product_id and db_part.type_id:
@@ -94,8 +166,8 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     #             db.add(priority_entry)
     #         db.commit()
 
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return _part_to_dict(db_part, type_map, rm_map, user_map)
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map, vendor_map)
 
 
 @router.get("/", response_model=List[Part])
@@ -105,8 +177,8 @@ def get_parts(user_id: int | None = None, db: Session = Depends(get_db)):
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/{part_id}", response_model=Part)
@@ -118,8 +190,8 @@ def get_part(part_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {part_id} not found"
         )
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return _part_to_dict(part, type_map, rm_map, user_map)
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(part, type_map, rm_map, stock_map, user_map, vendor_map)
 
 
 @router.get("/product/{product_id}", response_model=List[Part])
@@ -129,8 +201,8 @@ def get_parts_by_product(product_id: int, user_id: int | None = None, db: Sessio
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/assembly/{assembly_id}", response_model=List[Part])
@@ -140,8 +212,8 @@ def get_parts_by_assembly(assembly_id: int, user_id: int | None = None, db: Sess
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/type/{type_id}", response_model=List[Part])
@@ -151,8 +223,8 @@ def get_parts_by_type(type_id: int, user_id: int | None = None, db: Session = De
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, user_map) for p in parts]
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
 
 
 @router.put("/{part_id}", response_model=Part)
@@ -166,13 +238,79 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
         )
 
     update_data = part.model_dump(exclude_unset=True)
+    
+    # Check if raw material allocation is being updated
+    is_updating_raw_material = any(key in update_data for key in [
+        'raw_material_stock_id', 'raw_material_required_quantity'
+    ])
+    
+    # If updating raw material allocation, handle the allocation logic
+    if is_updating_raw_material:
+        new_stock_id = update_data.get('raw_material_stock_id')
+        new_required_quantity = update_data.get('raw_material_required_quantity')
+        
+        # Case 1: Same stock, different quantity (partial update)
+        if new_stock_id == db_part.raw_material_stock_id and new_required_quantity is not None:
+            if new_required_quantity != db_part.raw_material_required_quantity:
+                try:
+                    from services.raw_material_tracking import RawMaterialTrackingService
+                    RawMaterialTrackingService.update_raw_material_allocation(
+                        db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
+                    )
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Raw material allocation update failed: {str(e)}"
+                    )
+        
+        # Case 2: Different stock or new allocation
+        elif new_stock_id != db_part.raw_material_stock_id:
+            # If there's an existing allocation, deallocate it first
+            if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+                try:
+                    from services.raw_material_tracking import RawMaterialTrackingService
+                    RawMaterialTrackingService.deallocate_raw_material_from_part(
+                        db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
+                    )
+                except Exception as e:
+                    # Log error but continue with new allocation
+                    print(f"Warning: Could not deallocate previous material: {e}")
+            
+            # If new allocation is provided, allocate it
+            if new_stock_id and new_required_quantity:
+                try:
+                    from services.raw_material_tracking import RawMaterialTrackingService
+                    RawMaterialTrackingService.allocate_raw_material_to_part(
+                        db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
+                    )
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Raw material allocation failed: {str(e)}"
+                    )
+        
+        # Case 3: Clearing allocation (setting to null/0)
+        elif not new_stock_id or not new_required_quantity:
+            # If there's an existing allocation, deallocate it
+            if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+                try:
+                    from services.raw_material_tracking import RawMaterialTrackingService
+                    RawMaterialTrackingService.deallocate_raw_material_from_part(
+                        db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
+                    )
+                except Exception as e:
+                    # Log error but continue
+                    print(f"Warning: Could not deallocate material: {e}")
+    
+    # Update other fields normally (but skip raw material fields as they're handled above)
     for field, value in update_data.items():
-        setattr(db_part, field, value)
+        if field not in ['raw_material_stock_id', 'raw_material_required_quantity']:
+            setattr(db_part, field, value)
 
     db.commit()
     db.refresh(db_part)
-    type_map, rm_map, user_map = _build_part_maps(db)
-    return _part_to_dict(db_part, type_map, rm_map, user_map)
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map, vendor_map)
 
 
 @router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -251,7 +389,6 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             DocumentExtractedDataModel.part_id == part_id
         ).delete(synchronize_session=False)
 
-        # Now delete the documents associated with this part
         db.query(DocumentModel).filter(DocumentModel.part_id == part_id).delete(
             synchronize_session=False
         )
@@ -261,12 +398,7 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             OutSourcePartStatusModel.part_id == part_id
         ).delete(synchronize_session=False)
 
-        # 6. Delete raw material links
-        db.query(OrderPartsRawMaterialLinkedModel).filter(
-            OrderPartsRawMaterialLinkedModel.part_id == part_id
-        ).delete(synchronize_session=False)
-
-        # 7. Delete component_issues records that reference this part
+        # 6. Delete component_issues records that reference this part
         db.execute(
             text("DELETE FROM maintenance.component_issues WHERE part_id = :pid"),
             {"pid": part_id}
@@ -302,6 +434,18 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             text("DELETE FROM inventory.inventory_requests WHERE part_id = :pid"),
             {"pid": part_id}
         )
+
+        # 10. Deallocate raw material if this part has any allocated
+        if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+            try:
+                from services.raw_material_tracking import RawMaterialTrackingService
+                RawMaterialTrackingService.deallocate_raw_material_from_part(
+                    db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 30
+                )
+                print(f" Deallocated {db_part.raw_material_required_quantity} units from stock {db_part.raw_material_stock_id}")
+            except Exception as e:
+                # Log error but don't fail the deletion
+                print(f"Warning: Could not deallocate raw material: {e}")
 
         # Finally, delete the part itself
         db.delete(db_part)
@@ -510,7 +654,7 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
     duplicates: list[str]  = []
     errors:     list[dict] = []
  
-    type_map, rm_map, user_map = _build_part_maps(db)
+    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
  
     # Pre-check all part numbers in ONE query to avoid N round-trips
     incoming_numbers = [item.part_number for item in payload.parts if item.part_number]
@@ -533,12 +677,12 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
             db_part = PartModel(**item.model_dump())
             db.add(db_part)
             db.flush()   # assign id without committing yet
-            created.append(_part_to_dict(db_part, type_map, rm_map, user_map))
+            created.append(_part_to_dict(db_part, type_map, rm_map, stock_map, user_map))
             existing_numbers.add(item.part_number)   # prevent intra-batch dupes
         except Exception as exc:
             db.rollback()
             errors.append({"part_number": item.part_number, "error": str(exc)})
-            type_map, rm_map, user_map = _build_part_maps(db)
+            type_map, rm_map, stock_map, user_map = _build_part_maps(db)
  
     # Single commit for all successful inserts
     if created:
@@ -555,9 +699,10 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
 
 
 class BulkDeleteResult(BaseModel):
-    assembly_id:   int
+    assembly_id: int | None = None
+    product_id: int | None = None
     deleted_count: int
-    part_ids:      list[int]
+    part_ids: list[int]
 
 
 @router.delete(
@@ -663,17 +808,12 @@ def bulk_delete_parts_by_assembly(assembly_id: int, db: Session = Depends(get_db
             DocumentModel.part_id.in_(part_ids)
         ).delete(synchronize_session=False)
 
-        # ── 7. OutSource part status ──────────────────────────────────────────
+        # ── 7. Out-source part statuses ─────────────────────────────────────
         db.query(OutSourcePartStatusModel).filter(
             OutSourcePartStatusModel.part_id.in_(part_ids)
         ).delete(synchronize_session=False)
 
-        # ── 8. Raw material links ─────────────────────────────────────────────
-        db.query(OrderPartsRawMaterialLinkedModel).filter(
-            OrderPartsRawMaterialLinkedModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # ── 9. Maintenance component issues ──────────────────────────────────
+        # ── 8. Maintenance component issues ──────────────────────────────────
         db.execute(
             text(
                 "DELETE FROM maintenance.component_issues "
@@ -722,6 +862,168 @@ def bulk_delete_parts_by_assembly(assembly_id: int, db: Session = Depends(get_db
 
     return BulkDeleteResult(
         assembly_id=assembly_id,
+        deleted_count=len(part_ids),
+        part_ids=part_ids,
+    )
+
+
+@router.delete(
+    "/bulk-by-product/{product_id}",
+    response_model=BulkDeleteResult,
+    status_code=status.HTTP_200_OK,
+)
+def bulk_delete_parts_by_product(product_id: int, db: Session = Depends(get_db)):
+    """
+    Delete ALL parts linked to given product_id in a single call,
+    along with every dependent record for each part — identical cleanup
+    logic to single-part DELETE /{part_id} endpoint.
+
+    Called from BillOfMaterials when user clicks
+    "Delete All Parts" for a product.
+
+    Returns count and IDs of deleted parts so the frontend can
+    update its local state without a refetch.
+    """
+    # ── 1. Find all part IDs for this product ────────────────────────────────
+    parts = (
+        db.query(PartModel)
+        .filter(PartModel.product_id == product_id)
+        .all()
+    )
+
+    if not parts:
+        # Nothing to delete — return gracefully (not a 404)
+        return BulkDeleteResult(
+            product_id=product_id,
+            deleted_count=0,
+            part_ids=[],
+        )
+
+    part_ids = [p.id for p in parts]
+
+    try:
+        # ── 2. Pokayoke logs ──────────────────────────────────────────────────
+        for part_id in part_ids:
+            result = db.execute(
+                text(
+                    "SELECT id FROM configuration.pokayoke_completed_logs "
+                    "WHERE part_id = :pid"
+                ),
+                {"pid": part_id},
+            )
+            log_ids = [row[0] for row in result]
+            for log_id in log_ids:
+                log_obj = (
+                    db.query(PokayokeCompletedLog)
+                    .filter(PokayokeCompletedLog.id == log_id)
+                    .first()
+                )
+                if log_obj:
+                    db.delete(log_obj)
+        db.flush()
+
+        # ── 3. Scheduling: part_schedule_status ──────────────────────────────
+        db.execute(
+            text(
+                "DELETE FROM scheduling.part_schedule_status "
+                "WHERE part_id = ANY(:pids)"
+            ),
+            {"pids": part_ids},
+        )
+
+        # ── 4. Order part priorities ──────────────────────────────────────────
+        db.query(OrderPartPriority).filter(
+            OrderPartPriority.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # ── 5. Operations → planned_schedule_items, documents, tools ─────────
+        operations = (
+            db.query(OperationModel)
+            .filter(OperationModel.part_id.in_(part_ids))
+            .all()
+        )
+        operation_ids = [op.id for op in operations]
+
+        if operation_ids:
+            db.execute(
+                text(
+                    "DELETE FROM scheduling.planned_schedule_items "
+                    "WHERE operation_id = ANY(:oids)"
+                ),
+                {"oids": operation_ids},
+            )
+            db.query(OperationDocumentModel).filter(
+                OperationDocumentModel.operation_id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+            db.query(ToolWithPartModel).filter(
+                ToolWithPartModel.operation_id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+            db.query(OperationModel).filter(
+                OperationModel.id.in_(operation_ids)
+            ).delete(synchronize_session=False)
+
+        # ── 6. Part documents + extracted data ───────────────────────────────
+        db.query(DocumentExtractedDataModel).filter(
+            DocumentExtractedDataModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+        db.query(DocumentModel).filter(
+            DocumentModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # ── 7. Out-source part statuses ─────────────────────────────────────
+        db.query(OutSourcePartStatusModel).filter(
+            OutSourcePartStatusModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # ── 8. Maintenance component issues ──────────────────────────────────
+        db.execute(
+            text(
+                "DELETE FROM maintenance.component_issues "
+                "WHERE part_id = ANY(:pids)"
+            ),
+            {"pids": part_ids},
+        )
+
+        # ── 10. Tools with part (not operation-linked) ────────────────────────
+        db.query(ToolWithPartModel).filter(
+            ToolWithPartModel.part_id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        # ── 11. Inventory return requests + inventory requests ────────────────
+        db.execute(
+            text(
+                "DELETE FROM inventory.inventory_return_requests "
+                "WHERE requested_id IN ("
+                "  SELECT id FROM inventory.inventory_requests "
+                "  WHERE part_id = ANY(:pids)"
+                ")"
+            ),
+            {"pids": part_ids},
+        )
+        db.execute(
+            text(
+                "DELETE FROM inventory.inventory_requests "
+                "WHERE part_id = ANY(:pids)"
+            ),
+            {"pids": part_ids},
+        )
+
+        # ── 12. Finally delete all parts ──────────────────────────────────────
+        db.query(PartModel).filter(
+            PartModel.id.in_(part_ids)
+        ).delete(synchronize_session=False)
+
+        db.commit()
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Bulk delete failed: {str(exc)}",
+        )
+
+    return BulkDeleteResult(
+        product_id=product_id,
         deleted_count=len(part_ids),
         part_ids=part_ids,
     )

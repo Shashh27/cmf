@@ -35,10 +35,7 @@ from .oms import (
     OperationDocumentCreate,
     OperationDocumentUpdate,
     OperationDocumentWithDetails,
-    OrderPartsRawMaterialLinked,
-    OrderPartsRawMaterialLinkedCreate,
-    OrderPartsRawMaterialLinkedUpdate,
-    OrderPartsRawMaterialLinkedWithDetails
+   
 )
 from .configuration import (
     WorkCenter,
@@ -65,6 +62,15 @@ from .inventory import (
     ToolsList,
     ToolsListCreate,
     ToolsListUpdate
+)
+from .scheduling import (
+    ProductionLogStatus,
+    ProductionLogBase,
+    ProductionLogCreate,
+    ProductionLogUpdate,
+    ProductionLogResponse,
+    ProductionLogWithDetails,
+    ProductionLogStatusUpdate
 )
 
 __all__ = [
@@ -104,10 +110,6 @@ __all__ = [
     "OperationDocumentCreate",
     "OperationDocumentUpdate",
     "OperationDocumentWithDetails",
-    "OrderPartsRawMaterialLinked",
-    "OrderPartsRawMaterialLinkedCreate",
-    "OrderPartsRawMaterialLinkedUpdate",
-    "OrderPartsRawMaterialLinkedWithDetails",
     "WorkCenter",
     "WorkCenterCreate",
     "WorkCenterUpdate",
@@ -127,5 +129,12 @@ __all__ = [
     "RawMaterialUpdate",
     "ToolsList",
     "ToolsListCreate",
-    "ToolsListUpdate"
+    "ToolsListUpdate",
+    "ProductionLogStatus",
+    "ProductionLogBase",
+    "ProductionLogCreate",
+    "ProductionLogUpdate",
+    "ProductionLogResponse",
+    "ProductionLogWithDetails",
+    "ProductionLogStatusUpdate"
 ]

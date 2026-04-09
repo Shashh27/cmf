@@ -42,7 +42,7 @@ from routers import (
 
     machines_router,
 
-    order_parts_raw_material_linked_router,
+
 
     operation_documents_router,
 
@@ -66,7 +66,11 @@ from routers import (
 
 )
 
+# Import scheduling router
 
+from scheduling_routers.production_logs import router as production_logs_router
+# from scheduling_routers.rawmaterials import router as rawmaterials_router  # Commented out - doesn't exist
+from routers.raw_material_tracking import router as tracking_router
 
 # Import notification routers
 
@@ -240,7 +244,7 @@ app.include_router(customers_router, prefix="/api/v1")
 
 app.include_router(orders_router, prefix="/api/v1")
 
-
+app.include_router(order_documents_router, prefix="/api/v1")
 
 app.include_router(rawmaterials_router, prefix="/api/v1")
 
@@ -250,15 +254,13 @@ app.include_router(general_documents_router, prefix="/api/v1")
 
 app.include_router(machine_documents_router, prefix="/api/v1")
 
-app.include_router(common_documents_router,prefix="/api/v1")
+app.include_router(common_documents_router, prefix="/api/v1")
 
 app.include_router(access_control_router, prefix="/api/v1")
 
 app.include_router(login_router, prefix="/api/v1")
 
 app.include_router(machines_router, prefix="/api/v1")
-
-app.include_router(order_parts_raw_material_linked_router, prefix="/api/v1")
 
 app.include_router(operation_documents_router, prefix="/api/v1")
 
@@ -279,6 +281,10 @@ app.include_router(tool_issues_router, prefix="/api/v1")
 app.include_router(out_source_parts_status_router, prefix="/api/v1")
 
 app.include_router(maintenance_router, prefix="/api/v1")
+
+app.include_router(production_logs_router, prefix="/api/v1")
+
+app.include_router(tracking_router, prefix="/api/v1")
 
 # Include notification routers
 
@@ -416,8 +422,6 @@ def system_info():
 
             "machines": "/api/v1/machines",
 
-            "order_parts_raw_material_linked": "/api/v1/order-parts-raw-material-linked",
-
             "operation_documents": "/api/v1/operation-documents",
 
             "tools_list": "/api/v1/tools-list",
@@ -430,7 +434,9 @@ def system_info():
 
             "general_documents": "/general-documents",
 
-            "maintenance": "/api/v1/maintenance"
+            "maintenance": "/api/v1/maintenance",
+            
+            "raw_material_tracking": "/api/v1/rawmaterials/tracking"
 
         }
 

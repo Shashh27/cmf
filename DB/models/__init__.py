@@ -10,7 +10,6 @@ from .oms import (
     Order,
     OrderDocument,
     OperationDocument,
-    OrderPartsRawMaterialLinked,
     OutSourcePartStatus
 )
 from .configuration import (
@@ -36,6 +35,9 @@ from .documents import (
     CommonFolder,
     CommonDocument
 )
+from .scheduling import (
+    ProductionLog
+)
 
 __all__ = [
     "Product",
@@ -46,10 +48,8 @@ __all__ = [
     "Document",
     "ToolWithPart",
     "Order",
-    "OrderScheduleStatus",
     "OrderDocument",
     "OperationDocument",
-    "OrderPartsRawMaterialLinked",
     "OutSourcePartStatus",
     "WorkCenter",
     "Machine",
@@ -66,5 +66,6 @@ __all__ = [
     "MachineDocument",
     "CommonFolder",
     "CommonDocument",
+    "ProductionLog",
     "Base"
 ]
