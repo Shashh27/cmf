@@ -343,6 +343,46 @@ def get_all_production_logs(
 
             # Get raw materials through the part relationship
             if operation.part:
+                # Add complete part details
+                part_data = {
+                    "id": operation.part.id,
+                    "part_number": operation.part.part_number,
+                    "part_name": operation.part.part_name,
+                    "quantity": operation.part.qty,
+                    "unit": "pcs"  # Default unit since Part model doesn't have unit attribute
+                }
+                operation_data["part"] = part_data
+
+                # Add product details
+                if operation.part.product:
+                    product_data = {
+                        "id": operation.part.product.id,
+                        "product_name": operation.part.product.product_name,
+                        "product_version": operation.part.product.product_version
+                    }
+                    operation_data["product"] = product_data
+
+                    # Get order details through the product relationship
+                    if operation.part.product.orders:
+                        # Get the first order associated with this product
+                        # Note: A product can have multiple orders, we'll take the first one
+                        order = operation.part.product.orders[0] if operation.part.product.orders else None
+                        if order:
+                            order_data = {
+                                "id": order.id,
+                                "sale_order_number": order.sale_order_number,
+                                "quantity": order.quantity,
+                                "status": order.status
+                            }
+                            # Add customer information if available
+                            if order.customer:
+                                order_data["customer"] = {
+                                    "id": order.customer.id,
+                                    "customer_name": getattr(order.customer, 'customer_name', 'Unknown Customer')
+                                }
+                            operation_data["order"] = order_data
+
+                # Get raw materials
                 raw_materials = []
                 # Check if part has a raw material stock assigned
                 if operation.part.raw_material_stock and operation.part.raw_material_stock.material:
@@ -447,6 +487,46 @@ def get_production_log(log_id: int, db: Session = Depends(get_db)):
 
         # Get raw materials through the part relationship
         if operation.part:
+            # Add complete part details
+            part_data = {
+                "id": operation.part.id,
+                "part_number": operation.part.part_number,
+                "part_name": operation.part.part_name,
+                "quantity": operation.part.qty,
+                "unit": "pcs"  # Default unit since Part model doesn't have unit attribute
+            }
+            operation_data["part"] = part_data
+
+            # Add product details
+            if operation.part.product:
+                product_data = {
+                    "id": operation.part.product.id,
+                    "product_name": operation.part.product.product_name,
+                    "product_version": operation.part.product.product_version
+                }
+                operation_data["product"] = product_data
+
+                # Get order details through the product relationship
+                if operation.part.product.orders:
+                    # Get the first order associated with this product
+                    # Note: A product can have multiple orders, we'll take the first one
+                    order = operation.part.product.orders[0] if operation.part.product.orders else None
+                    if order:
+                        order_data = {
+                            "id": order.id,
+                            "sale_order_number": order.sale_order_number,
+                            "quantity": order.quantity,
+                            "status": order.status
+                        }
+                        # Add customer information if available
+                        if order.customer:
+                            order_data["customer"] = {
+                                "id": order.customer.id,
+                                "customer_name": getattr(order.customer, 'customer_name', 'Unknown Customer')
+                            }
+                        operation_data["order"] = order_data
+
+            # Get raw materials
             raw_materials = []
             # Check if part has a raw material stock assigned
             if operation.part.raw_material_stock and operation.part.raw_material_stock.material:

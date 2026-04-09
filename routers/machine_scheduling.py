@@ -1676,8 +1676,9 @@ def get_machine_operations(
             raise HTTPException(404, f"Machine with ID {machine_id} not found")
 
         rows = (
-            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority, OperationStatus)
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority, OperationStatus, Part)
             .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
+            .outerjoin(Part, Part.id == PlannedScheduleItem.part_id)
             .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
             .outerjoin(
@@ -1693,7 +1694,7 @@ def get_machine_operations(
 
         # Group operations by operation_id to consolidate multiple time spans
         operation_groups = {}
-        for item, op, machine, wc, priority, operation_status in rows:
+        for item, op, machine, wc, priority, operation_status, part in rows:
             op_id = item.operation_id
             if op_id not in operation_groups:
                 # Initialize group with first operation
@@ -1703,6 +1704,7 @@ def get_machine_operations(
                     "sale_order_number": item.sale_order_number,
                     "part_id": item.part_id,
                     "part_number": item.part_number,
+                    "part_name": part.part_name if part else None,
                     "priority": priority.priority if priority else None,
                     "order_part_priority_id": priority.id if priority else None,
                     "operation_id": item.operation_id,
