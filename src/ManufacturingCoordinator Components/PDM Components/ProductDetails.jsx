@@ -132,36 +132,29 @@ const ProductDetails = ({ selectedItem }) => {
       setPartDocuments([]);
       return;
     }
-
-    // Fetch documents for this part
-    const fetchDocuments = async () => {
-      try {
-        const response = await axios.get(`${API_BASE_URL}/documents/part/${selectedItem.id}`);
-        const docs = response.data || [];
-        setPartDocuments(docs);
-        
-        // Filter and sort 3D documents
-        const filtered = docs.filter(doc => {
-          const url = (doc.document_url || "").toLowerCase();
-          const name = (doc.document_name || "").toLowerCase();
-          const target = url || name;
-          return [".stl", ".step", ".stp"].some(ext => target.endsWith(ext));
-        });
-        const sorted = [...filtered].sort((a, b) => {
-          return (a.id || 0) - (b.id || 0);
-        });
-        setThreeDDocuments(sorted);
-        setSelectedThreeDDocumentId(sorted[0]?.id || null);
-      } catch (error) {
-        console.error('Error fetching documents:', error);
-        setPartDocuments([]);
-        setThreeDDocuments([]);
-        setSelectedThreeDDocumentId(null);
-      }
-    };
-
-    fetchDocuments();
   }, [selectedItem]);
+
+  // Update 3D documents when partDocuments are loaded from DocumentsPanel
+  useEffect(() => {
+    if (!partDocuments.length) {
+      setThreeDDocuments([]);
+      setSelectedThreeDDocumentId(null);
+      return;
+    }
+
+    // Filter and sort 3D documents from the documents already fetched by DocumentsPanel
+    const filtered = partDocuments.filter(doc => {
+      const url = (doc.document_url || "").toLowerCase();
+      const name = (doc.document_name || "").toLowerCase();
+      const target = url || name;
+      return [".stl", ".step", ".stp"].some(ext => target.endsWith(ext));
+    });
+    const sorted = [...filtered].sort((a, b) => {
+      return (a.id || 0) - (b.id || 0);
+    });
+    setThreeDDocuments(sorted);
+    setSelectedThreeDDocumentId(sorted[0]?.id || null);
+  }, [partDocuments]);
 
   if (!selectedItem) {
     return (
@@ -298,36 +291,26 @@ const ProductDetails = ({ selectedItem }) => {
     const buttonSize = size === 'small' ? 'small' : 'middle';
     const spacing = size === 'small' ? 'compact' : 'default';
     
+    const viewButtons = [
+      { key: 'front', label: 'Front' },
+      { key: 'isometric', label: 'Isometric' },
+      { key: 'top', label: 'Top' },
+      { key: 'bottom', label: 'Bottom' }
+    ];
+    
     return (
       <Space size={spacing} className="bg-white/90 backdrop-blur-sm rounded-lg p-2 shadow-md">
-        <Button 
-          size={buttonSize}
-          onClick={() => onOpenModal('front')}
-          title="Front View"
-        >
-          Front
-        </Button>
-        <Button 
-          size={buttonSize}
-          onClick={() => onOpenModal('isometric')}
-          title="Isometric View"
-        >
-          Isometric
-        </Button>
-        <Button 
-          size={buttonSize}
-          onClick={() => onOpenModal('top')}
-          title="Top View"
-        >
-          Top
-        </Button>
-        <Button 
-          size={buttonSize}
-          onClick={() => onOpenModal('bottom')}
-          title="Bottom View"
-        >
-          Bottom
-        </Button>
+        {viewButtons.map(({ key, label }) => (
+          <Button 
+            key={key}
+            size={buttonSize}
+            type={selectedView === key ? 'primary' : 'default'}
+            onClick={() => onOpenModal(key)}
+            title={`${label} View`}
+          >
+            {label}
+          </Button>
+        ))}
       </Space>
     );
   };
@@ -354,7 +337,13 @@ const ProductDetails = ({ selectedItem }) => {
         <div className="flex-1 min-h-0 flex flex-col" style={{ flex: 1, height: '100%' }}>
           {/* Top section: Process Plan and Part Documents tabs - Full height when bottom is hidden, 68% when visible */}
           <div style={{ flex: activeTab === 'mbom' ? 0.68 : 1, minHeight: 0, marginBottom: activeTab === 'mbom' ? '2px' : 0 }}>
-            <DocumentsPanel selectedItem={selectedItem} onDocumentsLoaded={() => {}} compactMode={true} onTabChange={setActiveTab} externalActiveTab={activeTab} />
+            <DocumentsPanel 
+              selectedItem={selectedItem} 
+              onDocumentsLoaded={(docs) => setPartDocuments(docs)} 
+              compactMode={true} 
+              onTabChange={setActiveTab} 
+              externalActiveTab={activeTab} 
+            />
           </div>
           
           {/* Bottom section: Single container with 2 sub-sections side-by-side - Only show for Process Plan tab */}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
-import { Button, Card, InputNumber, Spin, Typography, message, Select } from "antd";
+import { Button, Card, InputNumber, Spin, Typography, App, Select } from "antd";
 import { 
   AppstoreOutlined
 } from "@ant-design/icons";
@@ -10,6 +10,7 @@ const { Text } = Typography;
 const { Option } = Select;
 
 const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => {
+  const { message } = App.useApp();
   const [orders, setOrders] = useState([]);
   const [rawMaterials, setRawMaterials] = useState(propRawMaterials || []);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -391,7 +392,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Material *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Material <span className="text-red-500">*</span></label>
               <Select
                 style={{ width: '100%' }}
                 placeholder="Select Material"
@@ -416,7 +417,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Form Type *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Form Type <span className="text-red-500">*</span></label>
               <Select
                 style={{ width: '100%' }}
                 value={newStockForm.form_type}
@@ -429,7 +430,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
             </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Order *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Order <span className="text-red-500">*</span></label>
             <Select
               style={{ width: '100%' }}
               placeholder="Select Order (Required)"
@@ -476,14 +477,132 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
             </div>
           )}
 
+          {newStockForm.part_id && newStockForm.part_id.split(',').length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Part Required Quantities</label>
+              <div className="space-y-2">
+                {orderPartsForStock
+                  .filter(part => newStockForm.part_id.split(',').includes(part.id.toString()))
+                  .map(part => (
+                    <div key={part.id} className="flex items-center space-x-2">
+                      <span className="text-sm flex-1">{part.part_number} - {part.part_name}</span>
+                      <InputNumber
+                        placeholder="Qty"
+                        min={1}
+                        step={1}
+                        precision={0}
+                        style={{ width: '100px' }}
+                        value={newStockForm[`part_quantity_${part.id}`] || 1}
+                        onChange={(value) => {
+                          // Only allow positive integers, block 0
+                          if (value === null || value === undefined || value === '') {
+                            setNewStockForm(prev => ({ 
+                              ...prev, 
+                              [`part_quantity_${part.id}`]: 1 
+                            }));
+                          } else if (Number.isInteger(value) && value >= 1) {
+                            setNewStockForm(prev => ({ 
+                              ...prev, 
+                              [`part_quantity_${part.id}`]: value 
+                            }));
+                          }
+                        }}
+                        onBlur={(e) => {
+                          // Ensure integer value on blur
+                          const value = parseInt(e.target.value);
+                          if (isNaN(value) || value < 1) {
+                            setNewStockForm(prev => ({ 
+                              ...prev, 
+                              [`part_quantity_${part.id}`]: 1 
+                            }));
+                          } else {
+                            setNewStockForm(prev => ({ 
+                              ...prev, 
+                              [`part_quantity_${part.id}`]: value 
+                            }));
+                          }
+                        }}
+                        onBeforeInput={(e) => {
+                          const char = e.data;
+                          const currentValue = e.target.value || '';
+                          // Block non-digits
+                          if (char && !/[0-9]/.test(char)) {
+                            e.preventDefault();
+                            return false;
+                          }
+                          // Block 0 as first digit
+                          if (char === '0' && currentValue === '') {
+                            e.preventDefault();
+                            return false;
+                          }
+                        }}
+                        onKeyPress={(e) => {
+                          // Block all non-digit keys except backspace, delete, tab, enter
+                          const char = String.fromCharCode(e.which);
+                          const currentValue = e.target.value || '';
+                          if (!/[0-9]/.test(char) && 
+                              e.which !== 8 && // backspace
+                              e.which !== 46 && // delete
+                              e.which !== 9 && // tab
+                              e.which !== 13 && // enter
+                              e.which !== 37 && // left arrow
+                              e.which !== 39 && // right arrow
+                              e.which !== 36 && // home
+                              e.which !== 35) { // end
+                            e.preventDefault();
+                          }
+                          // Block 0 as first digit
+                          if (char === '0' && currentValue === '') {
+                            e.preventDefault();
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          // Block decimal point and other special characters
+                          if (e.key === '.' || e.key === ',' || e.key === '-' || e.key === '+') {
+                            e.preventDefault();
+                          }
+                        }}
+                      />
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+          )}
+
           {newStockForm.form_type === 'Round' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Diameter (mm)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Diameter (mm) <span className="text-red-500">*</span></label>
               <InputNumber
                 style={{ width: '100%' }}
                 placeholder="Diameter"
                 value={newStockForm.diameter}
                 onChange={(value) => setNewStockForm(prev => ({ ...prev, diameter: value }))}
+                onKeyPress={(e) => {
+                  // Block all non-digit and non-decimal keys except navigation keys
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && // backspace
+                      e.which !== 46 && // delete
+                      e.which !== 9 && // tab
+                      e.which !== 13 && // enter
+                      e.which !== 37 && // left arrow
+                      e.which !== 39 && // right arrow
+                      e.which !== 36 && // home
+                      e.which !== 35) { // end
+                    e.preventDefault();
+                  }
+                }}
+                onKeyDown={(e) => {
+                  // Block multiple decimal points and special characters
+                  const value = e.target.value;
+                  if (e.key === '.' && value.includes('.')) {
+                    e.preventDefault();
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                  }
+                }}
                 min={0}
                 step={0.01}
               />
@@ -493,23 +612,73 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           {newStockForm.form_type === 'Square' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Breadth (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Breadth (mm) <span className="text-red-500">*</span></label>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Breadth"
                   value={newStockForm.breadth}
                   onChange={(value) => setNewStockForm(prev => ({ ...prev, breadth: value }))}
+                  onKeyPress={(e) => {
+                    // Block all non-digit and non-decimal keys except navigation keys
+                    const char = String.fromCharCode(e.which);
+                    if (!/[0-9.]/.test(char) && 
+                        e.which !== 8 && // backspace
+                        e.which !== 46 && // delete
+                        e.which !== 9 && // tab
+                        e.which !== 13 && // enter
+                        e.which !== 37 && // left arrow
+                        e.which !== 39 && // right arrow
+                        e.which !== 36 && // home
+                        e.which !== 35) { // end
+                      e.preventDefault();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Block multiple decimal points and special characters
+                    const value = e.target.value;
+                    if (e.key === '.' && value.includes('.')) {
+                      e.preventDefault();
+                    }
+                    if (e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                    }
+                  }}
                   min={0}
                   step={0.01}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Height (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Height (mm) <span className="text-red-500">*</span></label>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Height"
                   value={newStockForm.height}
                   onChange={(value) => setNewStockForm(prev => ({ ...prev, height: value }))}
+                  onKeyPress={(e) => {
+                    // Block all non-digit and non-decimal keys except navigation keys
+                    const char = String.fromCharCode(e.which);
+                    if (!/[0-9.]/.test(char) && 
+                        e.which !== 8 && // backspace
+                        e.which !== 46 && // delete
+                        e.which !== 9 && // tab
+                        e.which !== 13 && // enter
+                        e.which !== 37 && // left arrow
+                        e.which !== 39 && // right arrow
+                        e.which !== 36 && // home
+                        e.which !== 35) { // end
+                      e.preventDefault();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Block multiple decimal points and special characters
+                    const value = e.target.value;
+                    if (e.key === '.' && value.includes('.')) {
+                      e.preventDefault();
+                    }
+                    if (e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                    }
+                  }}
                   min={0}
                   step={0.01}
                 />
@@ -520,23 +689,73 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           {newStockForm.form_type === 'Pipe' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Outer Diameter (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Outer Diameter (mm) <span className="text-red-500">*</span></label>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Outer Diameter"
                   value={newStockForm.outer_diameter}
                   onChange={(value) => setNewStockForm(prev => ({ ...prev, outer_diameter: value }))}
+                  onKeyPress={(e) => {
+                    // Block all non-digit and non-decimal keys except navigation keys
+                    const char = String.fromCharCode(e.which);
+                    if (!/[0-9.]/.test(char) && 
+                        e.which !== 8 && // backspace
+                        e.which !== 46 && // delete
+                        e.which !== 9 && // tab
+                        e.which !== 13 && // enter
+                        e.which !== 37 && // left arrow
+                        e.which !== 39 && // right arrow
+                        e.which !== 36 && // home
+                        e.which !== 35) { // end
+                      e.preventDefault();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Block multiple decimal points and special characters
+                    const value = e.target.value;
+                    if (e.key === '.' && value.includes('.')) {
+                      e.preventDefault();
+                    }
+                    if (e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                    }
+                  }}
                   min={0}
                   step={0.01}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Inner Diameter (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Inner Diameter (mm) <span className="text-red-500">*</span></label>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Inner Diameter"
                   value={newStockForm.inner_diameter}
                   onChange={(value) => setNewStockForm(prev => ({ ...prev, inner_diameter: value }))}
+                  onKeyPress={(e) => {
+                    // Block all non-digit and non-decimal keys except navigation keys
+                    const char = String.fromCharCode(e.which);
+                    if (!/[0-9.]/.test(char) && 
+                        e.which !== 8 && // backspace
+                        e.which !== 46 && // delete
+                        e.which !== 9 && // tab
+                        e.which !== 13 && // enter
+                        e.which !== 37 && // left arrow
+                        e.which !== 39 && // right arrow
+                        e.which !== 36 && // home
+                        e.which !== 35) { // end
+                      e.preventDefault();
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Block multiple decimal points and special characters
+                    const value = e.target.value;
+                    if (e.key === '.' && value.includes('.')) {
+                      e.preventDefault();
+                    }
+                    if (e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                    }
+                  }}
                   min={0}
                   step={0.01}
                 />
@@ -545,32 +764,182 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Length (mm)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Length (mm) <span className="text-red-500">*</span></label>
             <InputNumber
               style={{ width: '100%' }}
               placeholder="Length"
               value={newStockForm.length}
-              onChange={(value) => setNewStockForm(prev => ({ ...prev, length: value }))}
+              onChange={(value) => {
+                // Only allow valid numbers
+                if (value === null || value === undefined || value === '') {
+                  setNewStockForm(prev => ({ ...prev, length: '' }));
+                } else if (!isNaN(value) && value >= 0) {
+                  setNewStockForm(prev => ({ ...prev, length: value }));
+                }
+              }}
+              onBeforeInput={(e) => {
+                // Block input before it reaches the field
+                const char = e.data;
+                if (char && !/[0-9.]/.test(char)) {
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+              onKeyPress={(e) => {
+                // Block all non-digit and non-decimal keys except navigation keys
+                const char = String.fromCharCode(e.which);
+                if (!/[0-9.]/.test(char) && 
+                    e.which !== 8 && // backspace
+                    e.which !== 46 && // delete
+                    e.which !== 9 && // tab
+                    e.which !== 13 && // enter
+                    e.which !== 37 && // left arrow
+                    e.which !== 39 && // right arrow
+                    e.which !== 36 && // home
+                    e.which !== 35) { // end
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+              onKeyDown={(e) => {
+                // Block multiple decimal points and special characters
+                const value = e.target.value;
+                if (e.key === '.' && value && value.includes('.')) {
+                  e.preventDefault();
+                  return false;
+                }
+                if (e.key === ',' || e.key === '-' || e.key === '+') {
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+              onInput={(e) => {
+                // Immediate cleanup of any invalid characters
+                if (!e.target || !e.target.value) return;
+                const value = e.target.value;
+                const validValue = value.replace(/[^0-9.]/g, '');
+                if (value !== validValue) {
+                  e.target.value = validValue;
+                  setNewStockForm(prev => ({ ...prev, length: validValue }));
+                }
+              }}
+              onPaste={(e) => {
+                // Prevent paste of invalid content
+                e.preventDefault();
+                const pasteData = e.clipboardData.getData('text');
+                const cleanData = pasteData.replace(/[^0-9.]/g, '');
+                if (cleanData) {
+                  const currentValue = e.target.value || '';
+                  const newValue = currentValue + cleanData;
+                  setNewStockForm(prev => ({ ...prev, length: newValue }));
+                }
+                return false;
+              }}
+              onBlur={(e) => {
+                // Clean up any invalid characters on blur
+                const value = e.target.value;
+                const cleanValue = value.replace(/[^0-9.]/g, '');
+                if (value !== cleanValue) {
+                  setNewStockForm(prev => ({ ...prev, length: cleanValue }));
+                }
+              }}
               min={0}
               step={0.01}
+              parser={(value) => {
+                // Parse only numbers and decimal
+                const cleanValue = value.replace(/[^0-9.]/g, '');
+                const parsed = parseFloat(cleanValue);
+                return isNaN(parsed) ? null : parsed;
+              }}
+              formatter={(value) => {
+                // Display only valid numbers
+                return value !== null && value !== undefined ? value.toString() : '';
+              }}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity <span className="text-red-500">*</span></label>
             <InputNumber
               style={{ width: '100%' }}
               placeholder="Quantity"
               value={newStockForm.quantity}
-              onChange={(value) => setNewStockForm(prev => ({ ...prev, quantity: value }))}
+              onChange={(value) => {
+                // Only allow positive integers
+                if (value === null || value === undefined || value === '') {
+                  setNewStockForm(prev => ({ ...prev, quantity: 1 }));
+                } else if (Number.isInteger(value) && value >= 1) {
+                  setNewStockForm(prev => ({ ...prev, quantity: value }));
+                }
+              }}
+              onBlur={(e) => {
+                // Ensure integer value on blur
+                const value = parseInt(e.target.value);
+                if (isNaN(value) || value < 1) {
+                  setNewStockForm(prev => ({ ...prev, quantity: 1 }));
+                } else {
+                  setNewStockForm(prev => ({ ...prev, quantity: value }));
+                }
+              }}
+              onBeforeInput={(e) => {
+                const char = e.data;
+                const currentValue = e.target.value || '';
+                // Block non-digits
+                if (char && !/[0-9]/.test(char)) {
+                  e.preventDefault();
+                  return false;
+                }
+                // Block 0 as first digit
+                if (char === '0' && currentValue === '') {
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+              onKeyPress={(e) => {
+                // Block all non-digit keys except backspace, delete, tab, enter
+                const char = String.fromCharCode(e.which);
+                const currentValue = e.target.value || '';
+                if (!/[0-9]/.test(char) && 
+                    e.which !== 8 && // backspace
+                    e.which !== 46 && // delete
+                    e.which !== 9 && // tab
+                    e.which !== 13 && // enter
+                    e.which !== 37 && // left arrow
+                    e.which !== 39 && // right arrow
+                    e.which !== 36 && // home
+                    e.which !== 35) { // end
+                  e.preventDefault();
+                }
+                // Block 0 as first digit
+                if (char === '0' && currentValue === '') {
+                  e.preventDefault();
+                }
+              }}
+              onKeyDown={(e) => {
+                // Block decimal point and other special characters
+                if (e.key === '.' || e.key === ',' || e.key === '-' || e.key === '+') {
+                  e.preventDefault();
+                }
+              }}
               min={1}
+              step={1}
+              precision={0}
+              parser={(value) => {
+                // Parse only integers, reject decimals and special chars
+                const parsed = parseInt(value, 10);
+                return isNaN(parsed) ? null : parsed;
+              }}
+              formatter={(value) => {
+                // Display only integers
+                return value ? value.toString() : '';
+              }}
             />
           </div>
 
           {enquiryMode ? (
           <>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Vendors for Enquiry *</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendors for Enquiry <span className="text-red-500">*</span></label>
               <Select
                 mode="multiple"
                 style={{ width: '100%' }}

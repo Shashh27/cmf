@@ -227,9 +227,10 @@ const EditOperationModal = ({
     let type = 'other';
     if (['jpg','jpeg','png','gif','svg'].includes(ext)) type = 'image';
     else if (ext === 'pdf') type = 'pdf';
+    else if (['cnc','gcode','nc','m','tap','mpf','iso','fan','h','txt','csv'].includes(ext)) type = 'text';
     
-    // Instead of opening a new modal, we show it in the right panel
-    setViewingDoc({ url, title: doc.document_name, type, id: doc.id, name: doc.document_name });
+    // Open preview modal instead of showing in right panel
+    setPreview({ url, title: doc.document_name, type, id: doc.id, name: doc.document_name });
     setParentId(null); // Switch off "Update Version" mode if it was on
   };
 
@@ -701,15 +702,40 @@ const EditOperationModal = ({
       {preview && (
         <Modal title={preview.title} open onCancel={() => setPreview(null)}
           footer={[
-            <Button key="dl" icon={<DownloadOutlined />} onClick={() => window.open(preview.url, '_blank')}>Download</Button>,
+            <Button key="dl" icon={<DownloadOutlined />} onClick={() => handleDownloadFile({ id: preview.id, document_name: preview.name })}>Download</Button>,
             <Button key="cl" type="primary" onClick={() => setPreview(null)}>Close</Button>
           ]}
           width="95%" style={{ maxWidth: 1000, top: 20 }} styles={{ body: { height: '75vh', padding: 0 } }}
         >
-          {preview.type === 'image'
-            ? <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto"><img src={preview.url} alt={preview.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /></div>
-            : <iframe src={`${preview.url}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
-          }
+          {preview.type === 'image' ? (
+            <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+              <img src={preview.url} alt={preview.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            </div>
+          ) : preview.type === 'pdf' ? (
+            <iframe src={`${preview.url}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
+          ) : preview.type === 'text' ? (
+            <div className="h-full bg-gray-50 p-4 overflow-auto">
+              <iframe 
+                src={preview.url} 
+                title={preview.title} 
+                width="100%" 
+                height="100%" 
+                style={{ 
+                  border: 'none', 
+                  backgroundColor: 'white',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  whiteSpace: 'pre'
+                }} 
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+              <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
+              <p className="text-gray-700 font-medium mb-2">Preview is not available for this file type.</p>
+              <p className="text-gray-500">Please download the file to view it.</p>
+            </div>
+          )}
         </Modal>
       )}
       {toolsSelectorVisible && (

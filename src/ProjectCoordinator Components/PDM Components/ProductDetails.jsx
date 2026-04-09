@@ -281,36 +281,26 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
     const buttonSize = size === 'small' ? 'small' : 'middle';
     const spacing = size === 'small' ? 'compact' : 'default';
     
+    const viewButtons = [
+      { key: 'front', label: 'Front' },
+      { key: 'isometric', label: 'Isometric' },
+      { key: 'top', label: 'Top' },
+      { key: 'bottom', label: 'Bottom' }
+    ];
+    
     return (
       <Space size={spacing} className="bg-white/90 backdrop-blur-sm rounded-lg p-2 shadow-md">
-        <Button 
-          size={buttonSize}
-          onClick={() => onOpenModal('front')}
-          title="Front View"
-        >
-          Front
-        </Button>
-        <Button 
-          size={buttonSize}
-          onClick={() => onOpenModal('isometric')}
-          title="Isometric View"
-        >
-          Isometric
-        </Button>
-        <Button 
-          size={buttonSize}
-          onClick={() => onOpenModal('top')}
-          title="Top View"
-        >
-          Top
-        </Button>
-        <Button 
-          size={buttonSize}
-          onClick={() => onOpenModal('bottom')}
-          title="Bottom View"
-        >
-          Bottom
-        </Button>
+        {viewButtons.map(({ key, label }) => (
+          <Button 
+            key={key}
+            size={buttonSize}
+            type={selectedView === key ? 'primary' : 'default'}
+            onClick={() => onOpenModal(key)}
+            title={`${label} View`}
+          >
+            {label}
+          </Button>
+        ))}
       </Space>
     );
   };

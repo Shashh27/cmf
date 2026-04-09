@@ -298,20 +298,52 @@ const handleDeleteRawMaterial = async (material) => {
   });
 };
 
-  const handleSearch = (value) => setSearchText((value || '').replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20));
+  const handleSearch = (value) => {
+    // Remove special characters but keep alphanumeric, spaces, and decimal points for number search
+    const cleanedValue = (value || '').replace(/[^a-zA-Z0-9 .]/g, '');
+    setSearchText(cleanedValue.toLowerCase().slice(0, 50));
+  };
 
   const filteredMaterials = (rawMaterials || []).filter((item) => {
     if (!searchText) return true;
+    
     const searchLower = searchText.toLowerCase();
-    return Object.values(item).some(value => 
-      value !== null && value !== undefined && 
-      String(value).toLowerCase().includes(searchLower)
-    );
+    
+    // Create a searchable string from all relevant fields
+    const searchableContent = [
+      item.material_name || '',
+      item.density?.toString() || '',
+      item.cost_per_kg?.toString() || '',
+      item.material_specification || '',
+      item.stock_type || '',
+      item.stock_dimensions || '',
+      // Status search - handle both AVAILABLE and NOT AVAILABLE
+      item.has_available_stock ? 'available' : 'not available',
+      item.has_available_stock ? 'available' : 'notavailable',
+      item.has_available_stock ? 'available' : 'not_available'
+    ].join(' ').toLowerCase();
+    
+    // Create special numeric content that preserves decimal points for number search
+    const numericContent = [
+      item.density?.toString() || '',
+      item.cost_per_kg?.toString() || ''
+    ].join(' ').toLowerCase();
+    
+    // Clean content for special character search (remove everything except alphanumeric and spaces)
+    const cleanedContent = searchableContent.replace(/[^a-z0-9 ]/g, '');
+    
+    // Check if search term exists in:
+    // 1. Original content (with decimals)
+    // 2. Cleaned content (without special characters)
+    // 3. Numeric content (preserving decimals for number search)
+    return searchableContent.includes(searchLower) || 
+           cleanedContent.includes(searchLower) || 
+           numericContent.includes(searchLower);
   }).sort((a, b) => (a.id || 0) - (b.id || 0));
 
   const columns = [
     {
-      title: <span className="font-semibold text-gray-700">#</span>,
+      title: <span className="font-semibold text-gray-700">Sl No</span>,
       dataIndex: 'index',
       key: 'index',
       width: 60,
@@ -402,12 +434,12 @@ const handleDeleteRawMaterial = async (material) => {
                 </div>
                 <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
                   <Input.Search
-                    placeholder="Search..."
+                    placeholder="Search all columns..."
                     allowClear
                     onSearch={handleSearch}
                     onChange={(e) => handleSearch(e.target.value)}
                     value={searchText}
-                    maxLength={20}
+                    maxLength={50}
                     className="w-full sm:w-64"
                     size="middle"
                   />
@@ -673,12 +705,80 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
         <>
           <Col xs={12} sm={8}>
             <Form.Item name="diameter" label="Diameter (mm)" rules={[{ required: true }]}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+              <InputNumber 
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
             </Form.Item>
           </Col>
           <Col xs={12} sm={8}>
             <Form.Item name="length" label="Length (mm)" rules={[{ required: true }]}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+              <InputNumber 
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
             </Form.Item>
           </Col>
         </>
@@ -689,17 +789,119 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
         <>
           <Col xs={12} sm={8}>
             <Form.Item name="breadth" label="Breadth (mm)" rules={[{ required: true }]}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+              <InputNumber 
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
             </Form.Item>
           </Col>
           <Col xs={12} sm={8}>
             <Form.Item name="height" label="Height (mm)" rules={[{ required: true }]}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+              <InputNumber 
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
             </Form.Item>
           </Col>
           <Col xs={12} sm={8}>
             <Form.Item name="length" label="Length (mm)" rules={[{ required: true }]}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+              <InputNumber 
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
             </Form.Item>
           </Col>
         </>
@@ -710,7 +912,41 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
         <>
           <Col xs={12} sm={8}>
             <Form.Item name="inner_diameter" label="Inner ⌀ (mm)" rules={[{ required: true, message: 'Required' }]}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+              <InputNumber 
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
             </Form.Item>
           </Col>
           <Col xs={12} sm={8}>
@@ -722,12 +958,80 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
                 return Promise.reject(new Error('Outer diameter must be > inner diameter'));
               },
             })]}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+              <InputNumber 
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
             </Form.Item>
           </Col>
           <Col xs={12} sm={8}>
             <Form.Item name="length" label="Length (mm)" rules={[{ required: true, message: 'Required' }]}>
-              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="mm" />
+              <InputNumber 
+                style={{ width: '100%' }} 
+                min={0} 
+                step={0.01}
+                precision={2} 
+                placeholder="mm"
+                onBeforeInput={(e) => {
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                      e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                      e.which !== 36 && e.which !== 35) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+              />
             </Form.Item>
           </Col>
         </>
@@ -754,7 +1058,46 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
         </Col>
         <Col xs={24} sm={12}>
           <Form.Item name="quantity" label="Quantity" rules={[{ required: true }]}>
-            <InputNumber style={{ width: '100%' }} min={1} precision={0} placeholder="Units" />
+            <InputNumber 
+              style={{ width: '100%' }} 
+              min={1} 
+              step={1}
+              precision={0} 
+              placeholder="Units"
+              onBeforeInput={(e) => {
+                const char = e.data;
+                const currentValue = e.target.value || '';
+                if (char && !/[0-9]/.test(char)) {
+                  e.preventDefault();
+                  return false;
+                }
+                if (char === '0' && currentValue === '') {
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+              onKeyPress={(e) => {
+                const char = String.fromCharCode(e.which);
+                const currentValue = e.target.value || '';
+                if (!/[0-9]/.test(char) && 
+                    e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                    e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                    e.which !== 36 && e.which !== 35) {
+                  e.preventDefault();
+                  return false;
+                }
+                if (char === '0' && currentValue === '') {
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === '.' || e.key === ',' || e.key === '-' || e.key === '+') {
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+            />
           </Form.Item>
         </Col>
         {renderDimensionFields()}

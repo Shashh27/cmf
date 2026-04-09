@@ -1,21 +1,17 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber } from "antd";
+import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber, App } from "antd";
 import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
-import { message } from "antd";
 import dayjs from "dayjs";
 
 const { Title } = Typography;
 const { Option } = Select;
 
-const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, products, fetchCustomers, fetchProducts }) => {
+const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, fetchCustomers }) => {
+  const { message } = App.useApp();
   const [form] = Form.useForm();
-  const [createProductForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const [createProductModalOpen, setCreateProductModalOpen] = useState(false);
-  const [productSelectOpen, setProductSelectOpen] = useState(false);
-  const [createProductLoading, setCreateProductLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
   const [users, setUsers] = useState([]);
   const [projectCoordinators, setProjectCoordinators] = useState([]);
@@ -29,6 +25,17 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       const u = JSON.parse(stored);
       if (u?.id == null) return null;
       return u.id;
+    } catch {
+      return null;
+    }
+  };
+
+  const getCurrentUserRole = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      return u?.role || null;
     } catch {
       return null;
     }
@@ -137,25 +144,15 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
     }
   };
 
-  const handleProductDropdown = (open) => {
-    setProductSelectOpen(open);
-    if (open && products.length === 0) {
-      fetchProducts?.();
-    }
-  };
-
-  const openCreateProductModal = () => {
-    setProductSelectOpen(false);
-    createProductForm.resetFields();
-    setCreateProductModalOpen(true);
-  };
-
+  
   const fetchUsersForRoles = async () => {
     if (users.length > 0) return;
     try {
       const response = await axios.get(`${API_BASE_URL}/access-users/`);
       const list = Array.isArray(response.data) ? response.data : [];
       setUsers(list);
+      
+      // For admin OrderModal: show all project coordinators for selection
       const pcs = list.filter(
         (u) => (u.role || "").toLowerCase() === "project_coordinator"
       );
@@ -170,98 +167,63 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
     }
   };
 
-  const handleCreateProductSubmit = async () => {
-    try {
-      await createProductForm.validateFields();
-    } catch {
-      return;
-    }
-    const values = createProductForm.getFieldsValue();
-    let userId = form.getFieldValue("user_id");
-    if (!userId) {
-      try {
-        const stored = localStorage.getItem("user");
-        const userObj = stored ? JSON.parse(stored) : null;
-        if (userObj?.id != null) userId = String(userObj.id);
-      } catch {}
-    }
-    if (!userId) {
-      message.error("User is required. Please ensure you are logged in.");
-      return;
-    }
-    setCreateProductLoading(true);
-    try {
-      const response = await axios.post(
-        `${API_BASE_URL}/products/`,
-        {
-          product_name: values.product_name?.trim() || "",
-          product_version: values.product_version?.trim() || "1.0",
-          user_id: parseInt(userId, 10),
-        },
-        {
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-      const newProduct = response.data;
-      await fetchProducts?.();
-      form.setFieldsValue({ product_id: newProduct.id.toString() });
-      setCreateProductModalOpen(false);
-      createProductForm.resetFields();
-      message.success(`Product "${newProduct.product_name || `Product ${newProduct.id}`}" created and selected.`);
-    } catch (error) {
-      console.error("Error creating product:", error);
-      const detail =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        error?.message ||
-        "Error creating product";
-      message.error(detail);
-    } finally {
-      setCreateProductLoading(false);
-    }
-  };
-
 
   useEffect(() => {
-    if (isOpen) {
-      fetchUsersForRoles();
-      if (editingOrder) {
-        // Ensure customer and product names are available even if the arrays are empty
-        const customerValue = editingOrder.customer_id?.toString() ?? "";
-        const productValue = editingOrder.product_id?.toString() ?? "";
-
-        form.setFieldsValue({
-          ...editingOrder,
-          customer_id: customerValue,
-          product_id: productValue,
-          quantity: editingOrder.quantity?.toString() ?? "",
-          due_date: editingOrder.due_date ? dayjs(editingOrder.due_date) : null,
-          order_date: editingOrder.order_date ? dayjs(editingOrder.order_date) : null,
-          user_id: editingOrder.user_id?.toString() ?? "",
-          project_coordinator_id: editingOrder.project_coordinator_id?.toString() ?? undefined,
-          manufacturing_coordinator_id: editingOrder.manufacturing_coordinator_id?.toString() ?? undefined,
-        });
-      } else {
-        form.resetFields();
-        form.setFieldsValue({
-          status: "Pending",
-        });
-        setDocuments([]);
-
-        try {
-          const stored = localStorage.getItem("user");
-          if (stored) {
-            const userObj = JSON.parse(stored);
-            if (userObj?.id != null) {
-              form.setFieldsValue({ user_id: String(userObj.id) });
-            }
-            if (userObj?.user_name) {
-              form.setFieldsValue({ user_name_display: userObj.user_name });
+    const initializeForm = async () => {
+      if (isOpen) {
+        fetchUsersForRoles();
+        if (editingOrder) {
+          // Ensure customer name is available even if the array is empty
+          const customerValue = editingOrder.customer_id?.toString() ?? "";
+          
+          // For editing, we need to fetch the product name if not already available
+          let projectValue = editingOrder.project_name || editingOrder.product_name || "";
+          if (!projectValue && editingOrder.product_id) {
+            // Try to get product name from the product
+            try {
+              const productResponse = await axios.get(`${API_BASE_URL}/products/${editingOrder.product_id}`);
+              projectValue = productResponse.data.product_name || `Project ${editingOrder.product_id}`;
+            } catch (error) {
+              console.error("Error fetching product:", error);
+              projectValue = `Project ${editingOrder.product_id}`;
             }
           }
-        } catch {}
+
+          form.setFieldsValue({
+            ...editingOrder,
+            customer_id: customerValue,
+            project_name: projectValue,
+            quantity: editingOrder.quantity?.toString() ?? "",
+            due_date: editingOrder.due_date ? dayjs(editingOrder.due_date) : null,
+            order_date: editingOrder.order_date ? dayjs(editingOrder.order_date) : null,
+            user_id: editingOrder.user_id?.toString() ?? "",
+            project_coordinator_id: editingOrder.project_coordinator_id?.toString() ?? undefined,
+            manufacturing_coordinator_id: editingOrder.manufacturing_coordinator_id?.toString() ?? undefined,
+          });
+        } else {
+          form.resetFields();
+          form.setFieldsValue({
+            status: "Pending",
+          });
+          setDocuments([]);
+
+          try {
+            const stored = localStorage.getItem("user");
+            if (stored) {
+              const userObj = JSON.parse(stored);
+              if (userObj?.id != null) {
+                form.setFieldsValue({ user_id: String(userObj.id) });
+              }
+              if (userObj?.user_name) {
+                form.setFieldsValue({ user_name_display: userObj.user_name });
+              }
+            }
+          } catch {}
+        }
       }
-    }
+    };
+    
+    initializeForm();
   }, [isOpen, editingOrder, form]);
 
   // Keep due_date consistent with order_date:
@@ -286,6 +248,26 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
     setLoading(true);
 
     try {
+      // Create product if project name is provided and it's a new order
+      let productId = 5; // Default fallback
+      if (!editingOrder && values.project_name?.trim()) {
+        try {
+          const userId = getCurrentUserId();
+          if (userId) {
+            const productResponse = await axios.post(`${API_BASE_URL}/products/`, {
+              product_name: values.project_name.trim(),
+              product_version: "1.0",
+              user_id: parseInt(userId, 10),
+            });
+            productId = productResponse.data.id;
+            message.success(`Project "${values.project_name.trim()}" created successfully`);
+          }
+        } catch (productError) {
+          console.error("Error creating product:", productError);
+          message.warning("Could not create project, using default product");
+        }
+      }
+
       const url = editingOrder 
         ? `${API_BASE_URL}/orders/${editingOrder.id}`
         : `${API_BASE_URL}/orders/`;
@@ -296,7 +278,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         sale_order_number: values.sale_order_number?.trim()?.toUpperCase(),
         quantity: parseInt(values.quantity),
         customer_id: parseInt(values.customer_id),
-        product_id: parseInt(values.product_id),
+        product_id: productId,
         status: values.status,
         user_id: values.user_id ? parseInt(values.user_id) : undefined,
         // Send null explicitly when coordinator is cleared so backend sets it to NULL
@@ -487,7 +469,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         initialValues={{
           sale_order_number: "",
           customer_id: "",
-          product_id: "",
+          project_name: "",
           quantity: "",
           status: "Pending",
           user_name_display: "",
@@ -523,44 +505,15 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             </Col>
             <Col xs={24} sm={12} md={9}>
               <Form.Item
-                name="product_id"
+                name="project_name"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Project Name</span>}
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-4"
               >
-                <Select 
-                  placeholder="Select project" 
+                <Input 
+                  placeholder="Enter project name" 
                   className="h-10"
-                  open={productSelectOpen}
-                  onOpenChange={handleProductDropdown}
-                  popupRender={editingOrder ? undefined : (menu) => (
-                    <>
-                      {menu}
-                      <div className="p-2 border-t border-gray-200 bg-gray-50">
-                        <Button
-                          type="dashed"
-                          icon={<PlusOutlined />}
-                          block
-                          onClick={openCreateProductModal}
-                          className="text-blue-600 border-blue-200 hover:border-blue-400 hover:text-blue-700"
-                        >
-                          Create new project
-                        </Button>
-                      </div>
-                    </>
-                  )}
-                >
-                  {products.map((product) => (
-                    <Option key={product.id} value={product.id.toString()}>
-                      {product.product_name || `Project ${product.id}`}
-                    </Option>
-                  ))}
-                  {editingOrder && editingOrder.product_id && !products.find(p => p.id === editingOrder.product_id) && (
-                    <Option key={editingOrder.product_id} value={editingOrder.product_id.toString()}>
-                      {editingOrder.product_name || `Project ${editingOrder.product_id}`}
-                    </Option>
-                  )}
-                </Select>
+                />
               </Form.Item>
             </Col>
             <Col xs={24} sm={24} md={9}>
@@ -612,6 +565,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                   allowClear
                   showSearch
                   optionFilterProp="children"
+                  disabled={editingOrder && editingOrder.project_coordinator_id}
                 >
                   {projectCoordinators.map((u) => (
                     <Option key={u.id} value={u.id.toString()}>
@@ -886,51 +840,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       </Form>
     </Modal>
 
-    {/* Create new product (from order flow) */}
-    <Modal
-      title="Create new project"
-      open={createProductModalOpen}
-      onCancel={() => setCreateProductModalOpen(false)}
-      footer={[
-        <Button key="cancel" onClick={() => setCreateProductModalOpen(false)}>Cancel</Button>,
-        <Button key="submit" type="primary" loading={createProductLoading} onClick={handleCreateProductSubmit}>
-          Create & select
-        </Button>,
-      ]}
-      destroyOnHidden
-      width="90%"
-      style={{ maxWidth: 400 }}
-    >
-      <Form form={createProductForm} layout="vertical" className="mt-2">
-        <Form.Item
-          name="product_name"
-          label="Project name"
-          rules={[{ required: true, message: "Required" }]}
-        >
-          <Input placeholder="e.g. Widget A" />
-        </Form.Item>
-        <Form.Item
-          name="product_version"
-          label={<span className="text-xs sm:text-sm font-bold text-gray-600 uppercase tracking-wider">Product Version</span>}
-          initialValue="1.0"
-          rules={[{ required: true, message: "Required" }]}
-        >
-          <Input 
-            placeholder="1.0" 
-            autoComplete="off" 
-            size="large" 
-            readOnly 
-            disabled 
-            style={{
-              backgroundColor: '#f5f5f5',
-              color: '#6b7280',
-              borderColor: '#e5e7eb'
-            }}
-          />
-        </Form.Item>
-      </Form>
-    </Modal>
-    </>
+        </>
   );
 };
 
