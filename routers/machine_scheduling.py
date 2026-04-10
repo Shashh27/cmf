@@ -2243,3 +2243,66 @@ def cleanup_all_operation_status(
     except Exception as e:
         raise HTTPException(500, f"Failed to perform comprehensive cleanup: {str(e)}")
 
+
+@router.get("/inprogress-operations/{machine_id}")
+def get_inprogress_operations_by_machine(
+    machine_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all operations that are currently in progress for a specific machine.
+    
+    Args:
+        machine_id: ID of the machine to get in-progress operations for
+        
+    Returns:
+        List of operations with order_id, part_id, operation_id, and status
+    """
+    try:
+        # Check if machine exists
+        machine = db.query(Machine).filter(Machine.id == machine_id).first()
+        if not machine:
+            raise HTTPException(404, f"Machine with ID {machine_id} not found")
+
+        # Query operations with status 'inprogress' for the specific machine
+        inprogress_operations = (
+            db.query(OperationStatus, Operation, Part, Machine)
+            .join(Operation, Operation.id == OperationStatus.operation_id)
+            .join(Part, Part.id == Operation.part_id)
+            .join(Machine, Machine.id == Operation.machine_id)
+            .filter(
+                OperationStatus.status == 'inprogress',
+                Operation.machine_id == machine_id
+            )
+            .all()
+        )
+
+        # Build response
+        operations_list = []
+        for op_status, operation, part, machine in inprogress_operations:
+            operation_data = {
+                "order_id": op_status.order_id,
+                "part_id": operation.part_id,
+                "operation_id": operation.id,
+                "status": op_status.status,
+                "started_at": op_status.started_at,
+                "operation_number": operation.operation_number,
+                "operation_name": operation.operation_name,
+                "part_number": part.part_number,
+                "part_name": part.part_name,
+                "machine_id": machine.id,
+                "machine_name": f"{machine.make} {machine.model}" if machine.make and machine.model else machine.make or "Unknown"
+            }
+            operations_list.append(operation_data)
+
+        return {
+            "machine_id": machine_id,
+            "machine_name": f"{machine.make} {machine.model}" if machine.make and machine.model else machine.make or "Unknown",
+            "total_inprogress_operations": len(operations_list),
+            "operations": operations_list
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get in-progress operations: {str(e)}")
