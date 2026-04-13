@@ -278,6 +278,60 @@ def set_order_status(
     now = datetime.now(timezone.utc)
 
     # -----------------------------
+    # Check raw material availability for each part
+    # -----------------------------
+    if status == "active":
+        parts_with_raw_material = []
+        parts_without_raw_material = []
+        
+        for part in parts:
+            raw_material_available = False
+            
+            # Check raw_material_stock_id first
+            if hasattr(part, 'raw_material_stock_id') and getattr(part, 'raw_material_stock_id', None):
+                try:
+                    rm_stock = part.raw_material_stock
+                    if rm_stock is None:
+                        raw_material_available = False
+                    else:
+                        # Check if material is available
+                        if hasattr(rm_stock, 'calculated_status'):
+                            status_rm = rm_stock.calculated_status
+                        else:
+                            # Fallback: check quantity
+                            status_rm = 'Available' if getattr(rm_stock, 'quantity', 0) > 0 else 'Exhausted'
+                        
+                        raw_material_available = status_rm.lower() in ('available', 'in stock', 'ready', '')
+                except Exception:
+                    raw_material_available = False
+            
+            # Check raw_material_id fallback
+            elif hasattr(part, 'raw_material_id') and getattr(part, 'raw_material_id', None):
+                try:
+                    rm = part.raw_material
+                    if rm is None:
+                        raw_material_available = False
+                    else:
+                        # Check if RawMaterial has status attribute
+                        if hasattr(rm, 'status') and rm.status:
+                            status_rm = rm.status.strip()
+                        else:
+                            # New model: RawMaterial doesn't have status, assume available
+                            status_rm = 'Available'
+                        
+                        raw_material_available = status_rm.lower() in ('available', 'in stock', 'ready', '')
+                except Exception:
+                    raw_material_available = False
+            
+            if raw_material_available:
+                parts_with_raw_material.append(part)
+            else:
+                parts_without_raw_material.append(part)
+        
+        # Only activate parts with raw materials
+        parts = parts_with_raw_material
+
+    # -----------------------------
     # Loop through parts
     # -----------------------------
     for part in parts:
@@ -672,18 +726,83 @@ def update_part_status(
         Part.id == part_id,
         Part.product_id == order.product_id   # part belongs to that product
     ).first()
-
+    
     if not part:
         raise HTTPException(404, "Part not found for this order")
-
-    # ----------------------------
+    
+        
     # Get part type
     # ----------------------------
     part_type = db.query(PartType).filter(
         PartType.id == part.type_id
     ).first()
-
+    
     part_type_name = part_type.type_name  # IN-House / Out-Source
+
+    # ----------------------------
+    # Check raw material availability for activation
+    # ----------------------------
+    raw_material_status = "No Raw Material Assigned"
+    raw_material_order_status = None
+    raw_material_available = False
+    
+    if status == "active":
+        # Check raw_material_stock_id first
+        if hasattr(part, 'raw_material_stock_id') and getattr(part, 'raw_material_stock_id', None):
+            try:
+                rm_stock = part.raw_material_stock
+                if rm_stock is None:
+                    raw_material_status = "No Raw Material Stock Assigned"
+                    raw_material_available = False
+                else:
+                    # Get material status
+                    if hasattr(rm_stock, 'calculated_status'):
+                        raw_material_status = rm_stock.calculated_status
+                    else:
+                        # Fallback: check quantity
+                        raw_material_status = 'Available' if getattr(rm_stock, 'quantity', 0) > 0 else 'Exhausted'
+                    
+                    # Get order status if available
+                    raw_material_order_status = getattr(rm_stock, 'order_status', None)
+                    
+                    raw_material_available = raw_material_status.lower() in ('available', 'in stock', 'ready', '')
+            except Exception:
+                raw_material_status = "Stock Access Error"
+                raw_material_available = False
+        
+        # Check raw_material_id fallback
+        elif hasattr(part, 'raw_material_id') and getattr(part, 'raw_material_id', None):
+            try:
+                rm = part.raw_material
+                if rm is None:
+                    raw_material_status = "No Raw Material"
+                    raw_material_available = False
+                else:
+                    # Check if RawMaterial has status attribute
+                    if hasattr(rm, 'status') and rm.status:
+                        raw_material_status = rm.status.strip()
+                    else:
+                        # New model: RawMaterial doesn't have status, assume available
+                        raw_material_status = 'Available'
+                    
+                    raw_material_available = raw_material_status.lower() in ('available', 'in stock', 'ready', '')
+            except Exception:
+                raw_material_status = "Material Access Error"
+                raw_material_available = False
+        
+        # If trying to activate but raw materials not available, return detailed response
+        if not raw_material_available:
+            return {
+                "message": "Cannot activate this part, raw material not linked or not available. Link raw material first, then activate the part",
+                "sale_order_id": sale_order_id,
+                "part_id": part_id,
+                "part_name": part.part_name,
+                "part_type": part_type_name,
+                "status": raw_material_status,
+                "order_status": raw_material_order_status,
+                "will_be_scheduled": False,
+                "note": None
+            }
 
     # ----------------------------
     # Existing status record?
