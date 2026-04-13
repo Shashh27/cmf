@@ -448,10 +448,10 @@ class SchedulerEngine:
                 segment_end = window_end
             else:
                 # This is the final segment - use exact time needed
-                if not setup_applied:
-                    segment_hours = (setup_seconds + segment_quantity * cycle_seconds) / 3600.0
-                else:
-                    segment_hours = (segment_quantity * cycle_seconds) / 3600.0
+                # if not setup_applied:
+                segment_hours = (setup_seconds + segment_quantity * cycle_seconds) / 3600.0
+                # else:
+                # segment_hours = (segment_quantity * cycle_seconds) / 3600.0
                 segment_end = cur + timedelta(hours=segment_hours)
 
             # Update remaining quantity
