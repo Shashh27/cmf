@@ -6,7 +6,7 @@ import {
 } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
-import { Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Typography, Upload, Input, Form } from "antd";
+import { Tabs, Button, Badge, Table, Select, Empty, Spin, Tooltip, Tag, Modal, Popconfirm, Typography, Upload, Input, Form, App } from "antd";
 import { normalizeVersion, fetchInto } from "./operationUtils";
 import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
@@ -105,6 +105,7 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
 
 // ── DocumentsPanel ──────────────────────────────────────────────────────────
 const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, onTabChange, externalActiveTab }) => {
+  const { message } = App.useApp();
   const [documents, setDocuments]   = useState([]);
   const [operations, setOperations] = useState([]);
   const [activeTab, setActiveTab]   = useState('mbom');

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {PlusOutlined,DownloadOutlined,EyeOutlined,SyncOutlined,InboxOutlined,FilePdfOutlined,DeleteOutlined,UploadOutlined,} from "@ant-design/icons";
-import {Badge,Button,Empty,Input,Modal,Popconfirm,Select,Table,Tag,Typography,Upload,message,} from "antd";
+import {PlusOutlined,DownloadOutlined,EyeOutlined,SyncOutlined,InboxOutlined,FilePdfOutlined,DeleteOutlined,UploadOutlined,ApiOutlined,} from "@ant-design/icons";
+import {Badge,Button,Empty,Input,Modal,Popconfirm,Select,Space,Table,Tag,Typography,Upload,message,} from "antd";
+import ModelViewer3D from "./ModelViewer3D";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
@@ -14,6 +15,10 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
   const [previewDocument, setPreviewDocument] = useState(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [is3DModalOpen, setIs3DModalOpen] = useState(false);
+  const [selected3DDocument, setSelected3DDocument] = useState(null);
+  const [selectedThreeDDocumentId, setSelectedThreeDDocumentId] = useState(null);
+  const [selectedView, setSelectedView] = useState('front');
 
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -180,6 +185,92 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const is3DFile = (doc) => {
+    if (!doc) return false;
+    
+    // Check document_name first
+    const name = doc.document_name || "";
+    const nameExt = name.split(".").pop().toLowerCase();
+    
+    // Also check document_url as fallback
+    const url = doc.document_url || "";
+    const urlExt = url.split(".").pop().toLowerCase();
+    
+    const extensions = ["step", "stp", "stl", "obj", "gltf", "glb"];
+    return extensions.includes(nameExt) || extensions.includes(urlExt);
+  };
+
+  const handle3DView = (doc) => {
+    setSelected3DDocument(doc);
+    setIs3DModalOpen(true);
+  };
+
+  const get3DDocuments = () => {
+    const threeDDocs = documents.filter(doc => is3DFile(doc));
+    return threeDDocs;
+  };
+
+  const get3DDocumentCount = () => {
+    return get3DDocuments().length;
+  };
+
+  const handleOpenFirst3DModel = () => {
+    const threeDDocs = get3DDocuments();
+    if (threeDDocs.length > 0) {
+      openViewModal();
+    } else {
+      message.info('No 3D documents found. Please upload 3D files (.step, .stl, .obj, etc.) first.');
+    }
+  };
+
+  const openViewModal = (viewType = 'default') => {
+    const threeDDocs = get3DDocuments();
+    if (threeDDocs.length === 0) {
+      message.info('No 3D documents found. Please upload 3D files (.step, .stl, .obj, etc.) first.');
+      return;
+    }
+    
+    // Set selected document if not already set
+    if (!selectedThreeDDocumentId) {
+      setSelectedThreeDDocumentId(threeDDocs[0].id);
+    }
+    
+    setIs3DModalOpen(true);
+    if (viewType === selectedView) {
+      setSelectedView('reset'); // Temporarily set to a different value to force re-render
+      setTimeout(() => setSelectedView(viewType), 0); // Then set back to trigger view change
+    } else {
+      setSelectedView(viewType);
+    }
+  };
+
+  const ViewControls = ({ onOpenModal, size = 'small' }) => {
+    const buttonSize = size === 'small' ? 'small' : 'middle';
+    const spacing = size === 'small' ? 'compact' : 'default';
+    
+    const viewButtons = [
+      { key: 'front', label: 'Front' },
+      { key: 'isometric', label: 'Isometric' },
+      { key: 'top', label: 'Top' },
+      { key: 'bottom', label: 'Bottom' }
+    ];
+    
+    return (
+      <Space size={spacing} className="bg-white/90 backdrop-blur-sm rounded-lg p-2 shadow-md">
+        {viewButtons.map(({ key, label }) => (
+          <Button 
+            key={key}
+            size={buttonSize} 
+            type={selectedView === key ? 'primary' : 'default'}
+            onClick={() => onOpenModal(key)}
+          >
+            {label}
+          </Button>
+        ))}
+      </Space>
+    );
   };
 
   const handleDelete = async (documentId) => {
@@ -418,6 +509,19 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
               onClick={() => handlePreview(currentDoc)}
               className="hover:text-blue-500 hover:bg-blue-50"
             />
+            {is3DFile(currentDoc) && (
+              <Button
+                size="small"
+                type="text"
+                icon={<ApiOutlined />}
+                onClick={() => {
+                  setSelectedThreeDDocumentId(currentDoc.id);
+                  openViewModal();
+                }}
+                className="hover:text-purple-500 hover:bg-purple-50"
+                title="3D View"
+              />
+            )}
             <Button
               size="small"
               type="text"
@@ -491,6 +595,19 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             partTypes={partTypes}
             onPartsCreated={onPartsCreated}
           />
+          <Button
+            type="default"
+            size="small"
+            icon={<ApiOutlined />}
+            onClick={handleOpenFirst3DModel}
+            className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 hover:border-purple-300"
+          >
+            3D Model Viewer {get3DDocumentCount() > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 text-xs bg-purple-200 text-purple-800 rounded-full font-medium">
+                {get3DDocumentCount()}
+              </span>
+            )}
+          </Button>
           <Button
             type="primary"
             size="small"
@@ -735,6 +852,84 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             <Empty description="No preview available" />
           )}
         </div>
+      </Modal>
+
+      {/* 3D Model Viewer Modal */}
+      <Modal
+        title={
+          <div className="flex items-center gap-2">
+            <ApiOutlined className="text-purple-500" />
+            <span>3D Model Viewer</span>
+          </div>
+        }
+        open={is3DModalOpen}
+        onCancel={() => {
+          setIs3DModalOpen(false);
+          setSelected3DDocument(null);
+          setSelectedThreeDDocumentId(null);
+        }}
+        width="95%"
+        style={{ maxWidth: 900, top: 20 }}
+        destroyOnHidden
+        styles={{ body: { padding: 8 } }}
+        footer={[
+          <Button key="dl" icon={<DownloadOutlined />} onClick={() => { 
+            const selectedDoc = get3DDocuments().find(doc => doc.id === selectedThreeDDocumentId);
+            if (selectedDoc?.id) { 
+              const a = document.createElement("a"); 
+              a.href = `${API_BASE_URL}/documents/${selectedDoc.id}/download`; 
+              a.setAttribute("download", selectedDoc.document_name); 
+              document.body.appendChild(a); 
+              a.click(); 
+              a.remove(); 
+            } 
+          }}>Download</Button>,
+          <Button key="cl" type="primary" onClick={() => { 
+            setIs3DModalOpen(false); 
+            setSelected3DDocument(null); 
+            setSelectedThreeDDocumentId(null); 
+          }}>Close</Button>
+        ]}
+      >
+        {get3DDocuments().length === 0 || !selectedThreeDDocumentId ? (
+          <div className="w-full flex flex-col items-center justify-center text-slate-400 text-xs" style={{ height: 'clamp(280px, 50vh, 420px)' }}>
+            <span>No 3D models</span>
+            <span className="font-mono mt-0.5">{selectedItem?.assembly_name || selectedItem?.part_name || "N/A"}</span>
+          </div>
+        ) : (
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <div className="flex items-center gap-2">
+                <Text className="text-sm font-medium text-slate-700">Select 3D Model:</Text>
+                <Select
+                  size="small"
+                  value={selectedThreeDDocumentId}
+                  onChange={setSelectedThreeDDocumentId}
+                  style={{ width: '200px' }}
+                  options={get3DDocuments().map(doc => {
+                    const v = doc.document_version;
+                    const vStr = v ? (v.startsWith('v') ? v : `v${v}`) : "v1.0";
+                    return {
+                      value: doc.id,
+                      label: `${doc.document_name || 'Unnamed'} - ${vStr}`,
+                    };
+                  })}
+                />
+              </div>
+              <ViewControls onOpenModal={openViewModal} size="middle" />
+            </div>
+            <div style={{ height: 'clamp(280px, 50vh, 420px)' }}>
+              <ModelViewer3D 
+                documentId={selectedThreeDDocumentId} 
+                height={400} 
+                showControls 
+                initialView={selectedView} 
+                showEdgeButton={true} 
+                restrictZoom={false} 
+              />
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

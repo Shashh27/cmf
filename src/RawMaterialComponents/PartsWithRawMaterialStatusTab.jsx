@@ -597,7 +597,11 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     });
   };
 
-  const handleLinkedMaterialsSearch = (value) => setSearchText((value || '').replace(/[^a-zA-Z0-9 ]/g, '').slice(0, 20));
+  const handleLinkedMaterialsSearch = (value) => {
+    // Remove special characters but keep alphanumeric, spaces, and decimal points for number search
+    const cleanedValue = (value || '').replace(/[^a-zA-Z0-9 .]/g, '');
+    setSearchText(cleanedValue.toLowerCase().slice(0, 50));
+  };
 
   const flattenPartsFromOrderHierarchy = (orderData) => {
     if (!orderData || !orderData.product_hierarchy) {
@@ -659,12 +663,78 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     return { parts, meta };
   };
 
-  const filtered = linkedMaterials.filter(item => 
-    !searchText || Object.values(item).some(value => 
-      value !== null && value !== undefined && 
-      String(value).toLowerCase().includes(searchText.toLowerCase())
-    )
-  );
+  const filtered = linkedMaterials.filter(item => {
+    if (!searchText) return true;
+    
+    const searchLower = searchText.toLowerCase();
+    
+    // Create a searchable string from all relevant fields
+    const searchableContent = [
+      item.source_order_number || '',
+      // Part numbers - handle array and string formats
+      ...(Array.isArray(item.part_numbers) ? item.part_numbers : [item.part_numbers || '']),
+      item.material_name || '',
+      item.form_type || '',
+      item.quantity?.toString() || '',
+      item.allocated_quantity?.toString() || '',
+      item.available_quantity?.toString() || '',
+      // Part required quantities - handle array format
+      ...(Array.isArray(item.part_required_quantities) ? item.part_required_quantities : [item.part_required_quantities || '']),
+      item.mass?.toString() || '',
+      item.weight?.toString() || '',
+      item.cost?.toString() || '',
+      item.vendor_name || '',
+      item.received_vendor_name || '',
+      // Status search - handle both order_status and material_status
+      item.order_status || '',
+      item.material_status || '',
+      item.status || '', // Added status field for the Status column
+      // Handle status variations for searching
+      ...(item.order_status === 'enquiry' ? ['enquiry', 'inquiry', 'enq'] : []),
+      ...(item.order_status === 'purchase_request' ? ['purchase request', 'purchaserequest', 'pr', 'request'] : []),
+      ...(item.order_status === 'purchase_order' ? ['purchase order', 'purchaseorder', 'po', 'order'] : []),
+      ...(item.order_status === 'received' ? ['received', 'receive', 'recd', 'recvd'] : []),
+      ...(item.order_status === 'available' ? ['available', 'avail', 'availble'] : []),
+      ...(item.order_status === 'exhausted' ? ['exhausted', 'exhaust', 'finished', 'empty'] : []),
+      // Handle material_status variations
+      ...(item.material_status === 'enquiry' ? ['enquiry', 'inquiry', 'enq'] : []),
+      ...(item.material_status === 'purchase_request' ? ['purchase request', 'purchaserequest', 'pr', 'request'] : []),
+      ...(item.material_status === 'purchase_order' ? ['purchase order', 'purchaseorder', 'po', 'order'] : []),
+      ...(item.material_status === 'received' ? ['received', 'receive', 'recd', 'recvd'] : []),
+      ...(item.material_status === 'available' ? ['available', 'avail', 'availble'] : []),
+      ...(item.material_status === 'exhausted' ? ['exhausted', 'exhaust', 'finished', 'empty'] : []),
+      // Handle status field variations (for the Status column)
+      ...(item.status === 'available' ? ['available', 'avail', 'availble', 'in stock', 'stock', 'ready'] : []),
+      ...(item.status === 'not available' ? ['not available', 'notavailable', 'not_available', 'unavailable', 'na', 'zero', '0'] : []),
+      ...(item.status === 'exhausted' ? ['exhausted', 'exhaust', 'finished', 'empty'] : []),
+      // Handle NOT AVAILABLE status for available_quantity
+      ...(item.available_quantity === 0 || item.available_quantity === null ? ['not available', 'notavailable', 'not_available', 'unavailable', 'na', 'zero', '0'] : ['available', 'in stock', 'stock']),
+      // General status terms
+      ...(item.available_quantity > 0 ? ['available', 'in stock', 'stock', 'ready'] : [])
+    ].join(' ').toLowerCase();
+    
+    // Create special numeric content that preserves decimal points for number search
+    const numericContent = [
+      item.quantity?.toString() || '',
+      item.allocated_quantity?.toString() || '',
+      item.available_quantity?.toString() || '',
+      ...(Array.isArray(item.part_required_quantities) ? item.part_required_quantities : [item.part_required_quantities || '']),
+      item.mass?.toString() || '',
+      item.weight?.toString() || '',
+      item.cost?.toString() || ''
+    ].join(' ').toLowerCase();
+    
+    // Clean content for special character search (remove everything except alphanumeric and spaces)
+    const cleanedContent = searchableContent.replace(/[^a-z0-9 ]/g, '');
+    
+    // Check if search term exists in:
+    // 1. Original content (with decimals)
+    // 2. Cleaned content (without special characters)
+    // 3. Numeric content (preserving decimals for number search)
+    return searchableContent.includes(searchLower) || 
+           cleanedContent.includes(searchLower) || 
+           numericContent.includes(searchLower);
+  });
 
   const groupedMap = {};
   filtered.forEach((item) => {
@@ -930,7 +1000,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
 
   return (
     <div className="mt-4">
-      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Parts with Raw Materials Status</span></div><Space className="w-full sm:w-auto flex-col sm:flex-row gap-2"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={20} className="w-full sm:w-64" size="middle" /><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /></Space></div>}>
+      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Parts with Raw Materials Status</span></div><Space className="w-full sm:w-auto flex-col sm:flex-row gap-2"><Input.Search placeholder="Search all columns..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-64" size="middle" /><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /></Space></div>}>
         <Table columns={columns} dataSource={groupedData} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table" scroll={{ x: 1200 }} loading={loading} />
       </Card>
 
@@ -1005,7 +1075,105 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
           {/* Quantity */}
           <div className="space-y-1">
             <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</Text>
-            <InputNumber min={0} precision={0} step={1} max={99999} style={{ width: '100%' }} value={statusEditOrderQty} onChange={setStatusEditOrderQty} size="large" className="rounded-md" stringMode parser={(v) => limitDecimals(v, 'status-edit-qty', 0)} onKeyDown={(e) => blockExtraDecimals(e, 'status-edit-qty', 0)} />
+            <InputNumber 
+              min={1} 
+              precision={0} 
+              step={1} 
+              max={99999} 
+              style={{ width: '100%' }} 
+              value={statusEditOrderQty} 
+              onChange={(value) => {
+                // Only allow valid positive integers, reject everything else including 0
+                if (value === null || value === undefined || value === '') {
+                  setStatusEditOrderQty(1);
+                } else if (Number.isInteger(value) && value > 0) {
+                  setStatusEditOrderQty(value);
+                } else {
+                  // Reject invalid values including 0
+                  setStatusEditOrderQty(1);
+                }
+              }}
+              onBeforeInput={(e) => {
+                // Block input before it reaches the field
+                const char = e.data;
+                const currentValue = e.target.value || '';
+                // Block non-digits
+                if (char && !/[0-9]/.test(char)) {
+                  e.preventDefault();
+                  return false;
+                }
+                // Block 0 as first digit (if field is empty or will be first char)
+                if (char === '0' && currentValue === '') {
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+              onKeyPress={(e) => {
+                // Block all non-digit keys except navigation keys
+                const char = String.fromCharCode(e.which);
+                const currentValue = e.target.value || '';
+                // Block non-digits
+                if (!/[0-9]/.test(char) && 
+                    e.which !== 8 && // backspace
+                    e.which !== 46 && // delete
+                    e.which !== 9 && // tab
+                    e.which !== 13 && // enter
+                    e.which !== 37 && // left arrow
+                    e.which !== 39 && // right arrow
+                    e.which !== 36 && // home
+                    e.which !== 35) { // end
+                  e.preventDefault();
+                  return false;
+                }
+                // Block 0 as first digit
+                if (char === '0' && currentValue === '') {
+                  e.preventDefault();
+                  return false;
+                }
+              }}
+              onInput={(e) => {
+                // Immediate cleanup - remove leading zeros and non-digits
+                const value = e.target.value;
+                // Keep only digits
+                const cleanValue = value.replace(/[^0-9]/g, '');
+                // Remove leading zeros (e.g., "01" -> "1", "00" -> "0")
+                const validValue = cleanValue.replace(/^0+/, '');
+                if (value !== validValue) {
+                  e.target.value = validValue;
+                }
+                // If empty or just zeros, default to 1
+                const numValue = parseInt(validValue) || 1;
+                setStatusEditOrderQty(numValue > 0 ? numValue : 1);
+              }}
+              onPaste={(e) => {
+                // Prevent paste of invalid content
+                e.preventDefault();
+                const pasteData = e.clipboardData.getData('text');
+                const cleanData = pasteData.replace(/[^0-9]/g, '');
+                if (cleanData) {
+                  const currentValue = e.target.value || '';
+                  const newValue = (currentValue + cleanData).replace(/^0+/, '');
+                  const numValue = parseInt(newValue) || 1;
+                  setStatusEditOrderQty(numValue > 0 ? numValue : 1);
+                }
+                return false;
+              }}
+              onBlur={(e) => {
+                // Clean up any invalid characters and leading zeros on blur
+                const value = e.target.value;
+                const cleanValue = value.replace(/[^0-9]/g, '').replace(/^0+/, '');
+                if (value !== cleanValue) {
+                  e.target.value = cleanValue;
+                }
+                const numValue = parseInt(cleanValue) || 1;
+                setStatusEditOrderQty(numValue > 0 ? numValue : 1);
+              }}
+              size="large" 
+              className="rounded-md" 
+              stringMode 
+              parser={(v) => limitDecimals(v, 'status-edit-qty', 0)} 
+              onKeyDown={(e) => blockExtraDecimals(e, 'status-edit-qty', 0)} 
+            />
             {decimalWarnings['status-edit-qty'] && <Text type="warning" className="text-[10px] block mt-1">{decimalWarnings['status-edit-qty']}</Text>}
           </div>
 
@@ -1017,7 +1185,82 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                 style={{ width: '100%' }}
                 placeholder="Diameter"
                 value={statusEditDimensions.diameter}
-                onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, diameter: value }))}
+                onChange={(value) => {
+                  // Only allow valid numbers, reject everything else
+                  if (value === null || value === undefined || value === '') {
+                    setStatusEditDimensions(prev => ({ ...prev, diameter: '' }));
+                  } else if (!isNaN(value) && value >= 0) {
+                    setStatusEditDimensions(prev => ({ ...prev, diameter: value }));
+                  } else {
+                    // Reject invalid values by setting back to empty or last valid value
+                    setStatusEditDimensions(prev => ({ ...prev, diameter: '' }));
+                  }
+                }}
+                onBeforeInput={(e) => {
+                  // Block input before it reaches the field
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  // Block all non-digit and non-decimal keys except navigation keys
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && // backspace
+                      e.which !== 46 && // delete
+                      e.which !== 9 && // tab
+                      e.which !== 13 && // enter
+                      e.which !== 37 && // left arrow
+                      e.which !== 39 && // right arrow
+                      e.which !== 36 && // home
+                      e.which !== 35) { // end
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  // Block multiple decimal points and special characters
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onInput={(e) => {
+                  // Immediate cleanup of any invalid characters
+                  const value = e.target.value;
+                  const validValue = value.replace(/[^0-9.]/g, '');
+                  if (value !== validValue) {
+                    e.target.value = validValue;
+                    setStatusEditDimensions(prev => ({ ...prev, diameter: validValue }));
+                  }
+                }}
+                onPaste={(e) => {
+                  // Prevent paste of invalid content
+                  e.preventDefault();
+                  const pasteData = e.clipboardData.getData('text');
+                  const cleanData = pasteData.replace(/[^0-9.]/g, '');
+                  if (cleanData) {
+                    const currentValue = e.target.value || '';
+                    const newValue = currentValue + cleanData;
+                    setStatusEditDimensions(prev => ({ ...prev, diameter: newValue }));
+                  }
+                  return false;
+                }}
+                onBlur={(e) => {
+                  // Clean up any invalid characters on blur
+                  const value = e.target.value;
+                  const cleanValue = value.replace(/[^0-9.]/g, '');
+                  if (value !== cleanValue) {
+                    setStatusEditDimensions(prev => ({ ...prev, diameter: cleanValue }));
+                  }
+                }}
                 min={0}
                 step={0.01}
                 size="large"
@@ -1050,7 +1293,82 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                   style={{ width: '100%' }}
                   placeholder="Length"
                   value={statusEditDimensions.length}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
+                  onChange={(value) => {
+                    // Only allow valid numbers, reject everything else
+                    if (value === null || value === undefined || value === '') {
+                      setStatusEditDimensions(prev => ({ ...prev, length: '' }));
+                    } else if (!isNaN(value) && value >= 0) {
+                      setStatusEditDimensions(prev => ({ ...prev, length: value }));
+                    } else {
+                      // Reject invalid values by setting back to empty or last valid value
+                      setStatusEditDimensions(prev => ({ ...prev, length: '' }));
+                    }
+                  }}
+                  onBeforeInput={(e) => {
+                    // Block input before it reaches the field
+                    const char = e.data;
+                    if (char && !/[0-9.]/.test(char)) {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyPress={(e) => {
+                    // Block all non-digit and non-decimal keys except navigation keys
+                    const char = String.fromCharCode(e.which);
+                    if (!/[0-9.]/.test(char) && 
+                        e.which !== 8 && // backspace
+                        e.which !== 46 && // delete
+                        e.which !== 9 && // tab
+                        e.which !== 13 && // enter
+                        e.which !== 37 && // left arrow
+                        e.which !== 39 && // right arrow
+                        e.which !== 36 && // home
+                        e.which !== 35) { // end
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Block multiple decimal points and special characters
+                    const value = e.target.value;
+                    if (e.key === '.' && value && value.includes('.')) {
+                      e.preventDefault();
+                      return false;
+                    }
+                    if (e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onInput={(e) => {
+                    // Immediate cleanup of any invalid characters
+                    const value = e.target.value;
+                    const validValue = value.replace(/[^0-9.]/g, '');
+                    if (value !== validValue) {
+                      e.target.value = validValue;
+                      setStatusEditDimensions(prev => ({ ...prev, length: validValue }));
+                    }
+                  }}
+                  onPaste={(e) => {
+                    // Prevent paste of invalid content
+                    e.preventDefault();
+                    const pasteData = e.clipboardData.getData('text');
+                    const cleanData = pasteData.replace(/[^0-9.]/g, '');
+                    if (cleanData) {
+                      const currentValue = e.target.value || '';
+                      const newValue = currentValue + cleanData;
+                      setStatusEditDimensions(prev => ({ ...prev, length: newValue }));
+                    }
+                    return false;
+                  }}
+                  onBlur={(e) => {
+                    // Clean up any invalid characters on blur
+                    const value = e.target.value;
+                    const cleanValue = value.replace(/[^0-9.]/g, '');
+                    if (value !== cleanValue) {
+                      setStatusEditDimensions(prev => ({ ...prev, length: cleanValue }));
+                    }
+                  }}
                   min={0}
                   step={0.01}
                   size="large"
@@ -1063,7 +1381,82 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                   style={{ width: '100%' }}
                   placeholder="Breadth"
                   value={statusEditDimensions.breadth}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, breadth: value }))}
+                  onChange={(value) => {
+                    // Only allow valid numbers, reject everything else
+                    if (value === null || value === undefined || value === '') {
+                      setStatusEditDimensions(prev => ({ ...prev, breadth: '' }));
+                    } else if (!isNaN(value) && value >= 0) {
+                      setStatusEditDimensions(prev => ({ ...prev, breadth: value }));
+                    } else {
+                      // Reject invalid values by setting back to empty or last valid value
+                      setStatusEditDimensions(prev => ({ ...prev, breadth: '' }));
+                    }
+                  }}
+                  onBeforeInput={(e) => {
+                    // Block input before it reaches the field
+                    const char = e.data;
+                    if (char && !/[0-9.]/.test(char)) {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyPress={(e) => {
+                    // Block all non-digit and non-decimal keys except navigation keys
+                    const char = String.fromCharCode(e.which);
+                    if (!/[0-9.]/.test(char) && 
+                        e.which !== 8 && // backspace
+                        e.which !== 46 && // delete
+                        e.which !== 9 && // tab
+                        e.which !== 13 && // enter
+                        e.which !== 37 && // left arrow
+                        e.which !== 39 && // right arrow
+                        e.which !== 36 && // home
+                        e.which !== 35) { // end
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Block multiple decimal points and special characters
+                    const value = e.target.value;
+                    if (e.key === '.' && value && value.includes('.')) {
+                      e.preventDefault();
+                      return false;
+                    }
+                    if (e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onInput={(e) => {
+                    // Immediate cleanup of any invalid characters
+                    const value = e.target.value;
+                    const validValue = value.replace(/[^0-9.]/g, '');
+                    if (value !== validValue) {
+                      e.target.value = validValue;
+                      setStatusEditDimensions(prev => ({ ...prev, breadth: validValue }));
+                    }
+                  }}
+                  onPaste={(e) => {
+                    // Prevent paste of invalid content
+                    e.preventDefault();
+                    const pasteData = e.clipboardData.getData('text');
+                    const cleanData = pasteData.replace(/[^0-9.]/g, '');
+                    if (cleanData) {
+                      const currentValue = e.target.value || '';
+                      const newValue = currentValue + cleanData;
+                      setStatusEditDimensions(prev => ({ ...prev, breadth: newValue }));
+                    }
+                    return false;
+                  }}
+                  onBlur={(e) => {
+                    // Clean up any invalid characters on blur
+                    const value = e.target.value;
+                    const cleanValue = value.replace(/[^0-9.]/g, '');
+                    if (value !== cleanValue) {
+                      setStatusEditDimensions(prev => ({ ...prev, breadth: cleanValue }));
+                    }
+                  }}
                   min={0}
                   step={0.01}
                   size="large"
@@ -1080,7 +1473,82 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                 style={{ width: '100%' }}
                 placeholder="Height"
                 value={statusEditDimensions.height}
-                onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, height: value }))}
+                onChange={(value) => {
+                  // Only allow valid numbers, reject everything else
+                  if (value === null || value === undefined || value === '') {
+                    setStatusEditDimensions(prev => ({ ...prev, height: '' }));
+                  } else if (!isNaN(value) && value >= 0) {
+                    setStatusEditDimensions(prev => ({ ...prev, height: value }));
+                  } else {
+                    // Reject invalid values by setting back to empty or last valid value
+                    setStatusEditDimensions(prev => ({ ...prev, height: '' }));
+                  }
+                }}
+                onBeforeInput={(e) => {
+                  // Block input before it reaches the field
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  // Block all non-digit and non-decimal keys except navigation keys
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && // backspace
+                      e.which !== 46 && // delete
+                      e.which !== 9 && // tab
+                      e.which !== 13 && // enter
+                      e.which !== 37 && // left arrow
+                      e.which !== 39 && // right arrow
+                      e.which !== 36 && // home
+                      e.which !== 35) { // end
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  // Block multiple decimal points and special characters
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onInput={(e) => {
+                  // Immediate cleanup of any invalid characters
+                  const value = e.target.value;
+                  const validValue = value.replace(/[^0-9.]/g, '');
+                  if (value !== validValue) {
+                    e.target.value = validValue;
+                    setStatusEditDimensions(prev => ({ ...prev, height: validValue }));
+                  }
+                }}
+                onPaste={(e) => {
+                  // Prevent paste of invalid content
+                  e.preventDefault();
+                  const pasteData = e.clipboardData.getData('text');
+                  const cleanData = pasteData.replace(/[^0-9.]/g, '');
+                  if (cleanData) {
+                    const currentValue = e.target.value || '';
+                    const newValue = currentValue + cleanData;
+                    setStatusEditDimensions(prev => ({ ...prev, height: newValue }));
+                  }
+                  return false;
+                }}
+                onBlur={(e) => {
+                  // Clean up any invalid characters on blur
+                  const value = e.target.value;
+                  const cleanValue = value.replace(/[^0-9.]/g, '');
+                  if (value !== cleanValue) {
+                    setStatusEditDimensions(prev => ({ ...prev, height: cleanValue }));
+                  }
+                }}
                 min={0}
                 step={0.01}
                 size="large"
@@ -1097,7 +1565,82 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                   style={{ width: '100%' }}
                   placeholder="Outer Diameter"
                   value={statusEditDimensions.outer_diameter}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }))}
+                  onChange={(value) => {
+                    // Only allow valid numbers, reject everything else
+                    if (value === null || value === undefined || value === '') {
+                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: '' }));
+                    } else if (!isNaN(value) && value >= 0) {
+                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }));
+                    } else {
+                      // Reject invalid values by setting back to empty or last valid value
+                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: '' }));
+                    }
+                  }}
+                  onBeforeInput={(e) => {
+                    // Block input before it reaches the field
+                    const char = e.data;
+                    if (char && !/[0-9.]/.test(char)) {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyPress={(e) => {
+                    // Block all non-digit and non-decimal keys except navigation keys
+                    const char = String.fromCharCode(e.which);
+                    if (!/[0-9.]/.test(char) && 
+                        e.which !== 8 && // backspace
+                        e.which !== 46 && // delete
+                        e.which !== 9 && // tab
+                        e.which !== 13 && // enter
+                        e.which !== 37 && // left arrow
+                        e.which !== 39 && // right arrow
+                        e.which !== 36 && // home
+                        e.which !== 35) { // end
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Block multiple decimal points and special characters
+                    const value = e.target.value;
+                    if (e.key === '.' && value && value.includes('.')) {
+                      e.preventDefault();
+                      return false;
+                    }
+                    if (e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onInput={(e) => {
+                    // Immediate cleanup of any invalid characters
+                    const value = e.target.value;
+                    const validValue = value.replace(/[^0-9.]/g, '');
+                    if (value !== validValue) {
+                      e.target.value = validValue;
+                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: validValue }));
+                    }
+                  }}
+                  onPaste={(e) => {
+                    // Prevent paste of invalid content
+                    e.preventDefault();
+                    const pasteData = e.clipboardData.getData('text');
+                    const cleanData = pasteData.replace(/[^0-9.]/g, '');
+                    if (cleanData) {
+                      const currentValue = e.target.value || '';
+                      const newValue = currentValue + cleanData;
+                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: newValue }));
+                    }
+                    return false;
+                  }}
+                  onBlur={(e) => {
+                    // Clean up any invalid characters on blur
+                    const value = e.target.value;
+                    const cleanValue = value.replace(/[^0-9.]/g, '');
+                    if (value !== cleanValue) {
+                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: cleanValue }));
+                    }
+                  }}
                   min={0}
                   step={0.01}
                   size="large"
@@ -1110,7 +1653,82 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                   style={{ width: '100%' }}
                   placeholder="Inner Diameter"
                   value={statusEditDimensions.inner_diameter}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }))}
+                  onChange={(value) => {
+                    // Only allow valid numbers, reject everything else
+                    if (value === null || value === undefined || value === '') {
+                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: '' }));
+                    } else if (!isNaN(value) && value >= 0) {
+                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }));
+                    } else {
+                      // Reject invalid values by setting back to empty or last valid value
+                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: '' }));
+                    }
+                  }}
+                  onBeforeInput={(e) => {
+                    // Block input before it reaches the field
+                    const char = e.data;
+                    if (char && !/[0-9.]/.test(char)) {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyPress={(e) => {
+                    // Block all non-digit and non-decimal keys except navigation keys
+                    const char = String.fromCharCode(e.which);
+                    if (!/[0-9.]/.test(char) && 
+                        e.which !== 8 && // backspace
+                        e.which !== 46 && // delete
+                        e.which !== 9 && // tab
+                        e.which !== 13 && // enter
+                        e.which !== 37 && // left arrow
+                        e.which !== 39 && // right arrow
+                        e.which !== 36 && // home
+                        e.which !== 35) { // end
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    // Block multiple decimal points and special characters
+                    const value = e.target.value;
+                    if (e.key === '.' && value && value.includes('.')) {
+                      e.preventDefault();
+                      return false;
+                    }
+                    if (e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onInput={(e) => {
+                    // Immediate cleanup of any invalid characters
+                    const value = e.target.value;
+                    const validValue = value.replace(/[^0-9.]/g, '');
+                    if (value !== validValue) {
+                      e.target.value = validValue;
+                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: validValue }));
+                    }
+                  }}
+                  onPaste={(e) => {
+                    // Prevent paste of invalid content
+                    e.preventDefault();
+                    const pasteData = e.clipboardData.getData('text');
+                    const cleanData = pasteData.replace(/[^0-9.]/g, '');
+                    if (cleanData) {
+                      const currentValue = e.target.value || '';
+                      const newValue = currentValue + cleanData;
+                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: newValue }));
+                    }
+                    return false;
+                  }}
+                  onBlur={(e) => {
+                    // Clean up any invalid characters on blur
+                    const value = e.target.value;
+                    const cleanValue = value.replace(/[^0-9.]/g, '');
+                    if (value !== cleanValue) {
+                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: cleanValue }));
+                    }
+                  }}
                   min={0}
                   step={0.01}
                   size="large"
@@ -1127,7 +1745,82 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                 style={{ width: '100%' }}
                 placeholder="Length"
                 value={statusEditDimensions.length}
-                onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
+                onChange={(value) => {
+                  // Only allow valid numbers, reject everything else
+                  if (value === null || value === undefined || value === '') {
+                    setStatusEditDimensions(prev => ({ ...prev, length: '' }));
+                  } else if (!isNaN(value) && value >= 0) {
+                    setStatusEditDimensions(prev => ({ ...prev, length: value }));
+                  } else {
+                    // Reject invalid values by setting back to empty or last valid value
+                    setStatusEditDimensions(prev => ({ ...prev, length: '' }));
+                  }
+                }}
+                onBeforeInput={(e) => {
+                  // Block input before it reaches the field
+                  const char = e.data;
+                  if (char && !/[0-9.]/.test(char)) {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyPress={(e) => {
+                  // Block all non-digit and non-decimal keys except navigation keys
+                  const char = String.fromCharCode(e.which);
+                  if (!/[0-9.]/.test(char) && 
+                      e.which !== 8 && // backspace
+                      e.which !== 46 && // delete
+                      e.which !== 9 && // tab
+                      e.which !== 13 && // enter
+                      e.which !== 37 && // left arrow
+                      e.which !== 39 && // right arrow
+                      e.which !== 36 && // home
+                      e.which !== 35) { // end
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onKeyDown={(e) => {
+                  // Block multiple decimal points and special characters
+                  const value = e.target.value;
+                  if (e.key === '.' && value && value.includes('.')) {
+                    e.preventDefault();
+                    return false;
+                  }
+                  if (e.key === ',' || e.key === '-' || e.key === '+') {
+                    e.preventDefault();
+                    return false;
+                  }
+                }}
+                onInput={(e) => {
+                  // Immediate cleanup of any invalid characters
+                  const value = e.target.value;
+                  const validValue = value.replace(/[^0-9.]/g, '');
+                  if (value !== validValue) {
+                    e.target.value = validValue;
+                    setStatusEditDimensions(prev => ({ ...prev, length: validValue }));
+                  }
+                }}
+                onPaste={(e) => {
+                  // Prevent paste of invalid content
+                  e.preventDefault();
+                  const pasteData = e.clipboardData.getData('text');
+                  const cleanData = pasteData.replace(/[^0-9.]/g, '');
+                  if (cleanData) {
+                    const currentValue = e.target.value || '';
+                    const newValue = currentValue + cleanData;
+                    setStatusEditDimensions(prev => ({ ...prev, length: newValue }));
+                  }
+                  return false;
+                }}
+                onBlur={(e) => {
+                  // Clean up any invalid characters on blur
+                  const value = e.target.value;
+                  const cleanValue = value.replace(/[^0-9.]/g, '');
+                  if (value !== cleanValue) {
+                    setStatusEditDimensions(prev => ({ ...prev, length: cleanValue }));
+                  }
+                }}
                 min={0}
                 step={0.01}
                 size="large"
@@ -1204,18 +1897,67 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                         <span className="text-xs font-medium text-gray-600">Qty:</span>
                         <InputNumber
                           size="small"
-                          min={0.1}
-                          step={0.1}
+                          min={1}
+                          step={1}
+                          precision={0}
                           value={quantity}
                           onChange={(newQuantity) => {
-                            setStatusEditPartQuantities(prev => ({
-                              ...prev,
-                              [l.part_id]: newQuantity || 1
-                            }));
+                            // Only allow positive integers, reject 0 and decimals
+                            if (newQuantity === null || newQuantity === undefined || newQuantity === '') {
+                              setStatusEditPartQuantities(prev => ({
+                                ...prev,
+                                [l.part_id]: 1
+                              }));
+                            } else if (Number.isInteger(newQuantity) && newQuantity > 0) {
+                              setStatusEditPartQuantities(prev => ({
+                                ...prev,
+                                [l.part_id]: newQuantity
+                              }));
+                            } else {
+                              // Reject invalid values including 0 and decimals
+                              setStatusEditPartQuantities(prev => ({
+                                ...prev,
+                                [l.part_id]: 1
+                              }));
+                            }
+                          }}
+                          onKeyPress={(e) => {
+                            const char = String.fromCharCode(e.which);
+                            const currentValue = e.target.value || '';
+                            if (!/[0-9]/.test(char) && 
+                                e.which !== 8 && 
+                                e.which !== 46 && 
+                                e.which !== 9 && 
+                                e.which !== 13 && 
+                                e.which !== 37 && 
+                                e.which !== 39 && 
+                                e.which !== 36 && 
+                                e.which !== 35) {
+                              e.preventDefault();
+                              return false;
+                            }
+                            // Block 0 as first digit
+                            if (char === '0' && currentValue === '') {
+                              e.preventDefault();
+                              return false;
+                            }
+                          }}
+                          onBeforeInput={(e) => {
+                            const char = e.data;
+                            const currentValue = e.target.value || '';
+                            if (char && !/[0-9]/.test(char)) {
+                              e.preventDefault();
+                              return false;
+                            }
+                            // Block 0 as first digit
+                            if (char === '0' && currentValue === '') {
+                              e.preventDefault();
+                              return false;
+                            }
                           }}
                           style={{ width: '80px' }}
                           className="text-xs"
-                          placeholder="1.0"
+                          placeholder="1"
                         />
                       </div>
                     </div>

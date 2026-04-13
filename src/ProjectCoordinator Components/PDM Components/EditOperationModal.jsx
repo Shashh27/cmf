@@ -75,6 +75,8 @@ const EditOperationModal = ({
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
   const [workCentersLoading, setWorkCentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
+  const [vendorsLoading, setVendorsLoading]         = useState(false);
+  const [vendors, setVendors]                       = useState([]);
   const [toolsSelectorVisible, setToolsSelectorVisible] = useState(false);
 
   const fromDateWatch = Form.useWatch('from_date', form);
@@ -85,6 +87,7 @@ const EditOperationModal = ({
   const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,    setAllMachines, setMachinesLoading,    allMachines.length > 0);
+  const fetchVendors     = () => fetchInto(`${API_BASE_URL}/rawmaterials/vendors`,     setVendors,     setVendorsLoading,     vendors.length > 0);
 
   const getCurrentUserId = () => {
     try {
@@ -144,7 +147,7 @@ const EditOperationModal = ({
 
   useEffect(() => {
     if (!open) return;
-    if (partTypeWatch === 2) form.setFieldsValue({ setup_time: null, cycle_time: null, workcenter_id: null, machine_id: null, work_instructions: null, notes: null });
+    if (partTypeWatch === 2) form.setFieldsValue({ setup_time: null, cycle_time: null, workcenter_id: null, machine_id: null, work_instructions: null, notes: null, vendor_id: null });
   }, [partTypeWatch, open]);
 
   useEffect(() => {
@@ -153,6 +156,7 @@ const EditOperationModal = ({
       operation_number:  operation.operation_number,
       operation_name:    operation.operation_name,
       part_type_id:      operation.part_type_id ?? 1,
+      vendor_id:         operation.vendor_id,
       from_date:         operation.from_date  ? dayjs(operation.from_date) : null,
       to_date:           operation.to_date    ? dayjs(operation.to_date) : null,
       setup_time:        operation.setup_time ? dayjs(operation.setup_time, 'HH:mm:ss') : null,
@@ -223,9 +227,10 @@ const EditOperationModal = ({
     let type = 'other';
     if (['jpg','jpeg','png','gif','svg'].includes(ext)) type = 'image';
     else if (ext === 'pdf') type = 'pdf';
+    else if (['cnc','gcode','nc','m','tap','mpf','iso','fan','h','txt','csv'].includes(ext)) type = 'text';
     
-    // Instead of opening a new modal, we show it in the right panel
-    setViewingDoc({ url, title: doc.document_name, type, id: doc.id, name: doc.document_name });
+    // Open preview modal instead of showing in right panel
+    setPreview({ url, title: doc.document_name, type, id: doc.id, name: doc.document_name });
     setParentId(null); // Switch off "Update Version" mode if it was on
   };
 
@@ -299,6 +304,7 @@ const EditOperationModal = ({
         machine_id:        out ? null : (machine_id ?? null),
         work_instructions: out ? null : (rest.work_instructions ?? null),
         notes:             out ? null : (rest.notes ?? null),
+        vendor_id:         rest.vendor_id ?? null,
       };
       const url    = isCreateMode ? `${API_BASE_URL}/operations/` : `${API_BASE_URL}/operations/${operation.id}`;
       const body   = isCreateMode ? { ...payload, part_id: partId } : payload;
@@ -588,7 +594,32 @@ const EditOperationModal = ({
       </Row>
       <Form.Item noStyle shouldUpdate={(p, c) => p.part_type_id !== c.part_type_id}>
         {({ getFieldValue }) => getFieldValue('part_type_id') === 2
-          ? <OutSourceDates form={form} fromDateWatch={fromDateWatch} />
+          ? (
+            <>
+              <OutSourceDates form={form} fromDateWatch={fromDateWatch} />
+              {/* Vendor Selection for Out-Source Operations */}
+              <Row gutter={[12, 0]} style={{ marginTop: 12 }}>
+                <Col xs={24}>
+                  <Form.Item name="vendor_id" label="Vendor" rules={[{ required: true, message: 'Please select a vendor for outsourced operations!' }]}>
+                    <Select 
+                      placeholder="Select vendor" 
+                      allowClear 
+                      showSearch 
+                      optionFilterProp="children"
+                      loading={vendorsLoading}
+                      onOpenChange={o => { if (o) fetchVendors(); }}
+                    >
+                      {vendors.map(vendor => (
+                        <Select.Option key={vendor.id} value={vendor.id}>
+                          {vendor.company_name}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          )
           : (
             <>
               <Row gutter={[12, 0]}>
@@ -671,15 +702,40 @@ const EditOperationModal = ({
       {preview && (
         <Modal title={preview.title} open onCancel={() => setPreview(null)}
           footer={[
-            <Button key="dl" icon={<DownloadOutlined />} onClick={() => window.open(preview.url, '_blank')}>Download</Button>,
+            <Button key="dl" icon={<DownloadOutlined />} onClick={() => handleDownloadFile({ id: preview.id, document_name: preview.name })}>Download</Button>,
             <Button key="cl" type="primary" onClick={() => setPreview(null)}>Close</Button>
           ]}
           width="95%" style={{ maxWidth: 1000, top: 20 }} styles={{ body: { height: '75vh', padding: 0 } }}
         >
-          {preview.type === 'image'
-            ? <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto"><img src={preview.url} alt={preview.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /></div>
-            : <iframe src={`${preview.url}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
-          }
+          {preview.type === 'image' ? (
+            <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+              <img src={preview.url} alt={preview.title} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            </div>
+          ) : preview.type === 'pdf' ? (
+            <iframe src={`${preview.url}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
+          ) : preview.type === 'text' ? (
+            <div className="h-full bg-gray-50 p-4 overflow-auto">
+              <iframe 
+                src={preview.url} 
+                title={preview.title} 
+                width="100%" 
+                height="100%" 
+                style={{ 
+                  border: 'none', 
+                  backgroundColor: 'white',
+                  fontFamily: 'monospace',
+                  fontSize: '12px',
+                  whiteSpace: 'pre'
+                }} 
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+              <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
+              <p className="text-gray-700 font-medium mb-2">Preview is not available for this file type.</p>
+              <p className="text-gray-500">Please download the file to view it.</p>
+            </div>
+          )}
         </Modal>
       )}
       {toolsSelectorVisible && (

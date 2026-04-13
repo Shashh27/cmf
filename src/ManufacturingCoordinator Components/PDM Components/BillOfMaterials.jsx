@@ -111,7 +111,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     }
   }, []);
 
-  // If opened with an initial product id (e.g., from OMS), auto-select it (do not auto-expand).
+  // If opened with an initial product id (e.g., from OMS), auto-select it AND auto-expand complete BOM tree
   useEffect(() => {
     const pid = initialProductId != null ? Number(initialProductId) : null;
     if (!pid || loading) return;
@@ -120,6 +120,40 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     setActiveItemId(pid);
     if (onItemSelected) {
       onItemSelected({ ...product, itemType: 'product', productId: pid });
+    }
+    
+    // Auto-expand complete BOM tree when opened from OMS
+    if (hierarchicalData[pid]) {
+      const expandedKeys = {};
+      const expandAllItems = (data, prefix = '') => {
+        // Expand product
+        expandedKeys[getExpandKey('product', pid)] = true;
+        
+        // Expand all assemblies and their parts
+        if (data.assemblies) {
+          data.assemblies.forEach(assembly => {
+            expandedKeys[getExpandKey('assembly', assembly.id)] = true;
+            // Recursively expand nested assemblies and their parts
+            expandAssembly(assembly);
+          });
+        }
+      };
+      
+      const expandAssembly = (assembly) => {
+        // Expand this assembly (already done above, but keeping for completeness)
+        expandedKeys[getExpandKey('assembly', assembly.id)] = true;
+        
+        // Expand child assemblies recursively
+        if (assembly.child_assemblies) {
+          assembly.child_assemblies.forEach(childAssembly => {
+            expandedKeys[getExpandKey('assembly', childAssembly.id)] = true;
+            expandAssembly(childAssembly);
+          });
+        }
+      };
+      
+      expandAllItems(hierarchicalData[pid]);
+      setExpandedItems(prev => ({ ...prev, ...expandedKeys }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProductId, loading, products, hierarchicalData]);

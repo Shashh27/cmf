@@ -263,7 +263,12 @@ const OMS = () => {
     const status = String(order.status || "").toLowerCase();
     
     // Project Coordinator
-    const userName = String(order.user_name || order.user_id || "").toLowerCase();
+    const userName = String(
+      order.project_coordinator_name || 
+      order.project_coordinator_id || 
+      order.admin_name || 
+      order.admin_id || ""
+    ).toLowerCase();
     
     return (
       slNo.includes(searchLower) ||
@@ -379,12 +384,14 @@ const OMS = () => {
     },
     {
       title: <span className="font-semibold text-gray-700">Project Coordinator</span>,
-      dataIndex: "user_name",
-      key: "user_name",
+      dataIndex: "project_coordinator_name",
+      key: "project_coordinator_name",
       render: (text, record) => (
         <Space>
           <UserOutlined className="text-gray-400" />
-          <span className="text-gray-700">{text || record.user_id}</span>
+          <span className="text-gray-700">
+            {text || record.project_coordinator_id || record.admin_name || record.admin_id || "-"}
+          </span>
         </Space>
       ),
     },

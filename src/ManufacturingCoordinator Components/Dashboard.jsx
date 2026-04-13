@@ -1,60 +1,522 @@
-import React from 'react';
-import { Layout, Card, Row, Col, Statistic, Table, Tag } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Row, Col, Card, Spin, Empty, Statistic, Progress, Typography, Avatar, Table, Tag, Space, Badge, Flex } from 'antd';
+import { 
+  ShoppingCartOutlined, 
+  ClockCircleOutlined, 
+  CheckCircleOutlined, 
+  CalendarOutlined,
+  RiseOutlined,
+  UserOutlined,
+  FileTextOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined
+} from '@ant-design/icons';
+import axios from 'axios';
+import { API_BASE_URL } from '../Config/auth';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Sector, Cell, BarChart, Bar, ComposedChart } from 'recharts';
+import dayjs from 'dayjs';
 
-const { Content } = Layout;
-
-const columns = [
-  { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
-  { title: 'Operation', dataIndex: 'operation', key: 'operation' },
-  { title: 'Work Center', dataIndex: 'work_center', key: 'work_center' },
-  {
-    title: 'Status',
-    dataIndex: 'status',
-    key: 'status',
-    render: (s) => {
-      const color = s === 'Scheduled' ? 'geekblue' : s === 'Released' ? 'green' : 'volcano';
-      return <Tag color={color}>{s}</Tag>;
-    },
-  },
-];
-
-const data = [
-  { id: 11, operation: 'Milling 10', work_center: 'MC', status: 'Scheduled' },
-  { id: 12, operation: 'EDM Wire 20', work_center: 'EDM', status: 'Released' },
-  { id: 13, operation: 'Turning 30', work_center: 'Lathe', status: 'Hold' },
-];
+const { Title, Text } = Typography;
 
 const Dashboard = () => {
+  const [loading, setLoading] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [dashboardStats, setDashboardStats] = useState({
+    totalOrders: 0,
+    pendingOrders: 0,
+    ongoingOrders: 0,
+    completedOrders: 0,
+    thisMonthOrders: 0,
+    lastMonthOrders: 0,
+    totalCustomers: 0,
+    avgOrderValue: 0
+  });
+
+  const getCurrentManufacturingCoordinatorId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const user = JSON.parse(stored);
+      // For manufacturing coordinator role, use the user id
+      return user?.role === 'manufacturing_coordinator' ? user?.id : user?.manufacturing_coordinator_id;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    try {
+      const manufacturingCoordinatorId = getCurrentManufacturingCoordinatorId();
+      if (!manufacturingCoordinatorId) {
+        console.error('No manufacturing coordinator ID found in localStorage');
+        return;
+      }
+
+      // Fetch orders only (company_name is included in orders response)
+      const response = await axios.get(`${API_BASE_URL}/orders/`, {
+        params: { manufacturing_coordinator_id: manufacturingCoordinatorId }
+      });
+
+      const ordersData = Array.isArray(response.data) ? response.data : [];
+      setOrders(ordersData);
+      
+      // Calculate statistics
+      const stats = calculateStats(ordersData);
+      setDashboardStats(stats);
+    } catch (error) {
+      console.error('Failed to fetch dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateStats = (ordersData) => {
+    const now = dayjs();
+    const thisMonth = now.startOf('month');
+    const lastMonth = now.subtract(1, 'month').startOf('month');
+    
+    const thisMonthOrders = ordersData.filter(order => 
+      dayjs(order.created_at) >= thisMonth
+    ).length;
+    
+    const lastMonthOrders = ordersData.filter(order => 
+      dayjs(order.created_at) >= lastMonth && dayjs(order.created_at) < thisMonth
+    ).length;
+
+    const statusCounts = ordersData.reduce((acc, order) => {
+      acc[order.status] = (acc[order.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    const uniqueCustomers = new Set(ordersData.map(order => order.customer_id)).size;
+
+    return {
+      totalOrders: ordersData.length,
+      pendingOrders: statusCounts['Pending'] || 0,
+      ongoingOrders: (statusCounts['Ongoing'] || 0) + (statusCounts['Scheduled'] || 0),
+      completedOrders: statusCounts['Completed'] || 0,
+      scheduledOrders: statusCounts['Scheduled'] || 0,
+      thisMonthOrders,
+      lastMonthOrders,
+      totalCustomers: uniqueCustomers,
+      avgOrderValue: ordersData.reduce((sum, order) => sum + (order.quantity || 0), 0) / ordersData.length || 0
+    };
+  };
+
+  const getMonthlyData = () => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentYear = dayjs().year();
+    
+    return months.map((month, index) => {
+      const monthOrders = orders.filter(order => {
+        const orderDate = dayjs(order.created_at);
+        return orderDate.year() === currentYear && orderDate.month() === index;
+      });
+
+      const pending = monthOrders.filter(o => o.status === 'Pending').length;
+      const ongoing = monthOrders.filter(o => o.status === 'Ongoing').length;
+      const completed = monthOrders.filter(o => o.status === 'Completed').length;
+
+      return {
+        month,
+        total: monthOrders.length,
+        pending,
+        ongoing,
+        completed
+      };
+    });
+  };
+
+  const getStatusData = () => {
+    const statusColors = {
+      'Pending': '#faad14',
+      'Ongoing': '#1890ff', 
+      'Completed': '#52c41a'
+    };
+
+    return Object.entries(
+      orders.reduce((acc, order) => {
+        acc[order.status] = (acc[order.status] || 0) + 1;
+        return acc;
+      }, {})
+    ).map(([status, count]) => ({
+      type: status,
+      value: count,
+      color: statusColors[status] || '#8c8c8c'
+    }));
+  };
+
+  const getCustomerName = (order) => {
+    return order.company_name || `Customer ${order.customer_id}`;
+  };
+
+  const getCustomerContact = (order) => {
+    return '';
+  };
+
+  const getRecentOrders = () => {
+    return orders
+      .sort((a, b) => dayjs(b.created_at).unix() - dayjs(a.created_at).unix())
+      .slice(0, 5);
+  };
+
+  const getMonthlyGrowth = () => {
+    if (dashboardStats.lastMonthOrders === 0) return 0;
+    return ((dashboardStats.thisMonthOrders - dashboardStats.lastMonthOrders) / dashboardStats.lastMonthOrders * 100).toFixed(1);
+  };
+
+  const getColumnChartData = () => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const currentYear = dayjs().year();
+    
+    return months.map((month, index) => {
+      const monthOrders = orders.filter(order => {
+        const orderDate = dayjs(order.created_at);
+        return orderDate.year() === currentYear && orderDate.month() === index;
+      });
+
+      const pending = monthOrders.filter(o => o.status === 'Pending').length;
+      const ongoing = monthOrders.filter(o => o.status === 'Ongoing').length;
+      const completed = monthOrders.filter(o => o.status === 'Completed').length;
+
+      return {
+        month,
+        Pending: pending,
+        Ongoing: ongoing,
+        Completed: completed
+      };
+    });
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <Spin size="large">
+          <span style={{ marginTop: 16 }}>Loading dashboard...</span>
+        </Spin>
+      </div>
+    );
+  }
+
   return (
-    <Layout style={{ padding: 16 }}>
-      <Content>
-        <Row gutter={16}>
-          <Col xs={24} sm={12} md={6}>
-            <Card>
-              <Statistic title="Active Orders" value={24} />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Card>
-              <Statistic title="Ops Scheduled" value={49} />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Card>
-              <Statistic title="Ops on Hold" value={3} />
-            </Card>
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Card>
-              <Statistic title="Work Centers" value={9} />
-            </Card>
-          </Col>
-        </Row>
-        <Card style={{ marginTop: 16 }} title="Manufacturing Coordinator Dashboard">
-          <Table columns={columns} dataSource={data} pagination={false} rowKey="id" />
-        </Card>
-      </Content>
-    </Layout>
+    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
+      <Title level={2} style={{ marginBottom: '24px' }}>Dashboard Overview</Title>
+      
+      {/* Light KPI Cards */}
+      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+        <Col xs={24} sm={12} md={6}>
+          <Card 
+            hoverable
+            styles={{ 
+              body: { 
+                background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
+                border: '1px solid #90caf9',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: '20px'
+              }
+            }}
+          >
+            <Statistic
+              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Total Orders</span>}
+              value={dashboardStats.totalOrders}
+              prefix={<ShoppingCartOutlined style={{ color: '#1976d2' }} />}
+              styles={{ content: { color: '#1976d2', fontSize: '24px', fontWeight: 'bold' } }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card 
+            hoverable
+            styles={{ 
+              body: { 
+                background: 'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)',
+                border: '1px solid #ffcc80',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: '20px'
+              }
+            }}
+          >
+            <Statistic
+              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Pending Orders</span>}
+              value={dashboardStats.pendingOrders}
+              prefix={<ClockCircleOutlined style={{ color: '#f57c00' }} />}
+              styles={{ content: { fontSize: '24px', fontWeight: 'bold', color: '#f57c00' } }}
+              suffix={
+                <Tag color="warning" style={{ marginLeft: '8px' }}>
+                  {dashboardStats.totalOrders > 0 ? 
+                    ((dashboardStats.pendingOrders / dashboardStats.totalOrders) * 100).toFixed(1) : 0
+                  }%
+                </Tag>
+              }
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card 
+            hoverable
+            styles={{ 
+              body: { 
+                background: 'linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%)',
+                border: '1px solid #ffd54f',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: '20px'
+              }
+            }}
+          >
+            <Statistic
+              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Ongoing Orders</span>}
+              value={dashboardStats.ongoingOrders}
+              prefix={<RiseOutlined style={{ color: '#f57c00' }} />}
+              styles={{ content: { fontSize: '24px', fontWeight: 'bold', color: '#f57c00' } }}
+              suffix={
+                <Tag color="processing" style={{ marginLeft: '8px' }}>
+                  {dashboardStats.totalOrders > 0 ? 
+                    ((dashboardStats.ongoingOrders / dashboardStats.totalOrders) * 100).toFixed(1) : 0
+                  }%
+                </Tag>
+              }
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card 
+            hoverable
+            styles={{ 
+              body: { 
+                background: 'linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%)',
+                border: '1px solid #81c784',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: '20px'
+              }
+            }}
+          >
+            <Statistic
+              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Completed Orders</span>}
+              value={dashboardStats.completedOrders}
+              prefix={<CheckCircleOutlined style={{ color: '#2e7d32' }} />}
+              styles={{ content: { color: '#2e7d32', fontSize: '24px', fontWeight: 'bold' } }}
+              suffix={
+                <Tag color="success" style={{ marginLeft: '8px' }}>
+                  {dashboardStats.totalOrders > 0 ? 
+                    ((dashboardStats.completedOrders / dashboardStats.totalOrders) * 100).toFixed(1) : 0
+                  }%
+                </Tag>
+              }
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Single Additional Stat */}
+      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+      </Row>
+
+      {/* Single Chart Row - Responsive Charts */}
+      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
+        <Col xs={24} xl={12}>
+          <Card 
+            title="Monthly Order Trend" 
+            extra={<Badge status="processing" text="Live" />}
+            styles={{ body: { padding: '20px' } }}
+          >
+            <div style={{ width: '100%', height: '300px' }}>
+              <LineChart 
+                width="100%" 
+                height={300} 
+                data={getMonthlyData()} 
+                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                <XAxis 
+                  dataKey="month" 
+                  tick={{ fill: '#666', fontSize: 12 }}
+                  axisLine={{ stroke: '#ccc' }}
+                />
+                <YAxis 
+                  tick={{ fill: '#666', fontSize: 12 }}
+                  axisLine={{ stroke: '#ccc' }}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'rgba(255, 255, 255, 0.95)', 
+                    border: '1px solid #ddd',
+                    borderRadius: '8px'
+                  }}
+                />
+                <Legend 
+                  wrapperStyle={{ fontSize: '12px' }}
+                  iconType="circle"
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="total" 
+                  stroke="#1976d2" 
+                  strokeWidth={3}
+                  dot={{ fill: '#1976d2', r: 4 }}
+                  activeDot={{ r: 6, fill: '#1565c0' }}
+                  name="Total Orders"
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="completed" 
+                  stroke="#52c41a" 
+                  strokeWidth={2}
+                  dot={{ fill: '#52c41a', r: 3 }}
+                  activeDot={{ r: 5, fill: '#389e0d' }}
+                  name="Completed"
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="pending" 
+                  stroke="#faad14" 
+                  strokeWidth={2}
+                  dot={{ fill: '#faad14', r: 3 }}
+                  activeDot={{ r: 5, fill: '#d48806' }}
+                  name="Pending"
+                />
+              </LineChart>
+            </div>
+          </Card>
+        </Col>
+        <Col xs={24} xl={12}>
+          <Card 
+            title="Order Status Distribution" 
+            extra={<Badge status="processing" text="Live" />}
+            styles={{ body: { padding: '20px' } }}
+          >
+            <div style={{ width: '100%', height: '300px' }}>
+              <PieChart width="100%" height={300}>
+                <Pie 
+                  data={getStatusData()} 
+                  dataKey="value" 
+                  nameKey="type" 
+                  cx="50%" 
+                  cy="50%" 
+                  outerRadius={100} 
+                  fill="#8884d8"
+                >
+                  {getStatusData().map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Recent Orders & Progress - Side by Side */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} xl={14}>
+          <Card 
+            title="Recent Orders" 
+            extra={<Text type="secondary">Last 5 orders</Text>}
+          >
+            <Table
+              dataSource={getRecentOrders()}
+              pagination={false}
+              size="small"
+              scroll={{ x: 'max-content' }}
+              rowKey="id"
+              columns={[
+                {
+                  title: 'Order Number',
+                  dataIndex: 'sale_order_number',
+                  key: 'sale_order_number',
+                  render: (text, record) => (
+                    <Space size="small">
+                      <Avatar size="small" icon={<FileTextOutlined />} />
+                      <Text strong>{text}</Text>
+                    </Space>
+                  ),
+                },
+                {
+                  title: 'Status',
+                  dataIndex: 'status',
+                  key: 'status',
+                  render: (status) => {
+                    const statusColors = {
+                      'Pending': 'warning',
+                      'Ongoing': 'processing',
+                      'Completed': 'success'
+                    };
+                    return (
+                      <Tag color={statusColors[status] || 'default'}>
+                        {status}
+                      </Tag>
+                    );
+                  },
+                },
+                {
+                  title: 'Quantity',
+                  dataIndex: 'quantity',
+                  key: 'quantity',
+                },
+                {
+                  title: 'Customer',
+                  dataIndex: 'customer_id',
+                  key: 'customer_id',
+                  render: (_, record) => (
+                    <Text strong>{getCustomerName(record)}</Text>
+                  )
+                },
+              ]}
+              locale={{
+                emptyText: <Empty description="No orders found" />
+              }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} xl={10}>
+          <Card title="Order Completion Rate" extra={<Badge status="processing" text="Live" />}>
+            <Flex vertical style={{ width: '100%' }} gap="large">
+              <div>
+                <Text strong>Overall Completion</Text>
+                <Progress 
+                  percent={dashboardStats.totalOrders > 0 ? 
+                    Math.round((dashboardStats.completedOrders / dashboardStats.totalOrders) * 100) : 0
+                  } 
+                  status="active"
+                  strokeColor="#52c41a"
+                />
+              </div>
+              <div>
+                <Text strong>Pending Orders</Text>
+                <Progress 
+                  percent={dashboardStats.totalOrders > 0 ? 
+                    Math.round((dashboardStats.pendingOrders / dashboardStats.totalOrders) * 100) : 0
+                  } 
+                  status="active"
+                  strokeColor="#faad14"
+                />
+              </div>
+              <div>
+                <Text strong>Ongoing Orders</Text>
+                <Progress 
+                  percent={dashboardStats.totalOrders > 0 ? 
+                    Math.round((dashboardStats.ongoingOrders / dashboardStats.totalOrders) * 100) : 0
+                  } 
+                  status="active"
+                  strokeColor="#1890ff"
+                />
+              </div>
+            </Flex>
+          </Card>
+        </Col>
+      </Row>
+    </div>
   );
 };
 

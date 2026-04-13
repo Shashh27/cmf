@@ -21,7 +21,6 @@ const OMS = () => {
   const [messageApi, contextHolder] = message.useMessage();
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
@@ -53,8 +52,7 @@ const OMS = () => {
       try {
         await Promise.all([
           fetchOrders(),
-          fetchCustomers(),
-          fetchProducts()
+          fetchCustomers()
         ]);
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -75,19 +73,7 @@ const OMS = () => {
     }
   };
 
-  const fetchProducts = async () => {
-    try {
-      const adminId = getCurrentAdminId();
-      const response = await axios.get(`${API_BASE_URL}/products/`, {
-        // Only show products created by this admin in the Project Name dropdown
-        params: adminId != null ? { user_id: adminId } : undefined,
-      });
-      setProducts(response.data);
-    } catch (error) {
-      console.error("Error fetching products:", error);
-    }
-  };
-
+  
   const fetchOrders = async () => {
     try {
       const adminId = getCurrentAdminId();
@@ -116,9 +102,7 @@ const OMS = () => {
   };
 
   const getProductName = (productId, record) => {
-    const product = products.find((p) => p.id === productId);
-    if (product) return product.product_name || `Project ${productId}`;
-    return record?.product_name ?? `Project ${productId}`;
+    return record?.product_name || record?.project_name || `Project ${productId}`;
   };
 
   const formatDate = (dateStr) => {
@@ -266,7 +250,12 @@ const OMS = () => {
     const status = String(order.status || "").toLowerCase();
     
     // Project Coordinator
-    const userName = String(order.user_name || order.user_id || "").toLowerCase();
+    const userName = String(
+      order.project_coordinator_name || 
+      order.project_coordinator_id || 
+      order.admin_name || 
+      order.admin_id || ""
+    ).toLowerCase();
     
     return (
       slNo.includes(searchLower) ||
@@ -371,12 +360,14 @@ const OMS = () => {
     },
     {
       title: <span className="font-semibold text-gray-700">Project Coordinator</span>,
-      dataIndex: "user_name",
-      key: "user_name",
+      dataIndex: "project_coordinator_name",
+      key: "project_coordinator_name",
       render: (text, record) => (
         <Space>
           <UserOutlined className="text-gray-400" />
-          <span className="text-gray-700">{text || record.user_id}</span>
+          <span className="text-gray-700">
+            {text || record.project_coordinator_id || record.admin_name || record.admin_id || "-"}
+          </span>
         </Space>
       ),
     },
@@ -638,9 +629,7 @@ const OMS = () => {
         onOrderCreated={handleOrderCreated}
         editingOrder={editingOrder}
         customers={customers}
-        products={products}
         fetchCustomers={fetchCustomers}
-        fetchProducts={fetchProducts}
       />
       
       <DocumentModal

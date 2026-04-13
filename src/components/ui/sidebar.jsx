@@ -214,7 +214,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: 'PPS',
         icon: <AppstoreOutlined />,
         children: [
-          { key: `${prefix}/pps/process-planning`, label: <Link to={`${prefix}/pps/process-planning`} onClick={() => setMobileDrawerOpen(false)}>Process Planning</Link> },
           { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link> },
           { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link> },
           { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`} onClick={() => setMobileDrawerOpen(false)}>Capacity Planning</Link> },

@@ -401,12 +401,12 @@ dracoLoader.setDecoderPath('/static/draco/');
         camera.position.set(dist, 0, 0);
         break;
       case 'top':
-        camera.position.set(0, dist, 0);
-        camera.up.set(0, 0, -1); // Point camera's "up" to the back
+        camera.position.set(0, dist, 0.01); // Slightly offset Z to avoid gimbal lock
+        camera.up.set(0, 1, 0); // Keep standard up vector for natural rotation
         break;
       case 'bottom':
-        camera.position.set(0, -dist, 0);
-        camera.up.set(0, 0, 1); // Point camera's "up" to the front
+        camera.position.set(0, -dist, 0.01); // Slightly offset Z to avoid gimbal lock
+        camera.up.set(0, 1, 0); // Keep standard up vector for natural rotation
         break;
       case 'isometric':
         camera.position.set(dist, dist, dist);
