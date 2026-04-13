@@ -12,6 +12,7 @@ import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
 import OperatorDashboard from "./Pages/OperatorDashboard";
 import PPS from "./Pages/PPS";
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
+import MaintenanceManagement from "./Pages/MaintenanceManagement";
 import QualityManagement from "./Quality Management Components/QualityManagement";
 import InventoryMaster from "./Pages/Inventory";
 import OverviewData from "./Pages/OverviewData";
@@ -58,8 +59,10 @@ function App() {
           <Route path="/admin/product-monitoring/live-monitoring" element={<ProductionMonitoring />} />
           <Route path="/admin/product-monitoring/planned-vs-actual" element={<ProductionMonitoring />} />
           <Route path="/admin/product-monitoring/order-tracking" element={<ProductionMonitoring />} />
-          <Route path="/admin/product-monitoring/maintenance" element={<ProductionMonitoring />} />
-          <Route path="/admin/product-monitoring/pokayoke-checklists" element={<ProductionMonitoring />} />
+
+          <Route path="/admin/maintenance-management" element={<Navigate to="/admin/maintenance-management/maintenance" replace />} />
+          <Route path="/admin/maintenance-management/maintenance" element={<MaintenanceManagement />} />
+          <Route path="/admin/maintenance-management/preventive-maintenance" element={<MaintenanceManagement />} />
 
           <Route path="/admin/quality-management" element={<QualityManagement />} />
 
@@ -101,8 +104,11 @@ function App() {
           <Route path="/manufacturing_coordinator/product-monitoring/live-monitoring" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/product-monitoring/planned-vs-actual" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/product-monitoring/order-tracking" element={<ManufacturingCoordinator />} />
-          <Route path="/manufacturing_coordinator/product-monitoring/maintenance" element={<ManufacturingCoordinator />} />
-          <Route path="/manufacturing_coordinator/product-monitoring/pokayoke-checklists" element={<ManufacturingCoordinator />} />
+
+          <Route path="/manufacturing_coordinator/maintenance-management" element={<Navigate to="/manufacturing_coordinator/maintenance-management/maintenance" replace />} />
+          <Route path="/manufacturing_coordinator/maintenance-management/maintenance" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/maintenance-management/preventive-maintenance" element={<ManufacturingCoordinator />} />
+
           <Route path="/manufacturing_coordinator/inventory-management" element={<Navigate to="/manufacturing_coordinator/inventory-management/inventory-master" replace />} />
           <Route path="/manufacturing_coordinator/inventory-management/inventory-master" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/inventory-management/overview-data" element={<ManufacturingCoordinator />} />

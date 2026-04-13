@@ -129,6 +129,7 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/configuration')) return 'Configuration';
     if (path.includes('/product-monitoring')) return 'Production Monitoring';
     if (path.includes('/quality-management')) return 'Quality Management';
+    if (path.includes('/maintenance-management')) return 'Maintenance Management';
     if (path.includes('/inventory-management')) return 'Inventory Management';
     if (path.includes('/document-management')) return 'Document Management';
     if (path.includes('/notification')) return 'Notification';
