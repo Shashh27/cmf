@@ -96,7 +96,6 @@ class Part(Base):
     product_id = Column(Integer, ForeignKey("oms.products.id"))
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
-    size = Column(String, nullable=True)
     qty = Column(Integer, nullable=True, default=1)
 
     raw_material_required_quantity = Column(Float, nullable=True)  # Required quantity per part for order-linked materials
