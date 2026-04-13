@@ -77,6 +77,16 @@ class RawMaterialStock(Base):
 
     source_type = Column(String, nullable=False, default="general")  # "general" or "order"
 
+    part_id = Column(String, nullable=True) 
+
+    vendor_id = Column(String, nullable=True)
+
+    received_vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)
+
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
+    status = Column(String, nullable=False, default="available")
+
     source_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
 
     order_status = Column(String, nullable=True)  # "enquiry", "purchase_request", "purchase_order", "received", etc.
@@ -84,6 +94,10 @@ class RawMaterialStock(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    allocated_quantity = Column(Integer, nullable=False, default=0)  # Quantity allocated to parts
+    
+    available_quantity = Column(Integer, nullable=False, default=0)  # Quantity available for use
 
 
 
@@ -93,17 +107,21 @@ class RawMaterialStock(Base):
 
     source_order = relationship("Order")
 
+    vendor = relationship("Vendors", foreign_keys=[received_vendor_id])
+
+    creator = relationship("AccessUser", foreign_keys=[user_id])
+
     # usage_links = relationship("OrderPartsRawMaterialLinked", back_populates="stock_item", cascade="all, delete-orphan")
 
     @property
     def calculated_status(self):
-        """Calculate status based on quantity and source type"""
+        """Calculate status based on available_quantity and source type"""
         if self.source_type == "general":
-            # For general stock: available only if quantity > 0
-            return "available" if self.quantity > 0 else "exhausted"
+            # For general stock: available only if available_quantity > 0
+            return "available" if self.available_quantity > 0 else "exhausted"
         elif self.source_type == "order":
-            # For order stock: available only if order_status = "received" AND quantity > 0
-            if self.quantity <= 0:
+            # For order stock: available only if order_status = "received" AND available_quantity > 0
+            if self.available_quantity <= 0:
                 return "exhausted"
             elif self.order_status == "received":
                 return "available"
@@ -111,7 +129,6 @@ class RawMaterialStock(Base):
                 return self.order_status or "pending"  # Show order status if not received
         else:
             return self.status  # Fallback to stored status
-
 
 # =======================
 
