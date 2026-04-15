@@ -287,39 +287,36 @@ def set_order_status(
         for part in parts:
             raw_material_available = False
             
-            # Check raw_material_stock_id first
+            # IMPORTANT: raw_material_stock_id is the BASELINE for raw material availability
+            # If raw_material_stock_id is None, part has NO raw materials
             if hasattr(part, 'raw_material_stock_id') and getattr(part, 'raw_material_stock_id', None):
                 try:
                     rm_stock = part.raw_material_stock
                     if rm_stock is None:
                         raw_material_available = False
                     else:
-                        # Check if material is available
-                        if hasattr(rm_stock, 'calculated_status'):
-                            status_rm = rm_stock.calculated_status
+                        # Get material status
+                        if rm_stock.source_type == "general":
+                            # For general stock, use the status column directly
+                            status_rm = getattr(rm_stock, 'status', 'unknown')
+                            raw_material_available = status_rm.lower() in ('available', 'in stock', 'ready', '')
+                        elif rm_stock.source_type == "order":
+                            # For order stock, use calculated_status
+                            if hasattr(rm_stock, 'calculated_status'):
+                                status_rm = rm_stock.calculated_status
+                                raw_material_available = status_rm.lower() == 'available'
+                            else:
+                                # Fallback: check quantity and order_status
+                                if getattr(rm_stock, 'available_quantity', 0) > 0 and getattr(rm_stock, 'order_status', None) == 'received':
+                                    status_rm = 'available'
+                                    raw_material_available = True
+                                else:
+                                    status_rm = getattr(rm_stock, 'order_status', 'pending') or 'not available'
+                                    raw_material_available = False
                         else:
                             # Fallback: check quantity
-                            status_rm = 'Available' if getattr(rm_stock, 'quantity', 0) > 0 else 'Exhausted'
-                        
-                        raw_material_available = status_rm.lower() in ('available', 'in stock', 'ready', '')
-                except Exception:
-                    raw_material_available = False
-            
-            # Check raw_material_id fallback
-            elif hasattr(part, 'raw_material_id') and getattr(part, 'raw_material_id', None):
-                try:
-                    rm = part.raw_material
-                    if rm is None:
-                        raw_material_available = False
-                    else:
-                        # Check if RawMaterial has status attribute
-                        if hasattr(rm, 'status') and rm.status:
-                            status_rm = rm.status.strip()
-                        else:
-                            # New model: RawMaterial doesn't have status, assume available
-                            status_rm = 'Available'
-                        
-                        raw_material_available = status_rm.lower() in ('available', 'in stock', 'ready', '')
+                            status_rm = 'Available' if getattr(rm_stock, 'available_quantity', 0) > 0 else 'Exhausted'
+                            raw_material_available = status_rm.lower() in ('available', 'in stock', 'ready', '')
                 except Exception:
                     raw_material_available = False
             
@@ -472,10 +469,47 @@ def set_order_status(
 
     db.commit()
 
-    return {
+    # Prepare detailed response
+    response_data = {
         "message": f"In-house parts of Order {sale_order_id} set to {status}",
-        "inhouse_parts_count": len(parts)
+        "inhouse_parts_count": len(parts),
+        "activated_parts_count": len(parts_with_raw_material) if status == "active" else 0,
+        "skipped_parts_count": len(parts_without_raw_material) if status == "active" else 0,
+        "activated_parts": [],
+        "skipped_parts": [],
+        "raw_material_summary": {}
     }
+    
+    # Add detailed information for active status
+    if status == "active":
+        # Add activated parts details
+        for part in parts_with_raw_material:
+            response_data["activated_parts"].append({
+                "part_id": part.id,
+                "part_number": part.part_number,
+                "part_name": part.part_name,
+                "status": "activated (raw materials available)"
+            })
+        
+        # Add skipped parts details
+        for part in parts_without_raw_material:
+            response_data["skipped_parts"].append({
+                "part_id": part.id,
+                "part_number": part.part_number,
+                "part_name": part.part_name,
+                "status": "not activated (no raw materials linked)",
+                "reason": "Raw material not linked or not available. Link raw material first, then activate the part."
+            })
+        
+        # Add summary
+        response_data["raw_material_summary"] = {
+            "total_inhouse_parts": len(parts_with_raw_material) + len(parts_without_raw_material),
+            "parts_with_raw_materials": len(parts_with_raw_material),
+            "parts_without_raw_materials": len(parts_without_raw_material),
+            "note": "Only parts with available raw materials are activated. Parts without raw materials remain inactive and can be activated individually when materials become available."
+        }
+    
+    return response_data
 
 
 # =========================================================
@@ -747,7 +781,8 @@ def update_part_status(
     raw_material_available = False
     
     if status == "active":
-        # Check raw_material_stock_id first
+        # IMPORTANT: raw_material_stock_id is the BASELINE for raw material availability
+        # If raw_material_stock_id is None, part has NO raw materials
         if hasattr(part, 'raw_material_stock_id') and getattr(part, 'raw_material_stock_id', None):
             try:
                 rm_stock = part.raw_material_stock
@@ -756,39 +791,48 @@ def update_part_status(
                     raw_material_available = False
                 else:
                     # Get material status
-                    if hasattr(rm_stock, 'calculated_status'):
-                        raw_material_status = rm_stock.calculated_status
+                    print(f"[DEBUG] Raw material stock found for part {part_id}")
+                    print(f"[DEBUG] Stock source_type: {getattr(rm_stock, 'source_type', 'unknown')}")
+                    print(f"[DEBUG] Stock status: {getattr(rm_stock, 'status', 'none')}")
+                    print(f"[DEBUG] Stock calculated_status: {getattr(rm_stock, 'calculated_status', 'none')}")
+                    print(f"[DEBUG] Stock available_quantity: {getattr(rm_stock, 'available_quantity', 'unknown')}")
+                    print(f"[DEBUG] Stock order_status: {getattr(rm_stock, 'order_status', 'none')}")
+                    
+                    if rm_stock.source_type == "general":
+                        # For general stock, use the status column directly
+                        raw_material_status = getattr(rm_stock, 'status', 'unknown')
+                        raw_material_available = raw_material_status.lower() in ('available', 'in stock', 'ready', '')
+                        print(f"[DEBUG] General stock - using status column: {raw_material_status}, available: {raw_material_available}")
+                    elif rm_stock.source_type == "order":
+                        # For order stock, use calculated_status
+                        if hasattr(rm_stock, 'calculated_status'):
+                            raw_material_status = rm_stock.calculated_status
+                            raw_material_available = raw_material_status.lower() == 'available'
+                            print(f"[DEBUG] Order stock - using calculated_status: {raw_material_status}, available: {raw_material_available}")
+                        else:
+                            # Fallback: check quantity and order_status
+                            if getattr(rm_stock, 'available_quantity', 0) > 0 and getattr(rm_stock, 'order_status', None) == 'received':
+                                raw_material_status = 'available'
+                                raw_material_available = True
+                            else:
+                                raw_material_status = getattr(rm_stock, 'order_status', 'pending') or 'not available'
+                                raw_material_available = False
+                            print(f"[DEBUG] Order stock - fallback logic: {raw_material_status}, available: {raw_material_available}")
                     else:
                         # Fallback: check quantity
-                        raw_material_status = 'Available' if getattr(rm_stock, 'quantity', 0) > 0 else 'Exhausted'
+                        raw_material_status = 'Available' if getattr(rm_stock, 'available_quantity', 0) > 0 else 'Exhausted'
+                        raw_material_available = raw_material_status.lower() in ('available', 'in stock', 'ready', '')
+                        print(f"[DEBUG] Fallback - quantity-based: {raw_material_status}, available: {raw_material_available}")
                     
                     # Get order status if available
                     raw_material_order_status = getattr(rm_stock, 'order_status', None)
-                    
-                    raw_material_available = raw_material_status.lower() in ('available', 'in stock', 'ready', '')
+                    print(f"[DEBUG] Final raw_material_status: {raw_material_status}, raw_material_available: {raw_material_available}")
             except Exception:
                 raw_material_status = "Stock Access Error"
                 raw_material_available = False
-        
-        # Check raw_material_id fallback
-        elif hasattr(part, 'raw_material_id') and getattr(part, 'raw_material_id', None):
-            try:
-                rm = part.raw_material
-                if rm is None:
-                    raw_material_status = "No Raw Material"
-                    raw_material_available = False
-                else:
-                    # Check if RawMaterial has status attribute
-                    if hasattr(rm, 'status') and rm.status:
-                        raw_material_status = rm.status.strip()
-                    else:
-                        # New model: RawMaterial doesn't have status, assume available
-                        raw_material_status = 'Available'
-                    
-                    raw_material_available = raw_material_status.lower() in ('available', 'in stock', 'ready', '')
-            except Exception:
-                raw_material_status = "Material Access Error"
-                raw_material_available = False
+        else:
+            raw_material_status = "No Raw Material Stock Assigned"
+            raw_material_available = False
         
         # If trying to activate but raw materials not available, return detailed response
         if not raw_material_available:
