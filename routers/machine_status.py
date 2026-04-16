@@ -391,3 +391,54 @@ def get_downtime_by_date(
         })
 
     return result
+
+
+@router.get("/active-machines/", response_model=MachineStatusResponse)
+async def get_active_machines(db: Session = Depends(get_db)):
+    """
+    Get all machines that are currently active (status = "ON").
+    Returns only machines with ON status, sorted by machine ID.
+    """
+    try:
+        # Query for machines with ON status
+        active_machines_query = db.query(
+            MachineStatus,
+            Machine,
+            Status
+        ).join(
+            Machine, MachineStatus.machine_id == Machine.id
+        ).join(
+            Status, MachineStatus.status_id == Status.id
+        ).filter(
+            Status.name == "ON"
+        ).options(
+            joinedload(Machine.work_center)
+        ).order_by(Machine.id)
+        
+        active_machines_raw = active_machines_query.all()
+        
+        # Convert to response format
+        active_machines = []
+        for ms, machine, status in active_machines_raw:
+            machine_status = MachineStatusOut(
+                work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
+                machine_make=machine.make or "Unknown",
+                machine_id=machine.id,
+                status_id=status.id,
+                status_name=status.name,
+                description=ms.description,
+                available_from=ms.available_from,
+                available_to=ms.available_to
+            )
+            active_machines.append(machine_status)
+        
+        return MachineStatusResponse(
+            total_machines=len(active_machines),
+            statuses=active_machines
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching active machines: {str(e)}"
+        )

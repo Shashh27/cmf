@@ -308,3 +308,23 @@ class ProductionLog(Base):
     # Relationships
     operator = relationship("AccessUser", foreign_keys=[operator_id])
     supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
+
+
+# =======================
+# Machine Operator Shift Assignment
+# =======================
+class MachineOperatorShiftAssignment(Base):
+    __tablename__ = "machine_operator_shift_assignment"
+    __table_args__ = {'schema': 'scheduling'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
+    operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    shift_config_id = Column(Integer, ForeignKey("scheduling.shift_hours_configuration.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    machine = relationship("Machine", foreign_keys=[machine_id])
+    operator = relationship("AccessUser", foreign_keys=[operator_id])
+    shift_config = relationship("ShiftHoursConfiguration", foreign_keys=[shift_config_id])

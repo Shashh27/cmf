@@ -30,8 +30,11 @@ from .scheduling import (
     ShiftHoursConfiguration,
     ShiftTimingConfiguration,
     PartScheduleStatus,
-    ProductionLog
+    ProductionLog,
+    MachineOperatorShiftAssignment
 )
+
+from .access_control import AccessUser
 
 __all__ = [
     "Product",
@@ -56,8 +59,9 @@ __all__ = [
     "ShiftHoursConfiguration",
     "ShiftTimingConfiguration",
     "Base",
+    "MachineOperatorShiftAssignment",
     "AccessUser",
     "OrderPartPriority",
     "PartScheduleStatus",
-    "ProductionLog"
+    "ProductionLog",
 ]
