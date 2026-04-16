@@ -1539,6 +1539,115 @@ def get_part_operation_details(
         raise HTTPException(500, f"Failed to fetch part operation details: {str(e)}")
 
 
+@router.get("/part-operation-details-consolidated/{sale_order_id}/{part_id}")
+def get_part_operation_details_consolidated(
+    sale_order_id: int,
+    part_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Consolidated version of part-operation-details endpoint.
+    If an operation spans multiple days, consolidates into a single entry
+    with earliest start time and latest end time.
+    """
+    try:
+        # Optional validation: order + part should exist for this order's product
+        order = db.query(Order).filter(Order.id == sale_order_id).first()
+        if not order:
+            raise HTTPException(404, "Order not found")
+
+        part = db.query(Part).filter(
+            Part.id == part_id,
+            Part.product_id == order.product_id
+        ).first()
+        if not part:
+            raise HTTPException(404, "Part not found for this order")
+
+        # If part is not active now, don't show any previous planned operations.
+        part_status = (
+            db.query(PartScheduleStatus.status)
+            .filter(
+                PartScheduleStatus.sale_order_id == sale_order_id,
+                PartScheduleStatus.part_id == part_id,
+            )
+            .first()
+        )
+        if not part_status or part_status[0] != "active":
+            return {
+                "sale_order_id": sale_order_id,
+                "part_id": part_id,
+                "part_name": part.part_name,
+                "message": "Part is deactivated",
+                "operations": []
+            }
+
+        latest = (
+            db.query(ScheduleHistory)
+            .order_by(ScheduleHistory.generated_at.desc())
+            .first()
+        )
+        if not latest:
+            return {
+                "sale_order_id": sale_order_id,
+                "part_id": part_id,
+                "part_name": part.part_name,
+                "schedule_history_id": None,
+                "message": "No schedule found. Please generate a schedule first.",
+                "operations": []
+            }
+        schedule_history_id = latest.id
+
+        rows = (
+            db.query(PlannedScheduleItem, Operation, Machine)
+            .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
+            .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
+            .filter(
+                PlannedScheduleItem.schedule_history_id == schedule_history_id,
+                PlannedScheduleItem.sale_order_id == sale_order_id,
+                PlannedScheduleItem.part_id == part_id
+            )
+            .order_by(PlannedScheduleItem.planned_start_time.asc(), PlannedScheduleItem.id.asc())
+            .all()
+        )
+
+        # Group operations by operation_id to consolidate multi-day operations
+        operation_groups = {}
+        for item, op, machine in rows:
+            if op.id not in operation_groups:
+                operation_groups[op.id] = {
+                    "operation_id": op.id,
+                    "operation": f"{op.operation_number} - {op.operation_name}",
+                    "machine": (
+                        f"{machine.make} {machine.model}".strip()
+                        if machine else None
+                    ),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time": item.planned_end_time,
+                }
+            else:
+                # Update with earliest start time and latest end time
+                current_group = operation_groups[op.id]
+                if item.planned_start_time < current_group["planned_start_time"]:
+                    current_group["planned_start_time"] = item.planned_start_time
+                if item.planned_end_time > current_group["planned_end_time"]:
+                    current_group["planned_end_time"] = item.planned_end_time
+
+        # Convert to list
+        consolidated_operations = list(operation_groups.values())
+
+        return {
+            "sale_order_id": sale_order_id,
+            "part_id": part_id,
+            "part_name": part.part_name,
+            "schedule_history_id": schedule_history_id,
+            "operations": consolidated_operations
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch consolidated part operation details: {str(e)}")
+
 
 # =========================================================
 # GANTT CHART DATA  (latest active schedule)
