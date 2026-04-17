@@ -61,7 +61,7 @@ const EditOperationModal = ({
   const [parentId, setParentId]                 = useState(null);
   const [parentDocName, setParentDocName]       = useState('');
   const [uploadVersion, setUploadVersion]       = useState('v1.0');
-  const [uploadType, setUploadType]             = useState('Balloon');
+  const [uploadType, setUploadType]             = useState('IPID');
   const [uploadTypeOther, setUploadTypeOther]   = useState('');
   const [selectedFileList, setSelectedFileList] = useState([]);
   const [workCenters, setWorkCenters]           = useState([]);
@@ -179,7 +179,7 @@ const EditOperationModal = ({
   }, [open, operation?.id, showAddToolForm]);
 
   // ── handlers ───────────────────────────────────────────────────────────────
-  const resetUpload = () => { setParentId(null); setParentDocName(''); setUploadVersion('v1.0'); setUploadType('Balloon'); setUploadTypeOther(''); setSelectedFileList([]); setViewingDoc(null); };
+  const resetUpload = () => { setParentId(null); setParentDocName(''); setUploadVersion('v1.0'); setUploadType('IPID'); setUploadTypeOther(''); setSelectedFileList([]); setViewingDoc(null); };
 
   const handleUpload = async () => {
     if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
@@ -454,7 +454,7 @@ const EditOperationModal = ({
                   <Col xs={24} sm={14}>
                     <div className="text-[11px] font-semibold text-gray-500 mb-1 uppercase">Document Type</div>
                     <Select value={uploadType} onChange={setUploadType} className="w-full">
-                      {['Balloon','Image','CNC','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
+                      {['IPID','Image','CNC','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
                     </Select>
                     {uploadType === 'Other' && <Input className="mt-2" placeholder="Custom type" value={uploadTypeOther} onChange={e => setUploadTypeOther(e.target.value)} autoComplete="off" />}
                   </Col>

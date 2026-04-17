@@ -579,15 +579,22 @@ const CreateProductModal = ({
       // Validation for parts with raw materials
       if (createType === 'part') {
         if (values.raw_material_id) {
-          // Raw material is selected - stock, dimensions, and quantity are required
+          // Raw material is selected - ALL related fields are required
+          const formValues = form.getFieldsValue();
+          if (!formValues.raw_material_form_type) {
+            message.error('Please select form type when raw material is selected');
+            setLoading(false);
+            return;
+          }
+          
           if (!values.raw_material_stock_id) {
-            message.error('Please select raw material stock when raw material is selected');
+            message.error('Please select dimensions when raw material is selected');
             setLoading(false);
             return;
           }
           
           if (!values.size || !values.qty) {
-            message.error('Please provide dimensions and quantity when raw material stock is selected');
+            message.error('Please provide size and quantity when raw material is selected');
             setLoading(false);
             return;
           }
@@ -614,7 +621,7 @@ const CreateProductModal = ({
           
           // Check if required quantity is provided and valid
           if (!values.raw_material_required_quantity || values.raw_material_required_quantity <= 0) {
-            message.error('Please enter a valid required quantity');
+            message.error('Please enter a valid required quantity when raw material is selected');
             setLoading(false);
             return;
           }
@@ -1164,17 +1171,33 @@ const CreateProductModal = ({
               >
 
                 <Input 
-
                   type="number" 
-
                   placeholder="Enter quantity" 
-
                   size="large"
-
                   autoComplete="off"
-
                   min={1}
-
+                  step={1}
+                  onKeyPress={(e) => {
+                    const char = String.fromCharCode(e.which);
+                    const currentValue = e.target.value || '';
+                    if (!/[0-9]/.test(char) && 
+                        e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                        e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                        e.which !== 36 && e.which !== 35) {
+                      e.preventDefault();
+                      return false;
+                    }
+                    if (char === '0' && currentValue === '') {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === '.' || e.key === ',' || e.key === '-' || e.key === '+') {
+                      e.preventDefault();
+                      return false;
+                    }
+                  }}
                 />
 
               </Form.Item>
@@ -1315,7 +1338,7 @@ const CreateProductModal = ({
                               <Form.Item
                                 name="raw_material_form_type"
                                 label={<span className="text-xs sm:text-sm">Form Type</span>}
-                                rules={[{ required: isRequiredRawMaterial, message: 'Select form type!' }]}
+                                rules={[{ required: isRequiredRawMaterial || isInHouse, message: 'Select form type!' }]}
                               >
                                 <Select 
                                   placeholder="Select form type" 
@@ -1366,7 +1389,7 @@ const CreateProductModal = ({
                               <Form.Item
                                 name="raw_material_stock_id"
                                 label={<span className="text-xs sm:text-sm">Dimensions</span>}
-                                rules={[{ required: isRequiredRawMaterial, message: 'Select dimensions!' }]}
+                                rules={[{ required: isRequiredRawMaterial || isInHouse, message: 'Select dimensions!' }]}
                               >
                                 <Select 
                                   placeholder="Select dimensions" 
@@ -1411,8 +1434,29 @@ const CreateProductModal = ({
                             type="number" 
                             placeholder="Enter required quantity" 
                             size="large"
-                            min={0}
-                            step={0.1}
+                            min={1}
+                            step={1}
+                            onKeyPress={(e) => {
+                              const char = String.fromCharCode(e.which);
+                              const currentValue = e.target.value || '';
+                              if (!/[0-9]/.test(char) && 
+                                  e.which !== 8 && e.which !== 46 && e.which !== 9 && 
+                                  e.which !== 13 && e.which !== 37 && e.which !== 39 && 
+                                  e.which !== 36 && e.which !== 35) {
+                                e.preventDefault();
+                                return false;
+                              }
+                              if (char === '0' && currentValue === '') {
+                                e.preventDefault();
+                                return false;
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === '.' || e.key === ',' || e.key === '-' || e.key === '+') {
+                                e.preventDefault();
+                                return false;
+                              }
+                            }}
                           />
                         </Form.Item>
                       </div>

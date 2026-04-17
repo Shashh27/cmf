@@ -552,19 +552,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
               onClick={() => handlePreview(currentDoc)}
               className="hover:text-blue-500 hover:bg-blue-50"
             />
-            {is3DFile(currentDoc) && (
-              <Button
-                size="small"
-                type="text"
-                icon={<ApiOutlined />}
-                onClick={() => {
-                  setSelectedThreeDDocumentId(currentDoc.id);
-                  openViewModal();
-                }}
-                className="hover:text-purple-500 hover:bg-purple-50"
-                title="3D View"
-              />
-            )}
+           
             <Button
               size="small"
               type="text"
