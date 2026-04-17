@@ -115,7 +115,9 @@ function App() {
           {/* Supervisor */}
           <Route path="/supervisor" element={<Navigate to="/supervisor/production_logs" replace />} />
           <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
-          
+          <Route path="/supervisor/pps/assets-availability" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/product-monitoring/pokayoke-checklists" element={<SupervisorDashboard />} />
+
           {/* Inventory Supervisor */}
           <Route path="/inventory_supervisor" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />
           <Route path="/inventory_supervisor/dashboard" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />

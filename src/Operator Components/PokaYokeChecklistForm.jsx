@@ -40,8 +40,36 @@ const PokaYokeChecklistForm = ({
       return vBool !== null && vBool === eBool;
     } else if (isNumeric) {
       const vNum = typeof value === 'number' ? value : parseFloat(String(value));
-      const eNum = expected != null ? parseFloat(String(expected)) : null;
-      return eNum != null && !Number.isNaN(vNum) && !Number.isNaN(eNum) && vNum === eNum;
+      const expStr = String(expected).trim();
+      
+      if (Number.isNaN(vNum)) return false;
+      
+      // Handle range comparisons
+      if (expStr.startsWith('<=')) {
+        const eNum = parseFloat(expStr.substring(2).trim());
+        return !Number.isNaN(eNum) && vNum <= eNum;
+      } else if (expStr.startsWith('>=')) {
+        const eNum = parseFloat(expStr.substring(2).trim());
+        return !Number.isNaN(eNum) && vNum >= eNum;
+      } else if (expStr.startsWith('<')) {
+        const eNum = parseFloat(expStr.substring(1).trim());
+        return !Number.isNaN(eNum) && vNum < eNum;
+      } else if (expStr.startsWith('>')) {
+        const eNum = parseFloat(expStr.substring(1).trim());
+        return !Number.isNaN(eNum) && vNum > eNum;
+      } else if (expStr.includes('-')) {
+        // Handle range format like "80-100"
+        const parts = expStr.split('-');
+        if (parts.length === 2) {
+          const min = parseFloat(parts[0].trim());
+          const max = parseFloat(parts[1].trim());
+          return !Number.isNaN(min) && !Number.isNaN(max) && vNum >= min && vNum <= max;
+        }
+      }
+      
+      // Handle exact equality
+      const eNum = parseFloat(expStr);
+      return !Number.isNaN(eNum) && vNum === eNum;
     } else {
       return (
         expected != null &&

@@ -90,7 +90,7 @@ const RawMaterialsContent = () => {
 
       key: 'linking',
 
-      label: <span className="flex items-center gap-2 px-2"><LinkOutlined /> Link Materials</span>,
+      label: <span className="flex items-center gap-2 px-2"><LinkOutlined /> Procure Raw Materials</span>,
 
       children: <LinkMaterialsTab rawMaterials={sharedRawMaterials} onDataChanged={refreshRawMaterials} />
 
@@ -100,7 +100,7 @@ const RawMaterialsContent = () => {
 
       key: 'order-status',
 
-      label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Parts with Raw Materials Status</span>,
+      label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procurement Status</span>,
 
       children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} />
 

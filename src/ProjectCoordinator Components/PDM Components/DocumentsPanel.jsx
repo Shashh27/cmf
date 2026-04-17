@@ -367,20 +367,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
     { title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to',
       render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
-    { title: <span className="font-semibold text-slate-700 text-center block">Actions</span>, key: 'actions', align: 'center', width: 120, fixed: 'right',
-      render: (_, r) => {
-        const isOut = r.part_type_name === 'Out-Source' || r.part_type_id === 2;
-        return (
-          <div className="flex gap-0.5 justify-center" onClick={e => e.stopPropagation()}>
-            <Tooltip title="Edit"><Button size="small" icon={<EditOutlined />} onClick={() => { setSelectedOperation(r); setModalTab('details'); setShowAddToolForm(false); setIsOperationModalOpen(true); }} className="text-blue-500 hover:bg-blue-50" /></Tooltip>
-            {!isOut && <Tooltip title="Add Tool"><Button size="small" icon={<ToolOutlined />} onClick={() => { setSelectedOperation(r); setModalTab('tools'); setShowAddToolForm(true); setIsOperationModalOpen(true); }} className="text-orange-500 hover:bg-orange-50" /></Tooltip>}
-            <Popconfirm title="Delete operation?" onConfirm={() => handleDeleteOperation(r.id)} okText="Yes" cancelText="No">
-              <Button size="small" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
-            </Popconfirm>
-          </div>
-        );
-      }
-    },
   ];
 
   const getDocumentDisplayName = (doc) => {
@@ -469,14 +455,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
             <span className="text-xs text-slate-500">Click row to view or edit</span>
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-              <Button size="small" icon={<UploadOutlined />} onClick={() => setShowImportModal(true)} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
-                <span className="hidden sm:inline">Upload MPP</span><span className="sm:hidden">MPP</span>
-              </Button>
               <Button size="small" icon={<DownloadOutlined />} onClick={() => setShowReportModal(true)} disabled={!isPart || loading} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Download Report</span><span className="sm:hidden">Report</span>
-              </Button>
-              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { setImportOperations([]); openPartActionModal('operation'); }} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
-                <span className="hidden sm:inline">Add Operation</span><span className="sm:hidden">Add Op</span>
               </Button>
             </div>
           </div>

@@ -290,9 +290,36 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
         return vBool !== eBool;
       } else if (typeRaw.includes('num')) {
         const vNum = typeof val === 'number' ? val : parseFloat(String(val));
-        const eNum = exp != null ? parseFloat(String(exp)) : null;
-        if (eNum == null || Number.isNaN(vNum) || Number.isNaN(eNum)) return false;
-        return vNum !== eNum;
+        const expStr = String(exp).trim();
+        
+        if (Number.isNaN(vNum)) return false;
+        
+        // Handle range comparisons
+        if (expStr.startsWith('<=')) {
+          const eNum = parseFloat(expStr.substring(2).trim());
+          return Number.isNaN(eNum) || vNum > eNum;
+        } else if (expStr.startsWith('>=')) {
+          const eNum = parseFloat(expStr.substring(2).trim());
+          return Number.isNaN(eNum) || vNum < eNum;
+        } else if (expStr.startsWith('<')) {
+          const eNum = parseFloat(expStr.substring(1).trim());
+          return Number.isNaN(eNum) || vNum >= eNum;
+        } else if (expStr.startsWith('>')) {
+          const eNum = parseFloat(expStr.substring(1).trim());
+          return Number.isNaN(eNum) || vNum <= eNum;
+        } else if (expStr.includes('-')) {
+          // Handle range format like "80-100"
+          const parts = expStr.split('-');
+          if (parts.length === 2) {
+            const min = parseFloat(parts[0].trim());
+            const max = parseFloat(parts[1].trim());
+            return Number.isNaN(min) || Number.isNaN(max) || vNum < min || vNum > max;
+          }
+        }
+        
+        // Handle exact equality
+        const eNum = parseFloat(expStr);
+        return Number.isNaN(eNum) || vNum !== eNum;
       } else {
         if (exp == null) return false;
         return String(val).toLowerCase().trim() !== String(exp).toLowerCase().trim();
@@ -407,8 +434,40 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
               isConfirming = vBool !== null && vBool === eBool;
             } else if (typeRaw.includes('num')) {
               const vNum = parseFloat(valStr);
-              const eNum = expected != null ? parseFloat(String(expected)) : null;
-              isConfirming = eNum != null && !Number.isNaN(vNum) && !Number.isNaN(eNum) && vNum === eNum;
+              const expStr = String(expected).trim();
+              
+              if (Number.isNaN(vNum)) {
+                isConfirming = false;
+              } else {
+                // Handle range comparisons
+                if (expStr.startsWith('<=')) {
+                  const eNum = parseFloat(expStr.substring(2).trim());
+                  isConfirming = !Number.isNaN(eNum) && vNum <= eNum;
+                } else if (expStr.startsWith('>=')) {
+                  const eNum = parseFloat(expStr.substring(2).trim());
+                  isConfirming = !Number.isNaN(eNum) && vNum >= eNum;
+                } else if (expStr.startsWith('<')) {
+                  const eNum = parseFloat(expStr.substring(1).trim());
+                  isConfirming = !Number.isNaN(eNum) && vNum < eNum;
+                } else if (expStr.startsWith('>')) {
+                  const eNum = parseFloat(expStr.substring(1).trim());
+                  isConfirming = !Number.isNaN(eNum) && vNum > eNum;
+                } else if (expStr.includes('-')) {
+                  // Handle range format like "80-100"
+                  const parts = expStr.split('-');
+                  if (parts.length === 2) {
+                    const min = parseFloat(parts[0].trim());
+                    const max = parseFloat(parts[1].trim());
+                    isConfirming = !Number.isNaN(min) && !Number.isNaN(max) && vNum >= min && vNum <= max;
+                  } else {
+                    isConfirming = false;
+                  }
+                } else {
+                  // Handle exact equality
+                  const eNum = parseFloat(expStr);
+                  isConfirming = !Number.isNaN(eNum) && vNum === eNum;
+                }
+              }
             } else {
               isConfirming =
                 expected != null &&
