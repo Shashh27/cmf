@@ -1,22 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Layout, Menu, Drawer, Button } from "antd";
 import { Link, useLocation } from "react-router-dom";
-import { 
-  AppstoreOutlined, 
-  DeploymentUnitOutlined, 
-  SettingOutlined, 
-  ShoppingCartOutlined,
-  DashboardOutlined,
-  MonitorOutlined,
-  ToolOutlined,
-  SafetyCertificateOutlined,
-  DatabaseOutlined,
-  FileTextOutlined,
-  BellOutlined,
-  LockOutlined,
-  MenuOutlined,
-  CloseOutlined,
-  ExperimentOutlined
+import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
+  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 
@@ -49,6 +35,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     if (path.includes('/oms')) keys.push('oms');
     if (path.includes('/pps')) keys.push('pps');
     if (path.includes('/product-monitoring')) keys.push('product-monitoring');
+    if (path.includes('/maintenance-management')) keys.push('maintenance-management');
     if (path.includes('/inventory-management')) keys.push('inventory-management');
     return keys;
   };
@@ -100,6 +87,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       icon: <ExperimentOutlined />,
     },
     {
+      key: `${prefix}/configuration`,
+      label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
+      icon: <SettingOutlined />,
+    },
+    {
       key: 'pps',
       label: 'PPS',
       icon: <AppstoreOutlined />,
@@ -111,11 +103,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       ],
     },
     {
-      key: `${prefix}/configuration`,
-      label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
-      icon: <SettingOutlined />,
-    },
-    {
       key: 'production monitoring',
       label: 'Production Monitoring',
       icon: <MonitorOutlined />,
@@ -123,8 +110,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`}>Live Monitoring</Link> },
         { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`}>Planned vs Actual</Link> },
         { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`}>Order Tracking</Link> },
-        { key: `${prefix}/product-monitoring/maintenance`, label: <Link to={`${prefix}/product-monitoring/maintenance`}>Maintenance</Link> },
-        { key: `${prefix}/product-monitoring/pokayoke-checklists`, label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`}>Preventive Maintenance</Link> },
+      ],
+    },
+    {
+      key: 'maintenance-management',
+      label: 'Maintenance Management',
+      icon: <ToolOutlined />,
+      children: [
+        { key: `${prefix}/maintenance-management/maintenance`, label: <Link to={`${prefix}/maintenance-management/maintenance`}>Maintenance</Link> },
+        { key: `${prefix}/maintenance-management/preventive-maintenance`, label: <Link to={`${prefix}/maintenance-management/preventive-maintenance`}>Preventive Maintenance</Link> },
       ],
     },
     // {
@@ -238,8 +232,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
           { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`} onClick={() => setMobileDrawerOpen(false)}>Live Monitoring</Link> },
           { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link> },
           { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`} onClick={() => setMobileDrawerOpen(false)}>Order Tracking</Link> },
-          { key: `${prefix}/product-monitoring/maintenance`, label: <Link to={`${prefix}/product-monitoring/maintenance`} onClick={() => setMobileDrawerOpen(false)}>Maintenance</Link> },
-          { key: `${prefix}/product-monitoring/pokayoke-checklists`, label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link> },
+        ],
+      },
+      {
+        key: 'maintenance-management',
+        label: 'Maintenance Management',
+        icon: <ToolOutlined />,
+        children: [
+          { key: `${prefix}/maintenance-management/maintenance`, label: <Link to={`${prefix}/maintenance-management/maintenance`} onClick={() => setMobileDrawerOpen(false)}>Maintenance</Link> },
+          { key: `${prefix}/maintenance-management/preventive-maintenance`, label: <Link to={`${prefix}/maintenance-management/preventive-maintenance`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link> },
         ],
       },
       {

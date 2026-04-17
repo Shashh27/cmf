@@ -5,6 +5,7 @@ import MCOMS from "../ManufacturingCoordinator Components/OMS";
 import MCPDM from "../ManufacturingCoordinator Components/PDM";
 import MCPPS from "../ManufacturingCoordinator Components/PPS";
 import MCProductionMonitoring from "../ManufacturingCoordinator Components/ProductionMonitoring";
+import MCMaintenanceManagement from "../Pages/MaintenanceManagement";
 import MCInventory from "../ManufacturingCoordinator Components/Inventory";
 import MCOverviewData from "../ManufacturingCoordinator Components/OverviewData";
 import MCRawMaterials from "../ManufacturingCoordinator Components/RawMaterials";
@@ -34,6 +35,9 @@ const ManufacturingCoordinator = () => {
   }
   if (path.startsWith("/manufacturing_coordinator/product-monitoring")) {
     return <MCProductionMonitoring />;
+  }
+  if (path.startsWith("/manufacturing_coordinator/maintenance-management")) {
+    return <MCMaintenanceManagement />;
   }
   if (path.startsWith("/manufacturing_coordinator/inventory-management/overview-data")) {
     return <MCOverviewData />;
