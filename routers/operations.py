@@ -587,6 +587,41 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
     return db_operation
 
 
+@router.post("/swap", status_code=status.HTTP_200_OK)
+def swap_operation_numbers(op1_id: int, op2_id: int, db: Session = Depends(get_db)):
+    """Swap operation numbers between two operations"""
+    op1 = db.query(OperationModel).filter(OperationModel.id == op1_id).first()
+    op2 = db.query(OperationModel).filter(OperationModel.id == op2_id).first()
+    
+    if not op1:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation with id {op1_id} not found"
+        )
+    if not op2:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation with id {op2_id} not found"
+        )
+    
+    if op1.part_id != op2.part_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Operations must belong to the same part to swap numbers"
+        )
+    
+    # Swap the operation numbers
+    temp_number = op1.operation_number
+    op1.operation_number = op2.operation_number
+    op2.operation_number = temp_number
+    
+    db.commit()
+    db.refresh(op1)
+    db.refresh(op2)
+    
+    return {"message": "Operation numbers swapped successfully", "op1_id": op1_id, "op2_id": op2_id}
+
+
 @router.delete("/{operation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_operation(operation_id: int, db: Session = Depends(get_db)):
     db_operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()

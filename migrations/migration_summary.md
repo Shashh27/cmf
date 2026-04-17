@@ -18,12 +18,18 @@
   - `procurement_weight` (double precision, nullable)
   - `procurement_status` (character varying, default: 'pending')
 
+### 3. oms.parts
+- **Status**: ✅ Successfully migrated (2025-04-13)
+- **Removed Columns**:
+  - `size` (character varying, nullable) - Deprecated field
+
 ## Migration Actions Performed:
 
 1. **Verified vendors table exists** with 101 vendor records
 2. **Added missing procurement columns** to order_parts_raw_material_linked table
 3. **Established vendor relationship** through vendor_id foreign key (already existed)
 4. **Set default values** for new columns to maintain data integrity
+5. **Removed size column** from parts table as it was deprecated from the data model
 
 ## Next Steps:
 
@@ -31,6 +37,7 @@
 2. **Test vendor assignment** functionality
 3. **Verify data integrity** with existing orders
 4. **Update API endpoints** to expose new procurement fields
+5. **Verify size field removal** doesn't break existing functionality
 
 ## Verification Commands:
 
@@ -47,6 +54,14 @@ AND column_name IN ('is_procurement', 'procurement_quantity', 'procurement_weigh
 
 -- Check procurement records
 SELECT COUNT(*) FROM oms.order_parts_raw_material_linked WHERE is_procurement = TRUE;
+
+-- Verify size column has been removed from parts table
+SELECT column_name 
+FROM information_schema.columns 
+WHERE table_schema = 'oms' 
+  AND table_name = 'parts' 
+  AND column_name = 'size';
+-- Should return no rows if size column was successfully removed
 ```
 
 ## Notes:
@@ -55,3 +70,4 @@ SELECT COUNT(*) FROM oms.order_parts_raw_material_linked WHERE is_procurement = 
 - Foreign key relationships maintained
 - Default values set to prevent data integrity issues
 - No data loss occurred during migration
+- Size field was safely removed as it was no longer used in the application

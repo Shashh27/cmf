@@ -112,7 +112,6 @@ class PartBase(BaseModel):
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
-    size: Optional[str] = None  # Optional size field (e.g., "25x25x160", "Ø210x110", "Tyre Coupling F160 Type:B")
     qty: Optional[int] = None  # Optional quantity field
     raw_material_required_quantity: Optional[float] = None  # Required quantity per part for order-linked materials
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
@@ -132,7 +131,6 @@ class PartUpdate(BaseModel):
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
-    size: Optional[str] = None  # Optional size field
     qty: Optional[int] = None  # Optional quantity field
     raw_material_required_quantity: Optional[float] = None  # Required quantity per part for order-linked materials
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
@@ -149,7 +147,6 @@ class Part(PartBase):
     raw_material_stock_dimensions: Optional[str] = None  # Formatted dimensions string
     priority: Optional[int] = None
     user_name: Optional[str] = None
-    size: Optional[str] = None  # Optional size field
     qty: Optional[int] = None  # Optional quantity field
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
     vendor_name: Optional[str] = None  # Vendor company name
@@ -699,3 +696,16 @@ class OutSourcePartStatus(OutSourcePartStatusBase):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Extracted Data Schemas
+# =======================
+class ExtractedDataUpdate(BaseModel):
+    material: Optional[str] = None
+    stock_size: Optional[str] = None
+    stocksize_kg: Optional[str] = None
+    net_wt_kg: Optional[str] = None
+    note: Optional[str] = None
+    title: Optional[str] = None
+    user_id: Optional[int] = None

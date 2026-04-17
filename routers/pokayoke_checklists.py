@@ -30,6 +30,8 @@ from DB.schemas.configuration import (
     PokayokeCompletedLogUpdate,
     PokayokeItemResponseCreate,
     PokayokeItemResponseUpdate,
+    PokayokeItemResponseWithItem,
+    PokayokeChecklistItemWithApprovals,
     PokayokeChecklistWithItems,
     PokayokeCompletedLogWithResponses,
     PokayokeMachineAssignmentWithChecklist
@@ -684,6 +686,147 @@ def delete_item_response(response_id: int, db: Session = Depends(get_db)):
     db.delete(db_response)
     db.commit()
     return None
+
+
+# =======================
+# ITEM RESPONSE APPROVAL
+# =======================
+
+class ItemApprovalRequest(BaseModel):
+    approval_status: str  # 'approved' or 'rejected'
+    approved_by: int
+    approval_comments: Optional[str] = None
+
+
+@completed_logs_router.post("/item-responses/{response_id}/approve", response_model=PokayokeItemResponseSchema)
+def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: Session = Depends(get_db)):
+    """Approve or reject a Pokayoke item response"""
+    db_response = db.query(PokayokeItemResponse).filter(PokayokeItemResponse.id == response_id).first()
+    if not db_response:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Item response with id {response_id} not found"
+        )
+
+    # Validate approval_status
+    if approval.approval_status not in ['approved', 'rejected']:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="approval_status must be 'approved' or 'rejected'"
+        )
+
+    # Get the checklist item to compare response with expected value
+    item = db.query(PokayokeChecklistItem).filter(PokayokeChecklistItem.id == db_response.item_id).first()
+    if item:
+        # Calculate is_confirming based on response value vs expected value
+        db_response.is_confirming = db_response.response_value.lower() == item.expected_value.lower()
+
+    # Update the response with approval info
+    db_response.approval_status = approval.approval_status
+    db_response.approved_by = approval.approved_by
+    db_response.approved_at = datetime.now(IST).replace(tzinfo=None)
+    db_response.approval_comments = approval.approval_comments
+
+    # Recalculate all_items_passed for the completed log
+    completed_log = db.query(PokayokeCompletedLog).filter(
+        PokayokeCompletedLog.id == db_response.completed_log_id
+    ).first()
+
+    if completed_log:
+        # Get all item responses for this log
+        all_responses = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == completed_log.id
+        ).all()
+
+        # Check if all responses have been approved/rejected
+        all_have_status = all(r.approval_status is not None for r in all_responses)
+
+        if all_have_status and all_responses:
+            # Check if any are rejected
+            any_rejected = any(r.approval_status == 'rejected' for r in all_responses)
+            if any_rejected:
+                completed_log.all_items_passed = False
+            else:
+                # All are approved
+                completed_log.all_items_passed = True
+        # If not all have status, leave all_items_passed as None
+
+    db.commit()
+    db.refresh(db_response)
+    return db_response
+
+
+@completed_logs_router.get("/checklists/{checklist_id}/approval-status", response_model=List[PokayokeChecklistItemWithApprovals])
+def get_approval_status_by_checklist(checklist_id: int, db: Session = Depends(get_db)):
+    """Get all checklist items with their approved/rejected responses for a specific checklist"""
+    from DB.models.access_control import AccessUser
+
+    # Verify checklist exists
+    checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == checklist_id).first()
+    if not checklist:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Checklist with id {checklist_id} not found"
+        )
+
+    # Get all checklist items
+    items = db.query(PokayokeChecklistItem).filter(
+        PokayokeChecklistItem.checklist_id == checklist_id
+    ).order_by(PokayokeChecklistItem.sequence_number).all()
+
+    if not items:
+        return []
+
+    # Get all completed logs for this checklist
+    completed_logs = db.query(PokayokeCompletedLog).filter(
+        PokayokeCompletedLog.checklist_id == checklist_id
+    ).all()
+
+    log_ids = [log.id for log in completed_logs] if completed_logs else []
+
+    # Build result grouped by item
+    result = []
+    for item in items:
+        item_data = {
+            "item": item,
+            "responses": []
+        }
+
+        if log_ids:
+            # Get only approved/rejected responses for this item
+            responses = db.query(PokayokeItemResponse).filter(
+                PokayokeItemResponse.completed_log_id.in_(log_ids),
+                PokayokeItemResponse.item_id == item.id,
+                PokayokeItemResponse.approval_status != None  # Only approved/rejected
+            ).all()
+
+            # Build simplified response data
+            for response in responses:
+                approver_data = None
+                if response.approved_by:
+                    approver = db.query(AccessUser).filter(AccessUser.id == response.approved_by).first()
+                    if approver:
+                        approver_data = {"user_name": approver.user_name}
+
+                response_data = {
+                    "id": response.id,
+                    "completed_log_id": response.completed_log_id,
+                    "response_value": response.response_value,
+                    "is_confirming": response.is_confirming,
+                    "timestamp": response.timestamp,
+                    "approval_status": response.approval_status,
+                    "approved_by": response.approved_by,
+                    "approved_at": response.approved_at,
+                    "approval_comments": response.approval_comments,
+                    "approver": approver_data
+                }
+                item_data["responses"].append(response_data)
+
+        # Only include items that have at least one approved/rejected response
+        if item_data["responses"]:
+            result.append(item_data)
+
+    return result
 
 
 # Export both routers

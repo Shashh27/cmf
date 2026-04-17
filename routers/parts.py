@@ -84,7 +84,6 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict
         "assembly_id": part.assembly_id,
         "product_id": part.product_id,
         "user_id": part.user_id,
-        "size": part.size,
         "qty": part.qty,
         "raw_material_required_quantity": part.raw_material_required_quantity,
         "vendor_id": part.vendor_id,
@@ -150,6 +149,11 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
                 detail=f"Raw material allocation failed: {str(e)}"
             )
 
+    # =================================================================
+    # IMPORTANT: OrderPartPriority auto-creation is PERMANENTLY DISABLED
+    # Parts should NOT automatically create entries in order_part_priorities table
+    # This table should only be managed manually through the priority management UI
+    # =================================================================
     # Automatic OrderPartPriority creation disabled
     # if db_part.product_id and db_part.type_id:
     #     part_type = db.query(PartType).filter(PartType.id == db_part.type_id).first()
@@ -165,6 +169,13 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     #             )
     #             db.add(priority_entry)
     #         db.commit()
+
+    # EXTRA SAFETY: Remove any OrderPartPriority entries that might have been created
+    # for this part by triggers or other mechanisms
+    db.query(OrderPartPriority).filter(OrderPartPriority.part_id == db_part.id).delete(
+        synchronize_session=False
+    )
+    db.commit()
 
     type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
     return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map, vendor_map)
@@ -239,58 +250,60 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
 
     update_data = part.model_dump(exclude_unset=True)
     
+    # Check if we're switching from outsource to in-house
+    is_switching_to_inhouse = (
+        'part_detail' in update_data and
+        'type_id' in update_data
+    )
+    
+    if is_switching_to_inhouse:
+        # Check if old part was outsource and new part is in-house
+        new_type_id = update_data.get('type_id')
+        old_part = db_part
+        
+        # Query PartType table to get type names
+        from DB.models.oms import PartType
+        old_type = db.query(PartType).filter(PartType.id == old_part.type_id).first()
+        new_type = db.query(PartType).filter(PartType.id == new_type_id).first()
+        
+        old_is_outsource = 'out' in old_type.type_name.lower() if old_type else False
+        new_is_inhouse = 'in-house' in new_type.type_name.lower() if new_type else False
+        
+        if old_is_outsource and new_is_inhouse:
+            # Clear vendor_id when switching from outsource to in-house
+            update_data['vendor_id'] = None
+            print("Clearing vendor_id when switching from outsource to in-house")
+    
+    # Check if we're switching to WITHOUT_RAW_MATERIAL by checking part_detail
+    is_switching_to_without_raw = (
+        'part_detail' in update_data and 
+        update_data.get('part_detail') == 'WITHOUT_RAW_MATERIAL'
+    )
+    
     # Check if raw material allocation is being updated
     is_updating_raw_material = any(key in update_data for key in [
-        'raw_material_stock_id', 'raw_material_required_quantity'
+        'raw_material_stock_id', 'raw_material_required_quantity', 'raw_material_id', 'qty'
     ])
     
+    # Check if all raw material fields are being cleared (set to null)
+    is_clearing_raw_material = (
+        update_data.get('raw_material_id') is None and
+        update_data.get('raw_material_stock_id') is None and
+        update_data.get('raw_material_required_quantity') is None and
+        update_data.get('qty') is None
+    )
+    
+    # Also consider clearing if switching to WITHOUT_RAW_MATERIAL and raw material fields are not present
+    if is_switching_to_without_raw and not is_updating_raw_material:
+        is_clearing_raw_material = True
+        # Also clear vendor_id for outsource parts when switching to WITHOUT_RAW_MATERIAL
+        update_data['vendor_id'] = None
+        print("Clearing vendor_id when switching to WITHOUT_RAW_MATERIAL")
+    
     # If updating raw material allocation, handle the allocation logic
-    if is_updating_raw_material:
-        new_stock_id = update_data.get('raw_material_stock_id')
-        new_required_quantity = update_data.get('raw_material_required_quantity')
-        
-        # Case 1: Same stock, different quantity (partial update)
-        if new_stock_id == db_part.raw_material_stock_id and new_required_quantity is not None:
-            if new_required_quantity != db_part.raw_material_required_quantity:
-                try:
-                    from services.raw_material_tracking import RawMaterialTrackingService
-                    RawMaterialTrackingService.update_raw_material_allocation(
-                        db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
-                    )
-                except Exception as e:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Raw material allocation update failed: {str(e)}"
-                    )
-        
-        # Case 2: Different stock or new allocation
-        elif new_stock_id != db_part.raw_material_stock_id:
-            # If there's an existing allocation, deallocate it first
-            if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
-                try:
-                    from services.raw_material_tracking import RawMaterialTrackingService
-                    RawMaterialTrackingService.deallocate_raw_material_from_part(
-                        db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
-                    )
-                except Exception as e:
-                    # Log error but continue with new allocation
-                    print(f"Warning: Could not deallocate previous material: {e}")
-            
-            # If new allocation is provided, allocate it
-            if new_stock_id and new_required_quantity:
-                try:
-                    from services.raw_material_tracking import RawMaterialTrackingService
-                    RawMaterialTrackingService.allocate_raw_material_to_part(
-                        db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
-                    )
-                except Exception as e:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Raw material allocation failed: {str(e)}"
-                    )
-        
-        # Case 3: Clearing allocation (setting to null/0)
-        elif not new_stock_id or not new_required_quantity:
+    if is_updating_raw_material or is_clearing_raw_material:
+        # Special case: All raw material fields are being cleared
+        if is_clearing_raw_material:
             # If there's an existing allocation, deallocate it
             if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
                 try:
@@ -301,10 +314,77 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
                 except Exception as e:
                     # Log error but continue
                     print(f"Warning: Could not deallocate material: {e}")
+            
+            # Explicitly set raw material fields to null in the database
+            db_part.raw_material_id = None
+            db_part.raw_material_stock_id = None
+            db_part.raw_material_required_quantity = None
+            db_part.qty = None
+        else:
+            new_stock_id = update_data.get('raw_material_stock_id')
+            new_required_quantity = update_data.get('raw_material_required_quantity')
+            new_raw_material_id = update_data.get('raw_material_id')
+            
+            # Case 1: Same stock, different quantity (partial update)
+            if new_stock_id == db_part.raw_material_stock_id and new_required_quantity is not None:
+                if new_required_quantity != db_part.raw_material_required_quantity:
+                    try:
+                        from services.raw_material_tracking import RawMaterialTrackingService
+                        RawMaterialTrackingService.update_raw_material_allocation(
+                            db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
+                        )
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Raw material allocation update failed: {str(e)}"
+                        )
+            
+            # Case 2: Different stock or new allocation
+            elif new_stock_id != db_part.raw_material_stock_id:
+                # If there's an existing allocation, deallocate it first
+                if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+                    try:
+                        from services.raw_material_tracking import RawMaterialTrackingService
+                        RawMaterialTrackingService.deallocate_raw_material_from_part(
+                            db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
+                        )
+                    except Exception as e:
+                        # Log error but continue with new allocation
+                        print(f"Warning: Could not deallocate previous material: {e}")
+                
+                # If new allocation is provided, allocate it
+                if new_stock_id and new_required_quantity:
+                    try:
+                        from services.raw_material_tracking import RawMaterialTrackingService
+                        RawMaterialTrackingService.allocate_raw_material_to_part(
+                            db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
+                        )
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Raw material allocation failed: {str(e)}"
+                        )
+            
+            # Update raw_material_id if provided
+            if new_raw_material_id is not None:
+                db_part.raw_material_id = new_raw_material_id
+            
+            # Case 3: Clearing allocation (setting to null/0)
+            elif not new_stock_id or not new_required_quantity:
+                # If there's an existing allocation, deallocate it
+                if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+                    try:
+                        from services.raw_material_tracking import RawMaterialTrackingService
+                        RawMaterialTrackingService.deallocate_raw_material_from_part(
+                            db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
+                        )
+                    except Exception as e:
+                        # Log error but continue
+                        print(f"Warning: Could not deallocate material: {e}")
     
-    # Update other fields normally (but skip raw material fields as they're handled above)
+    # Update other fields normally (but skip only raw material specific fields as they're handled above)
     for field, value in update_data.items():
-        if field not in ['raw_material_stock_id', 'raw_material_required_quantity']:
+        if field not in ['raw_material_stock_id', 'raw_material_required_quantity', 'raw_material_id']:
             setattr(db_part, field, value)
 
     db.commit()
@@ -592,7 +672,6 @@ async def parse_parts_doc(file: UploadFile = File(...)):
                     "part_name":         part_name,
                     "part_number":       part_number,
                     "qty":               qty,
-                    "size":              _cell(row_cells, COL_SIZE) or None,
                     "raw_material_name": _cell(row_cells, COL_MATERIAL) or None,
                     "type_id":           1,    # default: In-house; user can change in UI
                     "part_detail":       None,
@@ -625,7 +704,6 @@ class BulkPartCreateItem(BaseModel):
     assembly_id:     int | None = None
     product_id:      int | None = None
     user_id:         int | None = None
-    size:            str | None = None
     qty:             int | None = None
  
  
@@ -654,7 +732,7 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
     duplicates: list[str]  = []
     errors:     list[dict] = []
  
-    type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
  
     # Pre-check all part numbers in ONE query to avoid N round-trips
     incoming_numbers = [item.part_number for item in payload.parts if item.part_number]
@@ -677,12 +755,12 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
             db_part = PartModel(**item.model_dump())
             db.add(db_part)
             db.flush()   # assign id without committing yet
-            created.append(_part_to_dict(db_part, type_map, rm_map, stock_map, user_map))
+            created.append(_part_to_dict(db_part, type_map, rm_map, stock_map, user_map, vendor_map))
             existing_numbers.add(item.part_number)   # prevent intra-batch dupes
         except Exception as exc:
             db.rollback()
             errors.append({"part_number": item.part_number, "error": str(exc)})
-            type_map, rm_map, stock_map, user_map = _build_part_maps(db)
+            type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
  
     # Single commit for all successful inserts
     if created:

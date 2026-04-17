@@ -143,7 +143,7 @@ class PokayokeCompletedLog(Base):
     production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=True)
     completed_at = Column(TIMESTAMP, nullable=False)
-    all_items_passed = Column(Boolean, nullable=False)
+    all_items_passed = Column(Boolean, nullable=True, default=None)
     comments = Column(Text, nullable=True)
     read = Column(Boolean, default=False)
     assignment_id = Column(Integer, ForeignKey("configuration.pokayoke_machine_assignments.id"), nullable=True)
@@ -168,9 +168,16 @@ class PokayokeItemResponse(Base):
     completed_log_id = Column(Integer, ForeignKey("configuration.pokayoke_completed_logs.id"), nullable=False)
     item_id = Column(Integer, ForeignKey("configuration.pokayoke_checklist_items.id"), nullable=False)
     response_value = Column(String, nullable=False)
-    is_confirming = Column(Boolean, default=False)
+    is_confirming = Column(Boolean, nullable=True, default=None)
     timestamp = Column(TIMESTAMP, nullable=False)
+
+    # Approval fields
+    approval_status = Column(String, nullable=True)  # 'approved', 'rejected', 'pending'
+    approved_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    approved_at = Column(TIMESTAMP, nullable=True)
+    approval_comments = Column(String, nullable=True)
 
     # Relationships
     completed_log = relationship("PokayokeCompletedLog", back_populates="item_responses")
     item = relationship("PokayokeChecklistItem")
+    approver = relationship("AccessUser")
