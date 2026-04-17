@@ -1,6 +1,6 @@
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+from typing import Optional, List
+from datetime import datetime, date
 
 
 class AccessUserBase(BaseModel):
@@ -52,3 +52,40 @@ class AccessUserResponseForOperator(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# =======================
+# Operator Leave Schemas
+# =======================
+
+class OperatorLeaveBase(BaseModel):
+    operator_id: int
+    from_date: date
+    to_date: date
+    reason: str
+    additional_remarks: Optional[str] = None
+
+class OperatorLeaveCreate(OperatorLeaveBase):
+    pass
+
+class OperatorLeaveUpdate(BaseModel):
+    from_date: Optional[date] = None
+    to_date: Optional[date] = None
+    reason: Optional[str] = None
+    additional_remarks: Optional[str] = None
+
+class OperatorLeaveResponse(OperatorLeaveBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+    def dict(self, **kwargs):
+        data = super().dict(**kwargs)
+        # Remove additional_remarks if it's None, empty string, or placeholder values
+        remarks = data.get('additional_remarks')
+        if remarks is None or remarks == '' or remarks == 'string':
+            data.pop('additional_remarks', None)
+        return data

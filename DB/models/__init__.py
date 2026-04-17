@@ -34,7 +34,7 @@ from .scheduling import (
     MachineOperatorShiftAssignment
 )
 
-from .access_control import AccessUser
+from .access_control import AccessUser, OperatorLeave
 
 __all__ = [
     "Product",
@@ -61,6 +61,7 @@ __all__ = [
     "Base",
     "MachineOperatorShiftAssignment",
     "AccessUser",
+    "OperatorLeave",
     "OrderPartPriority",
     "PartScheduleStatus",
     "ProductionLog",

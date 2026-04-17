@@ -13,6 +13,7 @@ from routers import (
     capacity_planning,
     machine_scheduling,
     production_logs,
+    operator_leaves,
 )
 
 
@@ -41,6 +42,7 @@ app.include_router(shift_hours.router, prefix="/api/v1")
 app.include_router(capacity_planning.router, prefix="/api/v1")
 app.include_router(machine_scheduling_router, prefix="/api/v1")
 app.include_router(production_logs.router, prefix="/api/v1")
+app.include_router(operator_leaves.router, prefix="/api/v1")
 # app.include_router(machine_scheduling_engine_router, prefix="/api/v1")
 
 
