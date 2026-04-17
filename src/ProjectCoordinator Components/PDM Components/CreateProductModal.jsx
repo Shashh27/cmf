@@ -36,19 +36,7 @@ const CreateProductModal = ({
 
   const [partTypes, setPartTypes] = useState([]);
 
-  const [rawMaterials, setRawMaterials] = useState([]);
-
-  const [rawMaterialStock, setRawMaterialStock] = useState([]);
-
-  const [vendors, setVendors] = useState([]);
-
   const hasFetchedPartTypes = useRef(false);
-
-  const hasFetchedRawMaterials = useRef(false);
-
-  const hasFetchedRawMaterialStock = useRef(false);
-
-  const hasFetchedVendors = useRef(false);
 
 
 
@@ -90,17 +78,7 @@ const CreateProductModal = ({
 
     type_id: 1,
 
-    raw_material_id: null,
-
-    raw_material_required_quantity: null,
-
-    part_detail: null,
-
-    size: '',
-
     qty: 1,
-
-    vendor_id: null,
 
     assembly_id: null,
 
@@ -144,33 +122,15 @@ const CreateProductModal = ({
 
       } else if (createType === 'part') {
 
-        // Find the stock if raw_material_stock_id exists
-        const selectedStock = editingItem.raw_material_stock_id 
-          ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)
-          : null;
-
         newValues = {
 
           part_number: editingItem.part_number || '',
 
           part_name: editingItem.part_name || '',
 
-          type_id: editingItem.type_id || 1,
-
-          raw_material_id: selectedStock ? selectedStock.material_id : editingItem.raw_material_id,
-
-          raw_material_form_type: selectedStock ? selectedStock.form_type : null,
-
-          raw_material_stock_id: editingItem.raw_material_stock_id,
-
-          raw_material_required_quantity: editingItem.raw_material_required_quantity,
-
-          part_detail: editingItem.part_detail ?? null,
-
-          size: editingItem.size || '',
+          type_id: 1,
 
           qty: editingItem.qty || 1,
-          vendor_id: editingItem.vendor_id || null,
 
         };
 
@@ -210,12 +170,6 @@ const CreateProductModal = ({
 
           type_id: 1,
 
-          raw_material_id: null,
-
-          part_detail: null,
-
-          size: '',
-
           qty: 1,
 
         };
@@ -230,7 +184,7 @@ const CreateProductModal = ({
 
     setFormData(prev => ({ ...prev, ...newValues }));
 
-  }, [selectedProduct, parentAssembly, mode, editingItem, createType, rawMaterialStock]);
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType]);
 
 
 
@@ -266,33 +220,15 @@ const CreateProductModal = ({
 
       } else if (createType === 'part') {
 
-        // Find the stock if raw_material_stock_id exists
-        const selectedStock = editingItem.raw_material_stock_id 
-          ? rawMaterialStock.find(s => s.id === editingItem.raw_material_stock_id)
-          : null;
-
         newValues = {
 
           part_number: editingItem.part_number || '',
 
           part_name: editingItem.part_name || '',
 
-          type_id: editingItem.type_id || 1,
-
-          raw_material_id: selectedStock ? selectedStock.material_id : editingItem.raw_material_id,
-
-          raw_material_form_type: selectedStock ? selectedStock.form_type : null,
-
-          raw_material_stock_id: editingItem.raw_material_stock_id,
-
-          raw_material_required_quantity: editingItem.raw_material_required_quantity,
-
-          part_detail: editingItem.part_detail ?? null,
-
-          size: editingItem.size || '',
+          type_id: 1,
 
           qty: editingItem.qty || 1,
-          vendor_id: editingItem.vendor_id || null,
 
         };
 
@@ -333,12 +269,6 @@ const CreateProductModal = ({
 
           type_id: 1,
 
-          raw_material_id: null,
-
-          part_detail: null,
-
-          size: '',
-
           qty: 1,
 
         };
@@ -355,16 +285,8 @@ const CreateProductModal = ({
       form.setFieldsValue(newValues);
     }
 
-  }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open, rawMaterialStock]);
+  }, [selectedProduct, parentAssembly, mode, editingItem, createType, form, open]);
 
-  // Update form values again after vendors are loaded to ensure vendor selection works
-  useEffect(() => {
-    if (mode === 'edit' && editingItem && createType === 'part' && vendors.length > 0 && form && open) {
-      form.setFieldsValue({
-        vendor_id: editingItem.vendor_id ? Number(editingItem.vendor_id) : null,
-      });
-    }
-  }, [vendors, mode, editingItem, createType, form, open]);
 
 
 
@@ -438,37 +360,6 @@ const CreateProductModal = ({
 
 
 
-  // Fetch raw materials when component mounts or when createType becomes 'part'
-
-  useEffect(() => {
-
-    if (createType === 'part' && !hasFetchedRawMaterials.current) {
-
-      const fetchRawMaterialsData = async () => {
-
-        hasFetchedRawMaterials.current = true;
-
-        try {
-
-          await fetchRawMaterials();
-
-          await fetchRawMaterialStock();
-
-          await fetchVendors();
-
-        } catch (error) {
-
-          console.error('Error fetching raw materials:', error);
-
-        }
-
-      };
-
-      fetchRawMaterialsData();
-
-    }
-
-  }, [createType]);
 
 
 
@@ -490,57 +381,6 @@ const CreateProductModal = ({
 
 
 
-  const fetchRawMaterials = async () => {
-
-    try {
-
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
-
-      setRawMaterials(response.data);
-
-    } catch (error) {
-
-      console.error("Error fetching raw materials:", error);
-
-    }
-
-  };
-
-
-
-  const fetchRawMaterialStock = async () => {
-
-    try {
-
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`);
-
-      setRawMaterialStock(response.data);
-
-    } catch (error) {
-
-      console.error("Error fetching raw material stock:", error);
-
-    }
-
-  };
-
-
-
-  const fetchVendors = async () => {
-
-    try {
-
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
-
-      setVendors(response.data);
-
-    } catch (error) {
-
-      console.error("Error fetching vendors:", error);
-
-    }
-
-  };
 
 
 
@@ -726,47 +566,15 @@ const CreateProductModal = ({
 
         method = mode === 'edit' && editingItem ? 'PUT' : 'POST';
 
-        const partDetail = values.part_detail || null;
-
-        // Only include raw material fields if raw material is selected
-        const payloadBase = {
+        payload = {
           part_number: values.part_number,
           part_name: values.part_name,
-          type_id: values.type_id,
-          part_detail: partDetail,
+          type_id: 1,
+          qty: values.qty || 1,
           assembly_id: parentAssembly?.id || editingItem?.assembly_id || null,
           product_id: editingItem?.product_id || selectedProduct?.id,
           user_id: getCurrentUserId(),
         };
-
-        // Add raw material fields based on what is selected
-        // Always include raw_material_id if stock is selected (get from stock data)
-        if (values.raw_material_stock_id) {
-          // Get material_id from the selected stock
-          const selectedStock = rawMaterialStock.find(stock => stock.id === values.raw_material_stock_id);
-          if (selectedStock) {
-            payloadBase.raw_material_id = selectedStock.material_id;
-          }
-          payloadBase.raw_material_stock_id = values.raw_material_stock_id;
-        } else {
-          payloadBase.raw_material_id = null;
-          payloadBase.raw_material_stock_id = null;
-        }
-        
-        // Always include size and qty for in-house parts, and for outsource parts that have them
-        payloadBase.size = values.size || null;
-        payloadBase.qty = values.qty || 1;
-        
-        // Include required quantity only if stock is selected
-        payloadBase.raw_material_required_quantity = values.raw_material_required_quantity || null;
-
-        // Add vendor_id only for outsource parts
-        const isOutSource = partTypes.find(t => t.id === values.type_id)?.type_name?.toLowerCase().includes('out');
-        if (isOutSource) {
-          payloadBase.vendor_id = values.vendor_id || null;
-        }
-
-        payload = payloadBase;
 
       }
 
@@ -1134,31 +942,9 @@ const CreateProductModal = ({
 
             </div>
 
-            {/* Size, Quantity, and Part Type - 3 columns */}
+            {/* Quantity and Part Type - 2 columns */}
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-              <Form.Item
-
-                name="size"
-
-                label={<span className="text-xs sm:text-sm">Size</span>}
-
-                rules={[{ required: true, message: 'Please enter size!' }]}
-
-              >
-
-                <Input 
-
-                  placeholder="Enter size" 
-
-                  size="large"
-
-                  autoComplete="off"
-
-                />
-
-              </Form.Item>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
               <Form.Item
 
@@ -1212,7 +998,7 @@ const CreateProductModal = ({
 
               >
 
-                <Select placeholder="Select part type" size="large">
+                <Select placeholder="Select part type" size="large" disabled>
 
                   {partTypes.map(type => (
 

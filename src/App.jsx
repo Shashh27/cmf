@@ -29,7 +29,7 @@ import OperatorDashboard from "./Pages/OperatorDashboard";
 import PPS from "./Pages/PPS";
 
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
-
+import MaintenanceManagement from "./Pages/MaintenanceManagement";
 import QualityManagement from "./Quality Management Components/QualityManagement";
 
 import InventoryMaster from "./Pages/Inventory";
@@ -124,11 +124,9 @@ function App() {
 
           <Route path="/admin/product-monitoring/order-tracking" element={<ProductionMonitoring />} />
 
-          <Route path="/admin/product-monitoring/maintenance" element={<ProductionMonitoring />} />
-
-          <Route path="/admin/product-monitoring/pokayoke-checklists" element={<ProductionMonitoring />} />
-
-
+          <Route path="/admin/maintenance-management" element={<Navigate to="/admin/maintenance-management/maintenance" replace />} />
+          <Route path="/admin/maintenance-management/maintenance" element={<MaintenanceManagement />} />
+          <Route path="/admin/maintenance-management/preventive-maintenance" element={<MaintenanceManagement />} />
 
           <Route path="/admin/quality-management" element={<QualityManagement />} />
 
@@ -210,9 +208,9 @@ function App() {
 
           <Route path="/manufacturing_coordinator/product-monitoring/order-tracking" element={<ManufacturingCoordinator />} />
 
-          <Route path="/manufacturing_coordinator/product-monitoring/maintenance" element={<ManufacturingCoordinator />} />
-
-          <Route path="/manufacturing_coordinator/product-monitoring/pokayoke-checklists" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/maintenance-management" element={<Navigate to="/manufacturing_coordinator/maintenance-management/maintenance" replace />} />
+          <Route path="/manufacturing_coordinator/maintenance-management/maintenance" element={<ManufacturingCoordinator />} />
+          <Route path="/manufacturing_coordinator/maintenance-management/preventive-maintenance" element={<ManufacturingCoordinator />} />
 
           <Route path="/manufacturing_coordinator/inventory-management" element={<Navigate to="/manufacturing_coordinator/inventory-management/inventory-master" replace />} />
 
@@ -235,8 +233,8 @@ function App() {
           <Route path="/supervisor" element={<Navigate to="/supervisor/production_logs" replace />} />
 
           <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
-
-          
+          <Route path="/supervisor/pps/assets-availability" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/product-monitoring/pokayoke-checklists" element={<SupervisorDashboard />} />
 
           {/* Inventory Supervisor */}
 

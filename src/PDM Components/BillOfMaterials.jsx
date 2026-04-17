@@ -60,6 +60,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     if (outSourceTypes.includes(normalized)) {
       return <CodepenOutlined className="text-amber-600" />;
     }
+    // Standard part: gray – same icon as outsource but gray
+    if (normalized === "standard") {
+      return <CodepenOutlined className="text-gray-500" />;
+    }
     if (normalized === "part") {
       return <FileTextOutlined className="text-gray-500" />;
     }
@@ -75,6 +79,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     if (normalized === "assembly") return 'blue';
     if (inHouseTypes.includes(normalized)) return 'green';
     if (outSourceTypes.includes(normalized)) return 'orange';
+    if (normalized === "standard") return 'gray';
     return 'default';
   };
 

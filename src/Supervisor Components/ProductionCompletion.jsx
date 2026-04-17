@@ -369,6 +369,15 @@ const ProductionCompletion = () => {
       ),
     },
     {
+      title: 'Machine',
+      key: 'machine',
+      render: (_, record) => (
+        <Text style={{ fontSize: '12px' }}>
+          {record.planned_schedule_item?.machine_name || 'N/A'}
+        </Text>
+      ),
+    },
+    {
       title: 'Total Quantity',
       key: 'total_quantity',
       render: (_, record) => (

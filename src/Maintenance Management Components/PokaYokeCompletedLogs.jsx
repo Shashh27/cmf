@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,Input,Tooltip,Popconfirm,} from 'antd';
-import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,CheckOutlined,CloseOutlined,UserOutlined,} from '@ant-design/icons';
-import { API_BASE_URL } from "../../Config/auth";
+import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,} from 'antd';
+import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,} from '@ant-design/icons';
+import { API_BASE_URL } from "../Config/auth";
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -16,25 +16,8 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
   const [selectedLog, setSelectedLog] = useState(null);
   const [selectedLogDetails, setSelectedLogDetails] = useState(null);
 
-  const [approvalModalVisible, setApprovalModalVisible] = useState(false);
-  const [selectedResponse, setSelectedResponse] = useState(null);
-  const [approvalAction, setApprovalAction] = useState(null); // 'approve' or 'reject'
-  const [approvalComments, setApprovalComments] = useState('');
-  const [submittingApproval, setSubmittingApproval] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
-
   useEffect(() => {
     fetchLogs();
-    // Fetch current user from localStorage
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      try {
-        const user = JSON.parse(userData);
-        setCurrentUser(user);
-      } catch (e) {
-        console.error('Failed to parse user data:', e);
-      }
-    }
   }, []);
 
   const fetchLogs = async (machineId = null) => {
@@ -132,95 +115,6 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
         FAILED
       </Tag>
     );
-  };
-
-  const getApprovalStatusTag = (approvalStatus) => {
-    if (approvalStatus === 'approved') {
-      return (
-        <Tag color="success" style={{ borderRadius: '12px', padding: '0 10px' }}>
-          APPROVED
-        </Tag>
-      );
-    }
-    if (approvalStatus === 'rejected') {
-      return (
-        <Tag color="error" style={{ borderRadius: '12px', padding: '0 10px' }}>
-          REJECTED
-        </Tag>
-      );
-    }
-    return (
-      <Tag color="default" style={{ borderRadius: '12px', padding: '0 10px' }}>
-        PENDING
-      </Tag>
-    );
-  };
-
-  const handleApproveClick = (response) => {
-    if (!currentUser) {
-      message.error('Please log in to approve items');
-      return;
-    }
-    setSelectedResponse(response);
-    setApprovalAction('approve');
-    setApprovalComments(response.approval_comments || '');
-    setApprovalModalVisible(true);
-  };
-
-  const handleRejectClick = (response) => {
-    if (!currentUser) {
-      message.error('Please log in to reject items');
-      return;
-    }
-    setSelectedResponse(response);
-    setApprovalAction('reject');
-    setApprovalComments(response.approval_comments || '');
-    setApprovalModalVisible(true);
-  };
-
-  const handleApprovalSubmit = async () => {
-    if (!selectedResponse || !approvalAction || !currentUser) return;
-
-    try {
-      setSubmittingApproval(true);
-      const url = `${API_BASE_URL}/pokayoke-completed-logs/item-responses/${selectedResponse.id}/approve`;
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          approval_status: approvalAction === 'approve' ? 'approved' : 'rejected',
-          approved_by: currentUser.id,
-          approval_comments: approvalComments,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to ${approvalAction} item`);
-      }
-
-      const updatedResponse = await response.json();
-
-      // Update the local state
-      setSelectedLogDetails(prev => ({
-        ...prev,
-        item_responses: prev.item_responses.map(item =>
-          item.id === updatedResponse.id ? { ...item, ...updatedResponse, approver: currentUser } : item
-        ),
-      }));
-
-      message.success(`Item ${approvalAction === 'approve' ? 'approved' : 'rejected'} successfully`);
-      setApprovalModalVisible(false);
-      setSelectedResponse(null);
-      setApprovalAction(null);
-      setApprovalComments('');
-    } catch (error) {
-      message.error(error.message || `Failed to ${approvalAction} item`);
-    } finally {
-      setSubmittingApproval(false);
-    }
   };
 
   const columns = [
@@ -328,7 +222,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
     {
       title: 'Checklist Item',
       key: 'item_id',
-      width: 220,
+      width: 250,
       className: 'table-header-styled',
       render: (_, record) => getItemText(record),
     },
@@ -336,70 +230,23 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       title: 'Response',
       dataIndex: 'response_value',
       key: 'response_value',
-      width: 120,
+      width: 150,
       className: 'table-header-styled',
     },
     {
       title: 'Status',
       dataIndex: 'is_confirming',
       key: 'is_confirming',
-      width: 100,
+      width: 120,
       align: 'center',
       className: 'table-header-styled',
       render: (value) => getResponseStatusTag(value),
     },
     {
-      title: 'Approval',
-      dataIndex: 'approval_status',
-      key: 'approval_status',
-      width: 110,
-      align: 'center',
-      className: 'table-header-styled',
-      render: (value, record) => (
-        <div>
-          {getApprovalStatusTag(value)}
-          {record.approver && (
-            <div style={{ fontSize: '11px', marginTop: 4, color: '#666' }}>
-              <UserOutlined /> {record.approver.user_name || 'Unknown'}
-            </div>
-          )}
-        </div>
-      ),
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 140,
-      align: 'center',
-      className: 'table-header-styled',
-      render: (_, record) => (
-        <Space size="small">
-          <Tooltip title="Approve">
-            <Button
-              type="text"
-              size="small"
-              icon={<CheckOutlined style={{ color: '#52c41a' }} />}
-              onClick={() => handleApproveClick(record)}
-              disabled={record.approval_status === 'approved'}
-            />
-          </Tooltip>
-          <Tooltip title="Reject">
-            <Button
-              type="text"
-              size="small"
-              icon={<CloseOutlined style={{ color: '#ff4d4f' }} />}
-              onClick={() => handleRejectClick(record)}
-              disabled={record.approval_status === 'rejected'}
-            />
-          </Tooltip>
-        </Space>
-      ),
-    },
-    {
       title: 'Timestamp',
       dataIndex: 'timestamp',
       key: 'timestamp',
-      width: 180,
+      width: 220,
       className: 'table-header-styled',
       render: (date) => formatDateTime(date),
     },
@@ -549,7 +396,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       >
         {selectedLogDetails && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <Card
+            <Card
                 bordered={false}
                 style={{ background: '#fafafa', borderRadius: 8 }}
               >
@@ -651,54 +498,6 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
               </div>
             </div>
           )}
-      </Modal>
-
-      <Modal
-        title={
-          approvalAction === 'approve'
-            ? 'Approve Checklist Item'
-            : 'Reject Checklist Item'
-        }
-        open={approvalModalVisible}
-        onCancel={() => {
-          setApprovalModalVisible(false);
-          setSelectedResponse(null);
-          setApprovalAction(null);
-          setApprovalComments('');
-        }}
-        onOk={handleApprovalSubmit}
-        confirmLoading={submittingApproval}
-        okText={approvalAction === 'approve' ? 'Approve' : 'Reject'}
-        okButtonProps={{
-          type: approvalAction === 'approve' ? 'primary' : 'default',
-          danger: approvalAction === 'reject',
-        }}
-      >
-        <div style={{ marginTop: 16 }}>
-          <Text strong style={{ display: 'block', marginBottom: 8 }}>
-            Item
-          </Text>
-          <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
-            {selectedResponse?.item?.item_text || '-'}
-          </div>
-
-          <Text strong style={{ display: 'block', marginBottom: 8 }}>
-            Response
-          </Text>
-          <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
-            {selectedResponse?.response_value || '-'} ({selectedResponse?.is_confirming ? 'Passed' : 'Failed'})
-          </div>
-
-          <Text strong style={{ display: 'block', marginBottom: 8 }}>
-            Comments 
-          </Text>
-          <Input.TextArea
-            rows={3}
-            value={approvalComments}
-            onChange={(e) => setApprovalComments(e.target.value)}
-            placeholder={`Add comments for ${approvalAction === 'approve' ? 'approval' : 'rejection'}...`}
-          />
-        </div>
       </Modal>
     </div>
   );
