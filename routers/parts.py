@@ -84,7 +84,6 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict
         "assembly_id": part.assembly_id,
         "product_id": part.product_id,
         "user_id": part.user_id,
-        "size": part.size,
         "qty": part.qty,
         "raw_material_required_quantity": part.raw_material_required_quantity,
         "vendor_id": part.vendor_id,
@@ -283,7 +282,7 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
     
     # Check if raw material allocation is being updated
     is_updating_raw_material = any(key in update_data for key in [
-        'raw_material_stock_id', 'raw_material_required_quantity', 'raw_material_id', 'size', 'qty'
+        'raw_material_stock_id', 'raw_material_required_quantity', 'raw_material_id', 'qty'
     ])
     
     # Check if all raw material fields are being cleared (set to null)
@@ -668,7 +667,6 @@ async def parse_parts_doc(file: UploadFile = File(...)):
                     "part_name":         part_name,
                     "part_number":       part_number,
                     "qty":               qty,
-                    "size":              _cell(row_cells, COL_SIZE) or None,
                     "raw_material_name": _cell(row_cells, COL_MATERIAL) or None,
                     "type_id":           1,    # default: In-house; user can change in UI
                     "part_detail":       None,
@@ -701,7 +699,6 @@ class BulkPartCreateItem(BaseModel):
     assembly_id:     int | None = None
     product_id:      int | None = None
     user_id:         int | None = None
-    size:            str | None = None
     qty:             int | None = None
  
  

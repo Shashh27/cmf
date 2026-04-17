@@ -601,8 +601,7 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'part_detail': part.part_detail,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
-            'user_id': part.user_id,
-            'size': part.size,  # New optional size field
+            'user_id': part.user_id,        
             'qty': part.qty,    # New optional quantity field
             'vendor_id': part.vendor_id,
             'type_name': part_type_map.get(part.type_id),
