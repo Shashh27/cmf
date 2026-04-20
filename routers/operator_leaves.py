@@ -63,7 +63,7 @@ def create_leave(
     if overlapping_leaves:
         raise HTTPException(
             status_code=400,
-            detail="Operator already has leave during this period"
+            detail="Operator already has leave during this period, instead update the leave"
         )
     
     # Check for leaves with same from_date
