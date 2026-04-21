@@ -62,8 +62,9 @@ class OperatorLeaveBase(BaseModel):
     operator_id: int
     from_date: date
     to_date: date
-    reason: str
+    reason: Optional[str] = None
     additional_remarks: Optional[str] = None
+    status: str = "pending"
 
 class OperatorLeaveCreate(OperatorLeaveBase):
     pass
@@ -73,6 +74,10 @@ class OperatorLeaveUpdate(BaseModel):
     to_date: Optional[date] = None
     reason: Optional[str] = None
     additional_remarks: Optional[str] = None
+    status: Optional[str] = None
+
+class OperatorLeaveStatusUpdate(BaseModel):
+    status: str  # 'acknowledged' or 'rejected'
 
 class OperatorLeaveResponse(OperatorLeaveBase):
     id: int

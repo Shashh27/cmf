@@ -69,7 +69,7 @@ class MachineShiftConfigurationResponse(BaseModel):
     machine_make: Optional[str] = None
     work_center_name: Optional[str] = None
     operators_selected: List[MachineOperatorInfo]
-    shift_config: ShiftConfigDetails
+    shift_configs: List[ShiftConfigDetails]  # Changed from single shift_config to list
     
     class Config:
         from_attributes = True

@@ -180,15 +180,18 @@ def get_operator_shifts_for_machine(
     if not machine:
         raise HTTPException(status_code=404, detail="Machine not found")
     
-    # Find shift assignment for this machine and operator with shift config and timings
-    assignment = db.query(MachineOperatorShiftAssignment).options(
+    # Find all shift assignments for this machine and operator with shift config and timings
+    assignments = db.query(MachineOperatorShiftAssignment).options(
         joinedload(MachineOperatorShiftAssignment.shift_config).joinedload(ShiftHoursConfiguration.shift_timings)
     ).filter(
         MachineOperatorShiftAssignment.machine_id == machine_id,
         MachineOperatorShiftAssignment.operator_id == operator_id
-    ).first()
+    ).all()
     
-    if not assignment:
+    # Sort assignments by date in Python to avoid SQL alias issues
+    assignments.sort(key=lambda x: x.shift_config.date)
+    
+    if not assignments:
         raise HTTPException(
             status_code=404, 
             detail=f"No shift assignment found for machine {machine_id} and operator {operator_id}"
@@ -209,33 +212,37 @@ def get_operator_shifts_for_machine(
         group=operator.group
     )
     
-    # Create shift timing info
-    shift_timing_infos = []
-    for timing in assignment.shift_config.shift_timings:
-        timing_info = ShiftTimingInfo(
-            shift_code=timing.shift_code,
-            shift_start=timing.shift_start,
-            shift_end=timing.shift_end,
-            custom_start=timing.custom_start,
-            custom_end=timing.custom_end
+    # Create shift config details for all assignments
+    shift_configs = []
+    for assignment in assignments:
+        # Create shift timing info for this assignment
+        shift_timing_infos = []
+        for timing in assignment.shift_config.shift_timings:
+            timing_info = ShiftTimingInfo(
+                shift_code=timing.shift_code,
+                shift_start=timing.shift_start,
+                shift_end=timing.shift_end,
+                custom_start=timing.custom_start,
+                custom_end=timing.custom_end
+            )
+            shift_timing_infos.append(timing_info)
+        
+        # Create shift config details for this assignment
+        shift_config_details = ShiftConfigDetails(
+            id=assignment.shift_config.id,
+            date=assignment.shift_config.date,
+            working_day=assignment.shift_config.working_day,
+            number_of_shifts=assignment.shift_config.number_of_shifts,
+            shift_timings=shift_timing_infos
         )
-        shift_timing_infos.append(timing_info)
-    
-    # Create shift config details
-    shift_config_details = ShiftConfigDetails(
-        id=assignment.shift_config.id,
-        date=assignment.shift_config.date,
-        working_day=assignment.shift_config.working_day,
-        number_of_shifts=assignment.shift_config.number_of_shifts,
-        shift_timings=shift_timing_infos
-    )
+        shift_configs.append(shift_config_details)
     
     return MachineShiftConfigurationResponse(
         machine_id=machine.id,
         machine_make=machine.make,
         work_center_name=machine.work_center.work_center_name if machine.work_center else None,
         operators_selected=[operator_info],
-        shift_config=shift_config_details
+        shift_configs=shift_configs  # Return all shift configs
     )
 
 
@@ -408,8 +415,67 @@ def update_operator_shift_for_machine(
     )
 
 
+@router.get("/assignments/{shift_config_id}", response_model=List[MachineOperatorShiftAssignmentResponse])
+def get_assignments_by_shift_config(
+    shift_config_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get all machine operator assignments for a specific shift configuration"""
+    
+    # Check if shift configuration exists
+    shift_config = db.query(ShiftHoursConfiguration).filter(
+        ShiftHoursConfiguration.id == shift_config_id
+    ).first()
+    if not shift_config:
+        raise HTTPException(status_code=404, detail="Shift configuration not found")
+    
+    # Get all assignments for this shift config with related data
+    assignments = db.query(MachineOperatorShiftAssignment).options(
+        joinedload(MachineOperatorShiftAssignment.shift_config).joinedload(ShiftHoursConfiguration.shift_timings),
+        joinedload(MachineOperatorShiftAssignment.operator),
+        joinedload(MachineOperatorShiftAssignment.machine)
+    ).filter(
+        MachineOperatorShiftAssignment.shift_config_id == shift_config_id
+    ).all()
+    
+    # Create detailed responses
+    detailed_assignments = []
+    for assignment in assignments:
+        # Create shift timing info
+        shift_timing_infos = []
+        for timing in assignment.shift_config.shift_timings:
+            timing_info = ShiftTimingInfo(
+                shift_code=timing.shift_code,
+                shift_start=timing.shift_start,
+                shift_end=timing.shift_end,
+                custom_start=timing.custom_start,
+                custom_end=timing.custom_end
+            )
+            shift_timing_infos.append(timing_info)
+        
+        shift_config_details = ShiftConfigDetails(
+            id=assignment.shift_config.id,
+            date=assignment.shift_config.date,
+            working_day=assignment.shift_config.working_day,
+            number_of_shifts=assignment.shift_config.number_of_shifts,
+            shift_timings=shift_timing_infos
+        )
+        
+        detailed_assignment = MachineOperatorShiftAssignmentResponse(
+            id=assignment.id,
+            machine_id=assignment.machine_id,
+            operator_id=assignment.operator_id,
+            shift_config=shift_config_details,
+            created_at=assignment.created_at,
+            updated_at=assignment.updated_at
+        )
+        detailed_assignments.append(detailed_assignment)
+    
+    return detailed_assignments
+
+
 @router.get("/machine/{machine_id}/assignments", response_model=List[MachineOperatorShiftAssignmentResponse])
-def get_machine_shift_assignments(
+def get_machine_assignments(
     machine_id: int,
     db: Session = Depends(get_db)
 ):
@@ -420,12 +486,13 @@ def get_machine_shift_assignments(
     if not machine:
         raise HTTPException(status_code=404, detail="Machine not found")
     
-    # Get all assignments for this machine with shift config and timings
+    # Get all assignments for this machine with related data
     assignments = db.query(MachineOperatorShiftAssignment).options(
-        joinedload(MachineOperatorShiftAssignment.shift_config).joinedload(ShiftHoursConfiguration.shift_timings)
+        joinedload(MachineOperatorShiftAssignment.shift_config).joinedload(ShiftHoursConfiguration.shift_timings),
+        joinedload(MachineOperatorShiftAssignment.operator)
     ).filter(
         MachineOperatorShiftAssignment.machine_id == machine_id
-    ).order_by(MachineOperatorShiftAssignment.created_at.desc()).all()
+    ).all()
     
     # Create detailed responses
     detailed_assignments = []

@@ -20,6 +20,7 @@ class OperatorLeave(Base):
     __tablename__ = "operator_leaves"
     __table_args__ = (
         CheckConstraint('from_date <= to_date', name='check_date_range'),
+        CheckConstraint("status IN ('pending', 'acknowledged', 'rejected')", name='check_status_values'),
         {'schema': 'accesscontrol'}
     )
 
@@ -27,8 +28,9 @@ class OperatorLeave(Base):
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     from_date = Column(Date, nullable=False)
     to_date = Column(Date, nullable=False)
-    reason = Column(String, nullable=False)
+    reason = Column(String, nullable=True)
     additional_remarks = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default='pending')
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     

@@ -8,6 +8,7 @@ from DB.schemas.access_control_pydantic import (
     OperatorLeaveCreate,
     OperatorLeaveUpdate,
     OperatorLeaveResponse,
+    OperatorLeaveStatusUpdate,
     AccessUserResponseForOperator
 )
 from DB.database import get_db
@@ -35,7 +36,7 @@ def create_leave(
     operator_id: int = Query(..., description="Operator ID"),
     from_date: date = Query(..., description="Leave start date"),
     to_date: date = Query(..., description="Leave end date"),
-    reason: str = Query(..., description="Reason for leave"),
+    reason: Optional[str] = Query(None, description="Reason for leave (optional)"),
     additional_remarks: Optional[str] = Query(None, description="Additional remarks (optional)"),
     db: Session = Depends(get_db)
 ):
@@ -84,7 +85,8 @@ def create_leave(
         from_date=from_date,
         to_date=to_date,
         reason=reason,
-        additional_remarks=additional_remarks
+        additional_remarks=additional_remarks,
+        status="pending"  # Default status for new leave requests
     )
     db.add(leave)
     db.commit()
@@ -158,7 +160,7 @@ def update_leave(
     leave_id: int,
     from_date: date = Query(..., description="Leave start date"),
     to_date: date = Query(..., description="Leave end date"),
-    reason: str = Query(..., description="Reason for leave"),
+    reason: Optional[str] = Query(None, description="Reason for leave (optional)"),
     additional_remarks: Optional[str] = Query(None, description="Additional remarks (optional)"),
     db: Session = Depends(get_db)
 ):
@@ -263,3 +265,66 @@ def check_operator_availability(
         "is_available": is_available,
         "conflicting_leaves": overlapping_leaves if not is_available else []
     }
+
+
+@router.put("/{leave_id}/approve", response_model=OperatorLeaveResponse)
+def approve_leave(
+    leave_id: int,
+    status_update: OperatorLeaveStatusUpdate,
+    db: Session = Depends(get_db)
+):
+    """Approve or reject a leave request (Manufacturing Coordinator only)"""
+    
+    # Validate status value
+    if status_update.status not in ['acknowledged', 'rejected']:
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be either 'acknowledged' or 'rejected'"
+        )
+    
+    # Get leave request
+    leave = db.query(OperatorLeave).filter(OperatorLeave.id == leave_id).first()
+    
+    if not leave:
+        raise HTTPException(status_code=404, detail="Leave request not found")
+    
+    # Update status
+    leave.status = status_update.status
+    leave.updated_at = datetime.utcnow()
+    
+    db.commit()
+    db.refresh(leave)
+    
+    return leave
+
+
+@router.get("/pending", response_model=List[OperatorLeaveResponse])
+def get_pending_leaves(db: Session = Depends(get_db)):
+    """Get all pending leave requests for Manufacturing Coordinator approval"""
+    
+    pending_leaves = db.query(OperatorLeave).filter(
+        OperatorLeave.status == 'pending'
+    ).order_by(OperatorLeave.from_date.asc()).all()
+    
+    return pending_leaves
+
+
+@router.get("/status/{status}", response_model=List[OperatorLeaveResponse])
+def get_leaves_by_status(
+    status: str,
+    db: Session = Depends(get_db)
+):
+    """Get leave requests by status (pending, acknowledged, rejected)"""
+    
+    # Validate status value
+    if status not in ['pending', 'acknowledged', 'rejected']:
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be one of: pending, acknowledged, rejected"
+        )
+    
+    leaves = db.query(OperatorLeave).filter(
+        OperatorLeave.status == status
+    ).order_by(OperatorLeave.from_date.desc()).all()
+    
+    return leaves
