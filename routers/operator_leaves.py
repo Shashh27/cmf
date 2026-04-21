@@ -8,6 +8,7 @@ from DB.schemas.access_control_pydantic import (
     OperatorLeaveCreate,
     OperatorLeaveUpdate,
     OperatorLeaveResponse,
+    OperatorLeaveResponseWithOperator,
     OperatorLeaveStatusUpdate,
     AccessUserResponseForOperator
 )
@@ -95,7 +96,7 @@ def create_leave(
     return leave
 
 
-@router.get("/", response_model=List[OperatorLeaveResponse])
+@router.get("/", response_model=List[OperatorLeaveResponseWithOperator])
 def get_all_leaves(
     operator_id: Optional[int] = None,
     from_date: Optional[date] = None,
@@ -104,7 +105,7 @@ def get_all_leaves(
 ):
     """Get all leave requests with optional filters"""
     
-    query = db.query(OperatorLeave)
+    query = db.query(OperatorLeave).join(AccessUserModel, OperatorLeave.operator_id == AccessUserModel.id)
     
     # Apply filters
     if operator_id:
@@ -117,7 +118,25 @@ def get_all_leaves(
         query = query.filter(OperatorLeave.from_date <= to_date)
     
     leaves = query.order_by(OperatorLeave.from_date.desc()).all()
-    return leaves
+    
+    # Create response with operator name
+    leave_responses = []
+    for leave in leaves:
+        leave_response = OperatorLeaveResponseWithOperator(
+            id=leave.id,
+            operator_id=leave.operator_id,
+            operator_name=leave.operator.user_name,
+            from_date=leave.from_date,
+            to_date=leave.to_date,
+            reason=leave.reason,
+            additional_remarks=leave.additional_remarks,
+            status=leave.status,
+            created_at=leave.created_at,
+            updated_at=leave.updated_at
+        )
+        leave_responses.append(leave_response)
+    
+    return leave_responses
 
 
 @router.get("/{leave_id}", response_model=OperatorLeaveResponse)

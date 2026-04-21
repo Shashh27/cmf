@@ -94,3 +94,21 @@ class OperatorLeaveResponse(OperatorLeaveBase):
         if remarks is None or remarks == '' or remarks == 'string':
             data.pop('additional_remarks', None)
         return data
+
+
+class OperatorLeaveResponseWithOperator(OperatorLeaveBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    operator_name: str
+    
+    class Config:
+        from_attributes = True
+
+    def dict(self, **kwargs):
+        data = super().dict(**kwargs)
+        # Remove additional_remarks if it's None, empty string, or placeholder values
+        remarks = data.get('additional_remarks')
+        if remarks is None or remarks == '' or remarks == 'string':
+            data['additional_remarks'] = None
+        return data
