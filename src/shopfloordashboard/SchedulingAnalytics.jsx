@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Card, Table, Tag, Space, Typography, Collapse, Empty, Alert, Row, Col, Statistic, DatePicker, Radio, Tooltip } from 'antd';
+import { Card, Table, Tag, Space, Typography, Collapse, Empty, Alert, Row, Col, Statistic, DatePicker, Radio, Tooltip, Spin } from 'antd';
 import {
   CalendarOutlined,
   ClockCircleOutlined,
@@ -17,8 +17,11 @@ const { Panel } = Collapse;
 
 const SchedulingAnalytics = ({ machines, viewMode }) => {
   // Filter states for heatmap
-  const [filterMode, setFilterMode] = useState('month'); // 'day', 'month', 'year'
+  const [filterMode, setFilterMode] = useState('month'); // 'day', 'month', 'year', 'custom'
   const [selectedDate, setSelectedDate] = useState(dayjs());
+  const [customStartDate, setCustomStartDate] = useState(dayjs().startOf('month'));
+  const [customEndDate, setCustomEndDate] = useState(dayjs().endOf('month'));
+  const [isLoading, setIsLoading] = useState(false);
 
   // Filter and process scheduled items
   const scheduledData = useMemo(() => {
@@ -124,6 +127,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
 
   // Transform data for calendar heatmap view with filtering
   const heatmapData = useMemo(() => {
+    setIsLoading(true);
     const data = [];
     const now = dayjs().startOf('day');
     let startDate, endDate, daysCount;
@@ -139,7 +143,21 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
     } else if (filterMode === 'year') {
       startDate = selectedDate.startOf('year');
       endDate = selectedDate.endOf('year');
-      daysCount = 365; // Simplified for year view - can be adjusted
+      const year = selectedDate.year();
+      const isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+      daysCount = isLeap ? 366 : 365;
+    } else if (filterMode === 'custom') {
+      startDate = customStartDate.startOf('day');
+      endDate = customEndDate.endOf('day');
+      // Limit custom range to 60 days for performance
+      const maxDays = 60;
+      const actualDays = endDate.diff(startDate, 'day') + 1;
+      if (actualDays > maxDays) {
+        endDate = startDate.add(maxDays - 1, 'day');
+        daysCount = maxDays;
+      } else {
+        daysCount = actualDays;
+      }
     }
 
     // Create data points for each machine and each day
@@ -213,8 +231,11 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
       }
     });
 
+    // Clear loading after a short delay to allow UI to render
+    setTimeout(() => setIsLoading(false), 100);
+
     return { data, daysCount, startDate };
-  }, [machines, filterMode, selectedDate]);
+  }, [machines, filterMode, selectedDate, customStartDate, customEndDate]);
 
 
   const formatDateTime = (dateTime) => {
@@ -425,19 +446,42 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
               >
                 <Radio.Button value="day">Day</Radio.Button>
                 <Radio.Button value="month">Month</Radio.Button>
+                <Radio.Button value="year">Year</Radio.Button>
+                <Radio.Button value="custom">Custom</Radio.Button>
               </Radio.Group>
-              <DatePicker
-                picker={filterMode}
-                value={selectedDate}
-                onChange={(date) => date && setSelectedDate(date)}
-                size="small"
-                style={{ width: 140 }}
-              />
+              {filterMode !== 'custom' ? (
+                <DatePicker
+                  picker={filterMode}
+                  value={selectedDate}
+                  onChange={(date) => date && setSelectedDate(date)}
+                  size="small"
+                  style={{ width: 140 }}
+                />
+              ) : (
+                <Space size="small">
+                  <DatePicker
+                    placeholder="Start Date"
+                    value={customStartDate}
+                    onChange={(date) => date && setCustomStartDate(date)}
+                    size="small"
+                    style={{ width: 120 }}
+                  />
+                  <Text style={{ fontSize: '12px' }}>to</Text>
+                  <DatePicker
+                    placeholder="End Date"
+                    value={customEndDate}
+                    onChange={(date) => date && setCustomEndDate(date)}
+                    size="small"
+                    style={{ width: 120 }}
+                  />
+                </Space>
+              )}
             </Space>
           }
           style={{ marginBottom: '12px', borderRadius: '8px' }}
         >
 
+          <Spin spinning={isLoading} tip="Loading calendar data...">
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead>
@@ -446,18 +490,24 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                   {Array.from({ length: heatmapData.daysCount }, (_, i) => {
                     const date = heatmapData.startDate.add(i, 'day');
                     const isToday = date.isSame(dayjs(), 'day');
+                    const isFirstDayOfMonth = date.date() === 1;
+                    const monthIndex = date.month();
+                    const solidColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c', '#a0d911', '#2f54eb', '#fadb14', '#ff4d4f'];
+                    const monthName = date.format('MMM');
+                    const isYearOrCustom = filterMode === 'year' || (filterMode === 'custom' && heatmapData.daysCount > 31);
                     return (
                       <th key={i} style={{
                         border: '1px solid #d9d9d9',
+                        borderLeft: isFirstDayOfMonth ? '2px solid #262626' : '1px solid #d9d9d9',
                         padding: '2px',
-                        background: isToday ? '#fff7e6' : '#fafafa',
+                        background: isYearOrCustom ? solidColors[monthIndex] : (isToday ? '#fff7e6' : '#fafafa'),
                         minWidth: filterMode === 'year' ? '24px' : (filterMode === 'month' ? '32px' : '50px'),
                         fontSize: filterMode === 'year' ? '7px' : (filterMode === 'month' ? '8px' : '9px')
                       }}>
-                        <div style={{ fontWeight: isToday ? 'bold' : 'normal', color: isToday ? '#fa8c16' : 'inherit' }}>
+                        <div style={{ fontWeight: 'bold', color: isYearOrCustom ? '#fff' : '#000' }}>
                           {date.format('DD')}
                         </div>
-                        {filterMode !== 'year' && <div style={{ fontSize: '7px', color: '#8c8c8c' }}>{date.format('ddd')}</div>}
+                        {!isYearOrCustom && filterMode !== 'custom' && <div style={{ fontSize: '7px', color: '#000', fontWeight: 'bold' }}>{date.format('ddd')}</div>}
                       </th>
                     );
                   })}
@@ -477,6 +527,8 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                         const scheduledOps = allDayData.filter(d => d.status === 'scheduled');
                         const dayData = scheduledOps[0]; // First one for display
                         const isToday = date.isSame(dayjs(), 'day');
+                        const isFirstDayOfMonth = date.date() === 1;
+                        const baseBorderLeft = isFirstDayOfMonth ? '2px solid #262626' : '1px solid #d9d9d9';
 
                         if (scheduledOps.length > 0) {
                           // Build tooltip with all operations
@@ -489,6 +541,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                               key={i}
                               style={{
                                 border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
+                                borderLeft: baseBorderLeft,
                                 padding: '1px',
                                 background: '#1890ff',
                                 cursor: 'pointer',
@@ -511,6 +564,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                               key={i}
                               style={{
                                 border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
+                                borderLeft: baseBorderLeft,
                                 padding: '1px',
                                 background: '#ff4d4f',
                                 cursor: 'pointer',
@@ -532,6 +586,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                               key={i}
                               style={{
                                 border: '2px solid #faad14',
+                                borderLeft: baseBorderLeft,
                                 padding: '1px',
                                 background: '#52c41a',
                                 cursor: 'pointer',
@@ -550,6 +605,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                               key={i}
                               style={{
                                 border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
+                                borderLeft: baseBorderLeft,
                                 padding: '1px',
                                 background: '#52c41a',
                                 cursor: 'pointer',
@@ -570,9 +626,20 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: '8px', fontSize: '11px', color: '#8c8c8c' }}>
-            <Text>NS = Not Scheduled (Past dates without schedule) | Hover for details | Yellow border = Today</Text>
-          </div>
+          </Spin>
+          {filterMode === 'year' && (
+            <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+              {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, idx) => {
+                const solidColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c', '#a0d911', '#2f54eb', '#fadb14', '#ff4d4f'];
+                return (
+                  <div key={month} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ width: 16, height: 16, background: solidColors[idx], borderRadius: '3px', border: '1px solid #d9d9d9' }}></div>
+                    <Text style={{ fontSize: '11px' }}>{month}</Text>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       )}
 
@@ -616,28 +683,32 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                       <ClockCircleOutlined style={{ marginRight: 4 }} />
                       Available Time Slots for New Scheduling:
                     </Text>
-                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <div style={{
+                      background: 'white',
+                      padding: '10px',
+                      borderRadius: '4px',
+                      border: '1px solid #ffd591',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '12px'
+                    }}>
                       {machineGaps.map((gap, index) => (
                         <div key={index} style={{
-                          background: 'white',
-                          padding: '8px',
+                          fontSize: 12,
+                          padding: '4px 8px',
+                          background: '#fff7e6',
                           borderRadius: '4px',
                           border: '1px solid #ffd591'
                         }}>
-                          <Space direction="vertical" size={2}>
-                            <Text style={{ fontSize: 12 }}>
-                              From: <Text strong>{formatDateTime(gap.start)}</Text>
-                            </Text>
-                            <Text style={{ fontSize: 12 }}>
-                              To: <Text strong>{formatDateTime(gap.end)}</Text>
-                            </Text>
-                            <Text style={{ fontSize: 12, color: '#d46b08' }}>
-                              Duration: {gap.durationHours} hours available
-                            </Text>
-                          </Space>
+                          <Text strong>{formatDateTime(gap.start)}</Text>
+                          <Text style={{ margin: '0 6px', color: '#8c8c8c' }}>→</Text>
+                          <Text strong>{formatDateTime(gap.end)}</Text>
+                          <Text style={{ marginLeft: '8px', color: '#d46b08' }}>
+                            ({gap.durationHours} hrs)
+                          </Text>
                         </div>
                       ))}
-                    </Space>
+                    </div>
                   </div>
                 )}
 
@@ -662,3 +733,4 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
 
 export { SchedulingAnalytics };
 export default SchedulingAnalytics;
+

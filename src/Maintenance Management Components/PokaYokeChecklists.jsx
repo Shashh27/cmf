@@ -1,10 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Card, Typography, Divider, Tooltip, Select, DatePicker, Row, Col } from 'antd';
-import { PlusOutlined, EyeOutlined, DeleteOutlined,EditOutlined,CheckCircleOutlined,ClockCircleOutlined, FilterOutlined, CalendarOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined, DeleteOutlined,EditOutlined,CheckCircleOutlined,ClockCircleOutlined, FilterOutlined, CalendarOutlined, ReloadOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
+
+/* ─── Design tokens (matching Machine Assignments) ────────────────────────── */
+const T = {
+  bg:         '#FDFBF7',
+  surface:    '#FFFFFF',
+  sidebar:    '#F5F5F5',
+  border:     '#D1D5DB',
+  borderMid:  '#E5E5E5',
+  primary:    '#4A6CF7',
+  primaryBg:  '#EEF2FF',
+  success:    '#22C55E',
+  successBg:  '#DCFCE7',
+  warning:    '#F59E0B',
+  warningBg:  '#FEF3C7',
+  weekend:    '#F9FAFB',
+  text:       '#111827',
+  textMid:    '#374151',
+  textSub:    '#6B7280',
+  textMuted:  '#9CA3AF',
+  radius:     '12px',
+  radiusSm:   '8px',
+  shadow:     '0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05)',
+};
 
 const PokaYokeChecklists = () => {
   const [checklists, setChecklists] = useState([]);
@@ -307,56 +330,55 @@ const PokaYokeChecklists = () => {
   );
 
   return (
-    <div>
-      <Row gutter={[16, 16]} style={{ marginBottom: '16px' }} justify="space-between" align="middle">
-        <Col xs={24} lg={12}>
-            <Title level={4} style={{ margin: 0 }}>Manage Checklists</Title>
-            <Text type="secondary" style={{ fontSize: '14px' }}>
-                Create and manage PokaYoke checklists for your machines
-            </Text>
-        </Col>
-        <Col xs={24} lg={12}>
-            <Row justify="end" gutter={[12, 12]} align="middle">
-                <Col>
-                  <Input.Search
-                    placeholder="Search by name..."
-                    allowClear
-                    onChange={(e) => setSearchText(e.target.value)}
-                    style={{ width: 250 }}
-                  />
-                </Col>
-                <Col>
-                    <Button
-                      type="primary"
-                      icon={<PlusOutlined />}
-                      onClick={() => {
-                        setInitialItems([
-                          {
-                            id: Date.now(),
-                            item_text: '',
-                            item_type: '',
-                            expected_value: '',
-                            is_required: false,
-                          },
-                        ]);
-                        setCreateModalVisible(true);
-                      }}
-                      style={{
-                        background: '#1890ff',
-                        borderColor: '#1890ff',
-                        borderRadius: '6px',
-                        height: '40px',
-                        fontWeight: '500'
-                      }}
-                    >
-                      Create New Checklist
-                    </Button>
-                </Col>
-            </Row>
-        </Col>
-    </Row>
+    <div style={{ padding: 0, fontFamily: "'DM Sans', 'Inter', system-ui, sans-serif", background: T.bg }}>
+      {/* ── Top bar ── */}
+      <div style={{
+        background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
+        padding: '10px 14px', marginBottom: 10, boxShadow: T.shadow,
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      }}>
+        <Text strong style={{ fontSize: 13, color: T.textMid, whiteSpace: 'nowrap' }}>Checklists:</Text>
+        <div style={{ flex: '1 1 280px', minWidth: 220 }}>
+          <Input.Search
+            placeholder="Search by name..."
+            allowClear
+            onChange={(e) => setSearchText(e.target.value)}
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={fetchChecklists}
+            loading={loading}
+            style={{ borderRadius: 8 }}
+          >Refresh</Button>
+          <Button
+            type="primary" icon={<PlusOutlined />}
+            onClick={() => {
+              setInitialItems([
+                {
+                  id: Date.now(),
+                  item_text: '',
+                  item_type: '',
+                  expected_value: '',
+                  is_required: false,
+                },
+              ]);
+              setCreateModalVisible(true);
+            }}
+            style={{ background: T.primary, borderColor: T.primary, borderRadius: 8, fontWeight: 600 }}
+          >New Checklist</Button>
+        </div>
+      </div>
 
-      <Table
+      {/* ── Main content card ── */}
+      <div style={{
+        background: T.surface, border: `1px solid ${T.border}`,
+        borderRadius: T.radius, boxShadow: T.shadow, overflow: 'hidden',
+        minHeight: 'calc(100vh - 320px)',
+      }}>
+        <Table
         columns={columns}
         dataSource={filteredChecklists}
         loading={loading}
@@ -372,18 +394,16 @@ const PokaYokeChecklists = () => {
           pageSizeOptions: ['10', '20', '50', '100'],
           onChange: (page, pageSize) => {
             setPagination({ current: page, pageSize: pageSize });
-            console.log('Page changed to:', page, 'Page size:', pageSize);
           },
           onShowSizeChange: (current, size) => {
             setPagination({ current: 1, pageSize: size });
-            console.log('Page size changed to:', size);
           },
         }}
         style={{
-          background: '#fff',
-          borderRadius: '8px',
+          background: T.surface,
         }}
       />
+      </div>
 
       {/* Create Checklist Modal */}
       <Modal
@@ -572,9 +592,10 @@ const PokaYokeChecklists = () => {
                 type="primary" 
                 htmlType="submit"
                 style={{
-                  background: '#1890ff',
-                  borderColor: '#1890ff',
-                  borderRadius: '6px'
+                  background: T.primary,
+                  borderColor: T.primary,
+                  borderRadius: '8px',
+                  fontWeight: 600
                 }}
               >
                 Create Checklist
@@ -602,9 +623,10 @@ const PokaYokeChecklists = () => {
               setAddItemModalVisible(true);
             }}
             style={{
-              background: '#1890ff',
-              borderColor: '#1890ff',
-              borderRadius: '6px'
+              background: T.primary,
+              borderColor: T.primary,
+              borderRadius: '8px',
+              fontWeight: 600
             }}
           >
             Add New Item
@@ -802,9 +824,10 @@ const PokaYokeChecklists = () => {
                 type="primary" 
                 htmlType="submit"
                 style={{
-                  background: '#1890ff',
-                  borderColor: '#1890ff',
-                  borderRadius: '6px'
+                  background: T.primary,
+                  borderColor: T.primary,
+                  borderRadius: '8px',
+                  fontWeight: 600
                 }}
               >
                 Add Item
@@ -873,9 +896,10 @@ const PokaYokeChecklists = () => {
                 type="primary" 
                 htmlType="submit"
                 style={{
-                  background: '#faad14',
-                  borderColor: '#faad14',
-                  borderRadius: '6px'
+                  background: '#F59E0B',
+                  borderColor: '#F59E0B',
+                  borderRadius: '8px',
+                  fontWeight: 600
                 }}
               >
                 Update Checklist
