@@ -632,7 +632,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                   />
                 </Tooltip>
               ))}
-              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details)}
+              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details, item.part_detail, item.raw_material_id)}
             </>
           ) : (
           buttons[type].map(({ icon: Icon, onClick, danger, title, color }, idx) => (
@@ -656,7 +656,12 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
-  const getRawMaterialStatusTag = (status, stockStatus, stockDetails) => {
+  const getRawMaterialStatusTag = (status, stockStatus, stockDetails, partDetail, rawMaterialId) => {
+    // If part is WITHOUT_RAW_MATERIAL, don't show raw material status
+    if (partDetail === 'WITHOUT_RAW_MATERIAL' || !rawMaterialId) {
+      return <Tag className="m-0 text-[10px] shrink-0" color="default">N/A</Tag>;
+    }
+    
     // Show stock status if available, otherwise fall back to material status
     const statusToShow = stockStatus || status || "N/A";
     const s = statusToShow.toString().toLowerCase();

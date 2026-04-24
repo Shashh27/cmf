@@ -249,7 +249,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
     try {
       // Create product if project name is provided and it's a new order
-      let productId = 5; // Default fallback
+      let productId = editingOrder ? editingOrder.product_id : null; // Use existing product_id when editing
       if (!editingOrder && values.project_name?.trim()) {
         try {
           const userId = getCurrentUserId();

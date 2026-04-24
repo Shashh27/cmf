@@ -1294,7 +1294,7 @@ const CreateProductModal = ({
                               <Form.Item
                                 name="raw_material_form_type"
                                 label={<span className="text-xs sm:text-sm">Form Type</span>}
-                                rules={[{ required: isRequiredRawMaterial, message: 'Select form type!' }]}
+                                rules={[{ required: isRequiredRawMaterial || isInHouse, message: 'Select form type!' }]}
                               >
                                 <Select 
                                   placeholder="Select form type" 
@@ -1345,7 +1345,7 @@ const CreateProductModal = ({
                               <Form.Item
                                 name="raw_material_stock_id"
                                 label={<span className="text-xs sm:text-sm">Dimensions</span>}
-                                rules={[{ required: isRequiredRawMaterial, message: 'Select dimensions!' }]}
+                                rules={[{ required: isRequiredRawMaterial || isInHouse, message: 'Select dimensions!' }]}
                               >
                                 <Select 
                                   placeholder="Select dimensions" 
