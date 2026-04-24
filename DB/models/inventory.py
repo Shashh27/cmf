@@ -104,12 +104,14 @@ class RawMaterialStock(Base):
     # Relationships
 
     material = relationship("RawMaterial", back_populates="stock_items")
-
+    
     source_order = relationship("Order")
 
     vendor = relationship("Vendors", foreign_keys=[received_vendor_id])
 
     creator = relationship("AccessUser", foreign_keys=[user_id])
+
+    units = relationship("RawMaterialUnit", back_populates="stock", cascade="all, delete-orphan")
 
     # usage_links = relationship("OrderPartsRawMaterialLinked", back_populates="stock_item", cascade="all, delete-orphan")
 
@@ -280,3 +282,103 @@ class ToolIssueDocument(Base):
 
     # Relationships
     tool_issue = relationship("ToolIssue", back_populates="documents")
+
+
+
+
+
+# =======================
+
+# 🔥 Raw Material Unit (CORE TABLE)
+
+# =======================
+
+class RawMaterialUnit(Base):
+
+    __tablename__ = "raw_material_units"
+
+    __table_args__ = {'schema': 'inventory'}
+
+
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=False)
+
+
+
+    # 🔥 PER UNIT TRACKING
+
+    total_length = Column(Float, nullable=False)
+
+    remaining_length = Column(Float, nullable=False)
+
+
+
+    # 🔥 PER UNIT CALCULATIONS (IMPORTANT)
+
+    volume = Column(Float, nullable=True)
+
+    mass = Column(Float, nullable=True)
+
+    weight = Column(Float, nullable=True)
+
+    cost = Column(Float, nullable=True)
+
+
+
+    status = Column(String, nullable=False, default="available")  # available / exhausted
+
+
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+
+    # RELATIONS
+
+    stock = relationship("RawMaterialStock", back_populates="units")
+
+    usages = relationship("RawMaterialUsage", back_populates="unit", cascade="all, delete-orphan")
+    
+    parts = relationship("Part", back_populates="material_unit")
+
+
+
+# =======================
+
+# 🔥 Raw Material Usage (TRACKING TABLE)
+
+# =======================
+
+class RawMaterialUsage(Base):
+
+    __tablename__ = "raw_material_usage"
+
+    __table_args__ = {'schema': 'inventory'}
+
+
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    raw_material_unit_id = Column(Integer, ForeignKey("inventory.raw_material_units.id"), nullable=False)
+
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+
+
+
+    used_length = Column(Float, nullable=False)
+
+
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+
+    # RELATIONS
+
+    unit = relationship("RawMaterialUnit", back_populates="usages")
+
+    part = relationship("Part", back_populates="material_usages")

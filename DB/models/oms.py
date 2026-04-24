@@ -91,29 +91,51 @@ class Part(Base):
 
     type_id = Column(Integer, ForeignKey("oms.part_types.id"))
     raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=True)
-    raw_material_stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=True)  # New field for specific stock
+
+    raw_material_unit_id = Column(Integer, ForeignKey("inventory.raw_material_units.id"), nullable=True)  # Unit-based tracking
+
+    required_length = Column(Float, nullable=True)
+
+    # raw_material_stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=True)  # New field for specific stock
     assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
     product_id = Column(Integer, ForeignKey("oms.products.id"))
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     qty = Column(Integer, nullable=True, default=1)
 
-    raw_material_required_quantity = Column(Float, nullable=True)  # Required quantity per part for order-linked materials
+    size = Column(String, nullable=True)  # Size specification for the part
+    vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Vendor for outsourced parts
 
-
-
-    type = relationship("PartType", back_populates="parts")
-    raw_material = relationship("RawMaterial")
-    raw_material_stock = relationship("RawMaterialStock")
-    assembly = relationship("Assembly", back_populates="parts")
-    product = relationship("Product", back_populates="parts")
+    # raw_material_required_quantity = Column(Float, nullable=True)  # Required quantity per part for order-linked materials
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
+
+    type = relationship("PartType", back_populates="parts")
+    raw_material = relationship("RawMaterial")
+    vendor = relationship("Vendors", foreign_keys=[vendor_id])
+    # raw_material_stock = relationship("RawMaterialStock")
+    assembly = relationship("Assembly", back_populates="parts")
+    product = relationship("Product", back_populates="parts")
+
+
+
+    user = relationship("AccessUser")
+
+    @property
+
+    def user_name(self):
+
+        return self.user.user_name if self.user else None
+
     operations = relationship("Operation", back_populates="part", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="part", cascade="all, delete-orphan")
     # tools = relationship("ToolWithPart", back_populates="part", cascade="all, delete-orphan")
+
+    # RELATIONS
+    material_usages = relationship("RawMaterialUsage", back_populates="part")
+    material_unit = relationship("RawMaterialUnit", back_populates="parts")
 
     # raw_material_links = relationship("OrderPartsRawMaterialLinked", back_populates="part", cascade="all, delete-orphan")
 
