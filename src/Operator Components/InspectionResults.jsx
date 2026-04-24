@@ -16,9 +16,11 @@ const InspectionResults = () => {
   ];
 
   return (
-    <Card title={<Title level={4}>Inspection Results</Title>}>
-      <Table columns={columns} dataSource={data} />
-    </Card>
+    <div style={{ padding: '16px' }}>
+      <Card title={<Title level={4}>Inspection Results</Title>}>
+        <Table columns={columns} dataSource={data} />
+      </Card>
+    </div>
   );
 };
 

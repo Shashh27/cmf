@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,} from 'antd';
 import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,} from '@ant-design/icons';
-import { API_BASE_URL } from "../Config/auth";
+import { API_BASE_URL } from "../../Config/auth";
 
 const { Title, Text } = Typography;
 const { Option } = Select;

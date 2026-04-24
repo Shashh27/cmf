@@ -383,6 +383,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
           String(record.part_name || '').toLowerCase().includes(value.toLowerCase())
         );
       },
+      sorter: (a, b) => (a.tool_name || '').localeCompare(b.tool_name || ''),
     },
     {
       title: 'Requested Qty',
@@ -419,7 +420,11 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
-      render: (text) => text ? new Date(text).toLocaleDateString() : '-',
+      render: (text) => {
+        if (!text) return '-';
+        const d = new Date(text);
+        return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+      },
     },
     {
       title: 'Status',
@@ -433,6 +438,12 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
         if (status === 'rejected') color = 'red';
         return <Tag color={color}>{status ? status.toUpperCase() : 'UNKNOWN'}</Tag>;
       },
+      filters: [
+        { text: 'Pending', value: 'pending' },
+        { text: 'Approved', value: 'approved' },
+        { text: 'Rejected', value: 'rejected' },
+      ],
+      onFilter: (value, record) => record.status?.toLowerCase() === value,
     },
     {
       title: 'Approved By',

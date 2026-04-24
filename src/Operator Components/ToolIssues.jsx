@@ -125,6 +125,12 @@ const ToolIssues = () => {
           {status ? status.toUpperCase() : '-'}
         </Tag>
       ),
+      filters: [
+        { text: 'Pending', value: 'pending' },
+        { text: 'Approved', value: 'approved' },
+        { text: 'Rejected', value: 'rejected' },
+      ],
+      onFilter: (value, record) => record.status?.toLowerCase() === value,
     },
     {
       title: 'Approved By',

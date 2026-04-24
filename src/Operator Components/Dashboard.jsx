@@ -29,28 +29,64 @@ const Dashboard = () => {
   const [checklistPending, setChecklistPending] = useState(false);
   const [isActivated, setIsActivated] = useState(false);
   const [completedQuantity, setCompletedQuantity] = useState(0);
-  const [reworkData, setReworkData] = useState(null);
+  const [productionStats, setProductionStats] = useState({
+    totalProduced: 0,
+    totalRework: 0,
+    hasRework: false,
+    reworkRemarks: ''
+  });
+  const [latestHelpReply, setLatestHelpReply] = useState(null);
 
-  // Fetch rework data for the selected job
+  // Fetch latest help reply
+  const fetchLatestReply = async (mId) => {
+    if (!mId) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/maintenance/help-support`);
+      if (res.ok) {
+        const data = await res.json();
+        const machineReplies = data
+          .filter(item => item.machine_id === mId && item.mc_reply)
+          .sort((a, b) => b.id - a.id);
+        
+        if (machineReplies.length > 0) {
+          setLatestHelpReply(machineReplies[0]);
+        } else {
+          setLatestHelpReply(null);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching help reply:', error);
+    }
+  };
+
+  // Fetch production stats for the selected job
   const fetchReworkData = async (operationId) => {
     if (!operationId) {
-      setReworkData(null);
+      setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
       return;
     }
     
     try {
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
       if (response.ok) {
-        const data = await response.json();
-        // Find the rework entry (status === 'rework')
-        const reworkEntry = data.find(log => log.status === 'rework');
-        setReworkData(reworkEntry || null);
+        const logs = await response.json();
+        const stats = logs.reduce((acc, log) => {
+          acc.totalProduced += (log.produced_quantity || 0);
+          acc.totalRework += (log.rework_quantity || 0);
+          if (log.status === 'rework') {
+            acc.hasRework = true;
+            acc.reworkRemarks = log.remarks || acc.reworkRemarks;
+          }
+          return acc;
+        }, { totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
+        
+        setProductionStats(stats);
       } else {
-        setReworkData(null);
+        setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
       }
     } catch (error) {
-      console.error('Error fetching rework data:', error);
-      setReworkData(null);
+      console.error('Error fetching production stats:', error);
+      setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
     }
   };
 
@@ -67,6 +103,7 @@ const Dashboard = () => {
         const id =
           m?.id ?? m?.machine_id ?? m?.machineId ?? m?.machine?.id ?? null;
         setMachineId(id);
+        fetchLatestReply(id);
       }
     } catch (e) {
       setMachineName('');
@@ -150,8 +187,12 @@ const Dashboard = () => {
 
   useEffect(() => {
     const id = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
+    // const replyInterval = setInterval(() => fetchLatestReply(machineId), 30000);
+    return () => {
+      clearInterval(id);
+      // clearInterval(replyInterval);
+    };
+  }, [machineId]);
 
   const handleSelectJobClick = () => {
     if (checklistPending) {
@@ -164,6 +205,11 @@ const Dashboard = () => {
 
   const handleProductionSubmit = (submittedQuantity) => {
     setCompletedQuantity(prev => prev + submittedQuantity);
+    // Re-fetch production stats to update the dashboard immediately
+    const operationId = selectedJob?.id || selectedJob?.operation_id || selectedJob?.job_id || selectedJob?.schedule_id;
+    if (operationId) {
+      fetchReworkData(operationId);
+    }
   };
 
   const hourOptions = Array.from({ length: 24 }, (_, i) => i);
@@ -206,7 +252,7 @@ const Dashboard = () => {
   ];
 
   return (
-    <div style={{ padding: '0px', background: 'transparent' }}>
+    <div style={{ padding: '16px', background: 'transparent', overflowX: 'hidden' }}>
       {/* Header */}
       <Card
         style={{
@@ -242,16 +288,10 @@ const Dashboard = () => {
               fontSize: 13,
             }}
           >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 9999,
-                background: '#ff4d4f',
-                display: 'inline-block',
-              }}
-            />
-            <Text>{currentTime.toLocaleString()}</Text>
+            <Text>
+              {currentTime.toLocaleDateString('en-GB').replace(/\//g, '-')}{", "}
+              {currentTime.toLocaleTimeString()}
+            </Text>
           </div>
           <Button 
             type="primary" 
@@ -264,7 +304,7 @@ const Dashboard = () => {
       </Card>
 
       {/* Top row */}
-      <Row gutter={[24, 24]} style={{ marginTop: '16px' }}>
+      <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
         <Col xs={24} lg={8}>
           <Card
             title={
@@ -274,7 +314,6 @@ const Dashboard = () => {
                   <span>Machine Status</span>
                 </Space>
                 <Space>
-                  {/* <span style={{ width: 8, height: 8, borderRadius: 9999, background: '#ff4d4f', display: 'inline-block' }} /> */}
                   <Button
                     type="link"
                     danger
@@ -317,7 +356,7 @@ const Dashboard = () => {
                   <img
                     src={machineImg}
                     alt="Machine"
-                    style={{ width: 200, height: 160, objectFit: 'contain' }}
+                    style={{ maxWidth: 200, height: 160, objectFit: 'contain' }}
                   />
                 </div>
               </div>
@@ -329,12 +368,12 @@ const Dashboard = () => {
               </div>
               <div style={{ flex: 1, background: '#EAF6FF', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
                 <Text style={{ color: '#64748b' }}>Part Count</Text>
-                <div style={{ marginTop: 6, fontWeight: 700, color: '#52C41A' }}>0</div>
+                <div style={{ marginTop: 6, fontWeight: 700, color: '#52C41A' }}>{productionStats.totalProduced || 0}</div>
               </div>
             </div>
             
             {/* Rework Information */}
-            {reworkData && (
+            {productionStats.hasRework && (
               <div style={{ 
                 marginTop: 16, 
                 background: '#FFF2E8', 
@@ -355,7 +394,7 @@ const Dashboard = () => {
                   }}>
                     <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rework Quantity</Text>
                     <div style={{ marginTop: 4, fontWeight: 700, color: '#FA8C16', fontSize: 16 }}>
-                      {reworkData.rework_quantity || 0}
+                      {productionStats.totalRework || 0}
                     </div>
                   </div>
                   <div style={{ 
@@ -371,8 +410,55 @@ const Dashboard = () => {
                       wordBreak: 'break-word',
                       maxWidth: '100%'
                     }}>
-                      {reworkData.remarks || 'No remarks'}
+                      {productionStats.reworkRemarks || 'No remarks'}
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MC Reply Information */}
+            {latestHelpReply && (
+              <div style={{ 
+                marginTop: 16, 
+                background: '#F6FFED', 
+                borderRadius: 12, 
+                padding: 12, 
+                border: '1px solid #B7EB8F',
+                minHeight: 'auto'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ 
+                    width: 24, 
+                    height: 24, 
+                    borderRadius: '50%', 
+                    background: '#52C41A', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center' 
+                  }}>
+                    <SettingOutlined style={{ color: 'white', fontSize: 14 }} />
+                  </div>
+                  <Text strong style={{ color: '#389E0D', fontSize: 14 }}>MC Response</Text>
+                  {latestHelpReply.replied_at && (
+                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                      {new Date(latestHelpReply.replied_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  )}
+                </div>
+                <div style={{ 
+                  background: 'white', 
+                  borderRadius: 8, 
+                  padding: '8px 12px', 
+                  border: '1px solid #D9F7BE'
+                }}>
+                  <Text style={{ color: '#237804', fontSize: 13, display: 'block', fontStyle: 'italic' }}>
+                    "{latestHelpReply.mc_reply}"
+                  </Text>
+                  <div style={{ marginTop: 4, textAlign: 'right' }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      — {latestHelpReply.replied_by_name || 'Manufacturing Coordinator'}
+                    </Text>
                   </div>
                 </div>
               </div>
@@ -458,7 +544,7 @@ const Dashboard = () => {
       </Row>
 
       {/* Bottom row */}
-      <Row gutter={[24, 24]} style={{ marginTop: 24, marginBottom: 8 }}>
+      <Row gutter={[16, 16]} style={{ marginTop: 24, marginBottom: 8 }}>
         {/* Documents / Operations */}
         <Col xs={24} lg={16}>
           <PartDocumentTab 
@@ -466,6 +552,7 @@ const Dashboard = () => {
             isActivated={isActivated}
             onActivate={() => setIsActivated(true)}
             completedQuantity={completedQuantity}
+            productionStats={productionStats}
           />
         </Col>
 

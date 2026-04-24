@@ -750,6 +750,9 @@ const AssetAvailability = () => {
           <TabPane tab="Shift Hours Configuration" key="shift-hours">
             <MaintenanceSection activeTab={activeTab} machineData={machineData} />
           </TabPane>
+          <TabPane tab="Leave Logs" key="leave-logs">
+            <MaintenanceSection activeTab={activeTab} machineData={machineData} />
+          </TabPane>
         </Tabs>
       </Card>
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Layout, Menu, Drawer, Button } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
-  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined
+  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 
@@ -178,6 +178,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/documents`} onClick={() => setMobileDrawerOpen(false)}>Documents</Link>,
         icon: <FileTextOutlined />,
       },
+      {
+        key: `${prefix}/leave-log`,
+        label: <Link to={`${prefix}/leave-log`} onClick={() => setMobileDrawerOpen(false)}>Leave Log</Link>,
+        icon: <CalendarOutlined />,
+      },
     ];
   } else if (prefix === '/project_coordinator') {
     items = [
@@ -210,19 +215,19 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <ExperimentOutlined />,
       },
       {
+        key: `${prefix}/configuration`,
+        label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
+        icon: <SettingOutlined />,
+      },
+      {
         key: 'pps',
         label: 'PPS',
         icon: <AppstoreOutlined />,
         children: [
-          { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link> },
           { key: `${prefix}/pps/assets-availability`, label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link> },
           { key: `${prefix}/pps/capacity-planning`, label: <Link to={`${prefix}/pps/capacity-planning`} onClick={() => setMobileDrawerOpen(false)}>Capacity Planning</Link> },
+          { key: `${prefix}/pps/machine-scheduling`, label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link> },
         ],
-      },
-      {
-        key: `${prefix}/configuration`,
-        label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
-        icon: <SettingOutlined />,
       },
       {
         key: 'production monitoring',

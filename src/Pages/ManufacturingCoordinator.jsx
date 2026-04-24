@@ -5,7 +5,7 @@ import MCOMS from "../ManufacturingCoordinator Components/OMS";
 import MCPDM from "../ManufacturingCoordinator Components/PDM";
 import MCPPS from "../ManufacturingCoordinator Components/PPS";
 import MCProductionMonitoring from "../ManufacturingCoordinator Components/ProductionMonitoring";
-import MCMaintenanceManagement from "../Pages/MaintenanceManagement";
+import MCMaintenanceManagement from "../ManufacturingCoordinator Components/MaintenanceManagement";
 import MCInventory from "../ManufacturingCoordinator Components/Inventory";
 import MCOverviewData from "../ManufacturingCoordinator Components/OverviewData";
 import MCRawMaterials from "../ManufacturingCoordinator Components/RawMaterials";

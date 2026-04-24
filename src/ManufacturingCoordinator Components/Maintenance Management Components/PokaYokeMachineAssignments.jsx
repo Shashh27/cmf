@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Select, message, Space, Popconfirm,Tag,Card,Typography,Input,Divider, DatePicker } from 'antd';
 import { PlusOutlined, DeleteOutlined,SettingOutlined,CheckCircleOutlined,ClockCircleOutlined,ReloadOutlined,LinkOutlined } from '@ant-design/icons';
-import { API_BASE_URL } from '../Config/auth';
+import { API_BASE_URL } from '../../Config/auth';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;

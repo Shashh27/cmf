@@ -13,7 +13,7 @@ import config from "../Config/config.js";
 import {
   Card, Row, Col, message, Spin, Button, Modal, Form, Radio, Space, Alert,
   Checkbox, Calendar, Tag, Table, Select, List, Upload, DatePicker,
-  Tooltip, Popconfirm
+  Tooltip, Popconfirm, Input
 } from "antd";
 import {
   CheckCircleOutlined, InfoCircleOutlined, ReloadOutlined,
@@ -87,9 +87,19 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   const [calendarDowntimes, setCalendarDowntimes] = useState([]);
   const [selectedDateDowntimes, setSelectedDateDowntimes] = useState([]);
 
+  // Leave Logs state
+  const [leaveLogs, setLeaveLogs] = useState([]);
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [leavePageSize, setLeavePageSize] = useState(10);
+  const [acknowledgingId, setAcknowledgingId] = useState(null);
+  const [statusFilter, setStatusFilter] = useState(null);
+  const [searchText, setSearchText] = useState('');
+  const [dateRange, setDateRange] = useState([]);
+
   useEffect(() => {
     if (activeTab === "downtime-logs") fetchDowntimeLogs();
     else if (activeTab === "shift-hours") { fetchShiftConfigs(); fetchCurrentBreakdowns(); }
+    else if (activeTab === "leave-logs") fetchLeaveLogs();
   }, [activeTab]);
 
   // ── Breakdown Logs ──────────────────────────────────────────────────────
@@ -164,6 +174,82 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   const getMachineOptions = () => [...new Set((machineData?.statuses || []).map(i => i.machine_make))].map(n => ({ label: n, value: n }));
   const getWcOptions = () => [...new Set((machineData?.statuses || []).map(i => i.work_center_name))].map(w => ({ label: w, value: w }));
 
+  // Leave Logs API functions
+  const fetchLeaveLogs = async () => {
+    try {
+      setLeaveLoading(true);
+      const res = await fetch('http://172.18.7.85:8989/api/v1/operator-leaves/');
+      if (res.ok) {
+        const data = await res.json();
+        setLeaveLogs(data || []);
+      } else {
+        message.error("Failed to fetch leave logs");
+      }
+    } catch (error) {
+      console.error("Error fetching leave logs:", error);
+      message.error("Error fetching leave logs");
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
+  const handleAcknowledgeLeave = async (leaveId) => {
+    try {
+      setAcknowledgingId(leaveId);
+      const res = await fetch(`http://172.18.7.85:8989/api/v1/operator-leaves/${leaveId}/approve`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: 'acknowledged' }),
+      });
+
+      if (res.ok) {
+        message.success('Leave acknowledged successfully');
+        // Refresh the leave logs
+        fetchLeaveLogs();
+      } else {
+        const errorData = await res.json();
+        message.error(errorData.detail || 'Failed to acknowledge leave');
+      }
+    } catch (error) {
+      console.error('Error acknowledging leave:', error);
+      message.error('Error acknowledging leave');
+    } finally {
+      setAcknowledgingId(null);
+    }
+  };
+
+  const handleSearch = (value) => {
+    setSearchText(value);
+  };
+
+  const handleDateRangeChange = (dates) => {
+    setDateRange(dates || []);
+  };
+
+  const getFilteredLeaveLogs = () => {
+    let filtered = leaveLogs;
+    
+    // Filter by operator name
+    if (searchText) {
+      filtered = filtered.filter(log => 
+        log.operator_name?.toLowerCase().includes(searchText.toLowerCase())
+      );
+    }
+    
+    // Filter by date range
+    if (dateRange && dateRange.length === 2) {
+      const [startDate, endDate] = dateRange;
+      filtered = filtered.filter(log => {
+        const logDate = dayjs(log.from_date);
+        return logDate.isAfter(startDate.startOf('day')) && logDate.isBefore(endDate.endOf('day'));
+      });
+    }
+    
+    return filtered;
+  };
+
   const downtimeColumns = [
     { title: "Machine Name", dataIndex: "machine_name", key: "machine_name", sorter: (a, b) => a.machine_name.localeCompare(b.machine_name) },
     {
@@ -187,6 +273,100 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
           <Tooltip title="Upload document"><Button type="primary" size="small" icon={<UploadOutlined />} onClick={() => handleOpenUploadModal(record)}>Upload</Button></Tooltip>
           <Tooltip title="Preview documents"><Button type="default" size="small" icon={<EyeOutlined />} onClick={() => handleOpenPreviewModal(record)}>Preview</Button></Tooltip>
         </Space>
+      ),
+    },
+  ];
+
+  const leaveLogsColumns = [
+    { 
+      title: "Operator Name", 
+      dataIndex: "operator_name", 
+      key: "operator_name",
+      sorter: (a, b) => a.operator_name?.localeCompare(b.operator_name || '')
+    },
+    { 
+      title: "From Date", 
+      dataIndex: "from_date", 
+      key: "from_date",
+      render: (date) => {
+        if (!date) return "N/A";
+        const d = new Date(date);
+        return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+      },
+      sorter: (a, b) => new Date(a.from_date) - new Date(b.from_date)
+    },
+    { 
+      title: "To Date", 
+      dataIndex: "to_date", 
+      key: "to_date",
+      render: (date) => {
+        if (!date) return "N/A";
+        const d = new Date(date);
+        return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+      },
+      sorter: (a, b) => new Date(a.to_date) - new Date(b.to_date)
+    },
+    { 
+      title: "Days", 
+      dataIndex: "days", 
+      key: "days",
+      render: (_, record) => {
+        if (!record.from_date || !record.to_date) return "N/A";
+        const fromDate = new Date(record.from_date);
+        const toDate = new Date(record.to_date);
+        const diffTime = Math.abs(toDate - fromDate);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // Include both days
+        return diffDays;
+      },
+      sorter: (a, b) => {
+        const getDays = (record) => {
+          if (!record.from_date || !record.to_date) return 0;
+          const fromDate = new Date(record.from_date);
+          const toDate = new Date(record.to_date);
+          const diffTime = Math.abs(toDate - fromDate);
+          return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+        };
+        return getDays(a) - getDays(b);
+      }
+    },
+    { 
+      title: "Reason", 
+      dataIndex: "reason", 
+      key: "reason",
+      render: (text) => text || '-',
+      ellipsis: true
+    },
+    { 
+      title: "Status", 
+      dataIndex: "status", 
+      key: "status",
+      render: (status) => {
+        let color = "default";
+        if (status?.toLowerCase() === "pending") color = "orange";
+        // else if (status?.toLowerCase() === "approved") color = "green";
+        else if (status?.toLowerCase() === "acknowledged") color = "blue";
+        // else if (status?.toLowerCase() === "rejected") color = "red";
+        return <Tag color={color}>{status || "Unknown"}</Tag>;
+      },
+      filters: [
+        { text: "Pending", value: "pending" },
+        { text: "Acknowledged", value: "acknowledged" },
+      ],
+      onFilter: (value, record) => record.status?.toLowerCase() === value,
+    },
+    {
+      title: "Action",
+      key: "action",
+      render: (_, record) => (
+        <Button
+          type="primary"
+          size="small"
+          onClick={() => handleAcknowledgeLeave(record.id)}
+          loading={acknowledgingId === record.id}
+          disabled={record.status?.toLowerCase() !== "pending"}
+        >
+          Acknowledge
+        </Button>
       ),
     },
   ];
@@ -519,7 +699,75 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
     );
   }
 
+  // Leave Logs Tab
+  if (activeTab === "leave-logs") {
+    return (
+      <div style={{ padding: "24px 0" }}>
+        <div style={{ marginBottom: "24px" }}>
+          <Row justify="space-between" align="middle">
+            <Col>
+              <h2 style={{ 
+                margin: 0, 
+                fontSize: "24px", 
+                fontWeight: "bold",
+                textTransform: "uppercase"
+              }}>
+                Operator Leave Logs
+              </h2>
+            </Col>
+            <Col>
+              <Space>
+                <Input.Search
+                  placeholder="Search by operator name"
+                  allowClear
+                  onSearch={handleSearch}
+                  onChange={(e) => !e.target.value && setSearchText('')}
+                  style={{ width: 200 }}
+                />
+                <DatePicker.RangePicker
+                  onChange={handleDateRangeChange}
+                  style={{ width: 250 }}
+                  placeholder={['From date', 'To date']}
+                  format="DD-MM-YYYY"
+                />
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={fetchLeaveLogs}
+                  loading={leaveLoading}
+                  size="small"
+                  title="Refresh Leave Logs"
+                />
+              </Space>
+            </Col>
+          </Row>
+        </div>
+        {leaveLoading ? (
+          <div style={{ textAlign: "center", padding: "50px" }}>
+            <Spin size="large" />
+            <p>Loading leave logs...</p>
+          </div>
+        ) : (
+          <Table
+            columns={leaveLogsColumns}
+            dataSource={getFilteredLeaveLogs()}
+            rowKey="id"
+            scroll={{ x: 800 }}
+            pagination={{
+              pageSize: leavePageSize,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              pageSizeOptions: ["10", "20", "50", "100"],
+              onShowSizeChange: (_, size) => setLeavePageSize(size),
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              simple: window.innerWidth < 768,
+            }}
+            className="custom-table"
+          />
+        )}
+      </div>
+    );
+  }
+
   return null;
 };
-
 export default MaintenanceSection;

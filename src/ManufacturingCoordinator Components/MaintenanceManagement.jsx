@@ -2,8 +2,8 @@ import React from 'react';
 import { Card, Typography } from 'antd';
 import { SettingOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
-import Maintenance from '../Maintenance Management Components/Maintenance';
-import PokaYoke from '../Maintenance Management Components/PokaYoke';
+import Maintenance from './Maintenance Management Components/Maintenance';
+import PokaYoke from './Maintenance Management Components/PokaYoke';
 
 const { Title } = Typography;
 
@@ -29,12 +29,12 @@ const MaintenanceManagement = () => {
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
-      {/* <div style={{ marginBottom: '24px' }}> */}
-        {/* <Title level={2} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '12px' }}> */}
-          {/* <SettingOutlined style={{ color: '#1890ff' }} /> */}
-          {/* {titleText} */}
-        {/* </Title> */}
-      {/* </div> */}
+      <div style={{ marginBottom: '24px' }}>
+        <Title level={2} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <SettingOutlined style={{ color: '#1890ff' }} />
+          {titleText}
+        </Title>
+      </div>
       
       <Card 
         bordered={false} 

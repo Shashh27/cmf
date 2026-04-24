@@ -98,6 +98,7 @@ const ToolReturn = () => {
           String(record.project_name || '').toLowerCase().includes(value.toLowerCase())
         );
       },
+      sorter: (a, b) => (a.tool_name || '').localeCompare(b.tool_name || ''),
     },
     {
       title: 'Quantity',
@@ -115,7 +116,9 @@ const ToolReturn = () => {
           text ||
           record.created_at ||
           record.updated_at;
-        return date ? new Date(date).toLocaleDateString() : '-';
+        if (!date) return '-';
+        const d = new Date(date);
+        return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
       },
     },
     {
@@ -128,7 +131,15 @@ const ToolReturn = () => {
         if (status === 'Collected' || status === 'collected') color = 'green';
         if (status === 'Not Collected' || status === 'not_collected') color = 'orange';
         return <Tag color={color}>{status ? status.toUpperCase().replace('_', ' ') : 'UNKNOWN'}</Tag>;
-      }
+      },
+      filters: [
+        { text: 'Pending', value: 'pending' },
+        { text: 'Approved', value: 'approved' },
+        { text: 'Rejected', value: 'rejected' },
+        { text: 'Collected', value: 'collected' },
+        { text: 'Not Collected', value: 'not_collected' },
+      ],
+      onFilter: (value, record) => record.status?.toLowerCase() === value,
     },
     {
       title: 'Collected By',

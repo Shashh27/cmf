@@ -187,7 +187,7 @@ const Login = () => {
     { value: 'admin', label: 'Admin' },
     { value: 'supervisor', label: 'Supervisor' },
     { value: 'coordinator', label: 'Project Coordinator' },
-    { value: 'inventory_supervisor', label: 'Inventory Supervisor' },
+    { value: 'inventory_supervisor', label: 'Supervisor-Tool Crib' },
     { value: 'manufacturing_coordinator', label: 'Manufacturing Coordinator' },
     { value: 'operator', label: 'Operator' },
   ];
@@ -314,13 +314,19 @@ const Login = () => {
                   {operatorStep === 0 ? (
                     <Form form={machineForm} layout="vertical" onFinish={onMachineSubmit} autoComplete="off">
                       <Form.Item name="machine" rules={[{ required: true, message: 'Select a machine' }]}>
-                        <Select placeholder="Select Machine" size="large">
-                          {machines.map(machine => (
-                            <Option key={machine.id} value={machine.id}>
-                              {`${machine.type} - ${machine.make} ${machine.model}`}
-                            </Option>
-                          ))}
-                        </Select>
+                        <Select placeholder="Select or search machine..." 
+                                size="large"
+                                showSearch
+                                filterOption={(input, option) =>
+                                  option.children.toLowerCase().includes(input.toLowerCase())
+                                }
+                        >
+                        {machines.map(machine => (
+                          <Option key={machine.id} value={machine.id}>
+                            {`${machine.type} - ${machine.make} ${machine.model}`}
+                          </Option>
+                        ))}
+                      </Select>
                       </Form.Item>
                       <Form.Item name="machine_password" rules={[{ required: true, message: 'Enter machine password' }]}>
                         <Input.Password 
@@ -447,7 +453,7 @@ const Login = () => {
             {/* Inventory Supervisor Login Form */}
             {activeRole === 'inventory_supervisor' && (
               <Form form={invSupervisorForm} layout="vertical" onFinish={(v) => onLogin(v, 'Inventory Supervisor')} autoComplete="off">
-                <Text strong style={{ display: 'block', marginBottom: '16px' }}>Inventory Supervisor Credentials</Text>
+                <Text strong style={{ display: 'block', marginBottom: '16px' }}>Supervisor-Tool Crib Credentials</Text>
                 <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
                   <Input 
                     prefix={<UserOutlined style={{ color: '#bfbfbf' }} />} 

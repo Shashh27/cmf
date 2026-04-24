@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Card, Typography, Divider, Tooltip, Select, DatePicker, Row, Col } from 'antd';
 import { PlusOutlined, EyeOutlined, DeleteOutlined,EditOutlined,CheckCircleOutlined,ClockCircleOutlined, FilterOutlined, CalendarOutlined } from '@ant-design/icons';
-import { API_BASE_URL } from '../Config/auth';
+import { API_BASE_URL } from '../../Config/auth';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;

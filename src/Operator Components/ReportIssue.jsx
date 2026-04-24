@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Tabs, Button, Select, Input, DatePicker, message, Space, Typography } from 'antd';
-import { WarningOutlined, ToolOutlined, LockOutlined } from '@ant-design/icons';
+import { WarningOutlined, ToolOutlined, LockOutlined, CustomerServiceOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
 const { TabPane } = Tabs;
 const { TextArea } = Input;
@@ -45,6 +45,12 @@ const ReportIssue = ({ open, onClose, machineId }) => {
   const [orderId, setOrderId] = useState(null);
   const [partId, setPartId] = useState(null);
   const [componentDesc, setComponentDesc] = useState('');
+  
+  // Help & Support state variables
+  const [helpOrderId, setHelpOrderId] = useState(null);
+  const [helpPartId, setHelpPartId] = useState(null);
+  const [helpDescription, setHelpDescription] = useState('');
+  const [helpParts, setHelpParts] = useState([]);
   const operatorId = useMemo(() => getUserId(), []);
   useEffect(() => {
     if (open) {
@@ -96,6 +102,48 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       })
       .catch(() => setParts([]));
   }, [orderId, orders]);
+  
+  // Help & Support parts fetch effect
+  useEffect(() => {
+    if (!helpOrderId) {
+      setHelpParts([]);
+      setHelpPartId(null);
+      return;
+    }
+    const orderObj = orders.find(o => o.id === helpOrderId);
+    const saleOrderNumber = orderObj?.sale_order_number || orderObj?.order_no || orderObj?.id;
+    if (!saleOrderNumber) {
+      setHelpParts([]);
+      return;
+    }
+    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, { headers: { accept: 'application/json' } })
+      .then(async (r) => {
+        if (r.ok) {
+          const data = await r.json();
+          const arr = Array.isArray(data) ? data : [];
+          const normalized = arr
+            .map((item) => {
+              const p = item?.part ?? item;
+              const id = p?.part_id ?? p?.id;
+              if (id == null) return null;
+              const part_number = p?.part_number ?? p?.part_no ?? null;
+              const part_name = p?.part_name ?? p?.name ?? null;
+              return { id, part_number, part_name };
+            })
+            .filter(Boolean);
+          const unique = Object.values(
+            normalized.reduce((acc, cur) => {
+              acc[cur.id] = acc[cur.id] || cur;
+              return acc;
+            }, {})
+          );
+          setHelpParts(unique);
+        } else {
+          setHelpParts([]);
+        }
+      })
+      .catch(() => setHelpParts([]));
+  }, [helpOrderId, orders]);
   const resetAll = () => {
     setActiveTab('oee');
     setOeeCategory('Availability');
@@ -109,6 +157,11 @@ const ReportIssue = ({ open, onClose, machineId }) => {
     setOrderId(null);
     setPartId(null);
     setComponentDesc('');
+    // Reset Help & Support state
+    setHelpOrderId(null);
+    setHelpPartId(null);
+    setHelpDescription('');
+    setHelpParts([]);
   };
   const handleClose = () => {
     resetAll();
@@ -209,6 +262,37 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       });
       if (!res.ok) throw new Error('Failed to submit component issue');
       message.success('Component issue submitted');
+      handleClose();
+    } catch (e) {
+      message.error(e.message);
+    }
+  };
+  
+  const submitHelpSupport = async () => {
+    if (!machineId || !operatorId) {
+      message.error('Machine or operator not found');
+      return;
+    }
+    if (!helpOrderId || !helpPartId || !helpDescription) {
+      message.error('Fill all required fields');
+      return;
+    }
+    const payload = {
+      machine_id: parseInt(machineId),
+      reported_by: parseInt(operatorId),
+      production_order_id: parseInt(helpOrderId),
+      part_id: parseInt(helpPartId),
+      description: helpDescription,
+      reported_at: formatLocalNaive(new Date()),
+    };
+    try {
+      const res = await fetch(`${API_BASE_URL}/maintenance/help-support`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('Failed to submit help support request');
+      message.success('Help support request submitted');
       handleClose();
     } catch (e) {
       message.error(e.message);
@@ -435,6 +519,58 @@ const ReportIssue = ({ open, onClose, machineId }) => {
               }}
             >
               Submit Component Issue
+            </Button>
+          </Space>
+        </TabPane>
+        <TabPane
+          key="help"
+          tab={
+            <span>
+              <CustomerServiceOutlined style={{ marginRight: 6 }} />
+              Help & Support
+            </span>
+          }
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <Text strong><span style={{ color: '#ef4444' }}>*</span> Production Order</Text>
+            <Select
+              value={helpOrderId}
+              onChange={(v) => { setHelpOrderId(v); setHelpPartId(null); }}
+              placeholder="Select production order"
+              style={{ width: '100%' }}
+              showSearch
+              optionFilterProp="label"
+              options={orders.map((o) => ({ label: o.sale_order_number ?? o.order_no ?? o.id, value: o.id }))}
+            />
+            <Text strong><span style={{ color: '#ef4444' }}>*</span> Part Name</Text>
+            <Select
+              value={helpPartId}
+              onChange={setHelpPartId}
+              placeholder="Select part"
+              style={{ width: '100%' }}
+              showSearch
+              optionFilterProp="label"
+              options={helpParts.map((p) => {
+                const pid = p?.part_id ?? p?.id;
+                const label = p.part_name || (pid ? `Part #${pid}` : 'Part');
+                return { label, value: pid };
+              })}
+            />
+            <Text strong><span style={{ color: '#ef4444' }}>*</span> Description</Text>
+            <TextArea rows={4} value={helpDescription} onChange={(e) => setHelpDescription(e.target.value)} />
+            <Button
+              type="primary"
+              block
+              onClick={submitHelpSupport}
+              style={{
+                background: '#ef4444',
+                borderColor: '#ef4444',
+                borderRadius: 9999,
+                height: 44,
+                fontWeight: 600,
+              }}
+            >
+              Submit Help & Support
             </Button>
           </Space>
         </TabPane>

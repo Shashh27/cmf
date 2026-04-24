@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select } from 'antd';
-import { FileTextOutlined, DownloadOutlined, EyeOutlined } from '@ant-design/icons';
+import { FileTextOutlined, EyeOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
@@ -14,7 +14,7 @@ const { Option } = Select;
 
 
 
-const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuantity = 0 }) => {
+const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuantity = 0, productionStats: propStats }) => {
   const [loading, setLoading] = useState(false);
   const [partData, setPartData] = useState(null);
   const [selectedOperation, setSelectedOperation] = useState(null);
@@ -40,12 +40,21 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const [requestForm] = Form.useForm();
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
-  const [reworkData, setReworkData] = useState(null);
+  const [productionStats, setProductionStats] = useState({
+    totalProduced: 0,
+    totalRework: 0,
+    hasRework: false,
+    reworkRemarks: ''
+  });
 
-  // ── Reset justActivated whenever the selected job changes ───────────────────
+  // Use props stats if provided, otherwise use internal state
+  const effectiveStats = propStats || productionStats;
+
+  // ── Reset justActivated and production stats whenever the selected job changes ──
 
   useEffect(() => {
     setJustActivated(false);
+    setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
   }, [selectedJob?.schedule_id]);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -120,26 +129,34 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     fetchOrderAndData();
   }, [selectedJob]);
 
-  // Fetch rework data for selected job
+  // Fetch production stats for selected job
   const fetchReworkData = async (operationId) => {
     if (!operationId) {
-      setReworkData(null);
+      setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
       return;
     }
     
     try {
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
       if (response.ok) {
-        const data = await response.json();
-        // Find rework entry (status === 'rework')
-        const reworkEntry = data.find(log => log.status === 'rework');
-        setReworkData(reworkEntry || null);
+        const logs = await response.json();
+        const stats = logs.reduce((acc, log) => {
+          acc.totalProduced += (log.produced_quantity || 0);
+          acc.totalRework += (log.rework_quantity || 0);
+          if (log.status === 'rework') {
+            acc.hasRework = true;
+            acc.reworkRemarks = log.remarks || acc.reworkRemarks;
+          }
+          return acc;
+        }, { totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
+        
+        setProductionStats(stats);
       } else {
-        setReworkData(null);
+        setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
       }
     } catch (error) {
-      console.error('Error fetching rework data:', error);
-      setReworkData(null);
+      console.error('Error fetching production stats:', error);
+      setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
     }
   };
 
@@ -266,8 +283,11 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       title: 'Part Qty', key: 'part_qty',
       render: (record) => {
         const totalQty = selectedJob?.total_quantity || record.total_quantity || record.total_qty || record.quantity || selectedJob?.quantity || 0;
-        const reworkQty = reworkData?.rework_quantity || 0;
-        const completedQty = Math.max(0, completedQuantity - reworkQty);
+        const totalProduced = effectiveStats.totalProduced || 0;
+        const totalRework = effectiveStats.totalRework || 0;
+        
+        // Effective completed is what has been produced minus what needs to be redone (rework)
+        const completedQty = Math.max(0, totalProduced - totalRework);
         const remainingQty = Math.max(0, totalQty - completedQty);
         
         return (
@@ -453,26 +473,6 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   };
 
 
-  const handleDownload = async (doc) => {
-    if (!doc.document_url) return;
-    try {
-      const response = await fetch(doc.document_url);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = doc.document_name || doc.name || 'document.pdf';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      window.open(doc.document_url, '_blank');
-    }
-  };
-
-
-
   const handlePreview = (doc) => {
     setIsPreviewVisible(false);
     setPreviewDoc(null);
@@ -498,7 +498,6 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           <Space>
             <Tag color="blue">{doc.document_type || doc.tag || doc.type}</Tag>
             <Button icon={<EyeOutlined />} size="small" type="text" onClick={() => handlePreview(doc)} />
-            <Button icon={<DownloadOutlined />} size="small" type="text" onClick={() => handleDownload(doc)} />
           </Space>
         </div>
       </Card>
@@ -561,238 +560,121 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           </TabPane>
 
           <TabPane tab="Part Documents" key="part_documents">
-
             <Tabs activeKey={activeDocTab} onChange={setActiveDocTab} size="small">
-
               {docTabs.map(t => <TabPane tab={t.label} key={t.key} />)}
-
               <TabPane tab="Raw Materials" key="raw_materials" />
-
             </Tabs>
-
             <div style={{ marginTop: 16 }}>
-
               {activeDocTab === 'raw_materials' && (
-
                 <Table dataSource={rawMaterials} columns={rawMaterialColumns}
-
                   rowKey={(record) => record.raw_material_name}
-
                   size="small" pagination={false}
-
                 />
-
               )}
-
               {docTabs.some(t => t.key === activeDocTab) && renderDocuments(partDocuments, activeDocTab)}
-
             </div>
-
           </TabPane>
-
         </Tabs>
-
       </Spin>
-
 
 
       {/* Request Inventory Modal */}
 
       <Modal
-
         title="Request Inventory"
-
         open={isRequestModalVisible}
-
         onCancel={() => { setIsRequestModalVisible(false); requestForm.resetFields(); }}
-
         footer={null}
-
         maskClosable={false}
-
       >
-
         <Form form={requestForm} layout="vertical" onFinish={handleRequestSubmit}>
-
           <Form.Item name="project_id" label="Project" rules={[{ required: true, message: 'Please select a project' }]}>
-
             <Select disabled placeholder="Select a project"
-
               onChange={(value) => {
-
                 const selectedOrder = orders.find(o => o.id === value);
-
                 if (selectedOrder) fetchParts(selectedOrder.sale_order_number);
-
                 requestForm.setFieldsValue({ part_id: undefined });
-
               }}
-
             >
-
               {orders.map(o => <Option key={o.id} value={o.id}>{o.sale_order_number || `Order ${o.id}`}</Option>)}
-
             </Select>
-
           </Form.Item>
-
-
 
           <Form.Item name="part_id" label="Part" rules={[{ required: true, message: 'Please select a part' }]}>
-
             <Select disabled placeholder="Select a part">
-
               {parts.map(p => <Option key={p.id} value={p.id}>{p.part_name || p.part_number}</Option>)}
-
             </Select>
-
           </Form.Item>
-
-
 
           <Form.Item name="quantity" label="Quantity"
-
             rules={[
-
               { required: true, message: 'Please enter quantity' },
-
               {
-
                 validator(_, value) {
-
                   const available = selectedToolForRequest?.quantity ?? 0;
-
                   if (value && value > available) return Promise.reject(new Error(`Available quantity: ${available}.`));
-
                   return Promise.resolve();
-
                 },
-
               },
-
             ]}
-
             extra={<span style={{ fontSize: 12, color: '#8c8c8c' }}>Available: {selectedToolForRequest?.quantity ?? 0}</span>}
-
           >
-
             <InputNumber min={1} style={{ width: '100%' }} precision={0}
-
               parser={value => value.replace(/[^\d]/g, '')}
-
               formatter={value => value ? String(value).replace(/[^\d]/g, '') : ''}
-
               onKeyDown={e => {
-
                 if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) e.preventDefault();
-
               }}
-
             />
-
           </Form.Item>
-
-
-
           <Form.Item name="purpose_of_use" label="Purpose of Use">
-
             <TextArea rows={4} />
-
           </Form.Item>
-
-
 
           <Form.Item>
-
             <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-
               <Button onClick={() => { setIsRequestModalVisible(false); requestForm.resetFields(); }}>Cancel</Button>
-
               <Button type="primary" htmlType="submit" loading={requestLoading}>Submit Request</Button>
-
             </Space>
-
           </Form.Item>
-
         </Form>
-
       </Modal>
-
-
 
       {/* Preview Modal */}
-
       <Modal
-
         title={previewDoc?.document_name || previewDoc?.name || "Document Preview"}
-
         open={isPreviewVisible}
-
         onCancel={() => { setIsPreviewVisible(false); setPreviewDoc(null); }}
-
         destroyOnClose={true}  
-
         footer={[
-
-          <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => handleDownload(previewDoc)}>Download</Button>,
-
           <Button key="close" onClick={() => setIsPreviewVisible(false)}>Close</Button>
-
         ]}
-
         width="80%"
-
         style={{ top: 20 }}
-
         bodyStyle={{ height: '70vh', padding: 0 }}
-
       >
-
         {previewDoc && (previewDoc.document_type === '3D' || previewDoc.type === '3D' || previewDoc.tag === '3D') ? (
-
             <div style={{ width: '100%', height: '100%' }}>
-
               <ModelViewer3D
-
                 key={previewDoc.id || previewDoc.document_id}
-
                 documentId={previewDoc.id || previewDoc.document_id}
-
                 height="70vh"
-
                 showControls={true}
-
                 showEdgeButton={true}
-
               />
-
             </div>
-
           ) : previewDoc?.document_url && (
-
               previewDoc.format?.toLowerCase() === 'pdf' ||
-
               previewDoc.document_type?.toLowerCase() === 'pdf' ||
-
               previewDoc.type?.toLowerCase() === 'pdf' ||
-
               previewDoc.document_url?.toLowerCase().endsWith('.pdf')
-
             ) ? (
-
             <iframe src={`${previewDoc.document_url}#toolbar=0`} title="PDF Preview" width="100%" height="100%" style={{ border: 'none' }} />
-
           ) : (
-
             <Empty description="No preview available for this file type. Please download to view." />
-
          )}
-
       </Modal>
-
     </Card>
-
   );
-
 };
 export default PartDocumentTab;

@@ -3,7 +3,7 @@ import { Tabs, message } from 'antd';
 import PokaYokeChecklists from './PokaYokeChecklists';
 import PokaYokeCompletedLogs from './PokaYokeCompletedLogs';
 import PokaYokeMachineAssignments from './PokaYokeMachineAssignments';
-import config from '../Config/config';
+import config from '../../Config/config';
 
 const PokaYoke = () => {
   const [activeTab, setActiveTab] = useState('checklists');
