@@ -77,7 +77,19 @@ def get_content_type_from_detection(file_content: bytes, filename: str = None) -
         '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         '.xls': 'application/vnd.ms-excel',
         '.csv': 'text/csv',
-        '.txt': 'text/plain'
+        '.txt': 'text/plain',
+        '.cnc': 'text/plain',
+        '.gcode': 'text/plain',
+        '.nc': 'text/plain',
+        '.m': 'text/plain',
+        '.tap': 'text/plain',
+        '.mpf': 'text/plain',
+        '.iso': 'text/plain',
+        '.fan': 'text/plain',
+        '.h': 'text/plain',
+        '.step': 'application/step',
+        '.stp': 'application/step',
+        '.stl': 'application/sla'
     }
     return content_types.get(ext, 'application/octet-stream')
 

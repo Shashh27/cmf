@@ -204,7 +204,7 @@ class Part(Base):
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
-    size = Column(String, nullable=True)  # Optional size field (e.g., "25x25x160", "Ø210x110", "Tyre Coupling F160 Type:B")
+
 
     qty = Column(Integer, nullable=True, default=1)  # Optional quantity field, defaults to 1
     

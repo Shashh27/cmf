@@ -25,7 +25,8 @@ from .inventory import (
 from .maintenance import (
     OEEIssue,
     MachineBreakdown,
-    ComponentIssue
+    ComponentIssue,
+    HelpSupport
 )
 from .documents import (
     GeneralFolder,
@@ -60,6 +61,7 @@ __all__ = [
     "OEEIssue",
     "MachineBreakdown",
     "ComponentIssue",
+    "HelpSupport",
     "GeneralFolder",
     "GeneralDocument",
     "MachineFolder",

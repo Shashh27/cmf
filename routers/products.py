@@ -23,7 +23,7 @@ from DB.models.configuration import (
     Machine as MachineModel,
     PokayokeCompletedLog,
 )
-from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock, InventoryRequest, InventoryReturnRequest
+from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock, InventoryRequest, InventoryReturnRequest, Vendors as VendorModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.oms import (
     Product,
@@ -452,8 +452,8 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     all_assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).order_by(AssemblyModel.id.asc()).all()
     assembly_ids = [asm.id for asm in all_assemblies]
 
-    # Get all parts for this product
-    all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
+    # Get all parts for this product with vendor information
+    all_parts = db.query(PartModel).options(joinedload(PartModel.vendor)).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
 
     # Get all work centers for mapping
     all_work_centers = db.query(WorkCenterModel).all()
@@ -602,12 +602,13 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
             'user_id': part.user_id,
-            'size': part.size,  # New optional size field
             'qty': part.qty,    # New optional quantity field
+            'vendor_id': part.vendor_id,
             'type_name': part_type_map.get(part.type_id),
             'raw_material_name': raw_material_map.get(part.raw_material_id),
             'raw_material_status': raw_material_status,
             'user_name': user_map.get(part.user_id) if part.user_id else None,
+            'vendor_name': getattr(part.vendor, 'company_name', None) if part.vendor else None,
             'created_at': part.created_at,
             'updated_at': part.updated_at,
         }
