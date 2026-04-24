@@ -12,8 +12,9 @@ from DB.models.oms import (
     Part,
     OrderPartPriority,
     PartType,
+    Operation,
 )
-from DB.models.configuration import Customer, PokayokeCompletedLog
+from DB.models.configuration import Customer, PokayokeCompletedLog, Machine, WorkCenter
 from DB.models.inventory import InventoryRequest, InventoryReturnRequest, RawMaterialStock
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import (
@@ -36,14 +37,366 @@ from DB.models.notifications import OrderNotification as OrderNotificationModel
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
+@router.get("/shop-floor/hierarchical")
+def get_shop_floor_hierarchical_data(
+    admin_id: int | None = None,
+    manufacturing_coordinator_id: int | None = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get shop floor hierarchical data with machines, orders, parts, and operations.
+    Returns:
+    - All machines with their status
+    - Orders assigned to each machine (through operations)
+    - Parts with their status from scheduling schema
+    - Operations with their status from scheduling schema
+    """
+    try:
+        # Rollback any existing failed transaction to clear the state
+        db.rollback()
+        
+        # Get all machines
+        machines = db.query(Machine).options(
+            joinedload(Machine.work_center)
+        ).all()
+        
+        # Filter orders based on admin_id or manufacturing_coordinator_id
+        order_query = db.query(Order).options(
+            joinedload(Order.product),
+            joinedload(Order.customer)
+        )
+        if admin_id is not None:
+            order_query = order_query.filter(Order.admin_id == admin_id)
+        if manufacturing_coordinator_id is not None:
+            order_query = order_query.filter(Order.manufacturing_coordinator_id == manufacturing_coordinator_id)
+        
+        orders = order_query.all()
+        
+        # Get all operations for all machines (simplified approach)
+        all_operations = db.query(Operation).all()
+        
+        # Build machine-operation mapping
+        machine_operations = {}
+        for op in all_operations:
+            if op.machine_id and op.machine_id not in machine_operations:
+                machine_operations[op.machine_id] = []
+            if op.machine_id:
+                machine_operations[op.machine_id].append(op)
+        
+        # Get all parts for the orders
+        part_ids = []
+        if orders:
+            product_ids = [o.product_id for o in orders]
+            parts = db.query(Part).filter(Part.product_id.in_(product_ids)).all()
+            part_ids = [p.id for p in parts]
+        
+        # Fetch part status from scheduling schema (direct SQL)
+        part_status_map = {}
+        if part_ids:
+            try:
+                # Use string formatting for IN clause instead of parameter binding
+                placeholders = ','.join([str(pid) for pid in part_ids])
+                result = db.execute(
+                    text(f"""
+                        SELECT part_id, status, start_date, sale_order_id
+                        FROM scheduling.part_schedule_status
+                        WHERE part_id IN ({placeholders})
+                    """)
+                )
+                for row in result:
+                    part_status_map[row[0]] = {
+                        "status": row[1] if row[1] else "Not Started",
+                        "start_date": row[2],
+                        "sale_order_id": row[3]
+                    }
+                db.commit()  # Commit successful query
+            except Exception as e:
+                print(f"Error fetching part schedule status: {e}")
+                db.rollback()  # Rollback to clear failed transaction
+                # Initialize with default values if table doesn't exist or query fails
+                for pid in part_ids:
+                    part_status_map[pid] = {
+                        "status": "Not Started",
+                        "start_date": None,
+                        "sale_order_id": None
+                    }
+        
+        # Fetch operation status from scheduling schema (direct SQL)
+        operation_status_map = {}
+        operation_ids = [op.id for op in all_operations]
+        if operation_ids:
+            try:
+                placeholders = ','.join([str(oid) for oid in operation_ids])
+                result = db.execute(
+                    text(f"""
+                        SELECT operation_id, status, started_at, completed_at, operator_id
+                        FROM scheduling.operation_status
+                        WHERE operation_id IN ({placeholders})
+                    """)
+                )
+                for row in result:
+                    operation_status_map[row[0]] = {
+                        "status": row[1] if row[1] else "Pending",
+                        "started_at": row[2],
+                        "completed_at": row[3],
+                        "operator_id": row[4]
+                    }
+                db.commit()  # Commit successful query
+            except Exception as e:
+                print(f"Error fetching operation status: {e}")
+                db.rollback()  # Rollback to clear failed transaction
+                # Initialize with default values if table doesn't exist or query fails
+                for oid in operation_ids:
+                    operation_status_map[oid] = {
+                        "status": "Pending",
+                        "started_at": None,
+                        "completed_at": None,
+                        "operator_id": None
+                    }
+        
+        # Fetch machine status from scheduling schema (direct SQL)
+        machine_status_map = {}
+        machine_ids_db = [m.id for m in machines]
+        if machine_ids_db:
+            try:
+                placeholders = ','.join([str(mid) for mid in machine_ids_db])
+                result = db.execute(
+                    text(f"""
+                        SELECT machine_id, status_id, description, available_from, available_to
+                        FROM scheduling.machine_status
+                        WHERE machine_id IN ({placeholders})
+                    """)
+                )
+                for row in result:
+                    machine_status_map[row[0]] = {
+                        "status_id": row[1],
+                        "description": row[2],
+                        "available_from": row[3],
+                        "available_to": row[4]
+                    }
+                db.commit()  # Commit successful query
+            except Exception as e:
+                print(f"Error fetching machine status: {e}")
+                db.rollback()  # Rollback to clear failed transaction
+                # Initialize with default values if table doesn't exist or query fails
+                for mid in machine_ids_db:
+                    machine_status_map[mid] = {
+                        "status_id": None,
+                        "description": None,
+                        "available_from": None,
+                        "available_to": None
+                    }
+
+        # Fetch planned schedule items from scheduling schema (direct SQL)
+        planned_schedule_map = {}
+        if operation_ids:
+            try:
+                # First, get the actual column names from the table
+                columns_result = db.execute(
+                    text("""
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'scheduling'
+                        AND table_name = 'planned_schedule_items'
+                        ORDER BY ordinal_position
+                    """)
+                )
+                columns = [row[0] for row in columns_result]
+
+                # Build SELECT clause with only existing columns
+                select_columns = []
+                column_map = {}
+                for col in ['id', 'operation_id', 'planned_start_time', 'planned_end_time',
+                           'sale_order_id', 'part_number', 'operation_name', 'operation_number',
+                           'machine_id', 'total_quantity']:
+                    if col in columns:
+                        select_columns.append(col)
+                        column_map[col] = len(select_columns) - 1
+
+                if select_columns:
+                    placeholders = ','.join([str(oid) for oid in operation_ids])
+                    query = f"""
+                        SELECT {', '.join(select_columns)}
+                        FROM scheduling.planned_schedule_items
+                        WHERE operation_id IN ({placeholders})
+                    """
+                    result = db.execute(text(query))
+                    rows = list(result)
+
+                    for row in rows:
+                        row_dict = {}
+                        for col in select_columns:
+                            row_dict[col] = row[column_map[col]]
+                        # Use operation_id as key
+                        op_id = row_dict.get('operation_id')
+                        if op_id:
+                            planned_schedule_map[op_id] = row_dict
+
+                    db.commit()  # Commit successful query
+
+            except Exception as e:
+                db.rollback()  # Rollback to clear failed transaction
+                # Initialize with empty map if table doesn't exist or query fails
+        
+        # Build hierarchical response
+        shop_floor_data = []
+        
+        # Create order map for quick lookup
+        order_map = {o.id: o for o in orders}
+        
+        # Create part map for quick lookup
+        parts_for_orders = []
+        if orders:
+            product_ids = [o.product_id for o in orders]
+            parts_for_orders = db.query(Part).filter(Part.product_id.in_(product_ids)).all()
+        part_map = {p.id: p for p in parts_for_orders}
+        
+        for machine in machines:
+            machine_ops = machine_operations.get(machine.id, [])
+            
+            # Get unique orders for this machine
+            machine_order_ids = set()
+            machine_parts = []
+            
+            for op in machine_ops:
+                if op.part_id and op.part_id in part_map:
+                    part = part_map[op.part_id]
+                    
+                    # Find which order this part belongs to
+                    order_for_part = None
+                    for order in orders:
+                        if order.product_id == part.product_id:
+                            order_for_part = order
+                            break
+                    
+                    if order_for_part:
+                        machine_order_ids.add(order_for_part.id)
+                        
+                        # Get part status
+                        part_status = part_status_map.get(part.id, {
+                            "status": "Not Started",
+                            "start_date": None,
+                            "sale_order_id": None
+                        })
+                        
+                        # Get operation status
+                        op_status = operation_status_map.get(op.id, {
+                            "status": "Pending",
+                            "started_at": None,
+                            "completed_at": None,
+                            "operator_id": None
+                        })
+
+                        # Get planned schedule data
+                        planned_schedule = planned_schedule_map.get(op.id, {})
+
+                        machine_parts.append({
+                            "part_id": part.id,
+                            "part_name": part.part_name,
+                            "part_number": part.part_number,
+                            "part_status": part_status,
+                            "operation_id": op.id,
+                            "operation_name": op.operation_name,
+                            "operation_number": op.operation_number,
+                            "operation_status": op_status,
+                            "order_id": order_for_part.id,
+                            "sale_order_number": order_for_part.sale_order_number,
+                            "planned_schedule": planned_schedule
+                        })
+            
+            # Get order details
+            machine_orders = []
+            for order_id in machine_order_ids:
+                if order_id in order_map:
+                    order = order_map[order_id]
+                    machine_orders.append({
+                        "order_id": order.id,
+                        "sale_order_number": order.sale_order_number,
+                        "quantity": order.quantity,
+                        "status": order.status,
+                        "due_date": order.due_date,
+                        "product_name": order.product.product_name if order.product else None
+                    })
+            
+            # Get machine status
+            machine_status = machine_status_map.get(machine.id, {
+                "status_id": None,
+                "description": None,
+                "available_from": None,
+                "available_to": None
+            })
+            
+            shop_floor_data.append({
+                "machine_id": machine.id,
+                "machine_type": machine.type,
+                "machine_make": machine.make,
+                "machine_model": machine.model,
+                "work_center": machine.work_center.work_center_name if machine.work_center else None,
+                "work_center_id": machine.work_center_id,
+                "machine_status": machine_status,
+                "orders": machine_orders,
+                "parts_operations": machine_parts,
+                "total_orders": len(machine_orders),
+                "total_operations": len(machine_ops)
+            })
+        
+        # Calculate overall statistics
+        total_machines = len(machines)
+        active_machines = len([m for m in shop_floor_data if m["machine_status"]["status_id"] in [1, 2]])  # Assuming status_id 1,2 are active
+        idle_machines = total_machines - active_machines
+        total_orders = len(orders)
+        total_operations = len(all_operations)
+        
+        return {
+            "summary": {
+                "total_machines": total_machines,
+                "active_machines": active_machines,
+                "idle_machines": idle_machines,
+                "total_orders": total_orders,
+                "total_operations": total_operations
+            },
+            "machines": shop_floor_data
+        }
+    except Exception as e:
+        print(f"Error in shop floor endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        # Rollback to clear any failed transaction state
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error fetching shop floor data: {str(e)}")
+
 # CRUD operations
 def _order_to_response(order, db: Session):
     """Build order response dict with customer, product, and role user names."""
-    # Check if order has raw materials linked
-    has_raw_materials = db.query(RawMaterialStock).filter(
-        RawMaterialStock.source_order_id == order.id,
-        RawMaterialStock.source_type == "order"
-    ).first() is not None
+    # Check if ALL parts in the order have raw materials linked
+    from DB.models.oms import Part
+    
+    # Get all parts for this order's product
+    all_parts = db.query(Part).filter(Part.product_id == order.product_id).all()
+    total_parts = len(all_parts)
+    
+    if total_parts == 0:
+        has_raw_materials = False
+    else:
+        # Count parts that have raw materials linked (either general stock or order stock)
+        parts_with_raw_materials = 0
+        
+        for part in all_parts:
+            # Check if part has general stock linked
+            if part.raw_material_stock_id:
+                parts_with_raw_materials += 1
+            else:
+                # Check if part has order-linked raw materials (part_id stored as comma-separated string)
+                order_stock = db.query(RawMaterialStock).filter(
+                    RawMaterialStock.source_order_id == order.id,
+                    RawMaterialStock.source_type == "order",
+                    RawMaterialStock.part_id.like(f'%{part.id}%')
+                ).first()
+                if order_stock:
+                    parts_with_raw_materials += 1
+        
+        # Only set has_raw_materials = true if ALL parts have raw materials
+        has_raw_materials = parts_with_raw_materials >= total_parts
     
     return {
         "id": order.id,
