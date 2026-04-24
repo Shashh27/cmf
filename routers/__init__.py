@@ -20,6 +20,8 @@ from .order_documents import router as order_documents_router
 
 from .rawmaterials import router as rawmaterials_router
 
+from .order_raw_materials import router as order_raw_materials_router
+
 from .workcenter import router as workcenter_router
 
 from .machines import router as machines_router
@@ -73,6 +75,8 @@ __all__ = [
     "order_documents_router",
 
     "rawmaterials_router",
+
+    "order_raw_materials_router",
 
     "workcenter_router",
 

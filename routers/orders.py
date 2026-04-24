@@ -186,6 +186,57 @@ def get_shop_floor_hierarchical_data(
                         "available_from": None,
                         "available_to": None
                     }
+
+        # Fetch planned schedule items from scheduling schema (direct SQL)
+        planned_schedule_map = {}
+        if operation_ids:
+            try:
+                # First, get the actual column names from the table
+                columns_result = db.execute(
+                    text("""
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'scheduling'
+                        AND table_name = 'planned_schedule_items'
+                        ORDER BY ordinal_position
+                    """)
+                )
+                columns = [row[0] for row in columns_result]
+
+                # Build SELECT clause with only existing columns
+                select_columns = []
+                column_map = {}
+                for col in ['id', 'operation_id', 'planned_start_time', 'planned_end_time',
+                           'sale_order_id', 'part_number', 'operation_name', 'operation_number',
+                           'machine_id', 'total_quantity']:
+                    if col in columns:
+                        select_columns.append(col)
+                        column_map[col] = len(select_columns) - 1
+
+                if select_columns:
+                    placeholders = ','.join([str(oid) for oid in operation_ids])
+                    query = f"""
+                        SELECT {', '.join(select_columns)}
+                        FROM scheduling.planned_schedule_items
+                        WHERE operation_id IN ({placeholders})
+                    """
+                    result = db.execute(text(query))
+                    rows = list(result)
+
+                    for row in rows:
+                        row_dict = {}
+                        for col in select_columns:
+                            row_dict[col] = row[column_map[col]]
+                        # Use operation_id as key
+                        op_id = row_dict.get('operation_id')
+                        if op_id:
+                            planned_schedule_map[op_id] = row_dict
+
+                    db.commit()  # Commit successful query
+
+            except Exception as e:
+                db.rollback()  # Rollback to clear failed transaction
+                # Initialize with empty map if table doesn't exist or query fails
         
         # Build hierarchical response
         shop_floor_data = []
@@ -235,7 +286,10 @@ def get_shop_floor_hierarchical_data(
                             "completed_at": None,
                             "operator_id": None
                         })
-                        
+
+                        # Get planned schedule data
+                        planned_schedule = planned_schedule_map.get(op.id, {})
+
                         machine_parts.append({
                             "part_id": part.id,
                             "part_name": part.part_name,
@@ -246,7 +300,8 @@ def get_shop_floor_hierarchical_data(
                             "operation_number": op.operation_number,
                             "operation_status": op_status,
                             "order_id": order_for_part.id,
-                            "sale_order_number": order_for_part.sale_order_number
+                            "sale_order_number": order_for_part.sale_order_number,
+                            "planned_schedule": planned_schedule
                         })
             
             # Get order details
@@ -313,11 +368,35 @@ def get_shop_floor_hierarchical_data(
 # CRUD operations
 def _order_to_response(order, db: Session):
     """Build order response dict with customer, product, and role user names."""
-    # Check if order has raw materials linked
-    has_raw_materials = db.query(RawMaterialStock).filter(
-        RawMaterialStock.source_order_id == order.id,
-        RawMaterialStock.source_type == "order"
-    ).first() is not None
+    # Check if ALL parts in the order have raw materials linked
+    from DB.models.oms import Part
+    
+    # Get all parts for this order's product
+    all_parts = db.query(Part).filter(Part.product_id == order.product_id).all()
+    total_parts = len(all_parts)
+    
+    if total_parts == 0:
+        has_raw_materials = False
+    else:
+        # Count parts that have raw materials linked (either general stock or order stock)
+        parts_with_raw_materials = 0
+        
+        for part in all_parts:
+            # Check if part has unit assigned (unit-based tracking)
+            if part.raw_material_unit_id:
+                parts_with_raw_materials += 1
+            else:
+                # Check if part has order-linked raw materials (part_id stored as comma-separated string)
+                order_stock = db.query(RawMaterialStock).filter(
+                    RawMaterialStock.source_order_id == order.id,
+                    RawMaterialStock.source_type == "order",
+                    RawMaterialStock.part_id.like(f'%{part.id}%')
+                ).first()
+                if order_stock:
+                    parts_with_raw_materials += 1
+        
+        # Only set has_raw_materials = true if ALL parts have raw materials
+        has_raw_materials = parts_with_raw_materials >= total_parts
     
     return {
         "id": order.id,
@@ -343,7 +422,6 @@ def _order_to_response(order, db: Session):
         "created_at": order.created_at,
         "updated_at": order.updated_at,
     }
-
 
 @router.post("/", response_model=OrderResponse)
 def create_order(order: OrderCreate, db: Session = Depends(get_db)):

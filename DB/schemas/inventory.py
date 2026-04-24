@@ -249,6 +249,62 @@ class RawMaterialStockWithDetails(RawMaterialStock):
 
 
 
+# =======================
+
+# Order Raw Material Linking Schema
+
+# =======================
+
+class OrderMaterialLinkRequest(BaseModel):
+
+    """Request model for linking materials to an order"""
+
+    raw_material_id: int
+
+    form_type: str
+
+    diameter: Optional[float] = None
+
+    length: float
+
+    breadth: Optional[float] = None
+
+    height: Optional[float] = None
+
+    inner_diameter: Optional[float] = None
+
+    outer_diameter: Optional[float] = None
+
+    order_id: int
+
+    part_ids: List[int]
+
+    required_lengths: List[float]  # Required length for each part
+
+    vendor_id: Optional[List[int]] = None  # Multiple vendors for enquiry
+
+    quantity: int = 1
+
+    user_id: Optional[int] = None
+
+
+
+    @field_validator('form_type')
+
+    @classmethod
+
+    def validate_form_type(cls, v):
+
+        if v not in ["Round", "Square", "Pipe"]:
+
+            raise ValueError('form_type must be "Round", "Square", or "Pipe"')
+
+        return v
+
+
+
+
+
     class Config:
 
         from_attributes = True
@@ -793,5 +849,93 @@ class ToolIssueWithDetails(ToolIssue):
 
     class Config:
 
+        from_attributes = True
+
+
+# =======================
+
+# 🔥 Raw Material Unit Schemas
+
+# =======================
+
+class RawMaterialUnitBase(BaseModel):
+    stock_id: int
+    total_length: float
+    remaining_length: float
+    volume: Optional[float] = None
+    mass: Optional[float] = None
+    weight: Optional[float] = None
+    cost: Optional[float] = None
+    status: str = "available"
+
+
+class RawMaterialUnitCreate(RawMaterialUnitBase):
+    pass
+
+
+class RawMaterialUnitUpdate(BaseModel):
+    stock_id: Optional[int] = None
+    total_length: Optional[float] = None
+    remaining_length: Optional[float] = None
+    volume: Optional[float] = None
+    mass: Optional[float] = None
+    weight: Optional[float] = None
+    cost: Optional[float] = None
+    status: Optional[str] = None
+
+
+class RawMaterialUnit(RawMaterialUnitBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RawMaterialUnitWithDetails(RawMaterialUnit):
+    material_name: Optional[str] = None
+    stock_details: Optional[dict] = None
+
+    class Config:
+        from_attributes = True
+
+
+# =======================
+
+# 🔥 Raw Material Usage Schemas
+
+# =======================
+
+class RawMaterialUsageBase(BaseModel):
+    raw_material_unit_id: int
+    part_id: int
+    used_length: float
+
+
+class RawMaterialUsageCreate(RawMaterialUsageBase):
+    pass
+
+
+class RawMaterialUsageUpdate(BaseModel):
+    raw_material_unit_id: Optional[int] = None
+    part_id: Optional[int] = None
+    used_length: Optional[float] = None
+
+
+class RawMaterialUsage(RawMaterialUsageBase):
+    id: int
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RawMaterialUsageWithDetails(RawMaterialUsage):
+    part_name: Optional[str] = None
+    part_number: Optional[str] = None
+    unit_details: Optional[RawMaterialUnitWithDetails] = None
+
+    class Config:
         from_attributes = True
 

@@ -38,6 +38,8 @@ from routers import (
 
     rawmaterials_router,
 
+    order_raw_materials_router,
+
     workcenter_router,
 
     machines_router,
@@ -69,8 +71,7 @@ from routers import (
 # Import scheduling router
 
 from scheduling_routers.production_logs import router as production_logs_router
-# from scheduling_routers.rawmaterials import router as rawmaterials_router  # Commented out - doesn't exist
-from routers.raw_material_tracking import router as tracking_router
+
 
 # Import notification routers
 
@@ -248,6 +249,8 @@ app.include_router(order_documents_router, prefix="/api/v1")
 
 app.include_router(rawmaterials_router, prefix="/api/v1")
 
+app.include_router(order_raw_materials_router, prefix="/api/v1/rawmaterials")
+
 app.include_router(workcenter_router, prefix="/api/v1")
 
 app.include_router(general_documents_router, prefix="/api/v1")
@@ -284,7 +287,7 @@ app.include_router(maintenance_router, prefix="/api/v1")
 
 app.include_router(production_logs_router, prefix="/api/v1")
 
-app.include_router(tracking_router, prefix="/api/v1")
+
 
 # Include notification routers
 
@@ -435,8 +438,7 @@ def system_info():
             "general_documents": "/general-documents",
 
             "maintenance": "/api/v1/maintenance",
-            
-            "raw_material_tracking": "/api/v1/rawmaterials/tracking"
+        
 
         }
 
