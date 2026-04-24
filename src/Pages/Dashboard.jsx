@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Row, Col, Card, Spin, Empty, Statistic, Progress, Typography, Avatar, Table, Tag, Space, Badge, Flex } from 'antd';
+import { Row, Col, Card, Spin, Empty, Statistic, Progress, Typography, Avatar, Table, Tag, Space, Badge, Flex, Button } from 'antd';
 import { 
   ShoppingCartOutlined, 
   ClockCircleOutlined, 
@@ -9,16 +9,19 @@ import {
   UserOutlined,
   FileTextOutlined,
   ArrowUpOutlined,
-  ArrowDownOutlined
+  ArrowDownOutlined,
+  SettingOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
+import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Sector, Cell, BarChart, Bar, ComposedChart } from 'recharts';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -205,7 +208,23 @@ const Dashboard = () => {
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
-      <Title level={2} style={{ marginBottom: '24px' }}>Dashboard Overview</Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <Title level={2} style={{ margin: 0 }}>Dashboard Overview</Title>
+        <Button
+          type="primary"
+          size="large"
+          icon={<SettingOutlined />}
+          onClick={() => navigate('/admin/shop-floor')}
+          style={{
+            background: '#1976d2',
+            border: 'none',
+            borderRadius: '8px',
+            fontWeight: 600
+          }}
+        >
+          View Shop Floor
+        </Button>
+      </div>
       
       {/* Light KPI Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>

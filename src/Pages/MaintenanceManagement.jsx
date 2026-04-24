@@ -28,13 +28,7 @@ const MaintenanceManagement = () => {
   })();
 
   return (
-    <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <Title level={2} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <SettingOutlined style={{ color: '#1890ff' }} />
-          {titleText}
-        </Title>
-      </div>
+    <div style={{ padding: '12px', background: '#f5f5f5', minHeight: '100vh' }}>
       
       <Card 
         bordered={false} 
@@ -42,6 +36,7 @@ const MaintenanceManagement = () => {
           borderRadius: '8px',
           boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
         }}
+        bodyStyle={{ padding: '12px' }}
       >
         {renderContent()}
       </Card>
