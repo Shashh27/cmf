@@ -186,57 +186,6 @@ def get_shop_floor_hierarchical_data(
                         "available_from": None,
                         "available_to": None
                     }
-
-        # Fetch planned schedule items from scheduling schema (direct SQL)
-        planned_schedule_map = {}
-        if operation_ids:
-            try:
-                # First, get the actual column names from the table
-                columns_result = db.execute(
-                    text("""
-                        SELECT column_name
-                        FROM information_schema.columns
-                        WHERE table_schema = 'scheduling'
-                        AND table_name = 'planned_schedule_items'
-                        ORDER BY ordinal_position
-                    """)
-                )
-                columns = [row[0] for row in columns_result]
-
-                # Build SELECT clause with only existing columns
-                select_columns = []
-                column_map = {}
-                for col in ['id', 'operation_id', 'planned_start_time', 'planned_end_time',
-                           'sale_order_id', 'part_number', 'operation_name', 'operation_number',
-                           'machine_id', 'total_quantity']:
-                    if col in columns:
-                        select_columns.append(col)
-                        column_map[col] = len(select_columns) - 1
-
-                if select_columns:
-                    placeholders = ','.join([str(oid) for oid in operation_ids])
-                    query = f"""
-                        SELECT {', '.join(select_columns)}
-                        FROM scheduling.planned_schedule_items
-                        WHERE operation_id IN ({placeholders})
-                    """
-                    result = db.execute(text(query))
-                    rows = list(result)
-
-                    for row in rows:
-                        row_dict = {}
-                        for col in select_columns:
-                            row_dict[col] = row[column_map[col]]
-                        # Use operation_id as key
-                        op_id = row_dict.get('operation_id')
-                        if op_id:
-                            planned_schedule_map[op_id] = row_dict
-
-                    db.commit()  # Commit successful query
-
-            except Exception as e:
-                db.rollback()  # Rollback to clear failed transaction
-                # Initialize with empty map if table doesn't exist or query fails
         
         # Build hierarchical response
         shop_floor_data = []
@@ -286,10 +235,7 @@ def get_shop_floor_hierarchical_data(
                             "completed_at": None,
                             "operator_id": None
                         })
-
-                        # Get planned schedule data
-                        planned_schedule = planned_schedule_map.get(op.id, {})
-
+                        
                         machine_parts.append({
                             "part_id": part.id,
                             "part_name": part.part_name,
@@ -300,8 +246,7 @@ def get_shop_floor_hierarchical_data(
                             "operation_number": op.operation_number,
                             "operation_status": op_status,
                             "order_id": order_for_part.id,
-                            "sale_order_number": order_for_part.sale_order_number,
-                            "planned_schedule": planned_schedule
+                            "sale_order_number": order_for_part.sale_order_number
                         })
             
             # Get order details

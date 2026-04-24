@@ -289,16 +289,12 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
     is_clearing_raw_material = (
         update_data.get('raw_material_id') is None and
         update_data.get('raw_material_stock_id') is None and
-        update_data.get('raw_material_required_quantity') is None and
-        update_data.get('qty') is None
+        update_data.get('raw_material_required_quantity') is None
     )
     
-    # Also consider clearing if switching to WITHOUT_RAW_MATERIAL and raw material fields are not present
-    if is_switching_to_without_raw and not is_updating_raw_material:
+    # Also consider clearing if switching to WITHOUT_RAW_MATERIAL - this takes priority
+    if is_switching_to_without_raw:
         is_clearing_raw_material = True
-        # Also clear vendor_id for outsource parts when switching to WITHOUT_RAW_MATERIAL
-        update_data['vendor_id'] = None
-        print("Clearing vendor_id when switching to WITHOUT_RAW_MATERIAL")
     
     # If updating raw material allocation, handle the allocation logic
     if is_updating_raw_material or is_clearing_raw_material:
@@ -315,11 +311,10 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
                     # Log error but continue
                     print(f"Warning: Could not deallocate material: {e}")
             
-            # Explicitly set raw material fields to null in the database
+            # Explicitly set raw material fields to null in database
             db_part.raw_material_id = None
             db_part.raw_material_stock_id = None
             db_part.raw_material_required_quantity = None
-            db_part.qty = None
         else:
             new_stock_id = update_data.get('raw_material_stock_id')
             new_required_quantity = update_data.get('raw_material_required_quantity')
