@@ -11,7 +11,11 @@ import {
   CheckCircleOutlined,
   StopOutlined,
   SearchOutlined,
-  ArrowLeftOutlined
+  ArrowLeftOutlined,
+  PoweroffOutlined,
+  PlayCircleOutlined,
+  PauseCircleOutlined,
+  RocketOutlined
 } from '@ant-design/icons';
 import { motion } from 'framer-motion';
 
@@ -80,13 +84,46 @@ const MachineCard = ({ machine }) => {
     return statusColors[status] || 'default';
   };
 
+  const getMachineStatusColor = (status) => {
+    const statusColors = {
+      'off': '#ff4d4f',
+      'on': '#52c41a', 
+      'idle': '#faad14',
+      'production': '#1890ff',
+      'Running': '#52c41a',
+      'In Operation': '#1890ff',
+      'Idle': '#faad14',
+      'Stopped': '#ff4d4f',
+      'Maintenance': '#fa8c16'
+    };
+    return statusColors[status] || '#d9d9d9';
+  };
+
+  const getMachineStatusIcon = (status) => {
+    const statusIcons = {
+      'off': <PoweroffOutlined />,
+      'on': <PlayCircleOutlined />,
+      'idle': <PauseCircleOutlined />,
+      'production': <RocketOutlined />,
+      
+    };
+    return statusIcons[status] || <InfoCircleOutlined />;
+  };
+
+  const getMachineStatusText = (status) => {
+    const statusTexts = {
+      'off': 'OFF',
+      'on': 'ON',
+      'idle': 'IDLE',
+      'production': 'PRODUCTION',
+     
+    };
+    return statusTexts[status] || 'UNKNOWN';
+  };
+
   const getStatusIcon = (status) => {
     const statusIcons = {
-      'Running': <SyncOutlined spin />,
-      'In Operation': <SyncOutlined spin />,
-      'Idle': <ClockCircleOutlined />,
-      'Stopped': <StopOutlined />,
-      'Maintenance': <ToolOutlined />,
+    
       'Not Started': <ClockCircleOutlined />,
       'Pending': <ClockCircleOutlined />,
       'In Progress': <SyncOutlined spin />,
@@ -175,20 +212,48 @@ const MachineCard = ({ machine }) => {
           style={{
             borderRadius: '8px',
             boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
-            border: '1px solid #f0f0f0',
+            border: `2px solid ${getMachineStatusColor(machine.machine_status?.status || 'off')}`,
             height: '100%',
             display: 'flex',
-            flexDirection: 'column'
+            flexDirection: 'column',
+            position: 'relative',
+            overflow: 'hidden'
           }}
-          styles={{ body: { padding: '12px', flex: 1, display: 'flex', flexDirection: 'column', height: '160px' } }}
+          styles={{ body: { padding: '8px', flex: 1, display: 'flex', flexDirection: 'column', height: '140px' } }}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ marginBottom: 8, height: '45px', overflow: 'hidden' }}>
+          {/* Status Indicator */}
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            background: getMachineStatusColor(machine.machine_status?.status || 'off'),
+            padding: '4px 8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '4px'
+          }}>
+            <span style={{
+              color: 'white',
+              fontSize: '10px',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}>
+              {getMachineStatusIcon(machine.machine_status?.status || 'off')}
+              {getMachineStatusText(machine.machine_status?.status || 'off')}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', marginTop: '20px' }}>
+            <div style={{ marginBottom: 6, height: '40px', overflow: 'hidden' }}>
               <Space style={{ width: '100%' }}>
-                <SettingOutlined style={{ fontSize: '14px', color: '#1890ff', flexShrink: 0 }} />
+                <SettingOutlined style={{ fontSize: '12px', color: '#1890ff', flexShrink: 0 }} />
                 <Tooltip title={`${machine.machine_make} ${machine.machine_model}`}>
                   <span style={{ 
-                    fontSize: '13px', 
+                    fontSize: '12px', 
                     fontWeight: 600, 
                     color: '#262626',
                     display: '-webkit-box',
@@ -204,9 +269,9 @@ const MachineCard = ({ machine }) => {
               </Space>
               <Tooltip title={`${machine.machine_type} • ${machine.work_center || 'N/A'}`}>
                 <div style={{ 
-                  fontSize: '11px', 
+                  fontSize: '10px', 
                   color: '#8c8c8c', 
-                  marginTop: 3,
+                  marginTop: 2,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap'
@@ -218,45 +283,45 @@ const MachineCard = ({ machine }) => {
 
             <div style={{
               display: 'flex',
-              gap: 6,
-              marginBottom: 8,
-              height: '60px'
+              gap: 4,
+              marginBottom: 6,
+              height: '50px'
             }}>
               <div style={{
                 flex: 1,
-                background: '#f5f5f5',
-                padding: '6px',
-                borderRadius: '6px',
+                background: '#fafafa',
+                padding: '4px',
+                borderRadius: '4px',
                 textAlign: 'center'
               }}>
-                <div style={{ fontSize: 'clamp(14px, 3vw, 16px)', fontWeight: 600, color: '#262626' }}>
+                <div style={{ fontSize: 'clamp(12px, 2.5vw, 14px)', fontWeight: 600, color: '#262626' }}>
                   {machine.total_orders}
                 </div>
-                <div style={{ fontSize: 'clamp(9px, 1.5vw, 11px)', color: '#8c8c8c' }}>Orders</div>
+                <div style={{ fontSize: 'clamp(8px, 1.2vw, 10px)', color: '#8c8c8c' }}>Orders</div>
               </div>
               <div style={{
                 flex: 1,
-                background: '#f5f5f5',
-                padding: '6px',
-                borderRadius: '6px',
+                background: '#fafafa',
+                padding: '4px',
+                borderRadius: '4px',
                 textAlign: 'center'
               }}>
-                <div style={{ fontSize: 'clamp(14px, 3vw, 16px)', fontWeight: 600, color: '#262626' }}>
+                <div style={{ fontSize: 'clamp(12px, 2.5vw, 14px)', fontWeight: 600, color: '#262626' }}>
                   {partsList.length}
                 </div>
-                <div style={{ fontSize: 'clamp(9px, 1.5vw, 11px)', color: '#8c8c8c' }}>Parts</div>
+                <div style={{ fontSize: 'clamp(8px, 1.2vw, 10px)', color: '#8c8c8c' }}>Parts</div>
               </div>
               <div style={{
                 flex: 1,
-                background: '#f5f5f5',
-                padding: '6px',
-                borderRadius: '6px',
+                background: '#fafafa',
+                padding: '4px',
+                borderRadius: '4px',
                 textAlign: 'center'
               }}>
-                <div style={{ fontSize: 'clamp(14px, 3vw, 16px)', fontWeight: 600, color: '#262626' }}>
+                <div style={{ fontSize: 'clamp(12px, 2.5vw, 14px)', fontWeight: 600, color: '#262626' }}>
                   {machine.total_operations}
                 </div>
-                <div style={{ fontSize: 'clamp(9px, 1.5vw, 11px)', color: '#8c8c8c' }}>Operations</div>
+                <div style={{ fontSize: 'clamp(8px, 1.2vw, 10px)', color: '#8c8c8c' }}>Operations</div>
               </div>
             </div>
 
@@ -266,10 +331,10 @@ const MachineCard = ({ machine }) => {
                 icon={<ExpandOutlined />}
                 onClick={() => setDrawerVisible(true)}
                 style={{
-                  height: '28px',
-                  borderRadius: '6px',
+                  height: '24px',
+                  borderRadius: '4px',
                   fontWeight: 500,
-                  fontSize: '12px'
+                  fontSize: '11px'
                 }}
               >
                 View Details
@@ -397,12 +462,34 @@ const MachineCard = ({ machine }) => {
   );
 };
 
+// Function to assign random status to machines for demonstration
+const assignRandomMachineStatus = (machine) => {
+  const statuses = ['off', 'on', 'idle', 'production'];
+  const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+  
+  // If machine already has a status, use it, otherwise assign random
+  if (machine.machine_status && machine.machine_status.status) {
+    return machine;
+  }
+  
+  return {
+    ...machine,
+    machine_status: {
+      ...machine.machine_status,
+      status: randomStatus
+    }
+  };
+};
+
 // MachineGrid Component
 const MachineGrid = ({ machines, onBack }) => {
   const [searchText, setSearchText] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState('all');
 
-  const filteredMachines = machines.filter(machine => {
+  // Assign random statuses to machines for demo
+  const machinesWithStatus = machines.map(assignRandomMachineStatus);
+
+  const filteredMachines = machinesWithStatus.filter(machine => {
     const matchesSearch = 
       machine.machine_make?.toLowerCase().includes(searchText.toLowerCase()) ||
       machine.machine_model?.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -417,11 +504,11 @@ const MachineGrid = ({ machines, onBack }) => {
 
   const statusOptions = [
     { label: 'All', value: 'all' },
-    { label: 'Running', value: 'Running' },
-    { label: 'In Operation', value: 'In Operation' },
-    { label: 'Idle', value: 'Idle' },
-    { label: 'Stopped', value: 'Stopped' },
-    { label: 'Maintenance', value: 'Maintenance' }
+    { label: 'ON', value: 'on' },
+    { label: 'OFF', value: 'off' },
+    { label: 'IDLE', value: 'idle' },
+    { label: 'PRODUCTION', value: 'production' },
+  
   ];
 
   return (
@@ -467,7 +554,7 @@ const MachineGrid = ({ machines, onBack }) => {
             options={statusOptions}
           />
           <Text type="secondary" style={{ fontSize: '12px' }}>
-            Showing {filteredMachines.length} of {machines.length} machines
+            Showing {filteredMachines.length} of {machinesWithStatus.length} machines
           </Text>
         </Space>
       </div>

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Spin, Alert, Typography } from 'antd';
+import { Spin, Alert, Typography, Button, Switch, Radio, Space } from 'antd';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
+import { TableOutlined, CalendarOutlined } from '@ant-design/icons';
 
 import { MachineGrid } from './MachineComponents';
+import { SchedulingAnalytics } from './SchedulingAnalytics';
 
 const { Text } = Typography;
 
@@ -13,6 +15,8 @@ const ShopFloorDashboard = ({ onBack }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const [viewMode, setViewMode] = useState('2d'); // '2d' or 'analytics'
+  const [analyticsViewMode, setAnalyticsViewMode] = useState('table'); // 'table' or 'heatmap'
 
   const getCurrentAdminId = () => {
     try {
@@ -101,9 +105,60 @@ const ShopFloorDashboard = ({ onBack }) => {
       transition={{ duration: 0.5 }}
       style={{ padding: '12px', background: '#f5f5f5', minHeight: '100vh' }}
     >
+      {/* View Toggle */}
+      <div style={{
+        marginBottom: '12px',
+        padding: '12px',
+        background: 'white',
+        borderRadius: '8px',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <Text strong style={{ fontSize: '14px' }}>Shop Floor Dashboard</Text>
+          <Switch
+            checked={viewMode === 'analytics'}
+            onChange={(checked) => setViewMode(checked ? 'analytics' : '2d')}
+            checkedChildren="Analytics"
+            unCheckedChildren="2D View"
+            style={{ minWidth: '100px' }}
+          />
+          {viewMode === 'analytics' && (
+            <Radio.Group
+              value={analyticsViewMode}
+              onChange={(e) => setAnalyticsViewMode(e.target.value)}
+              buttonStyle="solid"
+              size="small"
+            >
+              <Radio.Button value="table"><TableOutlined /> Table View</Radio.Button>
+              <Radio.Button value="heatmap"><CalendarOutlined /> Calendar Heatmap</Radio.Button>
+            </Radio.Group>
+          )}
+        </div>
+        <Button
+          type="primary"
+          onClick={onBack}
+          style={{
+            background: '#1976d2',
+            border: 'none',
+            borderRadius: '6px',
+            fontWeight: 500,
+            height: '32px'
+          }}
+        >
+          Back
+        </Button>
+      </div>
+
       {/* Machines Grid Section */}
       <div style={{ marginTop: 0 }}>
-        <MachineGrid machines={data.machines} onBack={onBack} />
+        {viewMode === '2d' ? (
+          <MachineGrid machines={data.machines} onBack={onBack} />
+        ) : (
+          <SchedulingAnalytics machines={data.machines} viewMode={analyticsViewMode} />
+        )}
       </div>
     </motion.div>
   );

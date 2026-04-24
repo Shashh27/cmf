@@ -207,7 +207,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       ]);
       const docs = dR.data;
       const ops = oR.data;
-      setDocuments(docs); setOperations(ops);
+      setDocuments(docs); setOperations(ops.sort((a, b) => a.operation_number - b.operation_number));
       if (onDocumentsLoaded) onDocumentsLoaded(docs);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -590,6 +590,18 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         .docs-ops-table .ant-table-thead>tr>th{font-weight:600;color:#334155!important;}
         .custom-fit-table .ant-table-header{position:sticky;top:0;z-index:10;}
         .custom-fit-table .ant-table-body{overflow-y:auto!important;}
+        /* Blur operations table when modal is open */
+        .ant-modal-mask + * .docs-ops-table,
+        .ant-modal-mask + * .custom-fit-table,
+        .ant-modal-mask + * .docs-ops-table .ant-table-placeholder,
+        .ant-modal-mask + * .docs-ops-table .ant-empty,
+        body:has(.ant-modal-mask) .docs-ops-table,
+        body:has(.ant-modal-mask) .custom-fit-table,
+        body:has(.ant-modal-mask) .docs-ops-table .ant-table-placeholder,
+        body:has(.ant-modal-mask) .docs-ops-table .ant-empty {
+          filter: blur(2px);
+          pointer-events: none;
+        }
         @media(max-width:640px){
           .docs-ops-table .ant-table-tbody>tr>td,.docs-ops-table .ant-table-thead>tr>th,
           .docs-ebom-table .ant-table-tbody>tr>td,.docs-ebom-table .ant-table-thead>tr>th{padding:${compactMode ? '4px 6px' : '6px 8px'}!important;}

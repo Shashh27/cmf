@@ -264,49 +264,50 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     try {
       const record = statusEditRecord;
       const ids = record.linkage_ids || [];
-      const newQty = statusEditOrderQty != null ? Number(statusEditOrderQty) : record.quantity ?? 0;
+      let newQty = statusEditOrderQty != null ? Number(statusEditOrderQty) : record.quantity ?? 0;
+      
+      // Validate quantity is a positive integer
+      if (!newQty || newQty <= 0 || !Number.isInteger(newQty)) {
+        message.error("Please enter a valid positive integer for quantity");
+        return;
+      }
       const groupId = record.linkage_group_id || null;
 
       const uid = getCurrentUserId();
 
       if (!groupId) {
-        const updates = await Promise.all(
-          ids.map((id) => {
-            const linkage = (linkedMaterials || []).find((l) => l.id === id);
-            if (!linkage) return null;
-            const body = {
-              raw_material_id: linkage.raw_material_id,
-              part_id: linkage.part_id,
-              order_id: linkage.order_id,
-              order_quantity: newQty,
-              form_type: record.form_type || "Round",
-              // Include dimensions based on form type
-              ...(record.form_type === 'Round' && {
-                diameter: statusEditDimensions.diameter || 0,
-                length: statusEditDimensions.length || 0
-              }),
-              ...(record.form_type === 'Square' && {
-                length: statusEditDimensions.length || 0,
-                breadth: statusEditDimensions.breadth || 0,
-                height: statusEditDimensions.height || 0
-              }),
-              ...(record.form_type === 'Pipe' && {
-                outer_diameter: statusEditDimensions.outer_diameter || 0,
-                inner_diameter: statusEditDimensions.inner_diameter || 0,
-                length: statusEditDimensions.length || 0
-              }),
-              material_status: linkage.material_status || "available",
-              linkage_group_id: linkage.linkage_group_id || null,
-              user_id: uid,
-            };
-            return axios.put(
-              `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${id}`,
-              body,
-              { headers: { "Content-Type": "application/json" } }
-            );
-          })
+        // Only update the current record, not all linkage_ids
+        const body = {
+          raw_material_id: record.raw_material_id,
+          part_id: record.part_id,
+          order_id: record.order_id,
+          order_quantity: newQty,
+          form_type: record.form_type || "Round",
+          // Include dimensions based on form type
+          ...(record.form_type === 'Round' && {
+            diameter: statusEditDimensions.diameter || 0,
+            length: statusEditDimensions.length || 0
+          }),
+          ...(record.form_type === 'Square' && {
+            length: statusEditDimensions.length || 0,
+            breadth: statusEditDimensions.breadth || 0,
+            height: statusEditDimensions.height || 0
+          }),
+          ...(record.form_type === 'Pipe' && {
+            outer_diameter: statusEditDimensions.outer_diameter || 0,
+            inner_diameter: statusEditDimensions.inner_diameter || 0,
+            length: statusEditDimensions.length || 0
+          }),
+          material_status: record.material_status || "available",
+          linkage_group_id: record.linkage_group_id || null,
+          user_id: uid,
+        };
+        
+        await axios.put(
+          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${record.id}`,
+          body,
+          { headers: { "Content-Type": "application/json" } }
         );
-        await Promise.all(updates);
       }
 
       if (groupId) {
@@ -691,14 +692,14 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       item.status || '', // Added status field for the Status column
       // Handle status variations for searching
       ...(item.order_status === 'enquiry' ? ['enquiry', 'inquiry', 'enq'] : []),
-      ...(item.order_status === 'purchase_request' ? ['purchase request', 'purchaserequest', 'pr', 'request'] : []),
+     
       ...(item.order_status === 'purchase_order' ? ['purchase order', 'purchaseorder', 'po', 'order'] : []),
       ...(item.order_status === 'received' ? ['received', 'receive', 'recd', 'recvd'] : []),
       ...(item.order_status === 'available' ? ['available', 'avail', 'availble'] : []),
       ...(item.order_status === 'exhausted' ? ['exhausted', 'exhaust', 'finished', 'empty'] : []),
       // Handle material_status variations
       ...(item.material_status === 'enquiry' ? ['enquiry', 'inquiry', 'enq'] : []),
-      ...(item.material_status === 'purchase_request' ? ['purchase request', 'purchaserequest', 'pr', 'request'] : []),
+     
       ...(item.material_status === 'purchase_order' ? ['purchase order', 'purchaseorder', 'po', 'order'] : []),
       ...(item.material_status === 'received' ? ['received', 'receive', 'recd', 'recvd'] : []),
       ...(item.material_status === 'available' ? ['available', 'avail', 'availble'] : []),
@@ -967,7 +968,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         
         let color = 'default';
         if (orderStatus === 'enquiry') color = 'blue';
-        if (orderStatus === 'purchase_request') color = 'warning';
+      
         if (orderStatus === 'purchase_order') color = 'processing';
         if (orderStatus === 'received') color = 'success';
         
@@ -1020,7 +1021,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
               size="large"
               className="rounded-md"
             >
-              <Option value="purchase_request">Purchase Request</Option>
+            
               <Option value="purchase_order">Purchase Order</Option>
               <Option value="received">Received</Option>
             </Select>
@@ -1083,92 +1084,14 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
               style={{ width: '100%' }} 
               value={statusEditOrderQty} 
               onChange={(value) => {
-                // Only allow valid positive integers, reject everything else including 0
-                if (value === null || value === undefined || value === '') {
-                  setStatusEditOrderQty(1);
-                } else if (Number.isInteger(value) && value > 0) {
-                  setStatusEditOrderQty(value);
+                // Allow the user to type freely, only validate on blur or final submission
+                if (value === null || value === undefined) {
+                  setStatusEditOrderQty('');
                 } else {
-                  // Reject invalid values including 0
-                  setStatusEditOrderQty(1);
+                  setStatusEditOrderQty(value);
                 }
               }}
-              onBeforeInput={(e) => {
-                // Block input before it reaches the field
-                const char = e.data;
-                const currentValue = e.target.value || '';
-                // Block non-digits
-                if (char && !/[0-9]/.test(char)) {
-                  e.preventDefault();
-                  return false;
-                }
-                // Block 0 as first digit (if field is empty or will be first char)
-                if (char === '0' && currentValue === '') {
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-              onKeyPress={(e) => {
-                // Block all non-digit keys except navigation keys
-                const char = String.fromCharCode(e.which);
-                const currentValue = e.target.value || '';
-                // Block non-digits
-                if (!/[0-9]/.test(char) && 
-                    e.which !== 8 && // backspace
-                    e.which !== 46 && // delete
-                    e.which !== 9 && // tab
-                    e.which !== 13 && // enter
-                    e.which !== 37 && // left arrow
-                    e.which !== 39 && // right arrow
-                    e.which !== 36 && // home
-                    e.which !== 35) { // end
-                  e.preventDefault();
-                  return false;
-                }
-                // Block 0 as first digit
-                if (char === '0' && currentValue === '') {
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-              onInput={(e) => {
-                // Immediate cleanup - remove leading zeros and non-digits
-                const value = e.target.value;
-                // Keep only digits
-                const cleanValue = value.replace(/[^0-9]/g, '');
-                // Remove leading zeros (e.g., "01" -> "1", "00" -> "0")
-                const validValue = cleanValue.replace(/^0+/, '');
-                if (value !== validValue) {
-                  e.target.value = validValue;
-                }
-                // If empty or just zeros, default to 1
-                const numValue = parseInt(validValue) || 1;
-                setStatusEditOrderQty(numValue > 0 ? numValue : 1);
-              }}
-              onPaste={(e) => {
-                // Prevent paste of invalid content
-                e.preventDefault();
-                const pasteData = e.clipboardData.getData('text');
-                const cleanData = pasteData.replace(/[^0-9]/g, '');
-                if (cleanData) {
-                  const currentValue = e.target.value || '';
-                  const newValue = (currentValue + cleanData).replace(/^0+/, '');
-                  const numValue = parseInt(newValue) || 1;
-                  setStatusEditOrderQty(numValue > 0 ? numValue : 1);
-                }
-                return false;
-              }}
-              onBlur={(e) => {
-                // Clean up any invalid characters and leading zeros on blur
-                const value = e.target.value;
-                const cleanValue = value.replace(/[^0-9]/g, '').replace(/^0+/, '');
-                if (value !== cleanValue) {
-                  e.target.value = cleanValue;
-                }
-                const numValue = parseInt(cleanValue) || 1;
-                setStatusEditOrderQty(numValue > 0 ? numValue : 1);
-              }}
-              size="large" 
+                            size="large" 
               className="rounded-md" 
               stringMode 
               parser={(v) => limitDecimals(v, 'status-edit-qty', 0)} 

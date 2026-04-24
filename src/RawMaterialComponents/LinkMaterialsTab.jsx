@@ -167,7 +167,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         // Add parts under this assembly
         if (assembly.parts && assembly.parts.length > 0) {
           assembly.parts.forEach((partItem, partIndex) => {
-            if (partItem.part && partItem.part.type_name !== "Out-Source") {
+            if (partItem.part && partItem.part.type_name !== "Out-Source" && !partItem.part.raw_material_stock_id) {
               const partId = partItem.part.id;
               // Check if this part has 2D documents (documents are nested under partItem.documents)
               const has2DDocuments = partItem.documents && partItem.documents.some(
@@ -231,7 +231,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       };
 
       hierarchyData.direct_parts.forEach((partItem) => {
-        if (partItem.part && partItem.part.type_name !== "Out-Source") {
+        if (partItem.part && partItem.part.type_name !== "Out-Source" && !partItem.part.raw_material_stock_id) {
           const partId = partItem.part.id;
           // Check if this part has 2D documents (documents are nested under partItem.documents)
           const has2DDocuments = partItem.documents && partItem.documents.some(
@@ -294,7 +294,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       // Add parts under this subassembly
       if (subAsm.parts && subAsm.parts.length > 0) {
         subAsm.parts.forEach((partItem) => {
-          if (partItem.part && partItem.part.type_name !== "Out-Source") {
+          if (partItem.part && partItem.part.type_name !== "Out-Source" && !partItem.part.raw_material_stock_id) {
             const partId = partItem.part.id;
             // Check if this part has 2D documents (documents are nested under partItem.documents)
             const has2DDocuments = partItem.documents && partItem.documents.some(
@@ -448,11 +448,14 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           items.forEach(item => {
             // Handle direct parts (have a 'part' property)
             if (item.part && item.part.type_name !== "Out-Source") {
-              const partWithExtractedData = {
-                ...item.part,
-                extracted_data: item.extracted_data || []
-              };
-              allParts.push(partWithExtractedData);
+              // Skip parts that already have raw materials linked
+              if (!item.part.raw_material_stock_id) {
+                const partWithExtractedData = {
+                  ...item.part,
+                  extracted_data: item.extracted_data || []
+                };
+                allParts.push(partWithExtractedData);
+              }
             }
             // Handle subassemblies (have an 'assembly' property and 'parts' array)
             if (item.assembly && item.parts && item.parts.length > 0) {

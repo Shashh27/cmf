@@ -96,6 +96,8 @@ const CreateProductModal = ({
 
     part_detail: null,
 
+    size: '',
+
     qty: 1,
 
     vendor_id: null,
@@ -165,6 +167,8 @@ const CreateProductModal = ({
 
           part_detail: editingItem.part_detail ?? null,
 
+          size: editingItem.size || '',
+
           qty: editingItem.qty || 1,
           vendor_id: editingItem.vendor_id || null,
 
@@ -209,6 +213,8 @@ const CreateProductModal = ({
           raw_material_id: null,
 
           part_detail: null,
+
+          size: '',
 
           qty: 1,
 
@@ -283,6 +289,8 @@ const CreateProductModal = ({
 
           part_detail: editingItem.part_detail ?? null,
 
+          size: editingItem.size || '',
+
           qty: editingItem.qty || 1,
           vendor_id: editingItem.vendor_id || null,
 
@@ -328,6 +336,8 @@ const CreateProductModal = ({
           raw_material_id: null,
 
           part_detail: null,
+
+          size: '',
 
           qty: 1,
 
@@ -726,7 +736,8 @@ const CreateProductModal = ({
           payloadBase.raw_material_stock_id = null;
         }
         
-        // Always include qty for in-house parts, and for outsource parts that have it
+        // Always include size and qty for in-house parts, and for outsource parts that have them
+        payloadBase.size = values.size || null;
         payloadBase.qty = values.qty || 1;
         
         // Include required quantity only if stock is selected
@@ -1108,9 +1119,31 @@ const CreateProductModal = ({
 
             </div>
 
-            {/* Quantity and Part Type - 2 columns */}
+            {/* Size, Quantity, and Part Type - 3 columns */}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+              <Form.Item
+
+                name="size"
+
+                label={<span className="text-xs sm:text-sm">Size</span>}
+
+                rules={[{ required: false, message: 'Please enter size!' }]}
+
+              >
+
+                <Input 
+
+                  placeholder="Enter size" 
+
+                  size="large"
+
+                  autoComplete="off"
+
+                />
+
+              </Form.Item>
 
               <Form.Item
 
@@ -1242,7 +1275,7 @@ const CreateProductModal = ({
                         <Form.Item
                           name="raw_material_id"
                           label={<span className="text-xs sm:text-sm">Raw Material</span>}
-                          rules={[{ required: isRequiredRawMaterial, message: 'Select raw material!' }]}
+                          rules={[{ required: false, message: 'Select raw material!' }]}
                         >
                           <Select 
                             placeholder="Select raw material" 
@@ -1294,7 +1327,7 @@ const CreateProductModal = ({
                               <Form.Item
                                 name="raw_material_form_type"
                                 label={<span className="text-xs sm:text-sm">Form Type</span>}
-                                rules={[{ required: isRequiredRawMaterial || isInHouse, message: 'Select form type!' }]}
+                                rules={[{ required: false, message: 'Select form type!' }]}
                               >
                                 <Select 
                                   placeholder="Select form type" 
@@ -1345,7 +1378,7 @@ const CreateProductModal = ({
                               <Form.Item
                                 name="raw_material_stock_id"
                                 label={<span className="text-xs sm:text-sm">Dimensions</span>}
-                                rules={[{ required: isRequiredRawMaterial || isInHouse, message: 'Select dimensions!' }]}
+                                rules={[{ required: false, message: 'Select dimensions!' }]}
                               >
                                 <Select 
                                   placeholder="Select dimensions" 

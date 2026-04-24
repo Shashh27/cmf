@@ -74,7 +74,7 @@ const PDM = () => {
                 { key: "pps", label: "PPS" },
               ]}
             />
-            <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
+            <Button size="small" onClick={() => navigate("/manufacturing_coordinator/oms/orders")}>
               Back to Orders
             </Button>
           </div>

@@ -1,12 +1,20 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
-import { Table, Button, Empty, Card, Input, Space, Tooltip, Tag, Dropdown, Modal, InputNumber, Select, Typography, App } from "antd";
 import { 
-  SafetyCertificateOutlined, 
-  EditOutlined, 
+  Card, Table, Button, Select, message, Spin, Tree, 
+  Modal, InputNumber, Tag, Typography, Space, Collapse,
+  Empty, Row, Col, Alert, App, Input, Tooltip
+} from "antd";
+import { 
+  ShoppingCartOutlined, 
+  LinkOutlined, 
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  ReloadOutlined,
   DeleteOutlined,
-  CheckCircleOutlined
+  SafetyCertificateOutlined,
+  EditOutlined
 } from "@ant-design/icons";
 import { PartsWithRawMaterialsStatusPdfDownload } from "../../DownloadReports/RawMaterialsPdfDownload";
 
@@ -30,13 +38,12 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     outer_diameter: ''
   });
   const [statusEditCurrentLinkages, setStatusEditCurrentLinkages] = useState([]);
-  const [statusEditPartsToRemove, setStatusEditPartsToRemove] = useState([]);
-  const [statusEditPartsToAdd, setStatusEditPartsToAdd] = useState([]);
   const [statusEditPartQuantities, setStatusEditPartQuantities] = useState({});
-  const [statusEditAvailableParts, setStatusEditAvailableParts] = useState([]);
+  const [statusEditPartRequiredLengths, setStatusEditPartRequiredLengths] = useState({});
+  const [statusEditPartRawMaterialUnits, setStatusEditPartRawMaterialUnits] = useState({});
+  const [availableUnits, setAvailableUnits] = useState([]);
+  const [loadingUnits, setLoadingUnits] = useState(false);
   const [orderHierarchyMap, setOrderHierarchyMap] = useState({});
-  const [statusEditPartMetaById, setStatusEditPartMetaById] = useState({});
-  const [decimalWarnings, setDecimalWarnings] = useState({});
   const [vendors, setVendors] = useState([]);
   const [statusEditReceivedVendorId, setStatusEditReceivedVendorId] = useState(null);
   
@@ -106,93 +113,16 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     return vendors.filter(vendor => vendorIds.includes(vendor.id));
   };
 
-  const limitDecimals = (value, fieldName, precision = 3) => {
-    if (value === null || value === undefined || value === '') return value;
-    const cleaned = String(value).replace(/[^0-9.]/g, '');
-    let str = cleaned;
-    
-    if (precision === 0) {
-      str = str.replace(/\./g, '');
-      if (str.length > 5) {
-        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
-        return str.slice(0, 5);
-      }
-      return str;
-    }
-
-    if (str.includes('.')) {
-      const [int, dec] = str.split('.');
-      let finalInt = int;
-      if (int.length > 6) {
-        showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-        finalInt = int.slice(0, 6);
-      }
-      
-      if (dec.length > precision) {
-        showDecimalWarning(fieldName, precision);
-        return `${finalInt}.${dec.slice(0, precision)}`;
-      }
-      return `${finalInt}.${dec}`;
-    } else {
-      if (str.length > 6) {
-        showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-        return str.slice(0, 6);
-      }
-    }
-    return str;
-  };
-
-  const showDecimalWarning = (fieldName, precision, customMsg) => {
-    if (!fieldName) return;
-    const msg = customMsg ?? (precision === 0 ? "Only whole numbers allowed" : `Max ${precision} decimal places allowed`);
-    setDecimalWarnings(prev => ({ ...prev, [fieldName]: msg }));
-    setTimeout(() => {
-      setDecimalWarnings(prev => ({ ...prev, [fieldName]: null }));
-    }, 3000);
-  };
-
-  const blockExtraDecimals = (e, fieldName, precision = 3) => {
-    const { value } = e.target;
-    const controlKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Control'];
-    if (controlKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
-    if (!/[0-9.]/.test(e.key)) { e.preventDefault(); return; }
-    if (precision === 0 && e.key === '.') { showDecimalWarning(fieldName, 0); e.preventDefault(); return; }
-
-    if (/[0-9]/.test(e.key)) {
-      const hasSelection = e.target.selectionStart !== e.target.selectionEnd;
-      if (precision === 0) {
-        const digitsOnly = String(value).replace(/\D/g, '');
-        if (digitsOnly.length >= 5 && !hasSelection) {
-          showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
-          e.preventDefault();
-          return;
-        }
-      } else {
-        const parts = value.split('.');
-        const selectionStart = e.target.selectionStart;
-        const dotIndex = value.indexOf('.');
-        if ((dotIndex === -1 || selectionStart <= dotIndex) && !hasSelection) {
-          const integerPart = dotIndex === -1 ? value : parts[0];
-          if (integerPart.length >= 6) {
-            showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-    }
-    if (e.key === '.' && value.includes('.')) { e.preventDefault(); return; }
-    if (value.includes('.')) {
-      const parts = value.split('.');
-      const selectionStart = e.target.selectionStart;
-      const dotIndex = value.indexOf('.');
-      if (selectionStart > dotIndex && parts[1].length >= precision) {
-        if (e.target.selectionStart === e.target.selectionEnd) {
-          showDecimalWarning(fieldName, precision);
-          e.preventDefault();
-        }
-      }
-    }
+  const getStatusColor = (status) => {
+    const colors = {
+      enquiry: 'blue',
+      purchase_request: 'orange', 
+      purchase_order: 'processing',
+      received: 'success',
+      available: 'success',
+      exhausted: 'error'
+    };
+    return colors[status] || 'default';
   };
 
   const handleQuickStatusChange = (record) => {
@@ -210,25 +140,35 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     if (!quickStatusRecord) return;
     try {
       const record = quickStatusRecord;
-      const groupId = record.linkage_group_id || null;
+      const stockId = record.id;
+      const newStatus = record.order_status || record.material_status;
+      const newVendor = quickStatusReceivedVendorId;
 
-      if (groupId) {
-        const updateData = {
-          order_status: record.order_status || record.material_status || "enquiry"
-        };
-        
-        // Include received_vendor_id if vendor is selected
-        if (quickStatusReceivedVendorId) {
-          updateData.received_vendor_id = quickStatusReceivedVendorId;
+      // Validate vendor selection when status is purchase_request, purchase_order, or received
+      if (newStatus === 'purchase_request' || newStatus === 'purchase_order' || newStatus === 'received') {
+        if (!quickStatusReceivedVendorId) {
+          message.error('Vendor selection is required when status is purchase_request, purchase_order, or received');
+          return;
         }
-        
-        await axios.put(
-          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/status/group/${groupId}`,
-          updateData,
-          { headers: { "Content-Type": "application/json" } }
-        );
       }
 
+      // Always call PUT endpoint to update status and vendor
+      const updateData = {
+        order_status: newStatus
+      };
+      
+      if (newVendor) {
+        updateData.received_vendor_id = newVendor;
+      }
+      
+      await axios.put(
+        `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${stockId}`,
+        updateData,
+        { headers: { "Content-Type": "application/json" } }
+      );
+
+      // Force refresh the table data
+      await new Promise(resolve => setTimeout(resolve, 500));
       await fetchLinkedMaterials();
       if (typeof onDataChanged === "function") {
         onDataChanged();
@@ -238,12 +178,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       setQuickStatusRecord(null);
       setQuickStatusReceivedVendorId(null);
     } catch (error) {
-      console.error("Error updating status:", error);
-      const detail =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        "Error updating status";
-      message.error(detail);
+      message.error(error?.response?.data?.detail || error?.response?.data?.message || "Error updating status");
     }
   };
 
@@ -251,99 +186,71 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     if (!statusEditRecord) return;
     try {
       const record = statusEditRecord;
-      const ids = record.linkage_ids || [];
-      const newQty = statusEditOrderQty != null ? Number(statusEditOrderQty) : record.quantity ?? 0;
-      const groupId = record.linkage_group_id || null;
+      const stockId = record.id;
 
-      const uid = getCurrentUserId();
-
-      if (!groupId) {
-        const updates = await Promise.all(
-          ids.map((id) => {
-            const linkage = (linkedMaterials || []).find((l) => l.id === id);
-            if (!linkage) return null;
-            const body = {
-              raw_material_id: linkage.raw_material_id,
-              part_id: linkage.part_id,
-              order_id: linkage.order_id,
-              order_quantity: newQty,
-              form_type: record.form_type || "Round",
-              // Include dimensions based on form type
-              ...(record.form_type === 'Round' && {
-                diameter: statusEditDimensions.diameter || 0,
-                length: statusEditDimensions.length || 0
-              }),
-              ...(record.form_type === 'Square' && {
-                length: statusEditDimensions.length || 0,
-                breadth: statusEditDimensions.breadth || 0,
-                height: statusEditDimensions.height || 0
-              }),
-              ...(record.form_type === 'Pipe' && {
-                outer_diameter: statusEditDimensions.outer_diameter || 0,
-                inner_diameter: statusEditDimensions.inner_diameter || 0,
-                length: statusEditDimensions.length || 0
-              }),
-              material_status: linkage.material_status || "available",
-              linkage_group_id: linkage.linkage_group_id || null,
-              user_id: uid,
-            };
-            return axios.put(
-              `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${id}`,
-              body,
-              { headers: { "Content-Type": "application/json" } }
-            );
-          })
-        );
-        await Promise.all(updates);
+      // Validate that if unit is selected, required length must be entered
+      for (const linkage of statusEditCurrentLinkages) {
+        const partId = linkage.part_id;
+        const unitId = statusEditPartRawMaterialUnits[partId];
+        const requiredLength = statusEditPartRequiredLengths[partId];
+        
+        if (unitId && !requiredLength) {
+          message.error('Please enter required length for all linked parts');
+          return;
+        }
       }
 
-      if (groupId) {
-        const updateData = {
-          order_status: record.order_status || record.material_status || "enquiry",
-          order_quantity: newQty,
-          form_type: record.form_type || "Round",
-          // Include dimensions based on form type
-          ...(record.form_type === 'Round' && {
-            diameter: statusEditDimensions.diameter || 0,
-            length: statusEditDimensions.length || 0
-          }),
-          ...(record.form_type === 'Square' && {
-            length: statusEditDimensions.length || 0,
-            breadth: statusEditDimensions.breadth || 0,
-            height: statusEditDimensions.height || 0
-          }),
-          ...(record.form_type === 'Pipe' && {
-            outer_diameter: statusEditDimensions.outer_diameter || 0,
-            inner_diameter: statusEditDimensions.inner_diameter || 0,
-            length: statusEditDimensions.length || 0
-          })
-        };
+      // Always call PUT endpoint to update stock details
+      const updateData = {
+        quantity: statusEditOrderQty || record.quantity,
+        form_type: record.form_type || "Round",
+        part_ids: statusEditCurrentLinkages.map(l => l.part_id).join(','),
+        part_quantities: statusEditCurrentLinkages.reduce((acc, l) => {
+          acc[l.part_id] = statusEditPartQuantities[l.part_id] || 1;
+          return acc;
+        }, {}),
+        required_lengths: statusEditCurrentLinkages.reduce((acc, l) => {
+          acc[l.part_id] = statusEditPartRequiredLengths[l.part_id] || '';
+          return acc;
+        }, {})
+      };
+      
+      // Add dimensions based on form type
+      if (record.form_type === 'Round') {
+        updateData.diameter = statusEditDimensions.diameter;
+        updateData.length = statusEditDimensions.length;
+      } else if (record.form_type === 'Square') {
+        updateData.length = statusEditDimensions.length;
+        updateData.breadth = statusEditDimensions.breadth;
+        updateData.height = statusEditDimensions.height;
+      } else if (record.form_type === 'Pipe') {
+        updateData.outer_diameter = statusEditDimensions.outer_diameter;
+        updateData.inner_diameter = statusEditDimensions.inner_diameter;
+        updateData.length = statusEditDimensions.length;
+      }
+      
+      await axios.put(
+        `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${stockId}`,
+        updateData,
+        { headers: { "Content-Type": "application/json" } }
+      );
+      
+      // Assign units to parts using the assign-material endpoint
+      for (const linkage of statusEditCurrentLinkages) {
+        const partId = linkage.part_id;
+        const requiredLength = statusEditPartRequiredLengths[partId];
+        const unitId = statusEditPartRawMaterialUnits[partId];
         
-        // Include received_vendor_id if status is purchase_request, purchase_order, or received and vendor is selected
-        if ((statusEditRecord.order_status === 'purchase_request' || statusEditRecord.order_status === 'purchase_order' || statusEditRecord.order_status === 'received') && 
-            statusEditReceivedVendorId) {
-          updateData.received_vendor_id = statusEditReceivedVendorId;
+        // Only assign if both unit and length are provided
+        if (unitId && requiredLength) {
+          await axios.post(`${API_BASE_URL}/rawmaterials/assign-material/`, null, {
+            params: {
+              unit_id: unitId,
+              part_id: partId,
+              required_length: parseFloat(requiredLength)
+            }
+          });
         }
-        
-        // Calculate and include part_ids and quantities
-        const finalPartIds = statusEditCurrentLinkages
-          .filter(l => !statusEditPartsToRemove.includes(l.id))
-          .map(l => l.part_id);
-        
-        updateData.part_ids = finalPartIds.join(',');
-        
-        // Include part quantities
-        const partQuantities = {};
-        finalPartIds.forEach(partId => {
-          partQuantities[partId] = statusEditPartQuantities[partId] || 1;
-        });
-        updateData.part_quantities = partQuantities;
-        
-        await axios.put(
-          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/status/group/${groupId}`,
-          updateData,
-          { headers: { "Content-Type": "application/json" } }
-        );
       }
 
       await fetchLinkedMaterials();
@@ -352,29 +259,29 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       }
       message.success("Status updated successfully");
       setStatusEditModalOpen(false);
-      setStatusEditRecord(null);
-      setStatusEditOrderQty(0);
-      setStatusEditDimensions({
-        diameter: '',
-        length: '',
-        breadth: '',
-        height: '',
-        inner_diameter: '',
-        outer_diameter: ''
-      });
-      setStatusEditCurrentLinkages([]);
-      setStatusEditPartsToRemove([]);
-      setStatusEditPartsToAdd([]);
-      setStatusEditPartQuantities({});
-      setStatusEditReceivedVendorId(null);
+      resetModalStates();
     } catch (error) {
-      console.error("Error updating status:", error);
-      const detail =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        "Error updating status";
-      message.error(detail);
+      message.error(error?.response?.data?.detail || "Error updating status");
     }
+  };
+
+  const resetModalStates = () => {
+    setStatusEditRecord(null);
+    setStatusEditOrderQty(0);
+    setStatusEditDimensions({
+      diameter: '',
+      length: '',
+      breadth: '',
+      height: '',
+      inner_diameter: '',
+      outer_diameter: ''
+    });
+    setStatusEditCurrentLinkages([]);
+    setStatusEditPartQuantities({});
+    setStatusEditPartRequiredLengths({});
+    setStatusEditPartRawMaterialUnits({});
+    setAvailableUnits([]);
+    setStatusEditReceivedVendorId(null);
   };
 
   const getOrderHierarchy = async (orderId) => {
@@ -428,7 +335,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
 
   const openStatusEditModal = async (record) => {
     setStatusEditRecord(record);
-    setStatusEditOrderQty(record.quantity ?? 0);
+    setStatusEditModalOpen(true);
     
     // Initialize dimensions from record
     setStatusEditDimensions({
@@ -440,117 +347,69 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       outer_diameter: record.outer_diameter || ''
     });
     
-    // Initialize received vendor from record
+    // Use quantity field
+    const qty = record.quantity ?? record.available_quantity ?? record.allocated_quantity ?? 0;
+    setStatusEditOrderQty(qty);
     setStatusEditReceivedVendorId(record.received_vendor_id || null);
     
-    // Fetch vendors for selection
-    await fetchVendors();
-    
-    // Extract current linkages from the record
+    // Extract linked parts from record
     let currentLinkages = [];
     if (record.part_ids) {
-      try {
-        const partIds = record.part_ids.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-        
-        if (partIds.length > 0) {
-          const partsResponse = await axios.get(`${API_BASE_URL}/parts/`, {
-            params: { ids: partIds.join(',') }
-          });
-          
-          const parts = partsResponse.data || [];
-          
-          // Create linkages with quantities
-          currentLinkages = partIds.map((partId, index) => {
-            const part = parts.find(p => p.id === partId);
-            return {
-              id: `${record.id}-${partId}`,
-              part_id: partId,
-              part_number: part?.part_number || `Part-${partId}`,
-              part_name: part?.part_name || 'Unknown Part',
-              raw_material_required_quantity: part?.raw_material_required_quantity || 1,
-              raw_material_id: record.raw_material_id,
-              order_id: record.order_id,
-              linkage_group_id: record.linkage_group_id
-            };
-          });
-        }
-      } catch (error) {
-        // Fallback to basic linkage creation
-        const partIds = record.part_ids.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-        const partNumbers = record.part_numbers || [];
-        const partNames = record.part_names || [];
-        
-        currentLinkages = partIds.map((partId, index) => ({
-          id: `${record.id}-${partId}`,
-          part_id: parseInt(partId),
-          part_number: Array.isArray(partNumbers) ? partNumbers[index] : partNumbers?.split(',')[index]?.trim() || `Part-${partId}`,
-          part_name: Array.isArray(partNames) ? partNames[index] : partNames?.split(',')[index]?.trim() || 'Unknown Part',
-          raw_material_required_quantity: 1,
-          raw_material_id: record.raw_material_id,
-          order_id: record.order_id,
-          linkage_group_id: record.linkage_group_id
-        }));
+      let partIds = record.part_ids;
+      if (typeof partIds === 'string') {
+        partIds = partIds.split(',').map(id => id.trim()).filter(id => id);
       }
+      
+      currentLinkages = partIds.map((partId, index) => ({
+        id: `${record.id}-${partId}`,
+        part_id: parseInt(partId),
+        part_number: record.part_numbers?.[index] || `Part-${partId}`,
+        part_name: record.part_names?.[index] || 'Unknown Part',
+        raw_material_id: record.raw_material_id,
+        order_id: record.source_order_id || record.order_id,
+        linkage_group_id: record.linkage_group_id
+      }));
     }
     
     setStatusEditCurrentLinkages(currentLinkages);
-    setStatusEditPartsToRemove([]);
-    setStatusEditPartsToAdd([]);
     
-    // Initialize part quantities from existing data
+    // Initialize part quantities
     const initialQuantities = {};
+    const initialRequiredLengths = {};
+    const initialRawMaterialUnits = {};
     currentLinkages.forEach(linkage => {
-      // Use existing quantity if available, default to 1
       initialQuantities[linkage.part_id] = linkage.raw_material_required_quantity || 1;
+      initialRequiredLengths[linkage.part_id] = linkage.required_length || '';
+      // Only set unit ID if it exists in the linkage, otherwise leave empty for user to select
+      if (linkage.raw_material_unit_id) {
+        initialRawMaterialUnits[linkage.part_id] = linkage.raw_material_unit_id;
+      }
     });
     setStatusEditPartQuantities(initialQuantities);
+    setStatusEditPartRequiredLengths(initialRequiredLengths);
+    setStatusEditPartRawMaterialUnits(initialRawMaterialUnits);
     
+    // Fetch available units for this stock
+    if (record.id) {
+      await fetchAvailableUnits(record.id);
+    }
+    
+    // Fetch order hierarchy
     try {
-      const orderId = record.order_id;
-      let hierarchy = orderHierarchyMap[orderId];
-      if (!hierarchy) {
-        const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
-        hierarchy = res.data;
-        setOrderHierarchyMap(prev => ({ ...prev, [orderId]: hierarchy }));
-      }
-      if (hierarchy) {
-        const { parts: allParts, meta } = flattenPartsFromOrderHierarchy(hierarchy) || { parts: [], meta: {} };
-        const existingPartIds = new Set(currentLinkages.map(l => l.part_id));
-        setStatusEditAvailableParts(allParts.filter(p => p && p.id && !existingPartIds.has(p.id)));
-        setStatusEditPartMetaById(meta || {});
+      const orderId = record.source_order_id || record.order_id;
+      
+      if (orderId) {
+        let hierarchy = orderHierarchyMap[orderId];
+        if (!hierarchy) {
+          const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+          hierarchy = res.data;
+          setOrderHierarchyMap(prev => ({ ...prev, [orderId]: hierarchy }));
+        }
       }
     } catch (error) {
       console.error("Error fetching order hierarchy:", error);
-      setStatusEditAvailableParts([]);
-      setStatusEditPartMetaById({});
     }
-    
-    setStatusEditModalOpen(true);
   };
-
-  // Update available parts whenever current linkages or parts to remove change
-  const updateAvailableParts = useCallback(() => {
-    if (!statusEditRecord || !orderHierarchyMap[statusEditRecord.order_id]) return;
-    
-    const hierarchy = orderHierarchyMap[statusEditRecord.order_id];
-    const { parts: allParts } = flattenPartsFromOrderHierarchy(hierarchy) || { parts: [] };
-    
-    // Get all currently linked parts (excluding those marked for removal)
-    const linkedPartIds = new Set(
-      statusEditCurrentLinkages
-        .filter(l => !statusEditPartsToRemove.includes(l.id))
-        .map(l => l.part_id)
-    );
-    
-    // Filter available parts (exclude linked parts)
-    const availableParts = allParts.filter(p => p && p.id && !linkedPartIds.has(p.id));
-    setStatusEditAvailableParts(availableParts);
-  }, [statusEditRecord, statusEditCurrentLinkages, statusEditPartsToRemove, orderHierarchyMap]);
-
-  // Update available parts when linkages change
-  useEffect(() => {
-    updateAvailableParts();
-  }, [updateAvailableParts]);
 
   const handleDeleteLinkGroup = (record) => {
     modal.confirm({
@@ -591,137 +450,363 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     setSearchText(cleanedValue.toLowerCase().slice(0, 50));
   };
 
-  const flattenPartsFromOrderHierarchy = (orderData) => {
-    if (!orderData || !orderData.product_hierarchy) {
-      return { parts: [], meta: {} };
+  const fetchAvailableUnits = async (stockId) => {
+    try {
+      setLoadingUnits(true);
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/${stockId}/units`);
+      setAvailableUnits(response.data || []);
+    } catch (error) {
+      console.error('Error fetching available units:', error);
+      setAvailableUnits([]);
+    } finally {
+      setLoadingUnits(false);
     }
+  };
 
-    const { product_hierarchy } = orderData;
-    const parts = [];
-    const meta = {};
-
-    const processAssembly = (assembly, path = []) => {
-      const currentPath = [...path, assembly.assembly?.assembly_name || 'Unknown Assembly'].filter(Boolean);
+  const buildTreeData = (hierarchy) => {
+    if (!hierarchy || !hierarchy.product_hierarchy) return [];
+    
+    const { assemblies = [], direct_parts = [] } = hierarchy.product_hierarchy;
+    const treeData = [];
+    
+    // Process assemblies
+    assemblies.forEach(assembly => {
+      const assemblyNode = {
+        title: assembly.assembly?.assembly_name || 'Unknown Assembly',
+        key: `assembly-${assembly.assembly?.id}`,
+        type: 'assembly',
+        children: []
+      };
       
       // Process parts in this assembly
       if (assembly.parts && Array.isArray(assembly.parts)) {
         assembly.parts.forEach(partDetail => {
           if (partDetail.part && partDetail.part.id) {
             const part = partDetail.part;
-            parts.push(part);
-            meta[part.id] = {
-              path: currentPath,
-              isDirect: false,
-              assemblyName: assembly.assembly?.assembly_name
-            };
+            const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
+            const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
+            const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
+            const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
+            
+            // Skip STANDARD and Out-Source WITHOUT_RAW_MATERIAL
+            if (part.type_name === "STANDARD" || 
+                (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
+              return;
+            }
+            
+            assemblyNode.children.push({
+              title: `${part.part_number} - ${part.part_name}`,
+              key: `part-${part.id}`,
+              type: 'part',
+              part: part,
+              isAlreadyLinked: isAlreadyLinked,
+              isLinkedToGeneralStock: isLinkedToGeneralStock,
+              isLinkedToOrderStock: isLinkedToOrderStock,
+              sourceType: sourceType
+            });
           }
         });
       }
-
-      // Process subassemblies recursively
+      
+      // Process subassemblies
       if (assembly.subassemblies && Array.isArray(assembly.subassemblies)) {
         assembly.subassemblies.forEach(subassembly => {
-          processAssembly(subassembly, currentPath);
+          const subNode = {
+            title: subassembly.assembly?.assembly_name || 'Unknown Subassembly',
+            key: `subassembly-${subassembly.assembly?.id}`,
+            type: 'assembly',
+            children: []
+          };
+          
+          if (subassembly.parts && Array.isArray(subassembly.parts)) {
+            subassembly.parts.forEach(partDetail => {
+              if (partDetail.part && partDetail.part.id) {
+                const part = partDetail.part;
+                const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
+                const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
+                const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
+                const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
+                
+                if (part.type_name === "STANDARD" || 
+                    (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
+                  return;
+                }
+                
+                subNode.children.push({
+                  title: `${part.part_number} - ${part.part_name}`,
+                  key: `part-${part.id}`,
+                  type: 'part',
+                  part: part,
+                  isAlreadyLinked: isAlreadyLinked,
+                  isLinkedToGeneralStock: isLinkedToGeneralStock,
+                  isLinkedToOrderStock: isLinkedToOrderStock,
+                  sourceType: sourceType
+                });
+              }
+            });
+          }
+          
+          assemblyNode.children.push(subNode);
         });
       }
-    };
-
-    // Process direct parts (not in any assembly)
-    if (product_hierarchy.direct_parts && Array.isArray(product_hierarchy.direct_parts)) {
-      product_hierarchy.direct_parts.forEach(partDetail => {
+      
+      treeData.push(assemblyNode);
+    });
+    
+    // Process direct parts
+    if (direct_parts && Array.isArray(direct_parts)) {
+      const directNode = {
+        title: 'Direct Parts',
+        key: 'direct-parts',
+        type: 'assembly',
+        children: []
+      };
+      
+      direct_parts.forEach(partDetail => {
         if (partDetail.part && partDetail.part.id) {
           const part = partDetail.part;
-          parts.push(part);
-          meta[part.id] = {
-            path: [],
-            isDirect: true,
-            assemblyName: null
-          };
+          const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
+          const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
+          const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
+          const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
+          
+          if (part.type_name === "STANDARD" || 
+              (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
+            return;
+          }
+          
+          directNode.children.push({
+            title: `${part.part_number} - ${part.part_name}`,
+            key: `part-${part.id}`,
+            type: 'part',
+            part: part,
+            isAlreadyLinked: isAlreadyLinked,
+            isLinkedToGeneralStock: isLinkedToGeneralStock,
+            isLinkedToOrderStock: isLinkedToOrderStock,
+            sourceType: sourceType
+          });
         }
       });
+      
+      if (directNode.children.length > 0) {
+        treeData.push(directNode);
+      }
     }
+    
+    return treeData;
+  };
 
-    // Process assemblies
-    if (product_hierarchy.assemblies && Array.isArray(product_hierarchy.assemblies)) {
-      product_hierarchy.assemblies.forEach(assembly => {
-        processAssembly(assembly);
+  const renderTreeNode = (nodeData) => {
+    if (nodeData.type === 'part') {
+      const { part, isAlreadyLinked, isLinkedToGeneralStock, isLinkedToOrderStock, sourceType } = nodeData;
+      const isLinkedToCurrentStock = statusEditCurrentLinkages.some(l => l.part_id === part.id);
+      
+      return (
+        <div className="flex items-center justify-between w-full pr-4 py-1">
+          <div className="flex items-center gap-3 flex-1">
+            <div className="flex flex-col">
+              <span className="font-semibold text-sm text-gray-800">{part.part_number}</span>
+              <span className="text-xs text-gray-500">{part.part_name}</span>
+            </div>
+            <div className="flex gap-1">
+              {isLinkedToGeneralStock ? (
+                <Tag color="green" className="text-[10px] border-green-200">✓ Linked to General Stock</Tag>
+              ) : isLinkedToOrderStock ? (
+                <Tag color="blue" className="text-[10px] border-blue-200">✓ Linked to Order Stock</Tag>
+              ) : (
+                <>
+                  {sourceType === 'general' && (
+                    <Tag color="orange" className="text-[10px] border-orange-200">General Stock Type</Tag>
+                  )}
+                  {sourceType === 'order' && (
+                    <Tag color="purple" className="text-[10px] border-purple-200">Order Stock Type</Tag>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+          {(isLinkedToGeneralStock || isLinkedToOrderStock) && (
+            <div className="flex items-center gap-2">
+              <div className="bg-blue-50 border border-blue-200 rounded px-2 py-1 text-xs">
+                <span className="font-semibold text-blue-800">Unit #{part.raw_material_unit_id || 'N/A'}</span>
+                <span className="text-blue-600 ml-1">| Length: {part.required_length || 0}mm</span>
+              </div>
+              {!isLinkedToGeneralStock && (
+                <Button 
+                  size="small" 
+                  danger 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    Modal.confirm({
+                      title: 'Unlink Part',
+                      content: `Are you sure you want to unlink part ${part.part_number} from the raw material unit? This will restore the unit's remaining length.`,
+                      okText: 'Yes, Unlink',
+                      okType: 'danger',
+                      cancelText: 'Cancel',
+                      onOk: () => handleUnlinkPart(part.id)
+                    });
+                  }}
+                >
+                  Unlink
+                </Button>
+              )}
+            </div>
+          )}
+          {!isLinkedToGeneralStock && !isLinkedToOrderStock && (
+            <div className="flex items-center gap-2">
+              <Select
+                size="small"
+                placeholder="Unit"
+                value={statusEditPartRawMaterialUnits[part.id] || null}
+                onChange={(value) => {
+                  const currentLength = statusEditPartRequiredLengths[part.id];
+                  
+                  // Validate current length against new unit's available length
+                  if (currentLength && value) {
+                    const selectedUnit = availableUnits.find(u => u.id === value);
+                    if (selectedUnit && parseFloat(currentLength) > selectedUnit.remaining_length) {
+                      message.error(`Required length (${currentLength}mm) exceeds available length of selected unit (${selectedUnit.remaining_length}mm)`);
+                      return;
+                    }
+                  }
+                  
+                  setStatusEditPartRawMaterialUnits(prev => ({ ...prev, [part.id]: value }));
+                  // Auto-link if not already linked
+                  if (!isLinkedToCurrentStock) {
+                    handleLinkPart(part);
+                  }
+                }}
+                style={{ width: '200px' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {availableUnits.map(unit => (
+                  <Option key={unit.id} value={unit.id} disabled={unit.status === 'exhausted'}>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-semibold">Unit #{unit.id}</span>
+                      <span className="text-[10px] text-gray-600">Total: {unit.total_length}mm | Remaining: {unit.remaining_length}mm</span>
+                      {unit.status === 'exhausted' && (
+                        <span className="text-[10px] text-red-500">Exhausted</span>
+                      )}
+                    </div>
+                  </Option>
+                ))}
+              </Select>
+              <Input
+                size="small"
+                placeholder="Length"
+                value={statusEditPartRequiredLengths[part.id] || ''}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const selectedUnitId = statusEditPartRawMaterialUnits[part.id];
+                  
+                  // Validate length against available unit length
+                  if (value && selectedUnitId) {
+                    const selectedUnit = availableUnits.find(u => u.id === selectedUnitId);
+                    if (selectedUnit && parseFloat(value) > selectedUnit.remaining_length) {
+                      message.error(`Required length cannot exceed available length (${selectedUnit.remaining_length}mm)`);
+                      return;
+                    }
+                  }
+                  
+                  setStatusEditPartRequiredLengths(prev => ({ ...prev, [part.id]: value }));
+                  // Auto-link if not already linked
+                  if (!isLinkedToCurrentStock) {
+                    handleLinkPart(part);
+                  }
+                }}
+                style={{ width: '80px' }}
+                onClick={(e) => e.stopPropagation()}
+              />
+              {isLinkedToCurrentStock && (
+                <Button 
+                  size="small" 
+                  danger 
+                  icon={<DeleteOutlined />}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleUnlinkPart(part.id);
+                  }}
+                >
+                  Unlink
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    // Assembly node
+    return (
+      <span className="font-semibold text-gray-700 flex items-center gap-2">
+        <span className="text-blue-600">📁</span>
+        {nodeData.title}
+      </span>
+    );
+  };
+
+  const handleLinkPart = (part) => {
+    const newLinkage = {
+      id: `${statusEditRecord.id}-${part.id}`,
+      part_id: part.id,
+      part_number: part.part_number,
+      part_name: part.part_name,
+      raw_material_id: statusEditRecord.raw_material_id || statusEditRecord.material_id,
+      order_id: statusEditRecord.source_order_id || statusEditRecord.order_id,
+      linkage_group_id: statusEditRecord.linkage_group_id
+    };
+    
+    setStatusEditCurrentLinkages(prev => [...prev, newLinkage]);
+    setStatusEditPartQuantities(prev => ({ ...prev, [part.id]: 1 }));
+    setStatusEditPartRequiredLengths(prev => ({ ...prev, [part.id]: '' }));
+    // Don't set unit ID here - let the user select it from dropdown
+  };
+
+  const handleUnlinkPart = async (partId) => {
+    try {
+      // Call the backend unlink endpoint to properly recalculate
+      await axios.delete(`${API_BASE_URL}/rawmaterials/parts/${partId}/unlink-material`);
+      
+      // Remove from local state
+      setStatusEditCurrentLinkages(prev => prev.filter(l => l.part_id !== partId));
+      setStatusEditPartQuantities(prev => {
+        const newState = { ...prev };
+        delete newState[partId];
+        return newState;
       });
+      setStatusEditPartRequiredLengths(prev => {
+        const newState = { ...prev };
+        delete newState[partId];
+        return newState;
+      });
+      setStatusEditPartRawMaterialUnits(prev => {
+        const newState = { ...prev };
+        delete newState[partId];
+        return newState;
+      });
+      
+      message.success('Part unlinked successfully');
+    } catch (error) {
+      console.error('Error unlinking part:', error);
+      message.error(error?.response?.data?.detail || 'Error unlinking part');
     }
+  };
 
-    return { parts, meta };
+  const flattenPartsFromOrderHierarchy = (hierarchy) => {
+    // This function is no longer needed with tree approach
+    return { parts: [], meta: {} };
   };
 
   const filtered = linkedMaterials.filter(item => {
     if (!searchText) return true;
-    
     const searchLower = searchText.toLowerCase();
-    
-    // Create a searchable string from all relevant fields
-    const searchableContent = [
-      item.source_order_number || '',
-      // Part numbers - handle array and string formats
-      ...(Array.isArray(item.part_numbers) ? item.part_numbers : [item.part_numbers || '']),
-      item.material_name || '',
-      item.form_type || '',
-      item.quantity?.toString() || '',
-      item.allocated_quantity?.toString() || '',
-      item.available_quantity?.toString() || '',
-      // Part required quantities - handle array format
-      ...(Array.isArray(item.part_required_quantities) ? item.part_required_quantities : [item.part_required_quantities || '']),
-      item.mass?.toString() || '',
-      item.weight?.toString() || '',
-      item.cost?.toString() || '',
-      item.vendor_name || '',
-      item.received_vendor_name || '',
-      // Status search - handle both order_status and material_status
-      item.order_status || '',
-      item.material_status || '',
-      item.status || '', // Added status field for the Status column
-      // Handle status variations for searching
-      ...(item.order_status === 'enquiry' ? ['enquiry', 'inquiry', 'enq'] : []),
-      ...(item.order_status === 'purchase_request' ? ['purchase request', 'purchaserequest', 'pr', 'request'] : []),
-      ...(item.order_status === 'purchase_order' ? ['purchase order', 'purchaseorder', 'po', 'order'] : []),
-      ...(item.order_status === 'received' ? ['received', 'receive', 'recd', 'recvd'] : []),
-      ...(item.order_status === 'available' ? ['available', 'avail', 'availble'] : []),
-      ...(item.order_status === 'exhausted' ? ['exhausted', 'exhaust', 'finished', 'empty'] : []),
-      // Handle material_status variations
-      ...(item.material_status === 'enquiry' ? ['enquiry', 'inquiry', 'enq'] : []),
-      ...(item.material_status === 'purchase_request' ? ['purchase request', 'purchaserequest', 'pr', 'request'] : []),
-      ...(item.material_status === 'purchase_order' ? ['purchase order', 'purchaseorder', 'po', 'order'] : []),
-      ...(item.material_status === 'received' ? ['received', 'receive', 'recd', 'recvd'] : []),
-      ...(item.material_status === 'available' ? ['available', 'avail', 'availble'] : []),
-      ...(item.material_status === 'exhausted' ? ['exhausted', 'exhaust', 'finished', 'empty'] : []),
-      // Handle status field variations (for the Status column)
-      ...(item.status === 'available' ? ['available', 'avail', 'availble', 'in stock', 'stock', 'ready'] : []),
-      ...(item.status === 'not available' ? ['not available', 'notavailable', 'not_available', 'unavailable', 'na', 'zero', '0'] : []),
-      ...(item.status === 'exhausted' ? ['exhausted', 'exhaust', 'finished', 'empty'] : []),
-      // Handle NOT AVAILABLE status for available_quantity
-      ...(item.available_quantity === 0 || item.available_quantity === null ? ['not available', 'notavailable', 'not_available', 'unavailable', 'na', 'zero', '0'] : ['available', 'in stock', 'stock']),
-      // General status terms
-      ...(item.available_quantity > 0 ? ['available', 'in stock', 'stock', 'ready'] : [])
-    ].join(' ').toLowerCase();
-    
-    // Create special numeric content that preserves decimal points for number search
-    const numericContent = [
-      item.quantity?.toString() || '',
-      item.allocated_quantity?.toString() || '',
-      item.available_quantity?.toString() || '',
-      ...(Array.isArray(item.part_required_quantities) ? item.part_required_quantities : [item.part_required_quantities || '']),
-      item.mass?.toString() || '',
-      item.weight?.toString() || '',
-      item.cost?.toString() || ''
-    ].join(' ').toLowerCase();
-    
-    // Clean content for special character search (remove everything except alphanumeric and spaces)
-    const cleanedContent = searchableContent.replace(/[^a-z0-9 ]/g, '');
-    
-    // Check if search term exists in:
-    // 1. Original content (with decimals)
-    // 2. Cleaned content (without special characters)
-    // 3. Numeric content (preserving decimals for number search)
-    return searchableContent.includes(searchLower) || 
-           cleanedContent.includes(searchLower) || 
-           numericContent.includes(searchLower);
+    return (
+      (item.source_order_number?.toLowerCase() || '').includes(searchLower) ||
+      (item.material_name?.toLowerCase() || '').includes(searchLower) ||
+      (item.vendor_name?.toLowerCase() || '').includes(searchLower) ||
+      (item.order_status?.toLowerCase() || '').includes(searchLower) ||
+      (item.part_numbers?.join(' ').toLowerCase() || '').includes(searchLower)
+    );
   });
 
   const groupedMap = {};
@@ -740,7 +825,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     if (item.id < groupedMap[key].min_id) {
       groupedMap[key].min_id = item.id;
     }
-    groupedMap[key].quantity = item.order_quantity;
+    groupedMap[key].quantity = item.quantity;
     groupedMap[key].mass = item.mass;
   });
 
@@ -833,20 +918,14 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       title: <span className="font-semibold text-gray-700">Quantity</span>,
       dataIndex: 'quantity',
       key: 'quantity',
+      width: 80,
       render: (value) => value != null ? value : <span className="text-gray-400">-</span>,
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
+    
     {
-      title: <span className="font-semibold text-gray-700">Allocated</span>,
-      dataIndex: 'allocated_quantity',
-      key: 'allocated_quantity',
-      render: (value) => value != null ? <span className="text-blue-600 font-medium">{value}</span> : <span className="text-gray-400">-</span>,
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Available</span>,
-      dataIndex: 'available_quantity',
-      key: 'available_quantity',
+      title: <span className="font-semibold text-gray-700">Volume (m³)</span>,
+      dataIndex: 'volume',
+      key: 'volume',
       render: (value) => {
         if (value == null) return <span className="text-gray-400">-</span>;
         const color = value > 0 ? 'text-green-600' : 'text-red-600';
@@ -854,24 +933,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       },
       onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
-    {
-      title: <span className="font-semibold text-gray-700">Part Required Qty</span>,
-      dataIndex: 'part_required_quantities',
-      key: 'part_required_quantities',
-      render: (values) => {
-        if (!values || values.length === 0 || values[0] === undefined) {
-          return <span className="text-gray-400">-</span>;
-        }
-        
-        return (
-          <Space size="small" wrap>
-            {values.map((val, idx) => (
-              <Tag key={idx} color="purple">{val}</Tag>
-            ))}
-          </Space>
-        );
-      },
-    },
+    
     {
       title: <span className="font-semibold text-gray-700">Mass (kg)</span>,
       dataIndex: 'mass',
@@ -956,7 +1018,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         
         let color = 'default';
         if (orderStatus === 'enquiry') color = 'blue';
-        if (orderStatus === 'purchase_request') color = 'warning';
+
         if (orderStatus === 'purchase_order') color = 'processing';
         if (orderStatus === 'received') color = 'success';
         
@@ -990,11 +1052,11 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   return (
     <div className="mt-4">
       <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procurement Status</span></div><Space className="w-full sm:w-auto flex-col sm:flex-row gap-2"><Input.Search placeholder="Search all columns..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-64" size="middle" /><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /></Space></div>}>
-        <Table columns={columns} dataSource={groupedData} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table" scroll={{ x: 1200 }} loading={loading} />
+        <Table columns={columns} dataSource={groupedData} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table responsive-table" scroll={{ x: 'max-content' }} loading={loading} />
       </Card>
 
       {/* Quick Status Modal - for dropdown status changes */}
-      <Modal open={quickStatusModalOpen} onCancel={() => setQuickStatusModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800">Update Order Status & Vendor</span></div>} width={500} centered footer={[<Button key="cancel" onClick={() => setQuickStatusModalOpen(false)}>Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveQuickStatus}>Update Status</Button>]}>
+      <Modal open={quickStatusModalOpen} onCancel={() => setQuickStatusModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800">Update Order Status & Vendor</span></div>} width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }} centered footer={[<Button key="cancel" onClick={() => setQuickStatusModalOpen(false)}>Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveQuickStatus}>Update Status</Button>]}>
         <div className="py-4 space-y-4">
           {/* Order Status */}
           <div className="space-y-1">
@@ -1006,10 +1068,10 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
               onChange={(value) => {
                 setQuickStatusRecord(prev => ({ ...prev, order_status: value, material_status: value }));
               }}
-              size="large"
+              size="middle"
               className="rounded-md"
             >
-              <Option value="purchase_request">Purchase Request</Option>
+       
               <Option value="purchase_order">Purchase Order</Option>
               <Option value="received">Received</Option>
             </Select>
@@ -1023,7 +1085,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
               placeholder="Select the vendor for this order"
               value={quickStatusReceivedVendorId}
               onChange={(value) => setQuickStatusReceivedVendorId(value)}
-              size="large"
+              size="middle"
               className="rounded-md"
               showSearch
               optionFilterProp="children"
@@ -1040,8 +1102,8 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       </Modal>
 
       {/* Full Edit Modal - for edit icon */}
-      <Modal open={statusEditModalOpen} onCancel={() => setStatusEditModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800">Edit Linked Parts & Status</span></div>} width={600} centered footer={[<Button key="cancel" onClick={() => setStatusEditModalOpen(false)}>Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveStatusEdit}>Save Changes</Button>]}>
-        <div className="py-4 space-y-6">
+      <Modal open={statusEditModalOpen} onCancel={() => setStatusEditModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800">Edit Linked Parts & Status</span></div>} width={{ xs: '95%', sm: '90%', md: 800, lg: 800 }} centered footer={[<Button key="cancel" onClick={() => setStatusEditModalOpen(false)}>Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveStatusEdit}>Save Changes</Button>]}>
+        <div className="py-2 space-y-3" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
           {/* Form Type */}
           <div className="space-y-1">
             <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Form Type</Text>
@@ -1049,10 +1111,8 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
               style={{ width: '100%' }}
               placeholder="Select Form Type"
               value={statusEditRecord?.form_type}
-              onChange={(value) => {
-                setStatusEditRecord(prev => ({ ...prev, form_type: value }));
-              }}
-              size="large"
+              disabled
+              size="middle"
               className="rounded-md"
             >
               <Option value="Round">Round</Option>
@@ -1066,958 +1126,153 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
             <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</Text>
             <InputNumber 
               min={1} 
-              precision={0} 
-              step={1} 
-              max={99999} 
               style={{ width: '100%' }} 
               value={statusEditOrderQty} 
-              onChange={(value) => {
-                // Only allow valid positive integers, reject everything else including 0
-                if (value === null || value === undefined || value === '') {
-                  setStatusEditOrderQty(1);
-                } else if (Number.isInteger(value) && value > 0) {
-                  setStatusEditOrderQty(value);
-                } else {
-                  // Reject invalid values including 0
-                  setStatusEditOrderQty(1);
-                }
-              }}
-              onBeforeInput={(e) => {
-                // Block input before it reaches the field
-                const char = e.data;
-                const currentValue = e.target.value || '';
-                // Block non-digits
-                if (char && !/[0-9]/.test(char)) {
-                  e.preventDefault();
-                  return false;
-                }
-                // Block 0 as first digit
-                if (char === '0' && currentValue === '') {
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-              onKeyPress={(e) => {
-                // Block all non-digit keys except navigation keys
-                const char = String.fromCharCode(e.which);
-                const currentValue = e.target.value || '';
-                // Block non-digits
-                if (!/[0-9]/.test(char) && 
-                    e.which !== 8 && // backspace
-                    e.which !== 46 && // delete
-                    e.which !== 9 && // tab
-                    e.which !== 13 && // enter
-                    e.which !== 37 && // left arrow
-                    e.which !== 39 && // right arrow
-                    e.which !== 36 && // home
-                    e.which !== 35) { // end
-                  e.preventDefault();
-                  return false;
-                }
-                // Block 0 as first digit
-                if (char === '0' && currentValue === '') {
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-              onInput={(e) => {
-                // Immediate cleanup - remove leading zeros and non-digits
-                const value = e.target.value;
-                // Keep only digits
-                const cleanValue = value.replace(/[^0-9]/g, '');
-                // Remove leading zeros (e.g., "01" -> "1", "00" -> "0")
-                const validValue = cleanValue.replace(/^0+/, '');
-                if (value !== validValue) {
-                  e.target.value = validValue;
-                }
-                // If empty or just zeros, default to 1
-                const numValue = parseInt(validValue) || 1;
-                setStatusEditOrderQty(numValue > 0 ? numValue : 1);
-              }}
-              onPaste={(e) => {
-                // Prevent paste of invalid content
-                e.preventDefault();
-                const pasteData = e.clipboardData.getData('text');
-                const cleanData = pasteData.replace(/[^0-9]/g, '');
-                if (cleanData) {
-                  const currentValue = e.target.value || '';
-                  const newValue = (currentValue + cleanData).replace(/^0+/, '');
-                  const numValue = parseInt(newValue) || 1;
-                  setStatusEditOrderQty(numValue > 0 ? numValue : 1);
-                }
-                return false;
-              }}
-              onBlur={(e) => {
-                // Clean up any invalid characters and leading zeros on blur
-                const value = e.target.value;
-                const cleanValue = value.replace(/[^0-9]/g, '').replace(/^0+/, '');
-                if (value !== cleanValue) {
-                  e.target.value = cleanValue;
-                }
-                const numValue = parseInt(cleanValue) || 1;
-                setStatusEditOrderQty(numValue > 0 ? numValue : 1);
-              }}
-              size="large" 
+              onChange={setStatusEditOrderQty}
+              size="middle" 
               className="rounded-md" 
-              stringMode 
-              parser={(v) => limitDecimals(v, 'status-edit-qty', 0)} 
-              onKeyDown={(e) => blockExtraDecimals(e, 'status-edit-qty', 0)} 
             />
-            {decimalWarnings['status-edit-qty'] && <Text type="warning" className="text-[10px] block mt-1">{decimalWarnings['status-edit-qty']}</Text>}
           </div>
 
           {/* Dimensions based on form type */}
           {statusEditRecord?.form_type === 'Round' && (
-            <div className="space-y-1">
-              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Diameter (mm) *</Text>
-              <InputNumber
-                style={{ width: '100%' }}
-                placeholder="Diameter"
-                value={statusEditDimensions.diameter}
-                onChange={(value) => {
-                  // Only allow valid numbers, reject everything else
-                  if (value === null || value === undefined || value === '') {
-                    setStatusEditDimensions(prev => ({ ...prev, diameter: '' }));
-                  } else if (!isNaN(value) && value >= 0) {
-                    setStatusEditDimensions(prev => ({ ...prev, diameter: value }));
-                  } else {
-                    // Reject invalid values by setting back to empty or last valid value
-                    setStatusEditDimensions(prev => ({ ...prev, diameter: '' }));
-                  }
-                }}
-                onBeforeInput={(e) => {
-                  // Block input before it reaches the field
-                  const char = e.data;
-                  if (char && !/[0-9.]/.test(char)) {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyPress={(e) => {
-                  // Block all non-digit and non-decimal keys except navigation keys
-                  const char = String.fromCharCode(e.which);
-                  if (!/[0-9.]/.test(char) && 
-                      e.which !== 8 && // backspace
-                      e.which !== 46 && // delete
-                      e.which !== 9 && // tab
-                      e.which !== 13 && // enter
-                      e.which !== 37 && // left arrow
-                      e.which !== 39 && // right arrow
-                      e.which !== 36 && // home
-                      e.which !== 35) { // end
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyDown={(e) => {
-                  // Block multiple decimal points and special characters
-                  const value = e.target.value;
-                  if (e.key === '.' && value && value.includes('.')) {
-                    e.preventDefault();
-                    return false;
-                  }
-                  if (e.key === ',' || e.key === '-' || e.key === '+') {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onInput={(e) => {
-                  // Immediate cleanup of any invalid characters
-                  const value = e.target.value;
-                  const validValue = value.replace(/[^0-9.]/g, '');
-                  if (value !== validValue) {
-                    e.target.value = validValue;
-                    setStatusEditDimensions(prev => ({ ...prev, diameter: validValue }));
-                  }
-                }}
-                onPaste={(e) => {
-                  // Prevent paste of invalid content
-                  e.preventDefault();
-                  const pasteData = e.clipboardData.getData('text');
-                  const cleanData = pasteData.replace(/[^0-9.]/g, '');
-                  if (cleanData) {
-                    const currentValue = e.target.value || '';
-                    const newValue = currentValue + cleanData;
-                    setStatusEditDimensions(prev => ({ ...prev, diameter: newValue }));
-                  }
-                  return false;
-                }}
-                onBlur={(e) => {
-                  // Clean up any invalid characters on blur
-                  const value = e.target.value;
-                  const cleanValue = value.replace(/[^0-9.]/g, '');
-                  if (value !== cleanValue) {
-                    setStatusEditDimensions(prev => ({ ...prev, diameter: cleanValue }));
-                  }
-                }}
-                min={0}
-                step={0.01}
-                size="large"
-                className="rounded-md"
-              />
-            </div>
-          )}
-
-          {statusEditRecord?.form_type === 'Round' && (
-            <div className="space-y-1">
-              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm) *</Text>
-              <InputNumber
-                style={{ width: '100%' }}
-                placeholder="Length"
-                value={statusEditDimensions.length}
-                onChange={(value) => {
-                  // Only allow valid numbers, reject everything else
-                  if (value === null || value === undefined || value === '') {
-                    setStatusEditDimensions(prev => ({ ...prev, length: '' }));
-                  } else if (!isNaN(value) && value >= 0) {
-                    setStatusEditDimensions(prev => ({ ...prev, length: value }));
-                  } else {
-                    // Reject invalid values by setting back to empty or last valid value
-                    setStatusEditDimensions(prev => ({ ...prev, length: '' }));
-                  }
-                }}
-                onBeforeInput={(e) => {
-                  // Block input before it reaches the field
-                  const char = e.data;
-                  if (char && !/[0-9.]/.test(char)) {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyPress={(e) => {
-                  // Block all non-digit and non-decimal keys except navigation keys
-                  const char = String.fromCharCode(e.which);
-                  if (!/[0-9.]/.test(char) && 
-                      e.which !== 8 && // backspace
-                      e.which !== 46 && // delete
-                      e.which !== 9 && // tab
-                      e.which !== 13 && // enter
-                      e.which !== 37 && // left arrow
-                      e.which !== 39 && // right arrow
-                      e.which !== 36 && // home
-                      e.which !== 35) { // end
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyDown={(e) => {
-                  // Block multiple decimal points and special characters
-                  const value = e.target.value;
-                  if (e.key === '.' && value && value.includes('.')) {
-                    e.preventDefault();
-                    return false;
-                  }
-                  if (e.key === ',' || e.key === '-' || e.key === '+') {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onInput={(e) => {
-                  // Immediate cleanup of any invalid characters
-                  const value = e.target.value;
-                  const validValue = value.replace(/[^0-9.]/g, '');
-                  if (value !== validValue) {
-                    e.target.value = validValue;
-                    setStatusEditDimensions(prev => ({ ...prev, length: validValue }));
-                  }
-                }}
-                onPaste={(e) => {
-                  // Prevent paste of invalid content
-                  e.preventDefault();
-                  const pasteData = e.clipboardData.getData('text');
-                  const cleanData = pasteData.replace(/[^0-9.]/g, '');
-                  if (cleanData) {
-                    const currentValue = e.target.value || '';
-                    const newValue = currentValue + cleanData;
-                    setStatusEditDimensions(prev => ({ ...prev, length: newValue }));
-                  }
-                  return false;
-                }}
-                onBlur={(e) => {
-                  // Clean up any invalid characters on blur
-                  const value = e.target.value;
-                  const cleanValue = value.replace(/[^0-9.]/g, '');
-                  if (value !== cleanValue) {
-                    setStatusEditDimensions(prev => ({ ...prev, length: cleanValue }));
-                  }
-                }}
-                min={0}
-                step={0.01}
-                size="large"
-                className="rounded-md"
-              />
-            </div>
-          )}
-
-          {statusEditRecord?.form_type === 'Square' && (
-            <div className="grid grid-cols-2 gap-4">
+            <>
               <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm) *</Text>
+                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Diameter (mm)</Text>
+                <InputNumber
+                  style={{ width: '100%' }}
+                  placeholder="Diameter"
+                  value={statusEditDimensions.diameter}
+                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, diameter: value }))}
+                  min={0}
+                  size="middle"
+                  className="rounded-md"
+                />
+              </div>
+              <div className="space-y-1">
+                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
                 <InputNumber
                   style={{ width: '100%' }}
                   placeholder="Length"
                   value={statusEditDimensions.length}
                   onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
                   min={0}
-                  step={0.01}
-                  size="large"
+                  size="middle"
                   className="rounded-md"
                 />
               </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breadth (mm) *</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Breadth"
-                  value={statusEditDimensions.breadth}
-                  onChange={(value) => {
-                    // Only allow valid numbers, reject everything else
-                    if (value === null || value === undefined || value === '') {
-                      setStatusEditDimensions(prev => ({ ...prev, breadth: '' }));
-                    } else if (!isNaN(value) && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, breadth: value }));
-                    } else {
-                      // Reject invalid values by setting back to empty or last valid value
-                      setStatusEditDimensions(prev => ({ ...prev, breadth: '' }));
-                    }
-                  }}
-                  onBeforeInput={(e) => {
-                    // Block input before it reaches the field
-                    const char = e.data;
-                    if (char && !/[0-9.]/.test(char)) {
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onKeyPress={(e) => {
-                    // Block all non-digit and non-decimal keys except navigation keys
-                    const char = String.fromCharCode(e.which);
-                    if (!/[0-9.]/.test(char) && 
-                        e.which !== 8 && // backspace
-                        e.which !== 46 && // delete
-                        e.which !== 9 && // tab
-                        e.which !== 13 && // enter
-                        e.which !== 37 && // left arrow
-                        e.which !== 39 && // right arrow
-                        e.which !== 36 && // home
-                        e.which !== 35) { // end
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    // Block multiple decimal points and special characters
-                    const value = e.target.value;
-                    if (e.key === '.' && value && value.includes('.')) {
-                      e.preventDefault();
-                      return false;
-                    }
-                    if (e.key === ',' || e.key === '-' || e.key === '+') {
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onInput={(e) => {
-                    // Immediate cleanup of any invalid characters
-                    const value = e.target.value;
-                    const validValue = value.replace(/[^0-9.]/g, '');
-                    if (value !== validValue) {
-                      e.target.value = validValue;
-                      setStatusEditDimensions(prev => ({ ...prev, breadth: validValue }));
-                    }
-                  }}
-                  onPaste={(e) => {
-                    // Prevent paste of invalid content
-                    e.preventDefault();
-                    const pasteData = e.clipboardData.getData('text');
-                    const cleanData = pasteData.replace(/[^0-9.]/g, '');
-                    if (cleanData) {
-                      const currentValue = e.target.value || '';
-                      const newValue = currentValue + cleanData;
-                      setStatusEditDimensions(prev => ({ ...prev, breadth: newValue }));
-                    }
-                    return false;
-                  }}
-                  onBlur={(e) => {
-                    // Clean up any invalid characters on blur
-                    const value = e.target.value;
-                    const cleanValue = value.replace(/[^0-9.]/g, '');
-                    if (value !== cleanValue) {
-                      setStatusEditDimensions(prev => ({ ...prev, breadth: cleanValue }));
-                    }
-                  }}
-                  min={0}
-                  step={0.01}
-                  size="large"
-                  className="rounded-md"
-                />
-              </div>
-            </div>
+            </>
           )}
 
           {statusEditRecord?.form_type === 'Square' && (
-            <div className="space-y-1">
-              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Height (mm) *</Text>
-              <InputNumber
-                style={{ width: '100%' }}
-                placeholder="Height"
-                value={statusEditDimensions.height}
-                onChange={(value) => {
-                  // Only allow valid numbers, reject everything else
-                  if (value === null || value === undefined || value === '') {
-                    setStatusEditDimensions(prev => ({ ...prev, height: '' }));
-                  } else if (!isNaN(value) && value >= 0) {
-                    setStatusEditDimensions(prev => ({ ...prev, height: value }));
-                  } else {
-                    // Reject invalid values by setting back to empty or last valid value
-                    setStatusEditDimensions(prev => ({ ...prev, height: '' }));
-                  }
-                }}
-                onBeforeInput={(e) => {
-                  // Block input before it reaches the field
-                  const char = e.data;
-                  if (char && !/[0-9.]/.test(char)) {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyPress={(e) => {
-                  // Block all non-digit and non-decimal keys except navigation keys
-                  const char = String.fromCharCode(e.which);
-                  if (!/[0-9.]/.test(char) && 
-                      e.which !== 8 && // backspace
-                      e.which !== 46 && // delete
-                      e.which !== 9 && // tab
-                      e.which !== 13 && // enter
-                      e.which !== 37 && // left arrow
-                      e.which !== 39 && // right arrow
-                      e.which !== 36 && // home
-                      e.which !== 35) { // end
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyDown={(e) => {
-                  // Block multiple decimal points and special characters
-                  const value = e.target.value;
-                  if (e.key === '.' && value && value.includes('.')) {
-                    e.preventDefault();
-                    return false;
-                  }
-                  if (e.key === ',' || e.key === '-' || e.key === '+') {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onInput={(e) => {
-                  // Immediate cleanup of any invalid characters
-                  const value = e.target.value;
-                  const validValue = value.replace(/[^0-9.]/g, '');
-                  if (value !== validValue) {
-                    e.target.value = validValue;
-                    setStatusEditDimensions(prev => ({ ...prev, height: validValue }));
-                  }
-                }}
-                onPaste={(e) => {
-                  // Prevent paste of invalid content
-                  e.preventDefault();
-                  const pasteData = e.clipboardData.getData('text');
-                  const cleanData = pasteData.replace(/[^0-9.]/g, '');
-                  if (cleanData) {
-                    const currentValue = e.target.value || '';
-                    const newValue = currentValue + cleanData;
-                    setStatusEditDimensions(prev => ({ ...prev, height: newValue }));
-                  }
-                  return false;
-                }}
-                onBlur={(e) => {
-                  // Clean up any invalid characters on blur
-                  const value = e.target.value;
-                  const cleanValue = value.replace(/[^0-9.]/g, '');
-                  if (value !== cleanValue) {
-                    setStatusEditDimensions(prev => ({ ...prev, height: cleanValue }));
-                  }
-                }}
-                min={0}
-                step={0.01}
-                size="large"
-                className="rounded-md"
-              />
-            </div>
-          )}
-
-          {statusEditRecord?.form_type === 'Pipe' && (
-            <div className="grid grid-cols-2 gap-4">
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    placeholder="Length"
+                    value={statusEditDimensions.length}
+                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
+                    min={0}
+                    size="middle"
+                    className="rounded-md"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breadth (mm)</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    placeholder="Breadth"
+                    value={statusEditDimensions.breadth}
+                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, breadth: value }))}
+                    min={0}
+                    size="middle"
+                    className="rounded-md"
+                  />
+                </div>
+              </div>
               <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Outer Diameter (mm) *</Text>
+                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Height (mm)</Text>
                 <InputNumber
                   style={{ width: '100%' }}
-                  placeholder="Outer Diameter"
-                  value={statusEditDimensions.outer_diameter}
-                  onChange={(value) => {
-                    // Only allow valid numbers, reject everything else
-                    if (value === null || value === undefined || value === '') {
-                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: '' }));
-                    } else if (!isNaN(value) && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }));
-                    } else {
-                      // Reject invalid values by setting back to empty or last valid value
-                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: '' }));
-                    }
-                  }}
-                  onBeforeInput={(e) => {
-                    // Block input before it reaches the field
-                    const char = e.data;
-                    if (char && !/[0-9.]/.test(char)) {
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onKeyPress={(e) => {
-                    // Block all non-digit and non-decimal keys except navigation keys
-                    const char = String.fromCharCode(e.which);
-                    if (!/[0-9.]/.test(char) && 
-                        e.which !== 8 && // backspace
-                        e.which !== 46 && // delete
-                        e.which !== 9 && // tab
-                        e.which !== 13 && // enter
-                        e.which !== 37 && // left arrow
-                        e.which !== 39 && // right arrow
-                        e.which !== 36 && // home
-                        e.which !== 35) { // end
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    // Block multiple decimal points and special characters
-                    const value = e.target.value;
-                    if (e.key === '.' && value && value.includes('.')) {
-                      e.preventDefault();
-                      return false;
-                    }
-                    if (e.key === ',' || e.key === '-' || e.key === '+') {
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onInput={(e) => {
-                    // Immediate cleanup of any invalid characters
-                    const value = e.target.value;
-                    const validValue = value.replace(/[^0-9.]/g, '');
-                    if (value !== validValue) {
-                      e.target.value = validValue;
-                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: validValue }));
-                    }
-                  }}
-                  onPaste={(e) => {
-                    // Prevent paste of invalid content
-                    e.preventDefault();
-                    const pasteData = e.clipboardData.getData('text');
-                    const cleanData = pasteData.replace(/[^0-9.]/g, '');
-                    if (cleanData) {
-                      const currentValue = e.target.value || '';
-                      const newValue = currentValue + cleanData;
-                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: newValue }));
-                    }
-                    return false;
-                  }}
-                  onBlur={(e) => {
-                    // Clean up any invalid characters on blur
-                    const value = e.target.value;
-                    const cleanValue = value.replace(/[^0-9.]/g, '');
-                    if (value !== cleanValue) {
-                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: cleanValue }));
-                    }
-                  }}
+                  placeholder="Height"
+                  value={statusEditDimensions.height}
+                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, height: value }))}
                   min={0}
-                  step={0.01}
-                  size="large"
+                  size="middle"
                   className="rounded-md"
                 />
               </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Inner Diameter (mm) *</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Inner Diameter"
-                  value={statusEditDimensions.inner_diameter}
-                  onChange={(value) => {
-                    // Only allow valid numbers, reject everything else
-                    if (value === null || value === undefined || value === '') {
-                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: '' }));
-                    } else if (!isNaN(value) && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }));
-                    } else {
-                      // Reject invalid values by setting back to empty or last valid value
-                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: '' }));
-                    }
-                  }}
-                  onBeforeInput={(e) => {
-                    // Block input before it reaches the field
-                    const char = e.data;
-                    if (char && !/[0-9.]/.test(char)) {
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onKeyPress={(e) => {
-                    // Block all non-digit and non-decimal keys except navigation keys
-                    const char = String.fromCharCode(e.which);
-                    if (!/[0-9.]/.test(char) && 
-                        e.which !== 8 && // backspace
-                        e.which !== 46 && // delete
-                        e.which !== 9 && // tab
-                        e.which !== 13 && // enter
-                        e.which !== 37 && // left arrow
-                        e.which !== 39 && // right arrow
-                        e.which !== 36 && // home
-                        e.which !== 35) { // end
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    // Block multiple decimal points and special characters
-                    const value = e.target.value;
-                    if (e.key === '.' && value && value.includes('.')) {
-                      e.preventDefault();
-                      return false;
-                    }
-                    if (e.key === ',' || e.key === '-' || e.key === '+') {
-                      e.preventDefault();
-                      return false;
-                    }
-                  }}
-                  onInput={(e) => {
-                    // Immediate cleanup of any invalid characters
-                    const value = e.target.value;
-                    const validValue = value.replace(/[^0-9.]/g, '');
-                    if (value !== validValue) {
-                      e.target.value = validValue;
-                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: validValue }));
-                    }
-                  }}
-                  onPaste={(e) => {
-                    // Prevent paste of invalid content
-                    e.preventDefault();
-                    const pasteData = e.clipboardData.getData('text');
-                    const cleanData = pasteData.replace(/[^0-9.]/g, '');
-                    if (cleanData) {
-                      const currentValue = e.target.value || '';
-                      const newValue = currentValue + cleanData;
-                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: newValue }));
-                    }
-                    return false;
-                  }}
-                  onBlur={(e) => {
-                    // Clean up any invalid characters on blur
-                    const value = e.target.value;
-                    const cleanValue = value.replace(/[^0-9.]/g, '');
-                    if (value !== cleanValue) {
-                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: cleanValue }));
-                    }
-                  }}
-                  min={0}
-                  step={0.01}
-                  size="large"
-                  className="rounded-md"
-                />
-              </div>
-            </div>
+            </>
           )}
 
           {statusEditRecord?.form_type === 'Pipe' && (
-            <div className="space-y-1">
-              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm) *</Text>
-              <InputNumber
-                style={{ width: '100%' }}
-                placeholder="Length"
-                value={statusEditDimensions.length}
-                onChange={(value) => {
-                  // Only allow valid numbers, reject everything else
-                  if (value === null || value === undefined || value === '') {
-                    setStatusEditDimensions(prev => ({ ...prev, length: '' }));
-                  } else if (!isNaN(value) && value >= 0) {
-                    setStatusEditDimensions(prev => ({ ...prev, length: value }));
-                  } else {
-                    // Reject invalid values by setting back to empty or last valid value
-                    setStatusEditDimensions(prev => ({ ...prev, length: '' }));
-                  }
-                }}
-                onBeforeInput={(e) => {
-                  // Block input before it reaches the field
-                  const char = e.data;
-                  if (char && !/[0-9.]/.test(char)) {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyPress={(e) => {
-                  // Block all non-digit and non-decimal keys except navigation keys
-                  const char = String.fromCharCode(e.which);
-                  if (!/[0-9.]/.test(char) && 
-                      e.which !== 8 && // backspace
-                      e.which !== 46 && // delete
-                      e.which !== 9 && // tab
-                      e.which !== 13 && // enter
-                      e.which !== 37 && // left arrow
-                      e.which !== 39 && // right arrow
-                      e.which !== 36 && // home
-                      e.which !== 35) { // end
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onKeyDown={(e) => {
-                  // Block multiple decimal points and special characters
-                  const value = e.target.value;
-                  if (e.key === '.' && value && value.includes('.')) {
-                    e.preventDefault();
-                    return false;
-                  }
-                  if (e.key === ',' || e.key === '-' || e.key === '+') {
-                    e.preventDefault();
-                    return false;
-                  }
-                }}
-                onInput={(e) => {
-                  // Immediate cleanup of any invalid characters
-                  const value = e.target.value;
-                  const validValue = value.replace(/[^0-9.]/g, '');
-                  if (value !== validValue) {
-                    e.target.value = validValue;
-                    setStatusEditDimensions(prev => ({ ...prev, length: validValue }));
-                  }
-                }}
-                onPaste={(e) => {
-                  // Prevent paste of invalid content
-                  e.preventDefault();
-                  const pasteData = e.clipboardData.getData('text');
-                  const cleanData = pasteData.replace(/[^0-9.]/g, '');
-                  if (cleanData) {
-                    const currentValue = e.target.value || '';
-                    const newValue = currentValue + cleanData;
-                    setStatusEditDimensions(prev => ({ ...prev, length: newValue }));
-                  }
-                  return false;
-                }}
-                onBlur={(e) => {
-                  // Clean up any invalid characters on blur
-                  const value = e.target.value;
-                  const cleanValue = value.replace(/[^0-9.]/g, '');
-                  if (value !== cleanValue) {
-                    setStatusEditDimensions(prev => ({ ...prev, length: cleanValue }));
-                  }
-                }}
-                min={0}
-                step={0.01}
-                size="large"
-                className="rounded-md"
-              />
-            </div>
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Outer Diameter (mm)</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    placeholder="Outer Diameter"
+                    value={statusEditDimensions.outer_diameter}
+                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }))}
+                    min={0}
+                    size="middle"
+                    className="rounded-md"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Inner Diameter (mm)</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    placeholder="Inner Diameter"
+                    value={statusEditDimensions.inner_diameter}
+                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }))}
+                    min={0}
+                    size="middle"
+                    className="rounded-md"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
+                <InputNumber
+                  style={{ width: '100%' }}
+                  placeholder="Length"
+                  value={statusEditDimensions.length}
+                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
+                  min={0}
+                  size="middle"
+                  className="rounded-md"
+                />
+              </div>
+            </>
           )}
           
-          {/* Received Vendor (when status is purchase_request, purchase_order, or received) */}
-          {(statusEditRecord?.order_status === 'purchase_request' || 
-            statusEditRecord?.order_status === 'purchase_order' || 
-            statusEditRecord?.order_status === 'received' || 
-            statusEditRecord?.material_status === 'purchase_request' || 
-            statusEditRecord?.material_status === 'purchase_order' || 
-            statusEditRecord?.material_status === 'received') && (
-            <div className="space-y-1">
-              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Selected Vendor *</Text>
-              <Select
-                style={{ width: '100%' }}
-                placeholder="Select the vendor for this order"
-                value={statusEditReceivedVendorId}
-                onChange={(value) => setStatusEditReceivedVendorId(value)}
-                size="large"
-                className="rounded-md"
-                showSearch
-                optionFilterProp="children"
-              >
-                {getEnquiryVendors(statusEditRecord).map(vendor => (
-                  <Option key={vendor.id} value={vendor.id}>
-                    {vendor.company_name}
-                  </Option>
-                ))}
-              </Select>
-              <Text type="secondary" className="text-xs">Select from vendors contacted during enquiry</Text>
-            </div>
-          )}
-          
-          {/* Parts Management */}
+          {/* Parts Management - Tree View */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between"><Text className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Linked Parts</Text><Text className="text-xs text-gray-400">{statusEditCurrentLinkages.filter(l => !statusEditPartsToRemove.includes(l.id)).length} Parts Linked</Text></div>
-            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 min-h-[60px] space-y-2">
-              {statusEditCurrentLinkages
-                .filter(l => !statusEditPartsToRemove.includes(l.id))
-                .map(l => {
-                  const meta = statusEditPartMetaById[l.part_id];
-                  const pathLabel = meta?.path?.length
-                    ? `Assembly: ${meta.path.join(" / ")}`
-                    : meta?.isDirect
-                      ? "Direct Part"
-                      : "";
-                  const quantity = statusEditPartQuantities[l.part_id] || 1;
-                  
-                  return (
-                    <div key={l.id} className="flex items-center justify-between bg-white p-3 rounded-lg border border-gray-200 hover:border-blue-300 transition-colors">
-                      <div className="flex items-center flex-1 min-w-0">
-                        <Tag
-                          color="geekblue"
-                          closable
-                          onClose={() => setStatusEditPartsToRemove(prev => [...prev, l.id])}
-                          className="flex-shrink-0"
-                        >
-                          <span className="font-semibold">{l.part_number}</span>
-                          <span className="mx-1 opacity-60">|</span>
-                          <span className="text-xs opacity-80">{l.part_name}</span>
-                          {pathLabel && (
-                            <>
-                              <span className="mx-1 opacity-40">|</span>
-                              <span className="text-[10px] opacity-70">{pathLabel}</span>
-                            </>
-                          )}
-                        </Tag>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className="text-xs font-medium text-gray-600">Qty:</span>
-                        <InputNumber
-                          size="small"
-                          min={1}
-                          step={1}
-                          precision={0}
-                          value={quantity}
-                          onChange={(newQuantity) => {
-                            // Only allow positive integers, reject 0 and decimals
-                            if (newQuantity === null || newQuantity === undefined || newQuantity === '') {
-                              setStatusEditPartQuantities(prev => ({
-                                ...prev,
-                                [l.part_id]: 1
-                              }));
-                            } else if (Number.isInteger(newQuantity) && newQuantity > 0) {
-                              setStatusEditPartQuantities(prev => ({
-                                ...prev,
-                                [l.part_id]: newQuantity
-                              }));
-                            } else {
-                              // Reject invalid values including 0 and decimals
-                              setStatusEditPartQuantities(prev => ({
-                                ...prev,
-                                [l.part_id]: 1
-                              }));
-                            }
-                          }}
-                          onKeyPress={(e) => {
-                            const char = String.fromCharCode(e.which);
-                            const currentValue = e.target.value || '';
-                            if (!/[0-9]/.test(char) && 
-                                e.which !== 8 && 
-                                e.which !== 46 && 
-                                e.which !== 9 && 
-                                e.which !== 13 && 
-                                e.which !== 37 && 
-                                e.which !== 39 && 
-                                e.which !== 36 && 
-                                e.which !== 35) {
-                              e.preventDefault();
-                              return false;
-                            }
-                            // Block 0 as first digit
-                            if (char === '0' && currentValue === '') {
-                              e.preventDefault();
-                              return false;
-                            }
-                          }}
-                          onBeforeInput={(e) => {
-                            const char = e.data;
-                            const currentValue = e.target.value || '';
-                            if (char && !/[0-9]/.test(char)) {
-                              e.preventDefault();
-                              return false;
-                            }
-                            // Block 0 as first digit
-                            if (char === '0' && currentValue === '') {
-                              e.preventDefault();
-                              return false;
-                            }
-                          }}
-                          style={{ width: '80px' }}
-                          className="text-xs"
-                          placeholder="1"
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+            <div className="flex items-center justify-between">
+              <Text className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Parts Hierarchy</Text>
+             
             </div>
-          </div>
-          <div className="space-y-2">
-            <Text className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Add More Parts</Text>
-            <Select 
-              mode="multiple" 
-              style={{ width: '100%' }} 
-              placeholder="Select parts to add" 
-              value={statusEditPartsToAdd} 
-              onChange={(selectedValues) => {
-                // Add selected parts to current linkages immediately
-                const newLinkages = selectedValues.map(partId => {
-                  const part = statusEditAvailableParts.find(p => p.id === partId);
-                  return {
-                    id: `${statusEditRecord.id}-${partId}`, // Unique key
-                    part_id: partId,
-                    part_number: part.part_number,
-                    part_name: part.part_name,
-                    raw_material_id: statusEditRecord.raw_material_id,
-                    order_id: statusEditRecord.order_id,
-                    linkage_group_id: statusEditRecord.linkage_group_id
-                  };
-                });
-                
-                // Add to current linkages
-                setStatusEditCurrentLinkages(prev => [...prev, ...newLinkages]);
-                
-                // Initialize quantities for new parts (default to 1)
-                const newQuantities = {};
-                selectedValues.forEach(partId => {
-                  if (!statusEditPartQuantities[partId]) {
-                    newQuantities[partId] = 1;
-                  }
-                });
-                if (Object.keys(newQuantities).length > 0) {
-                  setStatusEditPartQuantities(prev => ({ ...prev, ...newQuantities }));
-                }
-                
-                // Clear the selection
-                setStatusEditPartsToAdd([]);
-              }} 
-              size="large" 
-              className="rounded-md" 
-              optionFilterProp="children" 
-              allowClear
-            >
-              {statusEditAvailableParts.map(p => {
-                const meta = statusEditPartMetaById[p.id];
-                const pathLabel = meta?.path?.length
-                  ? `Assembly: ${meta.path.join(" / ")}`
-                  : meta?.isDirect
-                    ? "Direct Part"
-                    : "";
-                return (
-                  <Option key={p.id} value={p.id}>
-                    <div className="flex flex-col py-1">
-                      <span className="font-semibold text-gray-800">{p.part_number}</span>
-                      <span className="text-xs text-gray-500">{p.part_name}</span>
-                      {pathLabel && (
-                        <span className="text-[10px] text-gray-400 mt-0.5">{pathLabel}</span>
-                      )}
-                    </div>
-                  </Option>
-                );
-              })}
-            </Select>
+            <div className="bg-white p-4 rounded-lg border border-gray-200" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+              {loading ? (
+                <div className="flex justify-center py-12">
+                  <Spin size="large" tip="Loading parts..." />
+                </div>
+              ) : orderHierarchyMap[statusEditRecord?.source_order_id || statusEditRecord?.order_id] ? (
+                <Tree
+                  showLine={{ showLeafIcon: false }}
+                  defaultExpandAll
+                  treeData={buildTreeData(orderHierarchyMap[statusEditRecord?.source_order_id || statusEditRecord?.order_id])}
+                  titleRender={(nodeData) => renderTreeNode(nodeData)}
+                  className="custom-tree"
+                />
+              ) : (
+                <Empty description="No hierarchy available" />
+              )}
+            </div>
           </div>
         </div>
       </Modal>
