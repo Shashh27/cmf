@@ -6,7 +6,7 @@ import calendar
 from datetime import date
 
 from DB.database import get_db
-from DB.models.scheduling import MachineStatus, ShiftHoursConfiguration, Status, MachineDowntime, EfficiencyFactor
+from DB.models.scheduling import MachineStatus, ShiftHoursConfiguration, Status, MachineDowntime, EfficiencyFactor, PlannedScheduleItem
 from DB.models.configuration import Machine   # adjust path if needed
 
 
@@ -112,6 +112,26 @@ def get_machine_utilization(
         status_map.setdefault(s.machine_id, []).append(s)
 
     # ----------------------------
+    # GET PLANNED SCHEDULE ITEMS FOR UTILIZATION
+    # ----------------------------
+    planned_items = (
+        db.query(PlannedScheduleItem)
+        .filter(
+            PlannedScheduleItem.machine_id == machine_id if machine_id else True,
+            PlannedScheduleItem.planned_start_time >= start_dt,
+            PlannedScheduleItem.planned_end_time <= end_dt,
+            PlannedScheduleItem.planned_start_time.isnot(None),
+            PlannedScheduleItem.planned_end_time.isnot(None)
+        )
+        .all()
+    )
+
+    # Group planned items by machine for efficient lookup
+    planned_items_by_machine = {}
+    for item in planned_items:
+        planned_items_by_machine.setdefault(item.machine_id, []).append(item)
+
+    # ----------------------------
     # CALCULATION
     # ----------------------------
     result = []
@@ -140,6 +160,25 @@ def get_machine_utilization(
 
         available_hours = max(0, base_available_hours - downtime_hours)
 
+        # Calculate utilized hours from planned schedule items
+        utilized_hours = 0
+        machine_planned_items = planned_items_by_machine.get(m.id, [])
+        
+        for item in machine_planned_items:
+            if item.planned_start_time and item.planned_end_time:
+                duration = (item.planned_end_time - item.planned_start_time).total_seconds() / 3600
+                utilized_hours += duration
+
+        # Apply efficiency factor to utilized hours
+        utilized_hours *= efficiency
+
+        # Calculate utilization percentage
+        utilization_percentage = 0
+        if available_hours > 0:
+            utilization_percentage = (utilized_hours / base_available_hours) * 100
+
+        remaining_hours = max(0, available_hours - utilized_hours)
+
         result.append(
             MachineUtilization(
                 machine_id=m.id,
@@ -149,9 +188,9 @@ def get_machine_utilization(
                 work_center_name=m.work_center.work_center_name if m.work_center else None,
                 work_center_bool=m.work_center.is_schedulable if m.work_center else False,
                 available_hours=round(available_hours, 2),
-                utilized_hours=0,
-                remaining_hours=round(available_hours, 2),
-                utilization_percentage=0,
+                utilized_hours=round(utilized_hours, 2),
+                remaining_hours=round(remaining_hours, 2),
+                utilization_percentage=round(utilization_percentage, 2),
             )
         )
 
@@ -213,6 +252,26 @@ def get_machine_utilization_by_range(
     machines = machines_query.all()
 
     # ------------------------------------
+    # GET PLANNED SCHEDULE ITEMS FOR UTILIZATION
+    # ------------------------------------
+    planned_items = (
+        db.query(PlannedScheduleItem)
+        .filter(
+            PlannedScheduleItem.machine_id == machine_id if machine_id else True,
+            PlannedScheduleItem.planned_start_time >= start_dt,
+            PlannedScheduleItem.planned_end_time <= end_dt,
+            PlannedScheduleItem.planned_start_time.isnot(None),
+            PlannedScheduleItem.planned_end_time.isnot(None)
+        )
+        .all()
+    )
+
+    # Group planned items by machine for efficient lookup
+    planned_items_by_machine = {}
+    for item in planned_items:
+        planned_items_by_machine.setdefault(item.machine_id, []).append(item)
+
+    # ------------------------------------
     # MACHINE STATUS (DOWNTIME)
     # ------------------------------------
     statuses = (
@@ -264,9 +323,24 @@ def get_machine_utilization_by_range(
         adjusted_downtime = downtime_hours * efficiency
         available_hours = max(0, base_available_hours - adjusted_downtime)
 
+        # Calculate utilized hours from planned schedule items
         utilized_hours = 0
-        remaining_hours = available_hours
+        machine_planned_items = planned_items_by_machine.get(m.id, [])
+        
+        for item in machine_planned_items:
+            if item.planned_start_time and item.planned_end_time:
+                duration = (item.planned_end_time - item.planned_start_time).total_seconds() / 3600
+                utilized_hours += duration
+
+        # Apply efficiency factor to utilized hours
+        utilized_hours *= efficiency
+
+        # Calculate utilization percentage
         utilization_percentage = 0
+        if base_available_hours > 0:
+            utilization_percentage = (utilized_hours / base_available_hours) * 100
+
+        remaining_hours = max(0, available_hours - utilized_hours)
 
         result.append(
             MachineUtilization(
@@ -277,9 +351,9 @@ def get_machine_utilization_by_range(
                 work_center_name=m.work_center.code if m.work_center else None,
                 work_center_bool=m.work_center.is_schedulable if m.work_center else False,
                 available_hours=round(available_hours, 2),
-                utilized_hours=0,
+                utilized_hours=round(utilized_hours, 2),
                 remaining_hours=round(remaining_hours, 2),
-                utilization_percentage=0,
+                utilization_percentage=round(utilization_percentage, 2),
             )
         )
 

@@ -6,6 +6,7 @@ from datetime import datetime
 from DB.database import get_db
 from DB.models import ProductionLog, AccessUser, Operation
 from DB.models.configuration import Machine
+from DB.models.inventory import RawMaterialUsage, RawMaterialStock, RawMaterial
 from DB.schemas import (
     ProductionLogCreate,
     ProductionLogUpdate,
@@ -382,24 +383,27 @@ def get_all_production_logs(
                                 }
                             operation_data["order"] = order_data
 
-                # Get raw materials
+                # Get raw materials using raw_material_usage table
                 raw_materials = []
-                # Check if part has a raw material stock assigned
-                if operation.part.raw_material_stock and operation.part.raw_material_stock.material:
-                    raw_materials.append({
-                        "id": operation.part.raw_material_stock.material.id,
-                        "name": operation.part.raw_material_stock.material.material_name,
-                        "quantity": operation.part.raw_material_stock.quantity,
-                        "unit": "kg"  # Default unit since RawMaterial doesn't have unit field
-                    })
-                # Also check legacy raw_material relationship
-                elif operation.part.raw_material:
-                    raw_materials.append({
-                        "id": operation.part.raw_material.id,
-                        "name": operation.part.raw_material.material_name,
-                        "quantity": 1,  # Legacy field doesn't track quantity
-                        "unit": "kg"  # Default unit
-                    })
+                # Check if part has raw materials linked in raw_material_usage table
+                raw_material_usages = db.query(RawMaterialUsage).filter(
+                    RawMaterialUsage.part_id == operation.part.id
+                ).all()
+                
+                for usage in raw_material_usages:
+                    # Get the raw material unit to access stock and material info
+                    raw_material_unit = db.query(RawMaterialStock).filter(
+                        RawMaterialStock.id == usage.raw_material_unit_id
+                    ).first()
+                    
+                    if raw_material_unit and raw_material_unit.material:
+                        raw_materials.append({
+                            "id": raw_material_unit.material.id,
+                            "name": raw_material_unit.material.material_name,
+                            "quantity": usage.used_length,
+                            "unit": "units"  # Based on used_length field
+                        })
+                
                 operation_data["raw_materials"] = raw_materials
 
             response.operation = operation_data
