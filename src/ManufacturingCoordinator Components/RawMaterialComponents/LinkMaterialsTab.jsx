@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
-import { Button, Card, InputNumber, Spin, Typography, App, Select } from "antd";
+import { Button, Card, InputNumber, App, Select } from "antd";
 import { 
   AppstoreOutlined
 } from "@ant-design/icons";
+import DimensionInputs from "./DimensionInputs";
 
-const { Text } = Typography;
 const { Option } = Select;
 
 const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => {
@@ -14,15 +14,12 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
   const [orders, setOrders] = useState([]);
   const [rawMaterials, setRawMaterials] = useState(propRawMaterials || []);
   const [ordersLoading, setOrdersLoading] = useState(false);
-  const [ordersFetched, setOrdersFetched] = useState(false);
   const [vendors, setVendors] = useState([]);
-  const [vendorsLoading, setVendorsLoading] = useState(false);
-  const [vendorsFetched, setVendorsFetched] = useState(false);
   
   // Add Stock mode state
   const [newStockForm, setNewStockForm] = useState({
     material_id: null,
-    form_type: 'Round',
+    form_type: null,
     diameter: '',
     length: '',
     breadth: '',
@@ -31,19 +28,19 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
     outer_diameter: '',
     quantity: 1,
     order_id: null,
-    part_id: null, // Will store comma-separated IDs like "1,2,3,4"
-    vendor_ids: [], // Multiple vendors for enquiry phase
-    selected_vendor_id: null, // Final selected vendor for purchase
-    order_status: 'enquiry'  // Default to enquiry for multiple vendor workflow
+    selected_vendor_id: [], // Multiple vendors for enquiry
+    order_status: 'enquiry'
   });
   const [addStockLoading, setAddStockLoading] = useState(false);
-  const [selectedOrderForStock, setSelectedOrderForStock] = useState(null);
-  const [orderPartsForStock, setOrderPartsForStock] = useState([]);
-  const [loadingOrderParts, setLoadingOrderParts] = useState(false);
-  const [enquiryMode, setEnquiryMode] = useState(true); // Start with enquiry mode
 
-  const fetchingOrders = useRef(false);
-  const initializedRef = useRef(false);
+  // Sync rawMaterials state with prop changes
+  useEffect(() => {
+    setRawMaterials(propRawMaterials || []);
+  }, [propRawMaterials]);
+
+  const handleDimensionChange = (field, value) => {
+    setNewStockForm(prev => ({ ...prev, [field]: value }));
+  };
 
   const getCurrentUserId = () => {
     try {
@@ -58,9 +55,6 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
   };
 
   const fetchOrders = async () => {
-    if (ordersFetched) return; // Don't fetch if already fetched
-    if (fetchingOrders.current) return;
-    fetchingOrders.current = true;
     setOrdersLoading(true);
     try {
       const uid = getCurrentUserId();
@@ -70,186 +64,27 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       // Filter out orders that already have raw materials linked
       const availableOrders = (response.data || []).filter(order => !order.has_raw_materials);
       setOrders(availableOrders);
-      setOrdersFetched(true);
     } catch (error) {
       console.error("Error fetching orders:", error);
       setOrders([]);
     } finally {
       setOrdersLoading(false);
-      fetchingOrders.current = false;
     }
   };
 
   const fetchVendors = async () => {
-    if (vendorsFetched) return; // Don't fetch if already fetched
-    setVendorsLoading(true);
     try {
       const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
       setVendors(response.data || []);
-      setVendorsFetched(true);
     } catch (error) {
       console.error("Error fetching vendors:", error);
       setVendors([]);
-    } finally {
-      setVendorsLoading(false);
     }
   };
 
   // New functions for Add Stock mode
-  const handleOrderSelectionForStock = async (orderId) => {
-    setSelectedOrderForStock(orderId);
-    setNewStockForm(prev => ({ ...prev, order_id: orderId, part_id: null }));
-    
-    if (!orderId) {
-      setOrderPartsForStock([]);
-      return;
-    }
-
-    setLoadingOrderParts(true);
-    try {
-      // Use existing order data instead of making redundant API call
-      const existingOrder = orders.find(order => order.id === orderId);
-      
-      if (!existingOrder) {
-        message.error('Order not found in loaded data');
-        setOrderPartsForStock([]);
-        return;
-      }
-
-      const productId = existingOrder.product_id;
-      
-      if (!productId) {
-        message.error('Order has no product associated');
-        setOrderPartsForStock([]);
-        return;
-      }
-
-      // Only make one API call for product hierarchy
-      const hierarchyResponse = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical`);
-      if (hierarchyResponse.data) {
-        const allParts = [];
-        const extractParts = (items) => {
-          items.forEach(item => {
-            if (item.part && item.part.type_name !== "Out-Source") {
-              allParts.push(item.part);
-            }
-            if (item.subassemblies) {
-              extractParts(item.subassemblies);
-            }
-          });
-        };
-        
-        // Extract parts from assemblies and direct parts
-        if (hierarchyResponse.data.assemblies) {
-          hierarchyResponse.data.assemblies.forEach(assembly => {
-            extractParts(assembly.parts || []);
-            if (assembly.subassemblies) {
-              extractParts(assembly.subassemblies);
-            }
-          });
-        }
-        
-        if (hierarchyResponse.data.direct_parts) {
-          extractParts(hierarchyResponse.data.direct_parts);
-        }
-        
-        setOrderPartsForStock(allParts);
-      }
-    } catch (error) {
-      console.error('Error loading order parts:', error);
-      message.error('Failed to load order parts');
-      setOrderPartsForStock([]);
-    } finally {
-      setLoadingOrderParts(false);
-    }
-  };
-
-  const handleVendorEnquiry = async () => {
-    if (newStockForm.vendor_ids.length === 0) {
-      message.error('Please select at least one vendor for enquiry');
-      return;
-    }
-
-    if (!newStockForm.order_id) {
-      message.error('Please select an order for enquiry');
-      return;
-    }
-
-    if (!newStockForm.material_id) {
-      message.error('Please select a material for enquiry');
-      return;
-    }
-
-    setAddStockLoading(true);
-    try {
-      const userId = getCurrentUserId();
-      
-      // Create stock record with enquiry status and multiple vendors
-      const stockData = {
-        material_id: newStockForm.material_id,
-        form_type: newStockForm.form_type,
-        diameter: newStockForm.diameter,
-        length: newStockForm.length,
-        breadth: newStockForm.breadth,
-        height: newStockForm.height,
-        inner_diameter: newStockForm.inner_diameter,
-        outer_diameter: newStockForm.outer_diameter,
-        quantity: newStockForm.quantity,
-        order_id: newStockForm.order_id,
-        part_id: newStockForm.part_id,
-        vendor_id: newStockForm.vendor_ids.join(','), // Store as comma-separated
-        user_id: userId,
-        source_type: 'order',
-        source_order_id: newStockForm.order_id,
-        order_status: 'enquiry' // Default to enquiry
-      };
-
-      // Remove empty fields
-      Object.keys(stockData).forEach(key => {
-        if (stockData[key] === '' || stockData[key] === null) {
-          if (!(key === 'source_order_id' && stockData.source_type === 'order')) {
-            delete stockData[key];
-          }
-        }
-      });
-      delete stockData.order_id; // Remove original order_id
-
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/stock/`, stockData);
-      
-      if (response.data) {
-        message.success(`Enquiry sent to ${newStockForm.vendor_ids.length} vendor(s) and stock created!`);
-        
-        // Reset form
-        setNewStockForm({
-          material_id: null,
-          form_type: 'Round',
-          diameter: '',
-          length: '',
-          breadth: '',
-          height: '',
-          inner_diameter: '',
-          outer_diameter: '',
-          quantity: 1,
-          order_id: null,
-          part_id: null,
-          vendor_ids: [],
-          selected_vendor_id: null,
-          order_status: 'enquiry'
-        });
-        setEnquiryMode(true);
-        setSelectedOrderForStock(null);
-        setOrderPartsForStock([]);
-        
-        // Refresh raw materials list
-        if (onDataChanged) {
-          onDataChanged();
-        }
-      }
-    } catch (error) {
-      message.error('Failed to send enquiry: ' + (error.response?.data?.detail || error.message));
-    } finally {
-      setAddStockLoading(false);
-    }
+  const handleOrderSelectionForStock = (orderId) => {
+    setNewStockForm(prev => ({ ...prev, order_id: orderId }));
   };
 
   const handleAddStock = async () => {
@@ -259,32 +94,14 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       return;
     }
 
-    // In enquiry mode, call handleVendorEnquiry instead
-    if (enquiryMode) {
-      if (!newStockForm.order_id) {
-        message.error('Please select an order for enquiry');
-        return;
-      }
-      if (newStockForm.vendor_ids.length === 0) {
-        message.error('Please select at least one vendor for enquiry');
-        return;
-      }
-      if (!newStockForm.material_id) {
-        message.error('Please select a material for enquiry');
-        return;
-      }
-      await handleVendorEnquiry();
-      return;
-    }
-
-    // For actual stock creation, require all details
+    // Require all details
     if (!newStockForm.material_id) {
       message.error('Please select a material');
       return;
     }
 
-    if (!newStockForm.order_id) {
-      message.error('Please select an order - this tab is for order-linked stock only');
+    if (!newStockForm.form_type) {
+      message.error('Please select a form type');
       return;
     }
 
@@ -293,56 +110,44 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       return;
     }
 
+    if (!newStockForm.selected_vendor_id || newStockForm.selected_vendor_id.length === 0) {
+      message.error('Please select at least one vendor');
+      return;
+    }
+
+    if (!newStockForm.order_id) {
+      message.error('Please select an order - this tab is for order-linked stock only');
+      return;
+    }
+
     setAddStockLoading(true);
     try {
-      const stockData = {
-        ...newStockForm,
-        user_id: userId,
-        source_type: 'order' // Always order type in this tab
+      const requestData = {
+        raw_material_id: newStockForm.material_id,
+        form_type: newStockForm.form_type,
+        diameter: newStockForm.diameter || null,
+        length: newStockForm.length,
+        breadth: newStockForm.breadth || null,
+        height: newStockForm.height || null,
+        inner_diameter: newStockForm.inner_diameter || null,
+        outer_diameter: newStockForm.outer_diameter || null,
+        order_id: newStockForm.order_id,
+        part_ids: [],
+        required_lengths: [],
+        vendor_id: newStockForm.selected_vendor_id || null,
+        quantity: newStockForm.quantity,
+        user_id: userId
       };
 
-      // Map order_id to source_order_id for backend
-      stockData.source_order_id = newStockForm.order_id;
-      
-      // Handle vendor data correctly
-      if (newStockForm.vendor_ids && newStockForm.vendor_ids.length > 0) {
-        // Always store comma-separated vendor IDs in vendor_id field for enquiry tracking
-        stockData.vendor_id = newStockForm.vendor_ids.join(',');
-        stockData.received_vendor_id = null; // Default to null for enquiry
-      }
-      
-      // Use selected_vendor_id for received_vendor_id if in purchase mode (not enquiry)
-      if (newStockForm.selected_vendor_id && !enquiryMode) {
-        stockData.received_vendor_id = newStockForm.selected_vendor_id;
-        // Keep vendor_id as comma-separated string to preserve original enquiry vendors
-        // Don't set vendor_id to null - keep the enquiry vendor list
-      }
-      
-      // Remove vendor_ids and selected_vendor_id from final payload
-      delete stockData.vendor_ids;
-      delete stockData.selected_vendor_id;
-
-      // Remove empty fields but keep source_order_id if source_type is 'order'
-      Object.keys(stockData).forEach(key => {
-        if (stockData[key] === '' || stockData[key] === null) {
-          // Don't remove source_order_id if source_type is 'order'
-          if (!(key === 'source_order_id' && stockData.source_type === 'order')) {
-            delete stockData[key];
-          }
-        }
-      });
-
-      // Remove the original order_id field as backend expects source_order_id
-      delete stockData.order_id;
-
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/stock/`, stockData);
+      const response = await axios.post(`${API_BASE_URL}/rawmaterials/order-materials/link`, requestData);
       
       if (response.data) {
         message.success('Stock added successfully!');
+        
         // Reset form
         setNewStockForm({
           material_id: null,
-          form_type: 'Round',
+          form_type: null,
           diameter: '',
           length: '',
           breadth: '',
@@ -351,14 +156,9 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
           outer_diameter: '',
           quantity: 1,
           order_id: null,
-          part_id: null, // This will be null, not empty string
-          vendor_ids: [], // Multiple vendors for enquiry phase
-          selected_vendor_id: null, // Final selected vendor for purchase
-          order_status: 'enquiry'  // Default to enquiry for multiple vendor workflow
+          selected_vendor_id: [],
+          order_status: 'enquiry'
         });
-        setEnquiryMode(true);
-        setSelectedOrderForStock(null);
-        setOrderPartsForStock([]);
         
         // Refresh raw materials list
         if (onDataChanged) {
@@ -371,11 +171,6 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
       setAddStockLoading(false);
     }
   };
-
-  // Update rawMaterials when prop changes
-  useEffect(() => {
-    setRawMaterials(propRawMaterials || []);
-  }, [propRawMaterials]);
 
   return (
     <div className="mt-4">
@@ -390,6 +185,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
         className="shadow-sm rounded-lg border border-gray-100"
       >
         <div className="space-y-4">
+          {/* First Row: Material, Form Type */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Material <span className="text-red-500">*</span></label>
@@ -420,6 +216,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
               <label className="block text-sm font-medium text-gray-700 mb-1">Form Type <span className="text-red-500">*</span></label>
               <Select
                 style={{ width: '100%' }}
+                placeholder="Select Form Type"
                 value={newStockForm.form_type}
                 onChange={(value) => setNewStockForm(prev => ({ ...prev, form_type: value }))}
               >
@@ -428,529 +225,49 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
                 <Option value="Pipe">Pipe</Option>
               </Select>
             </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Order <span className="text-red-500">*</span></label>
-            <Select
-              style={{ width: '100%' }}
-              placeholder="Select Order (Required)"
-              value={newStockForm.order_id}
-              onChange={handleOrderSelectionForStock}
-              onOpenChange={(open) => {
-                if (open) fetchOrders();
-              }}
-              showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
-            >
-              {orders.map(order => (
-                <Option key={order.id} value={order.id}>
-                  {order.sale_order_number}
-                </Option>
-              ))}
-            </Select>
           </div>
 
-          {newStockForm.order_id && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Parts (Optional - Select Multiple)</label>
-              <Select
-                mode="multiple"
-                style={{ width: '100%' }}
-                placeholder="Select Parts (Optional - Can select multiple)"
-                value={newStockForm.part_id ? newStockForm.part_id.split(',').map(id => parseInt(id)) : []}
-                onChange={(values) => setNewStockForm(prev => ({ ...prev, part_id: values.join(',') }))}
-                allowClear
-                showSearch
-                loading={loadingOrderParts}
-                filterOption={(input, option) =>
-                  option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-                }
-              >
-                {orderPartsForStock.map(part => (
-                  <Option key={part.id} value={part.id}>
-                    {part.part_number} - {part.part_name}
-                  </Option>
-                ))}
-              </Select>
-            </div>
+          {/* Second Row: Dimensions */}
+          {newStockForm.form_type && (
+            <DimensionInputs
+              formType={newStockForm.form_type}
+              dimensions={{
+                diameter: newStockForm.diameter,
+                length: newStockForm.length,
+                breadth: newStockForm.breadth,
+                height: newStockForm.height,
+                inner_diameter: newStockForm.inner_diameter,
+                outer_diameter: newStockForm.outer_diameter,
+              }}
+              onChange={handleDimensionChange}
+            />
           )}
 
-          {newStockForm.part_id && newStockForm.part_id.split(',').length > 0 && (
+          {/* Third Row: Quantity, Vendor */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Part Required Quantities</label>
-              <div className="space-y-2">
-                {orderPartsForStock
-                  .filter(part => newStockForm.part_id.split(',').includes(part.id.toString()))
-                  .map(part => (
-                    <div key={part.id} className="flex items-center space-x-2">
-                      <span className="text-sm flex-1">{part.part_number} - {part.part_name}</span>
-                      <InputNumber
-                        placeholder="Qty"
-                        min={1}
-                        step={1}
-                        precision={0}
-                        style={{ width: '100px' }}
-                        value={newStockForm[`part_quantity_${part.id}`] || 1}
-                        onChange={(value) => {
-                          // Only allow positive integers, block 0
-                          if (value === null || value === undefined || value === '') {
-                            setNewStockForm(prev => ({ 
-                              ...prev, 
-                              [`part_quantity_${part.id}`]: 1 
-                            }));
-                          } else if (Number.isInteger(value) && value >= 1) {
-                            setNewStockForm(prev => ({ 
-                              ...prev, 
-                              [`part_quantity_${part.id}`]: value 
-                            }));
-                          }
-                        }}
-                        onBlur={(e) => {
-                          // Ensure integer value on blur
-                          const value = parseInt(e.target.value);
-                          if (isNaN(value) || value < 1) {
-                            setNewStockForm(prev => ({ 
-                              ...prev, 
-                              [`part_quantity_${part.id}`]: 1 
-                            }));
-                          } else {
-                            setNewStockForm(prev => ({ 
-                              ...prev, 
-                              [`part_quantity_${part.id}`]: value 
-                            }));
-                          }
-                        }}
-                        onBeforeInput={(e) => {
-                          const char = e.data;
-                          const currentValue = e.target.value || '';
-                          // Block non-digits
-                          if (char && !/[0-9]/.test(char)) {
-                            e.preventDefault();
-                            return false;
-                          }
-                          // Block 0 as first digit
-                          if (char === '0' && currentValue === '') {
-                            e.preventDefault();
-                            return false;
-                          }
-                        }}
-                        onKeyPress={(e) => {
-                          // Block all non-digit keys except backspace, delete, tab, enter
-                          const char = String.fromCharCode(e.which);
-                          const currentValue = e.target.value || '';
-                          if (!/[0-9]/.test(char) && 
-                              e.which !== 8 && // backspace
-                              e.which !== 46 && // delete
-                              e.which !== 9 && // tab
-                              e.which !== 13 && // enter
-                              e.which !== 37 && // left arrow
-                              e.which !== 39 && // right arrow
-                              e.which !== 36 && // home
-                              e.which !== 35) { // end
-                            e.preventDefault();
-                          }
-                          // Block 0 as first digit
-                          if (char === '0' && currentValue === '') {
-                            e.preventDefault();
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          // Block decimal point and other special characters
-                          if (e.key === '.' || e.key === ',' || e.key === '-' || e.key === '+') {
-                            e.preventDefault();
-                          }
-                        }}
-                      />
-                    </div>
-                  ))
-                }
-              </div>
-            </div>
-          )}
-
-          {newStockForm.form_type === 'Round' && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Diameter (mm) <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity <span className="text-red-500">*</span></label>
               <InputNumber
                 style={{ width: '100%' }}
-                placeholder="Diameter"
-                value={newStockForm.diameter}
-                onChange={(value) => setNewStockForm(prev => ({ ...prev, diameter: value }))}
-                onKeyPress={(e) => {
-                  // Block all non-digit and non-decimal keys except navigation keys
-                  const char = String.fromCharCode(e.which);
-                  if (!/[0-9.]/.test(char) && 
-                      e.which !== 8 && // backspace
-                      e.which !== 46 && // delete
-                      e.which !== 9 && // tab
-                      e.which !== 13 && // enter
-                      e.which !== 37 && // left arrow
-                      e.which !== 39 && // right arrow
-                      e.which !== 36 && // home
-                      e.which !== 35) { // end
-                    e.preventDefault();
-                  }
-                }}
-                onKeyDown={(e) => {
-                  // Block multiple decimal points and special characters
-                  const value = e.target.value;
-                  if (e.key === '.' && value.includes('.')) {
-                    e.preventDefault();
-                  }
-                  if (e.key === ',' || e.key === '-' || e.key === '+') {
-                    e.preventDefault();
-                  }
-                }}
-                min={0}
-                step={0.01}
+                placeholder="Quantity"
+                keyboard={false}
+                value={newStockForm.quantity}
+                onChange={(value) => setNewStockForm(prev => ({ ...prev, quantity: value }))}
               />
             </div>
-          )}
 
-          {newStockForm.form_type === 'Square' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Breadth (mm) <span className="text-red-500">*</span></label>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Breadth"
-                  value={newStockForm.breadth}
-                  onChange={(value) => setNewStockForm(prev => ({ ...prev, breadth: value }))}
-                  onKeyPress={(e) => {
-                    // Block all non-digit and non-decimal keys except navigation keys
-                    const char = String.fromCharCode(e.which);
-                    if (!/[0-9.]/.test(char) && 
-                        e.which !== 8 && // backspace
-                        e.which !== 46 && // delete
-                        e.which !== 9 && // tab
-                        e.which !== 13 && // enter
-                        e.which !== 37 && // left arrow
-                        e.which !== 39 && // right arrow
-                        e.which !== 36 && // home
-                        e.which !== 35) { // end
-                      e.preventDefault();
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    // Block multiple decimal points and special characters
-                    const value = e.target.value;
-                    if (e.key === '.' && value.includes('.')) {
-                      e.preventDefault();
-                    }
-                    if (e.key === ',' || e.key === '-' || e.key === '+') {
-                      e.preventDefault();
-                    }
-                  }}
-                  min={0}
-                  step={0.01}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Height (mm) <span className="text-red-500">*</span></label>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Height"
-                  value={newStockForm.height}
-                  onChange={(value) => setNewStockForm(prev => ({ ...prev, height: value }))}
-                  onKeyPress={(e) => {
-                    // Block all non-digit and non-decimal keys except navigation keys
-                    const char = String.fromCharCode(e.which);
-                    if (!/[0-9.]/.test(char) && 
-                        e.which !== 8 && // backspace
-                        e.which !== 46 && // delete
-                        e.which !== 9 && // tab
-                        e.which !== 13 && // enter
-                        e.which !== 37 && // left arrow
-                        e.which !== 39 && // right arrow
-                        e.which !== 36 && // home
-                        e.which !== 35) { // end
-                      e.preventDefault();
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    // Block multiple decimal points and special characters
-                    const value = e.target.value;
-                    if (e.key === '.' && value.includes('.')) {
-                      e.preventDefault();
-                    }
-                    if (e.key === ',' || e.key === '-' || e.key === '+') {
-                      e.preventDefault();
-                    }
-                  }}
-                  min={0}
-                  step={0.01}
-                />
-              </div>
-            </>
-          )}
-
-          {newStockForm.form_type === 'Pipe' && (
-            <>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Outer Diameter (mm) <span className="text-red-500">*</span></label>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Outer Diameter"
-                  value={newStockForm.outer_diameter}
-                  onChange={(value) => setNewStockForm(prev => ({ ...prev, outer_diameter: value }))}
-                  onKeyPress={(e) => {
-                    // Block all non-digit and non-decimal keys except navigation keys
-                    const char = String.fromCharCode(e.which);
-                    if (!/[0-9.]/.test(char) && 
-                        e.which !== 8 && // backspace
-                        e.which !== 46 && // delete
-                        e.which !== 9 && // tab
-                        e.which !== 13 && // enter
-                        e.which !== 37 && // left arrow
-                        e.which !== 39 && // right arrow
-                        e.which !== 36 && // home
-                        e.which !== 35) { // end
-                      e.preventDefault();
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    // Block multiple decimal points and special characters
-                    const value = e.target.value;
-                    if (e.key === '.' && value.includes('.')) {
-                      e.preventDefault();
-                    }
-                    if (e.key === ',' || e.key === '-' || e.key === '+') {
-                      e.preventDefault();
-                    }
-                  }}
-                  min={0}
-                  step={0.01}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Inner Diameter (mm) <span className="text-red-500">*</span></label>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Inner Diameter"
-                  value={newStockForm.inner_diameter}
-                  onChange={(value) => setNewStockForm(prev => ({ ...prev, inner_diameter: value }))}
-                  onKeyPress={(e) => {
-                    // Block all non-digit and non-decimal keys except navigation keys
-                    const char = String.fromCharCode(e.which);
-                    if (!/[0-9.]/.test(char) && 
-                        e.which !== 8 && // backspace
-                        e.which !== 46 && // delete
-                        e.which !== 9 && // tab
-                        e.which !== 13 && // enter
-                        e.which !== 37 && // left arrow
-                        e.which !== 39 && // right arrow
-                        e.which !== 36 && // home
-                        e.which !== 35) { // end
-                      e.preventDefault();
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    // Block multiple decimal points and special characters
-                    const value = e.target.value;
-                    if (e.key === '.' && value.includes('.')) {
-                      e.preventDefault();
-                    }
-                    if (e.key === ',' || e.key === '-' || e.key === '+') {
-                      e.preventDefault();
-                    }
-                  }}
-                  min={0}
-                  step={0.01}
-                />
-              </div>
-            </>
-          )}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Length (mm) <span className="text-red-500">*</span></label>
-            <InputNumber
-              style={{ width: '100%' }}
-              placeholder="Length"
-              value={newStockForm.length}
-              onChange={(value) => {
-                // Only allow valid numbers
-                if (value === null || value === undefined || value === '') {
-                  setNewStockForm(prev => ({ ...prev, length: '' }));
-                } else if (!isNaN(value) && value >= 0) {
-                  setNewStockForm(prev => ({ ...prev, length: value }));
-                }
-              }}
-              onBeforeInput={(e) => {
-                // Block input before it reaches the field
-                const char = e.data;
-                if (char && !/[0-9.]/.test(char)) {
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-              onKeyPress={(e) => {
-                // Block all non-digit and non-decimal keys except navigation keys
-                const char = String.fromCharCode(e.which);
-                if (!/[0-9.]/.test(char) && 
-                    e.which !== 8 && // backspace
-                    e.which !== 46 && // delete
-                    e.which !== 9 && // tab
-                    e.which !== 13 && // enter
-                    e.which !== 37 && // left arrow
-                    e.which !== 39 && // right arrow
-                    e.which !== 36 && // home
-                    e.which !== 35) { // end
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-              onKeyDown={(e) => {
-                // Block multiple decimal points and special characters
-                const value = e.target.value;
-                if (e.key === '.' && value && value.includes('.')) {
-                  e.preventDefault();
-                  return false;
-                }
-                if (e.key === ',' || e.key === '-' || e.key === '+') {
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-              onInput={(e) => {
-                // Immediate cleanup of any invalid characters
-                if (!e.target || !e.target.value) return;
-                const value = e.target.value;
-                const validValue = value.replace(/[^0-9.]/g, '');
-                if (value !== validValue) {
-                  e.target.value = validValue;
-                  setNewStockForm(prev => ({ ...prev, length: validValue }));
-                }
-              }}
-              onPaste={(e) => {
-                // Prevent paste of invalid content
-                e.preventDefault();
-                const pasteData = e.clipboardData.getData('text');
-                const cleanData = pasteData.replace(/[^0-9.]/g, '');
-                if (cleanData) {
-                  const currentValue = e.target.value || '';
-                  const newValue = currentValue + cleanData;
-                  setNewStockForm(prev => ({ ...prev, length: newValue }));
-                }
-                return false;
-              }}
-              onBlur={(e) => {
-                // Clean up any invalid characters on blur
-                const value = e.target.value;
-                const cleanValue = value.replace(/[^0-9.]/g, '');
-                if (value !== cleanValue) {
-                  setNewStockForm(prev => ({ ...prev, length: cleanValue }));
-                }
-              }}
-              min={0}
-              step={0.01}
-              parser={(value) => {
-                // Parse only numbers and decimal
-                const cleanValue = value.replace(/[^0-9.]/g, '');
-                const parsed = parseFloat(cleanValue);
-                return isNaN(parsed) ? null : parsed;
-              }}
-              formatter={(value) => {
-                // Display only valid numbers
-                return value !== null && value !== undefined ? value.toString() : '';
-              }}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Quantity <span className="text-red-500">*</span></label>
-            <InputNumber
-              style={{ width: '100%' }}
-              placeholder="Quantity"
-              value={newStockForm.quantity}
-              onChange={(value) => {
-                // Only allow positive integers
-                if (value === null || value === undefined || value === '') {
-                  setNewStockForm(prev => ({ ...prev, quantity: 1 }));
-                } else if (Number.isInteger(value) && value >= 1) {
-                  setNewStockForm(prev => ({ ...prev, quantity: value }));
-                }
-              }}
-              onBlur={(e) => {
-                // Ensure integer value on blur
-                const value = parseInt(e.target.value);
-                if (isNaN(value) || value < 1) {
-                  setNewStockForm(prev => ({ ...prev, quantity: 1 }));
-                } else {
-                  setNewStockForm(prev => ({ ...prev, quantity: value }));
-                }
-              }}
-              onBeforeInput={(e) => {
-                const char = e.data;
-                const currentValue = e.target.value || '';
-                // Block non-digits
-                if (char && !/[0-9]/.test(char)) {
-                  e.preventDefault();
-                  return false;
-                }
-                // Block 0 as first digit
-                if (char === '0' && currentValue === '') {
-                  e.preventDefault();
-                  return false;
-                }
-              }}
-              onKeyPress={(e) => {
-                // Block all non-digit keys except backspace, delete, tab, enter
-                const char = String.fromCharCode(e.which);
-                const currentValue = e.target.value || '';
-                if (!/[0-9]/.test(char) && 
-                    e.which !== 8 && // backspace
-                    e.which !== 46 && // delete
-                    e.which !== 9 && // tab
-                    e.which !== 13 && // enter
-                    e.which !== 37 && // left arrow
-                    e.which !== 39 && // right arrow
-                    e.which !== 36 && // home
-                    e.which !== 35) { // end
-                  e.preventDefault();
-                }
-                // Block 0 as first digit
-                if (char === '0' && currentValue === '') {
-                  e.preventDefault();
-                }
-              }}
-              onKeyDown={(e) => {
-                // Block decimal point and other special characters
-                if (e.key === '.' || e.key === ',' || e.key === '-' || e.key === '+') {
-                  e.preventDefault();
-                }
-              }}
-              min={1}
-              step={1}
-              precision={0}
-              parser={(value) => {
-                // Parse only integers, reject decimals and special chars
-                const parsed = parseInt(value, 10);
-                return isNaN(parsed) ? null : parsed;
-              }}
-              formatter={(value) => {
-                // Display only integers
-                return value ? value.toString() : '';
-              }}
-            />
-          </div>
-
-          {enquiryMode ? (
-          <>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Vendors for Enquiry <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Vendors <span className="text-red-500">*</span></label>
               <Select
                 mode="multiple"
                 style={{ width: '100%' }}
-                placeholder="Select vendors to send enquiry"
-                value={newStockForm.vendor_ids}
-                onChange={(value) => setNewStockForm(prev => ({ ...prev, vendor_ids: value }))}
+                placeholder="Select Vendors"
+                value={newStockForm.selected_vendor_id || []}
+                onChange={(value) => setNewStockForm(prev => ({ ...prev, selected_vendor_id: value }))}
                 onOpenChange={(open) => {
                   if (open) fetchVendors();
                 }}
                 showSearch
-                placement="bottomLeft"
                 filterOption={(input, option) =>
                   option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
                 }
@@ -962,37 +279,36 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
                 ))}
               </Select>
             </div>
-          </>
-        ) : (
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Selected Vendor</label>
-            <Select
-              style={{ width: '100%' }}
-              placeholder="Vendor"
-              value={newStockForm.selected_vendor_id}
-              onChange={(value) => setNewStockForm(prev => ({ ...prev, selected_vendor_id: value }))}
-              disabled
-            >
-              {vendors.map(vendor => (
-                <Option key={vendor.id} value={vendor.id}>
-                  {vendor.company_name}
-                </Option>
-              ))}
-            </Select>
-            <Button
-              type="link"
-              onClick={() => setEnquiryMode(true)}
-              style={{ padding: 0, height: 'auto' }}
-            >
-              ← Back to Vendor Enquiry
-            </Button>
-          </div>
-        )}
           </div>
 
-       
+          {/* Fourth Row: Order */}
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Order <span className="text-red-500">*</span></label>
+              <Select
+                style={{ width: '100%' }}
+                placeholder="Select Order"
+                value={newStockForm.order_id}
+                onChange={handleOrderSelectionForStock}
+                onOpenChange={(open) => {
+                  if (open) fetchOrders();
+                }}
+                showSearch
+                filterOption={(input, option) =>
+                  option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                }
+              >
+                {orders.map(order => (
+                  <Option key={order.id} value={order.id}>
+                    {order.sale_order_number}
+                  </Option>
+                ))}
+              </Select>
+            </div>
+          </div>
 
-        <div className="flex justify-end pt-4">
+          {/* Submit Button */}
+          <div className="flex justify-end pt-4">
             <Button
               type="primary"
               onClick={handleAddStock}
@@ -1001,7 +317,7 @@ const LinkMaterialsTab = ({ rawMaterials: propRawMaterials, onDataChanged }) => 
               style={{ backgroundColor: '#2563eb' }}
               className="border-none shadow-md px-8"
             >
-              {enquiryMode ? 'Send Enquiry' : 'Add Order-Linked Stock'}
+              Add Order-Linked Stock
             </Button>
           </div>
         </div>

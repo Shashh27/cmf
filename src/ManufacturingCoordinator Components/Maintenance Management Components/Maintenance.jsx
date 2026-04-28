@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Tabs, Table, Spin, message, Select, Button, Modal, Input } from 'antd';
+import { Card, Tabs, Table, Spin, message, Select, Button, Modal, Input, Badge } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../../Config/auth';
 
@@ -71,10 +71,10 @@ const Maintenance = () => {
         compRes.ok ? compRes.json() : [],
         helpRes.ok ? helpRes.json() : [],
       ]);
-      setOeeIssues(Array.isArray(oeeData) ? oeeData : []);
-      setBreakdowns(Array.isArray(brData) ? brData : []);
-      setComponents(Array.isArray(compData) ? compData : []);
-      setHelpSupport(Array.isArray(helpData) ? helpData : []);
+      setOeeIssues(Array.isArray(oeeData) ? oeeData.sort((a, b) => new Date(b.reported_at || b.created_at) - new Date(a.reported_at || a.created_at)) : []);
+      setBreakdowns(Array.isArray(brData) ? brData.sort((a, b) => new Date(b.reported_at || b.created_at) - new Date(a.reported_at || a.created_at)) : []);
+      setComponents(Array.isArray(compData) ? compData.sort((a, b) => new Date(b.reported_at || b.created_at) - new Date(a.reported_at || a.created_at)) : []);
+      setHelpSupport(Array.isArray(helpData) ? helpData.sort((a, b) => new Date(b.reported_at || b.created_at) - new Date(a.reported_at || a.created_at)) : []);
     } catch {
       message.error('Failed to load maintenance data');
       setOeeIssues([]);
@@ -165,6 +165,10 @@ const Maintenance = () => {
     return helpSupport.filter(item => selectedMachines.includes(item.machine_name));
   }, [helpSupport, selectedMachines]);
 
+  const getNewHelpRequestsCount = () => {
+    return helpSupport.filter(item => !item.mc_reply).length;
+  };
+
   const oeeColumns = [
     { title: 'Sl No', key: 'sl', width: 70, render: (_, __, idx) => (oeePagination.current - 1) * oeePagination.pageSize + idx + 1 },
     { title: 'Category', key: 'issue_category', width: 140, render: (_, r) => titleCase(r.issue_category) },
@@ -242,99 +246,99 @@ const Maintenance = () => {
   ];
 
   const componentColumns = [
-    { title: 'Sl No', key: 'sl', width: 70, render: (_, __, idx) => (componentPagination.current - 1) * componentPagination.pageSize + idx + 1 },
-    { title: 'Component Status', dataIndex: 'component_status', key: 'component_status', width: 180 },
+    { title: 'Sl No', key: 'sl', width: 60, render: (_, __, idx) => (componentPagination.current - 1) * componentPagination.pageSize + idx + 1 },
+    { title: 'Component Status', dataIndex: 'component_status', key: 'component_status', width: 140 },
     {
       title: 'Production Order',
       key: 'order',
-      width: 220,
+      width: 160,
       render: (_, r) => r.order_name ?? r.production_order_id,
     },
     {
       title: 'Part Name',
       key: 'part',
-      width: 220,
+      width: 160,
       render: (_, r) => r.part_name ?? r.part_id,
     },
     {
       title: 'Machine Name',
       key: 'machine_name',
-      width: 200,
+      width: 140,
       render: (_, r) => r.machine_name ?? r.machine_id,
     },
     {
       title: 'Reported By',
       key: 'reported_by',
-      width: 160,
+      width: 120,
       render: (_, r) => r.operator_name ?? r.reported_by,
     },
     {
       title: 'Reported At',
       dataIndex: 'reported_at',
       key: 'reported_at',
-      width: 190,
+      width: 140,
       render: (v) => formatIST(v),
     },
     {
       title: 'Description',
       dataIndex: 'description',
       key: 'description',
-      width: 320,
+      width: 200,
       render: (v) => <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{titleCase(v)}</span>,
     },
   ];
 
   const helpSupportColumns = [
-    { title: 'Sl No', key: 'sl', width: 70, render: (_, __, idx) => (helpSupportPagination.current - 1) * helpSupportPagination.pageSize + idx + 1 },
+    { title: 'Sl No', key: 'sl', width: 60, render: (_, __, idx) => (helpSupportPagination.current - 1) * helpSupportPagination.pageSize + idx + 1 },
     {
       title: 'Production Order',
       key: 'order',
-      width: 220,
+      width: 160,
       render: (_, r) => r.order_name ?? r.production_order_id,
     },
     {
       title: 'Part Name',
       key: 'part',
-      width: 220,
+      width: 160,
       render: (_, r) => r.part_name ?? r.part_id,
     },
     {
       title: 'Description',
       dataIndex: 'description',
       key: 'description',
-      width: 320,
+      width: 200,
       render: (v) => <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{titleCase(v)}</span>,
     },
     {
       title: 'Machine Name',
       key: 'machine_name',
-      width: 200,
+      width: 140,
       render: (_, r) => r.machine_name ?? r.machine_id,
     },
     {
       title: 'Reported By',
       key: 'reported_by',
-      width: 160,
+      width: 120,
       render: (_, r) => r.operator_name ?? r.reported_by,
     },
     {
       title: 'Reported At',
       dataIndex: 'reported_at',
       key: 'reported_at',
-      width: 190,
+      width: 140,
       render: (v) => formatIST(v),
     },
     {
       title: 'Reply',
       dataIndex: 'mc_reply',
       key: 'mc_reply',
-      width: 250,
+      width: 180,
       render: (v) => v || '-',
     },
     {
       title: 'Action',
       key: 'action',
-      width: 120,
+      width: 100,
       fixed: 'right',
       render: (_, record) => (
         <Button 
@@ -414,7 +418,7 @@ const Maintenance = () => {
                 columns={componentColumns}
                 dataSource={filteredComponents}
                 rowKey="id"
-                scroll={{ x: 1690 }}
+                scroll={{ x: 1200 }}
                 tableLayout="fixed"
                 pagination={{ ...componentPagination, position: ['bottomRight'] }}
                 onChange={(pagination) => setComponentPagination({ current: pagination.current ?? 1, pageSize: pagination.pageSize ?? 10 })}
@@ -426,7 +430,17 @@ const Maintenance = () => {
     },
     {
       key: 'help-support',
-      label: 'Help & Support',
+      label: (
+        <span>
+          <Badge 
+            count={getNewHelpRequestsCount()} 
+            offset={[8, -2]} 
+            style={{ backgroundColor: '#faad14' }}
+          >
+            <span>Help & Support</span>
+          </Badge>
+        </span>
+      ),
       children: (
         <div className="maintenance-tab-content">
           {loading ? (
@@ -439,7 +453,7 @@ const Maintenance = () => {
                 columns={helpSupportColumns}
                 dataSource={filteredHelpSupport}
                 rowKey="id"
-                scroll={{ x: 1450 }}
+                scroll={{ x: 1200 }}
                 tableLayout="fixed"
                 pagination={{ ...helpSupportPagination, position: ['bottomRight'] }}
                 onChange={(pagination) => setHelpSupportPagination({ current: pagination.current ?? 1, pageSize: pagination.pageSize ?? 10 })}

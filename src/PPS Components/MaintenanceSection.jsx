@@ -253,7 +253,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   const downtimeColumns = [
     { title: "Machine Name", dataIndex: "machine_name", key: "machine_name", sorter: (a, b) => a.machine_name.localeCompare(b.machine_name) },
     {
-      title: "Status Name", dataIndex: "status_name", key: "status_name",
+      title: "Status", dataIndex: "status_name", key: "status_name",
       render: (s) => {
         const l = s?.toLowerCase();
         const color = (l === "on" || l?.includes("active")) ? "green" : (l === "off" || l?.includes("inactive")) ? "red" : l?.includes("maintenance") ? "orange" : "default";

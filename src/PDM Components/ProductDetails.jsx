@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, UpOutlined, DownOutlined, LeftOutlined, RightOutlined, ExpandOutlined, DownloadOutlined } from "@ant-design/icons";
-import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space } from "antd";
+import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, UpOutlined, DownOutlined, LeftOutlined, RightOutlined, ExpandOutlined, DownloadOutlined, EditOutlined } from "@ant-design/icons";
+import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space, Form, Input } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import DocumentsPanel from "./DocumentsPanel";
 import axios from "axios";
@@ -20,6 +20,8 @@ const ProductDetails = ({ selectedItem }) => {
   const [activeTab, setActiveTab] = useState('mbom');
   const extractedDocsSigRef = useRef("");
   const extractedPartIdRef = useRef(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingRecord, setEditingRecord] = useState(null);
 
   const getCurrentUserId = () => {
     try {
@@ -237,6 +239,81 @@ const ProductDetails = ({ selectedItem }) => {
     });
   };
 
+  const parseKgValue = (value) => {
+    if (value && typeof value === 'string') {
+      const match = value.match(/([\d.]+)\s*KG/i);
+      return match ? parseFloat(match[1]) : parseFloat(value);
+    }
+    return value;
+  };
+
+  const handleEditExtractedMaterial = (record) => {
+    setEditingRecord({
+      ...record,
+      id: record.id, // Explicitly preserve the id field
+      stocksize_kg: parseKgValue(record.stocksize_kg),
+      net_wt_kg: parseKgValue(record.net_wt_kg),
+    });
+    setEditModalVisible(true);
+  };
+
+  const handleSaveExtractedMaterial = async () => {
+    if (!editingRecord || !editingRecord.id) return;
+
+    try {
+      const uid = getCurrentUserId();
+      
+      const payload = {
+        material: editingRecord.material,
+        stock_size: editingRecord.stock_size,
+        stocksize_kg: editingRecord.stocksize_kg?.toString() || '',
+        net_wt_kg: editingRecord.net_wt_kg?.toString() || '',
+        note: editingRecord.note,
+        title: editingRecord.title,
+        user_id: uid
+      };
+      
+      await axios.put(
+        `${API_BASE_URL}/documents/extracted-data/${editingRecord.id}`,
+        payload,
+        { headers: { "Content-Type": "application/json" } }
+      );
+      
+      message.success("Material data updated successfully");
+      setEditModalVisible(false);
+      setEditingRecord(null);
+      
+      // Update the specific row in place to preserve order
+      setExtractedMaterials(prevMaterials => 
+        prevMaterials.map(item => 
+          item.id === editingRecord.id 
+            ? { 
+                ...item, 
+                material: editingRecord.material,
+                stock_size: editingRecord.stock_size,
+                stocksize_kg: editingRecord.stocksize_kg,
+                net_wt_kg: editingRecord.net_wt_kg,
+                note: editingRecord.note,
+                title: editingRecord.title
+              }
+            : item
+        )
+      );
+    } catch (error) {
+      const detail =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Error updating material data";
+      message.error(detail);
+    }
+  };
+
+  const handleEditModalCancel = () => {
+    setEditModalVisible(false);
+    setEditingRecord(null);
+  };
+
   const baseMaterialColumns = [
     { title: 'Material', dataIndex: 'material_name', key: 'name', ellipsis: true },
   ];
@@ -432,8 +509,8 @@ const ProductDetails = ({ selectedItem }) => {
                           },
                           {
                             title: 'Stock Size Kg',
-                            dataIndex: 'stock_size_kg',
-                            key: 'stock_size_kg',
+                            dataIndex: 'stocksize_kg',
+                            key: 'stocksize_kg',
                             width: 120,
                             render: (text) => cellWithTooltip(text, 'N/A')
                           },
@@ -459,6 +536,22 @@ const ProductDetails = ({ selectedItem }) => {
                             width: 120,
                             ellipsis: { showTitle: false },
                             render: (text) => cellWithTooltip(text, 'N/A')
+                          },
+                          {
+                            title: 'Actions',
+                            key: 'actions',
+                            width: 80,
+                            fixed: 'right',
+                            render: (_, record) => (
+                              <Tooltip title="Edit material data">
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<EditOutlined />}
+                                  onClick={() => handleEditExtractedMaterial(record)}
+                                />
+                              </Tooltip>
+                            ),
                           },
                         ]}
                         rowKey="_rootId" 
@@ -521,6 +614,87 @@ const ProductDetails = ({ selectedItem }) => {
               <ModelViewer3D documentId={selectedThreeDDocumentId} height={400} showControls initialView={selectedView} showEdgeButton={true} restrictZoom={false} />
             </div>
           </div>
+        )}
+      </Modal>
+
+      {/* Edit Extracted Material Modal */}
+      <Modal
+        title="Edit Material Data"
+        open={editModalVisible}
+        onCancel={handleEditModalCancel}
+        footer={[
+          <Button key="cancel" onClick={handleEditModalCancel}>
+            Cancel
+          </Button>,
+          <Button key="save" type="primary" onClick={handleSaveExtractedMaterial}>
+            Save
+          </Button>,
+        ]}
+        width="600px"
+        destroyOnHidden
+      >
+        {editingRecord && (
+          <Form
+            layout="vertical"
+            initialValues={editingRecord}
+            onValuesChange={(changedValues, allValues) => {
+              setEditingRecord(allValues);
+            }}
+          >
+            {/* Hidden field to preserve the id */}
+            <Form.Item name="id" style={{ display: 'none' }}>
+              <Input />
+            </Form.Item>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Form.Item
+                label="Material"
+                name="material"
+              >
+                <Input placeholder="Enter material" />
+              </Form.Item>
+              
+              <Form.Item
+                label="Stock Size"
+                name="stock_size"
+              >
+                <Input placeholder="Enter stock size" />
+              </Form.Item>
+              
+              <Form.Item
+                label="Stock Size Kg"
+                name="stocksize_kg"
+              >
+                <Input type="number" placeholder="Enter stock size in kg" />
+              </Form.Item>
+              
+              <Form.Item
+                label="Net Wt Kg"
+                name="net_wt_kg"
+              >
+                <Input type="number" placeholder="Enter net weight in kg" />
+              </Form.Item>
+              
+              <Form.Item
+                label="Title"
+                name="title"
+                className="md:col-span-2"
+              >
+                <Input placeholder="Enter title" />
+              </Form.Item>
+              
+              <Form.Item
+                label="Note"
+                name="note"
+                className="md:col-span-2"
+              >
+                <Input.TextArea 
+                  placeholder="Enter note" 
+                  rows={3}
+                />
+              </Form.Item>
+            </div>
+          </Form>
         )}
       </Modal>
     </div>

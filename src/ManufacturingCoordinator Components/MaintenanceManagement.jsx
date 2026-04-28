@@ -29,14 +29,7 @@ const MaintenanceManagement = () => {
 
   return (
     <div style={{ padding: '24px', background: '#f5f5f5', minHeight: '100vh' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <Title level={2} style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <SettingOutlined style={{ color: '#1890ff' }} />
-          {titleText}
-        </Title>
-      </div>
-      
-      <Card 
+       <Card 
         bordered={false} 
         style={{ 
           borderRadius: '8px',

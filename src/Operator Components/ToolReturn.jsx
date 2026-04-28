@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Tag, Input } from 'antd';
+import { Table, Tag, Input, Button } from 'antd';
 import { API_BASE_URL } from '../Config/auth';
-import { SearchOutlined } from '@ant-design/icons';
+import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 
 const ToolReturn = () => {
   const [returns, setReturns] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [filters, setFilters] = useState({});           // ← NEW: track filter state
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -23,36 +25,36 @@ const ToolReturn = () => {
         const user = JSON.parse(storedUser);
         if (user && user.id != null) return parseInt(user.id);
       }
-    } catch (e) {
-      
-    }
+    } catch (e) {}
     const fallback = localStorage.getItem('operator_id');
     return fallback ? parseInt(fallback) : null;
   };
 
-  const handleTableChange = (newPagination) => {
+  const handleTableChange = (newPagination, newFilters) => {
     setPagination(newPagination);
+    setFilters(newFilters);
   };
 
   const fetchReturns = async () => {
     setLoading(true);
     try {
+      const operatorId = getCurrentOperatorId();
       const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
 
       if (response.ok) {
         let returnsData = await response.json();
         returnsData = Array.isArray(returnsData) ? returnsData : [];
-        
+
         // Flatten the nested details for the table
         returnsData = returnsData.map(ret => {
-            const details = ret.inventory_request_details || {};
-            return {
-                ...ret,
-                tool_name: details.tool_name || '-',
-                project_name: details.project_name || '-',
-            };
+          const details = ret.inventory_request_details || {};
+          return {
+            ...ret,
+            tool_name: details.tool_name || '-',
+            project_name: details.project_name || '-',
+          };
         });
-        
+
         const currentOpId = getCurrentOperatorId();
         const filtered = currentOpId != null
           ? returnsData.filter(ret => {
@@ -62,26 +64,30 @@ const ToolReturn = () => {
               return oid == null ? true : parseInt(oid) === currentOpId;
             })
           : returnsData;
-        
+
         setReturns(filtered);
       } else {
-        // Fallback for demo/development if endpoint doesn't exist yet
         console.warn('Inventory returns endpoint not found');
         const savedReturns = localStorage.getItem('inventory_returns');
         if (savedReturns) {
-            setReturns(JSON.parse(savedReturns));
+          setReturns(JSON.parse(savedReturns));
         }
       }
     } catch (error) {
       console.error('Failed to fetch returns:', error);
-      // Still try local storage on network error
       const savedReturns = localStorage.getItem('inventory_returns');
       if (savedReturns) {
-          setReturns(JSON.parse(savedReturns));
+        setReturns(JSON.parse(savedReturns));
       }
     } finally {
-        setLoading(false);
+      setLoading(false);
+      setRefreshing(false);
     }
+  };
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchReturns();
   };
 
   const columns = [
@@ -112,10 +118,7 @@ const ToolReturn = () => {
       key: 'return_date',
       width: 120,
       render: (text, record) => {
-        const date =
-          text ||
-          record.created_at ||
-          record.updated_at;
+        const date = text || record.created_at || record.updated_at;
         if (!date) return '-';
         const d = new Date(date);
         return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
@@ -126,6 +129,7 @@ const ToolReturn = () => {
       dataIndex: 'status',
       key: 'status',
       width: 120,
+      filteredValue: filters.status || null,
       render: (status) => {
         let color = 'blue';
         if (status === 'Collected' || status === 'collected') color = 'green';
@@ -134,10 +138,7 @@ const ToolReturn = () => {
       },
       filters: [
         { text: 'Pending', value: 'pending' },
-        { text: 'Approved', value: 'approved' },
-        { text: 'Rejected', value: 'rejected' },
         { text: 'Collected', value: 'collected' },
-        { text: 'Not Collected', value: 'not_collected' },
       ],
       onFilter: (value, record) => record.status?.toLowerCase() === value,
     },
@@ -156,37 +157,45 @@ const ToolReturn = () => {
       ellipsis: true,
       render: (_, record) => (
         <span>Returned from {record.project_name || 'Project'}</span>
-      )
-    }
+      ),
+    },
   ];
 
   return (
     <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
-         <Input
-            placeholder="Search returned tools..."
-            allowClear
-            prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
-            size="middle"
-            style={{ width: 300 }}
-            onChange={(e) => setSearchText(e.target.value)}
-          />
+      <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Input
+          placeholder="Search returned tools..."
+          allowClear
+          prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+          size="middle"
+          style={{ width: 300 }}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <Button
+          type="default"
+          icon={<ReloadOutlined />}
+          onClick={handleRefresh}
+          loading={refreshing}
+        >
+          Refresh
+        </Button>
       </div>
-      <Table 
-        columns={columns} 
-        dataSource={returns} 
-        rowKey="id" 
+      <Table
+        columns={columns}
+        dataSource={returns}
+        rowKey="id"
         loading={loading}
         scroll={{ x: 'max-content' }}
         pagination={{
-            current: pagination.current,
-            pageSize: pagination.pageSize,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-            position: ['bottomCenter']
+          current: pagination.current,
+          pageSize: pagination.pageSize,
+          showSizeChanger: true,
+          showQuickJumper: true,
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+          position: ['bottomCenter'],
         }}
-        onChange={handleTableChange}
+        onChange={handleTableChange}   // ← now correctly captures filters too
       />
     </div>
   );

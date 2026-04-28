@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Button, Tag, message, notification, Modal, Input, InputNumber, Form, Card, Row, Col, Select } from 'antd';
 import { API_BASE_URL } from '../Config/auth';
-import { SearchOutlined, ToolOutlined, CheckCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { SearchOutlined, ToolOutlined, CheckCircleOutlined, ClockCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 
 const KpiCard = ({ title, count, label, icon, color, bgColor }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -44,6 +44,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [returnLoading, setReturnLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [filters, setFilters] = useState({});           // ← NEW: track filter state
   const [pagination, setPagination] = useState({
     current: 1,
     pageSize: 10,
@@ -98,8 +99,10 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     return fallback ? parseInt(fallback) : null;
   };
 
-  const handleTableChange = (newPagination) => {
+  // ← FIXED: now captures filters too, not just pagination
+  const handleTableChange = (newPagination, newFilters) => {
     setPagination(newPagination);
+    setFilters(newFilters);
   };
 
   const totalRequested = requests.reduce((sum, r) => sum + (r.quantity || 0), 0);
@@ -395,7 +398,6 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       title: 'Remaining Qty',
       key: 'remaining_qty',
       width: 130,
-      // align: 'center',
       render: (_, record) => {
         const remaining = computeRemaining(record);
         return remaining > 0 ? remaining : 0;
@@ -431,6 +433,9 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       dataIndex: 'status',
       key: 'status',
       width: 120,
+      // ← FIXED: bind filteredValue to the filters state so Ant Design
+      //   knows this column is controlled and applies the selection correctly
+      filteredValue: filters.status || null,
       render: (status) => {
         let color = 'default';
         if (status === 'approved') color = 'green';
@@ -456,7 +461,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
     {
       title: 'Action',
       key: 'action',
-      width: 120,
+      width: 200,
       fixed: 'right',
       render: (_, record) => {
         const remaining = computeRemaining(record);
@@ -544,6 +549,16 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
             style={{ width: 300 }}
             onChange={(e) => setSearchText(e.target.value)}
           />
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              fetchRequests();
+              fetchReturnRequests();
+              fetchToolIssues();
+            }}
+          >
+            Refresh
+          </Button>
         </div>
         <Table
           columns={columns}
@@ -559,7 +574,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
             showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
             position: ['bottomCenter']
           }}
-          onChange={handleTableChange}
+          onChange={handleTableChange}   // ← now correctly captures filters too
         />
       </Card>
 

@@ -2,11 +2,11 @@ import React, { useState } from "react";
 import { Layout, Drawer, Button, Tabs } from "antd";
 import { MenuOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
-import BillOfMaterials from "../PDM Components/BillOfMaterials";
-import ProductDetails from "../PDM Components/ProductDetails";
-import ProductSummary from "../PDM Components/ProductSummary";
-import DocumentsPanel from "../PDM Components/DocumentsPanel";
-import AssemblyDocumentsPanel from "../PDM Components/AssemblyDocumentsPanel";
+import BillOfMaterials from "./PDM Components/BillOfMaterials";
+import ProductDetails from "./PDM Components/ProductDetails";
+import ProductSummary from "./PDM Components/ProductSummary";
+import DocumentsPanel from "./PDM Components/DocumentsPanel";
+import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
 import ProcessPlanning from "../PPS Components/ProcessPlanning";
 
 const { Sider, Content } = Layout;
@@ -74,7 +74,7 @@ const PDM = () => {
                 { key: "pps", label: "PPS" },
               ]}
             />
-            <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
+            <Button size="small" onClick={() => navigate("/manufacturing_coordinator/oms/orders")}>
               Back to Orders
             </Button>
           </div>

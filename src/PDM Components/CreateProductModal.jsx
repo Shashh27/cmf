@@ -579,59 +579,49 @@ const CreateProductModal = ({
       // Validation for parts with raw materials
       if (createType === 'part') {
         if (values.raw_material_id) {
-          // Raw material is selected - stock, dimensions, and quantity are required
-          if (!values.raw_material_stock_id) {
-            message.error('Please select raw material stock when raw material is selected');
-            setLoading(false);
-            return;
-          }
-          
-          if (!values.size || !values.qty) {
-            message.error('Please provide dimensions and quantity when raw material stock is selected');
-            setLoading(false);
-            return;
-          }
-          
-          // Check if selected stock exists and is available
-          const selectedStock = rawMaterialStock.find(stock => stock.id === values.raw_material_stock_id);
-          if (!selectedStock) {
-            message.error('Selected raw material stock not found');
-            setLoading(false);
-            return;
-          }
-          
-          // Check stock status - only validate if creating new part or increasing quantity
-          const isChangingQuantity = mode === 'create' || 
-            (mode === 'edit' && values.raw_material_required_quantity !== editingItem?.raw_material_required_quantity);
-          const isIncreasingQuantity = mode === 'edit' && 
-            values.raw_material_required_quantity > (editingItem?.raw_material_required_quantity || 0);
-          
-          if (selectedStock.status !== 'available' && isChangingQuantity && isIncreasingQuantity) {
-            message.error('Selected raw material stock is not available for increasing quantity. Status: ' + selectedStock.status);
-            setLoading(false);
-            return;
-          }
-          
-          // Check if required quantity is provided and valid
-          if (!values.raw_material_required_quantity || values.raw_material_required_quantity <= 0) {
-            message.error('Please enter a valid required quantity');
-            setLoading(false);
-            return;
-          }
-          
-          // Check if enough quantity is available - only validate if changing quantity
-          if (isChangingQuantity) {
-            // For edit mode, account for currently assigned quantity
-            let availableQuantity = selectedStock.available_quantity;
-            if (mode === 'edit' && editingItem && editingItem.raw_material_stock_id === values.raw_material_stock_id) {
-              // Add back the currently assigned quantity when editing
-              availableQuantity += (editingItem.raw_material_required_quantity || 0);
-            }
-            
-            if (values.raw_material_required_quantity > availableQuantity) {
-              message.error(`Insufficient material. Available: ${availableQuantity}, Required: ${values.raw_material_required_quantity}`);
+          // Raw material is selected - validate stock if provided (optional)
+          if (values.raw_material_stock_id) {
+            // Check if selected stock exists and is available
+            const selectedStock = rawMaterialStock.find(stock => stock.id === values.raw_material_stock_id);
+            if (!selectedStock) {
+              message.error('Selected raw material stock not found');
               setLoading(false);
               return;
+            }
+            
+            // Check stock status - only validate if creating new part or increasing quantity
+            const isChangingQuantity = mode === 'create' || 
+              (mode === 'edit' && values.raw_material_required_quantity !== editingItem?.raw_material_required_quantity);
+            const isIncreasingQuantity = mode === 'edit' && 
+              values.raw_material_required_quantity > (editingItem?.raw_material_required_quantity || 0);
+            
+            if (selectedStock.status !== 'available' && isChangingQuantity && isIncreasingQuantity) {
+              message.error('Selected raw material stock is not available for increasing quantity. Status: ' + selectedStock.status);
+              setLoading(false);
+              return;
+            }
+            
+            // Check if required quantity is provided and valid (if stock is selected, quantity should be valid)
+            if (values.raw_material_required_quantity && values.raw_material_required_quantity <= 0) {
+              message.error('Please enter a valid required quantity');
+              setLoading(false);
+              return;
+            }
+            
+            // Check if enough quantity is available - only validate if changing quantity
+            if (isChangingQuantity && values.raw_material_required_quantity) {
+              // For edit mode, account for currently assigned quantity
+              let availableQuantity = selectedStock.available_quantity;
+              if (mode === 'edit' && editingItem && editingItem.raw_material_stock_id === values.raw_material_stock_id) {
+                // Add back the currently assigned quantity when editing
+                availableQuantity += (editingItem.raw_material_required_quantity || 0);
+              }
+              
+              if (values.raw_material_required_quantity > availableQuantity) {
+                message.error(`Insufficient material. Available: ${availableQuantity}, Required: ${values.raw_material_required_quantity}`);
+                setLoading(false);
+                return;
+              }
             }
           }
         } else {
@@ -650,7 +640,7 @@ const CreateProductModal = ({
               values.raw_material_id = null;
               values.raw_material_required_quantity = null;
             }
-            // Keep size and qty for the part itself - DON'T clear them!
+            // Keep qty for the part itself - DON'T clear it!
           } else {
             // Scenario 1 & 2: In-house parts OR Outsource + WITH_RAW_MATERIAL
             // Only clear actual raw material specific fields if no stock selected
@@ -662,7 +652,7 @@ const CreateProductModal = ({
               values.raw_material_id = null;
               values.raw_material_required_quantity = null;
             }
-            // Always keep size and qty for the part
+            // Always keep qty for the part
           }
         }
       }
@@ -753,9 +743,11 @@ const CreateProductModal = ({
         // Include required quantity only if stock is selected
         payloadBase.raw_material_required_quantity = values.raw_material_required_quantity || null;
 
-        // Add vendor_id only for outsource parts
+        // Add vendor_id for outsource and standard parts
         const isOutSource = partTypes.find(t => t.id === values.type_id)?.type_name?.toLowerCase().includes('out');
-        if (isOutSource) {
+        const isStandard = partTypes.find(t => t.id === values.type_id)?.type_name?.toLowerCase().includes('standard');
+
+        if (isOutSource || isStandard) {
           payloadBase.vendor_id = values.vendor_id || null;
         }
 
@@ -1137,7 +1129,7 @@ const CreateProductModal = ({
 
                 label={<span className="text-xs sm:text-sm">Size</span>}
 
-                rules={[{ required: true, message: 'Please enter size!' }]}
+                rules={[{ required: false, message: 'Please enter size!' }]}
 
               >
 
@@ -1231,12 +1223,14 @@ const CreateProductModal = ({
 
                 const isOutSource = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('out');
 
-                if (!isOutSource) return null;
+                const isStandard = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('standard');
 
-                
+                // Only show part details for out-source parts (not for standard parts)
+                if (!isOutSource || isStandard) return null;
+
                 return (
                   <>
-                    {/* Part Details for Outsource Parts */}
+                    {/* Part Details for Outsource Parts (not for Standard parts) */}
                     <Form.Item
                       name="part_detail"
                       label={<span className="text-xs sm:text-sm">Part Details</span>}
@@ -1264,11 +1258,13 @@ const CreateProductModal = ({
 
                 const isOutSource = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('out');
 
-                const isRequiredRawMaterial = isOutSource && partDetail === 'WITH_RAW_MATERIAL';
+                const isStandard = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('standard');
+
+                const isRequiredRawMaterial = false;
 
                 const isInHouse = !isOutSource;
 
-                const shouldShowRawMaterialFields = isInHouse || isRequiredRawMaterial;
+                const shouldShowRawMaterialFields = (isInHouse || (isOutSource && partDetail === 'WITH_RAW_MATERIAL')) && !isStandard;
 
                 if (shouldShowRawMaterialFields) {
                   return (
@@ -1279,7 +1275,7 @@ const CreateProductModal = ({
                         <Form.Item
                           name="raw_material_id"
                           label={<span className="text-xs sm:text-sm">Raw Material</span>}
-                          rules={[{ required: isRequiredRawMaterial, message: 'Select raw material!' }]}
+                          rules={[{ required: false, message: 'Select raw material!' }]}
                         >
                           <Select 
                             placeholder="Select raw material" 
@@ -1331,7 +1327,7 @@ const CreateProductModal = ({
                               <Form.Item
                                 name="raw_material_form_type"
                                 label={<span className="text-xs sm:text-sm">Form Type</span>}
-                                rules={[{ required: isRequiredRawMaterial, message: 'Select form type!' }]}
+                                rules={[{ required: false, message: 'Select form type!' }]}
                               >
                                 <Select 
                                   placeholder="Select form type" 
@@ -1382,7 +1378,7 @@ const CreateProductModal = ({
                               <Form.Item
                                 name="raw_material_stock_id"
                                 label={<span className="text-xs sm:text-sm">Dimensions</span>}
-                                rules={[{ required: isRequiredRawMaterial, message: 'Select dimensions!' }]}
+                                rules={[{ required: false, message: 'Select dimensions!' }]}
                               >
                                 <Select 
                                   placeholder="Select dimensions" 
@@ -1458,7 +1454,7 @@ const CreateProductModal = ({
                 }
 
                 // For outsource parts WITHOUT raw material, no additional fields needed
-                // Size and qty are already shown in the basic section above
+                // qty is already shown in the basic section above
                 if (isOutSource && partDetail === 'WITHOUT_RAW_MATERIAL') {
                   return null;
                 }
@@ -1469,19 +1465,21 @@ const CreateProductModal = ({
 
             </Form.Item>
 
-            {/* Vendor Selection for Out-Source Parts */}
+            {/* Vendor Selection for Out-Source and Standard Parts */}
             <Form.Item noStyle shouldUpdate={(prev, curr) => prev.type_id !== curr.type_id}>
               {({ getFieldValue }) => {
                 const typeId = getFieldValue('type_id');
                 const isOutSource = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('out');
+                const isStandard = partTypes.find(t => t.id === typeId)?.type_name?.toLowerCase().includes('standard');
                 
-                if (!isOutSource) return null;
+                // Show vendor selection for both out-source and standard parts
+                if (!isOutSource && !isStandard) return null;
                 
                 return (
                   <Form.Item
                     name="vendor_id"
                     label={<span className="text-xs sm:text-sm">Vendor</span>}
-                    rules={[{ required: true, message: 'Please select a vendor for outsourced parts!' }]}
+                    rules={[{ required: true, message: 'Please select a vendor!' }]}
                   >
                     <Select 
                       placeholder="Select vendor" 

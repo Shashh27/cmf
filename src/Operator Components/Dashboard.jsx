@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card,Row,Col,Typography,Button,Tag,Space,DatePicker,Select,Input,Tabs } from 'antd';
+import { Card,Row,Col,Typography,Button,Tag,Space,DatePicker,Select,Input,Tabs,Badge } from 'antd';
 import { ToolOutlined,DashboardOutlined,ClockCircleOutlined,ProfileOutlined,SettingOutlined,FileTextOutlined,DownloadOutlined,WarningOutlined } from '@ant-design/icons';
 import machineImg from '../assets/machine.png';
 import PokaYokeChecklist from './PokaYokeChecklist';
@@ -8,6 +8,7 @@ import SelectJob from './SelectJob';
 import PartDocumentTab from './PartDocumentTab';
 import ProductionLog from './ProductionLog';
 import { API_BASE_URL } from '../Config/auth.js';
+import config from '../Config/config.js';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 import { message } from 'antd';
 
@@ -27,6 +28,7 @@ const Dashboard = () => {
   const [showSelectJob, setShowSelectJob] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [checklistPending, setChecklistPending] = useState(false);
+  const [rejectedChecklists, setRejectedChecklists] = useState([]);
   const [isActivated, setIsActivated] = useState(false);
   const [completedQuantity, setCompletedQuantity] = useState(0);
   const [productionStats, setProductionStats] = useState({
@@ -154,29 +156,62 @@ const Dashboard = () => {
         const completedTodayIds = new Set(
           logs
             .filter(log => new Date(log.completed_at) >= startOfToday)
-            .map(log => String(log.checklist_id))
+            .map(log => {
+              const cid = String(log.checklist_id);
+              const freq = (log.frequency || '').toLowerCase();
+              const shift = (log.shift || '').toLowerCase();
+              return `${cid}-${freq}-${shift}`;
+            })
         );
 
-        // 4. Check if all due today are completed
-        // Modified logic: Any ONE daily checklist completion satisfies the daily requirement.
-        // Weekly and Monthly checklists still require all to be completed if due.
-        
-        const dueDaily = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'daily');
-        const dueWeekly = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'weekly');
-        const dueMonthly = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'monthly');
+        // 4. Fetch approval status for each due checklist
+        const rejected = [];
+        let allApproved = true;
 
-        const isCompleted = (item) => {
-          const cid = item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id;
-          return completedTodayIds.has(String(cid));
-        };
+        for (const item of dueToday) {
+          const cid = String(item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id);
+          const freq = (item?.frequency || '').toLowerCase();
+          const shift = (item?.shift || '').toLowerCase();
+          const key = `${cid}-${freq}-${shift}`;
 
-        const dailyRequirementMet = dueDaily.length === 0 || dueDaily.some(isCompleted);
-        const weeklyRequirementMet = dueWeekly.every(isCompleted);
-        const monthlyRequirementMet = dueMonthly.every(isCompleted);
+          if (completedTodayIds.has(key)) {
+            try {
+              const approvalRes = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/checklists/${cid}/approval-status`);
+              if (approvalRes.ok) {
+                const approvalData = await approvalRes.json();
+                const logs = approvalData.completed_logs || [];
+                // Get the latest log for this machine today
+                const latestLog = logs
+                  .filter(l => l.machine_id === machineId && new Date(l.completed_at) >= startOfToday)
+                  .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at))[0];
 
-        const pending = !dailyRequirementMet || !weeklyRequirementMet || !monthlyRequirementMet;
+                if (latestLog) {
+                  if (latestLog.overall_approval_status === 'rejected') {
+                    allApproved = false;
+                    rejected.push({
+                      ...item,
+                      rejection_details: latestLog
+                    });
+                  } else if (latestLog.overall_approval_status !== 'approved') {
+                    allApproved = false; // pending or unknown
+                  }
+                } else {
+                  allApproved = false; // No log found despite being in completedTodayIds?
+                }
+              } else {
+                allApproved = false;
+              }
+            } catch (err) {
+              console.error('Error fetching approval status:', err);
+              allApproved = false;
+            }
+          } else {
+            allApproved = false; // Not completed yet
+          }
+        }
 
-        setChecklistPending(pending);
+        setRejectedChecklists(rejected);
+        setChecklistPending(!allApproved);
       } catch (error) {
         console.error('Error checking checklist status:', error);
       }
@@ -561,7 +596,16 @@ const Dashboard = () => {
           <Card
             style={{ borderRadius: 16 }}
             headStyle={{ borderRadius: '16px 16px 0 0' }}
-            title="Poka Yoke & Feedback"
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Poka Yoke & Feedback</span>
+                {rejectedChecklists.length > 0 && (
+                  <Badge count={rejectedChecklists.length} offset={[10, 0]}>
+                    <FileTextOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
+                  </Badge>
+                )}
+              </div>
+            }
           >
             {/* Poka Yoke section */}
             <Button
@@ -569,12 +613,12 @@ const Dashboard = () => {
               block
               style={{
                 borderRadius: 9999,
-                background: '#1677FF',
-                borderColor: '#1677FF',
+                background: rejectedChecklists.length > 0 ? '#ff4d4f' : '#1677FF',
+                borderColor: rejectedChecklists.length > 0 ? '#ff4d4f' : '#1677FF',
               }}
               onClick={() => setShowChecklist(true)}
             >
-              Open Poka Yoke Checklist
+              {rejectedChecklists.length > 0 ? 'Redo Rejected Checklists' : 'Open Poka Yoke Checklist'}
             </Button>
             <div
               style={{
@@ -584,8 +628,31 @@ const Dashboard = () => {
                 textAlign: 'center',
               }}
             >
-              Review and complete poka yoke checkpoints
+              {rejectedChecklists.length > 0 
+                ? 'Some checklists were rejected. Please review and resubmit.' 
+                : 'Review and complete poka yoke checkpoints'}
             </div>
+
+            {/* Rejected Details */}
+            {rejectedChecklists.length > 0 && (
+              <div style={{ marginTop: 16, padding: '12px', background: '#fff1f0', borderRadius: 8, border: '1px solid #ffccc7' }}>
+                <div style={{ fontWeight: 600, color: '#cf1322', marginBottom: 8, fontSize: 13 }}>
+                  Rejected Checklists:
+                </div>
+                {rejectedChecklists.map((rc, idx) => (
+                  <div key={idx} style={{ marginBottom: idx < rejectedChecklists.length - 1 ? 8 : 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: '#851111' }}>
+                      • {rc.name || rc.title || 'Checklist'} ({rc.frequency} {rc.shift})
+                    </div>
+                    {rc.rejection_details?.items?.some(i => i.approval_status === 'rejected') && (
+                      <div style={{ fontSize: 11, color: '#ff4d4f', marginLeft: 10, fontStyle: 'italic' }}>
+                        Items rejected: {rc.rejection_details.items.filter(i => i.approval_status === 'rejected').map(i => i.item_text).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Divider */}
             <div

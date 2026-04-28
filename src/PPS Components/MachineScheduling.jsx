@@ -522,9 +522,6 @@ const MachineScheduling = () => {
                   <Option value="year">Yearly</Option>
                 </Select>
 
-                <Button size="small" icon={<LeftOutlined />}  onClick={() => handleTimelineNavigation('left')} />
-                <Button size="small" icon={<RightOutlined />} onClick={() => handleTimelineNavigation('right')} />
-
                 <DatePicker.RangePicker
                   size="small"
                   format="DD-MM-YYYY"
@@ -611,6 +608,8 @@ const MachineScheduling = () => {
                   <Tooltip title="Fit All">
                     <Button icon={<FullscreenOutlined />} onClick={() => timelineRef.current?.fit()} />
                   </Tooltip>
+                  <Button size="small" icon={<LeftOutlined />}  onClick={() => handleTimelineNavigation('left')} />
+                  <Button size="small" icon={<RightOutlined />} onClick={() => handleTimelineNavigation('right')} />
                 </Button.Group>
 
                 <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />

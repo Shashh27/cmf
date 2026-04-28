@@ -6,6 +6,29 @@ import { API_BASE_URL } from "../Config/auth";
 const { Title, Text } = Typography;
 const { Option } = Select;
 
+/* ─── Design tokens (matching Machine Assignments) ────────────────────────── */
+const T = {
+  bg:         '#FDFBF7',
+  surface:    '#FFFFFF',
+  sidebar:    '#F5F5F5',
+  border:     '#D1D5DB',
+  borderMid:  '#E5E5E5',
+  primary:    '#4A6CF7',
+  primaryBg:  '#EEF2FF',
+  success:    '#22C55E',
+  successBg:  '#DCFCE7',
+  warning:    '#F59E0B',
+  warningBg:  '#FEF3C7',
+  weekend:    '#F9FAFB',
+  text:       '#111827',
+  textMid:    '#374151',
+  textSub:    '#6B7280',
+  textMuted:  '#9CA3AF',
+  radius:     '12px',
+  radiusSm:   '8px',
+  shadow:     '0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05)',
+};
+
 const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }) => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -253,75 +276,50 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
   ];
 
   return (
-    <div>
-      <div
-        style={{
-          marginBottom: '16px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-        }}
-      >
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            Checklist Completion Logs
-          </Title>
-          <Text type="secondary" style={{ fontSize: '14px' }}>
-            View and analyze checklist completion data
-          </Text>
+    <div style={{ padding: 0, fontFamily: "'DM Sans', 'Inter', system-ui, sans-serif", background: T.bg }}>
+      {/* ── Top bar ── */}
+      <div style={{
+        background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
+        padding: '10px 14px', marginBottom: 10, boxShadow: T.shadow,
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      }}>
+        <Text strong style={{ fontSize: 13, color: T.textMid, whiteSpace: 'nowrap' }}>Completion Logs:</Text>
+        <div style={{ flex: '0 0 400px', maxWidth: '100%' }}>
+          <Select
+            allowClear
+            placeholder="Select Machine"
+            loading={machinesLoading}
+            onFocus={() => fetchMachines()}
+            style={{ width: '100%' }}
+            value={selectedMachine}
+            onChange={handleMachineChange}
+            showSearch
+            optionFilterProp="children"
+          >
+            {machines.map((machine) => (
+              <Option key={machine.id} value={machine.id}>
+                {getMachineLabel(machine.id)}
+              </Option>
+            ))}
+          </Select>
         </div>
-      </div>
-
-      <Card
-        style={{
-          borderRadius: '12px',
-          border: '1px solid #f0f0f0',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
-          marginBottom: '16px',
-        }}
-        bodyStyle={{ padding: '16px 20px' }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: '16px',
-          }}
-        >
-          <div style={{ flex: '0 0 450px', maxWidth: '100%' }}>
-            <Text strong style={{ display: 'block', marginBottom: 8 }}>
-              Machine
-            </Text>
-            <Select
-              allowClear
-              placeholder="Select Machine"
-              loading={machinesLoading}
-              onFocus={() => fetchMachines()}
-              style={{ width: '100%' }}
-              value={selectedMachine}
-              onChange={handleMachineChange}
-              showSearch
-              optionFilterProp="children"
-            >
-              {machines.map((machine) => (
-                <Option key={machine.id} value={machine.id}>
-                  {getMachineLabel(machine.id)}
-                </Option>
-              ))}
-            </Select>
-          </div>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <Button
             icon={<ReloadOutlined />}
             onClick={handleRefresh}
-            style={{
-              borderRadius: '50%',
-            }}
-          />
+            loading={loading}
+            style={{ borderRadius: 8 }}
+          >Refresh</Button>
         </div>
-      </Card>
+      </div>
 
-      <Table
+      {/* ── Main content card ── */}
+      <div style={{
+        background: T.surface, border: `1px solid ${T.border}`,
+        borderRadius: T.radius, boxShadow: T.shadow, overflow: 'hidden',
+        minHeight: 'calc(100vh - 320px)',
+      }}>
+        <Table
         columns={columns}
         dataSource={logs}
         loading={loading}
@@ -338,18 +336,16 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
           pageSizeOptions: ['10', '20', '50', '100'],
           onChange: (page, pageSize) => {
             setPagination({ current: page, pageSize: pageSize });
-            console.log('Page changed to:', page, 'Page size:', pageSize);
           },
           onShowSizeChange: (current, size) => {
             setPagination({ current: 1, pageSize: size });
-            console.log('Page size changed to:', size);
           },
         }}
         style={{
-          background: '#fff',
-          borderRadius: '8px',
+          background: T.surface,
         }}
       />
+      </div>
 
       <Modal
         title={

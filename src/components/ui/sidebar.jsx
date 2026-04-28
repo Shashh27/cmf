@@ -280,6 +280,16 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/production_logs`} onClick={() => setMobileDrawerOpen(false)}>Production logs</Link>,
         icon: <FileTextOutlined />,
       },
+      {
+        key: `${prefix}/pps/assets-availability`,
+        label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link>,
+        icon: <AppstoreOutlined />,
+      },
+      {
+        key: `${prefix}/product-monitoring/pokayoke-checklists`,
+        label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
+        icon: <SafetyCertificateOutlined />,
+      },
     ];
   } else if (prefix === '/inventory_supervisor') {
     items = [

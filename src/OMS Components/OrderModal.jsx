@@ -249,7 +249,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
     try {
       // Create product if project name is provided and it's a new order
-      let productId = 5; // Default fallback
+      let productId = editingOrder ? editingOrder.product_id : null; // Use existing product_id when editing
       if (!editingOrder && values.project_name?.trim()) {
         try {
           const userId = getCurrentUserId();
@@ -260,7 +260,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
               user_id: parseInt(userId, 10),
             });
             productId = productResponse.data.id;
-            message.success(`Project "${values.project_name.trim()}" created successfully`);
           }
         } catch (productError) {
           console.error("Error creating product:", productError);
@@ -344,6 +343,10 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         
         onOrderCreated(result);
         handleClose();
+        // Show success message after both product and order are created successfully
+        if (!editingOrder && values.project_name?.trim()) {
+          message.success(`Project "${values.project_name.trim()}" created successfully`);
+        }
       } else {
         const errorData = response.data || {};
         message.error(errorData.detail || "Failed to save order");

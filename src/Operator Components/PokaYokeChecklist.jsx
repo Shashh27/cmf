@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {Modal,Button,Typography,message} from 'antd';
 import {CheckCircleOutlined,CloseOutlined,FileTextOutlined,CheckOutlined} from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
+import config from '../Config/config.js';
 import PokaYokeChecklistSelector from './PokaYokeChecklistSelector.jsx';
 import PokaYokeChecklistForm from './PokaYokeChecklistForm.jsx';
 
@@ -29,6 +30,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
   const [loading, setLoading] = useState(false);
   const [assignments, setAssignments] = useState([]);
   const [completedTodayIds, setCompletedTodayIds] = useState(new Set());
+  const [approvalStatuses, setApprovalStatuses] = useState({}); // { key: { status, rejection_details } }
   const [selected, setSelected] = useState(null);
   const [namesByChecklistId, setNamesByChecklistId] = useState({});
   const [items, setItems] = useState([]);
@@ -147,9 +149,46 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
           const idsSet = new Set(
             logs
               .filter(log => new Date(log.completed_at) >= startOfToday)
-              .map(log => String(log.checklist_id))
+              .map(log => {
+                const cid = String(log.checklist_id);
+                const freq = (log.frequency || '').toLowerCase();
+                const shift = (log.shift || '').toLowerCase();
+                return `${cid}-${freq}-${shift}`;
+              })
           );
           setCompletedTodayIds(idsSet);
+
+          // Fetch approval status for each completed assignment
+          const statuses = {};
+          for (const item of arr) {
+            const cid = String(item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id);
+            const freq = (item?.frequency || '').toLowerCase();
+            const shift = (item?.shift || '').toLowerCase();
+            const key = `${cid}-${freq}-${shift}`;
+
+            if (idsSet.has(key)) {
+              try {
+                const approvalRes = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/checklists/${cid}/approval-status`);
+                if (approvalRes.ok) {
+                  const approvalData = await approvalRes.json();
+                  const cLogs = approvalData.completed_logs || [];
+                  const latestLog = cLogs
+                    .filter(l => l.machine_id === machineId && new Date(l.completed_at) >= startOfToday)
+                    .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at))[0];
+
+                  if (latestLog) {
+                    statuses[key] = {
+                      status: latestLog.overall_approval_status,
+                      rejection_details: latestLog
+                    };
+                  }
+                }
+              } catch (err) {
+                console.error('Error fetching approval status:', err);
+              }
+            }
+          }
+          setApprovalStatuses(statuses);
         } catch (err) {
           console.error('Error fetching completed logs:', err);
         }
@@ -213,7 +252,39 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
         const data = await res.json();
         const arr = Array.isArray(data) ? data : [];
         setItems(arr);
-        setResponses({});
+        
+        // Pre-fill responses if rejected
+        const freq = (selected.frequency || '').toLowerCase();
+        const shift = (selected.shift || '').toLowerCase();
+        const key = `${checklistId}-${freq}-${shift}`;
+        const approval = approvalStatuses[key];
+
+        if (approval && approval.status === 'rejected') {
+          const prevResponses = {};
+          const rejectionDetails = approval.rejection_details || {};
+          (rejectionDetails.items || []).forEach(item => {
+            const itemId = item.item_id;
+            const value = item.response_value;
+            // Find the item in the current items list to get the correct key for responses state
+            const currentItem = arr.find(it => (it.id ?? null) === itemId);
+            const responseKey = currentItem?.id ?? currentItem?.item_text ?? currentItem?.name ?? 'Item';
+            prevResponses[responseKey] = value;
+          });
+          setResponses(prevResponses);
+          
+          // Also set production order and part if available from rejection details
+          if (rejectionDetails.production_order_id) {
+            setSelectedOrderId(rejectionDetails.production_order_id);
+          }
+          if (rejectionDetails.part_id) {
+            setSelectedPartId(rejectionDetails.part_id);
+          }
+          if (rejectionDetails.comments) {
+            setComments(rejectionDetails.comments);
+          }
+        } else {
+          setResponses({});
+        }
       } catch {
         setItems([]);
       }
@@ -509,7 +580,14 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       
       // Update completedTodayIds immediately
       if (checklistId) {
-        setCompletedTodayIds(prev => new Set([...prev, String(checklistId)]));
+        const freq = (assignmentFrequency || '').toLowerCase();
+        const shift = (assignmentShift || '').toLowerCase();
+        const key = `${String(checklistId)}-${freq}-${shift}`;
+        setCompletedTodayIds(prev => new Set([...prev, key]));
+        setApprovalStatuses(prev => ({
+          ...prev,
+          [key]: { status: 'pending', rejection_details: null }
+        }));
       }
 
       message.success('Checklist submitted');
@@ -757,6 +835,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
             namesByChecklistId={namesByChecklistId}
             onSelectChecklist={setSelected}
             completedTodayIds={completedTodayIds}
+            approvalStatuses={approvalStatuses}
           />
         )}
 
@@ -781,6 +860,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
             submitLoading={submitLoading}
             onSubmit={handleSubmit}
             onBack={() => setSelected(null)}
+            approvalInfo={approvalStatuses[`${selected?.checklist_id ?? selected?.pokayoke_checklist_id ?? selected?.checklistId ?? selected?.checklist?.id}-${(selected?.frequency || '').toLowerCase()}-${(selected?.shift || '').toLowerCase()}`]}
           />
         )}
           </>

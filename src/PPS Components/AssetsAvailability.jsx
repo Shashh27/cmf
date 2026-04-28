@@ -38,6 +38,9 @@ const AssetAvailability = () => {
   const [statusSearchText, setStatusSearchText] = useState(null);
   const [machinePageSize, setMachinePageSize] = useState(10);
 
+  // ← NEW: track table-level filters (for Status column filter)
+  const [tableFilters, setTableFilters] = useState({});
+
   // Get unique machine names for dropdown
   const getMachineOptions = () => {
     if (!machineData?.statuses) return [];
@@ -85,22 +88,19 @@ const AssetAvailability = () => {
     console.log('Machine data received:', machine);
     setSelectedMachine(machine);
     
-    // Automatically set the next status: 1 (ON) -> 2 (OFF), 2 (OFF) -> 1 (ON)
     const nextStatusId = machine.status_id === 1 ? 2 : 1;
     setSelectedStatus(nextStatusId); 
     setUpdateModalVisible(true);
     
-    // Reset form first to clear any previous values
     updateForm.resetFields();
     
-    // Properly handle date values for the form using dayjs
     const formValues = {
       machine_id: machine.machine_id,
       machine_name: machine.machine_make, 
-      status_id: nextStatusId, // Set to automatically calculated next status
+      status_id: nextStatusId,
       description: machine.description || '',
-      available_from: null, // Start empty
-      available_to: null,   // Start empty
+      available_from: null,
+      available_to: null,
     };
     
     console.log('Setting form values:', formValues);
@@ -120,29 +120,20 @@ const AssetAvailability = () => {
       const currentStatusId = selectedMachine.status_id;
       const newStatusId = values.status_id;
       
-      // Case 1: Initial machine creation (no previous status)
       if (!currentStatusId) {
         payload.available_from = '2026-01-01T00:00:00';
         payload.available_to = null;
-      }
-      // Case 2: ON -> OFF transition
-      else if (currentStatusId === 1 && newStatusId === 2) {
-        // Ask user for both from and to times
+      } else if (currentStatusId === 1 && newStatusId === 2) {
         if (!values.available_from || !values.available_to) {
           message.error('Please provide both "Available From" and "Available To" times for ON -> OFF transition');
           return;
         }
         payload.available_from = values.available_from.toISOString();
         payload.available_to = values.available_to.toISOString();
-      }
-      // Case 3: OFF -> ON transition
-      else if (currentStatusId === 2 && newStatusId === 1) {
-        // From time is current time, to is null
+      } else if (currentStatusId === 2 && newStatusId === 1) {
         payload.available_from = new Date().toISOString();
         payload.available_to = null;
-      }
-      // Default case: use form values if provided
-      else {
+      } else {
         payload.available_from = values.available_from ? values.available_from.toISOString() : null;
         payload.available_to = values.available_to ? values.available_to.toISOString() : null;
       }
@@ -151,9 +142,7 @@ const AssetAvailability = () => {
         `${SCHEDULING_API_BASE_URL}/machine-status/machine-status/${selectedMachine.machine_id}`,
         {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }
       );
@@ -166,7 +155,6 @@ const AssetAvailability = () => {
         updateForm.resetFields();
         setSelectedMachine(null);
         
-        // Update local state immediately for better UX
         if (machineData?.statuses) {
           const updatedStatuses = machineData.statuses.map(status => 
             status.machine_id === selectedMachine.machine_id 
@@ -182,9 +170,6 @@ const AssetAvailability = () => {
           );
           setMachineData({ ...machineData, statuses: updatedStatuses });
         }
-        
-        // Also refresh from server to ensure consistency
-        // fetchMachineStatus();
       } else {
         const errorData = await response.json();
         message.error(errorData.detail || 'Failed to update machine status');
@@ -209,10 +194,10 @@ const AssetAvailability = () => {
   const edit = (record) => {
     const key = (record.id || record.machine_id).toString();
     inlineEditForm.setFieldsValue({
-      status_id: record.status_id === 1, // true for ON, false for OFF
+      status_id: record.status_id === 1,
       description: record.description,
-      available_from: null, // Start empty
-      available_to: null,   // Start empty
+      available_from: null,
+      available_to: null,
       machine_make: record.machine_make,
       work_center_name: record.work_center_name,
     });
@@ -230,7 +215,7 @@ const AssetAvailability = () => {
       
       const machineId = record.machine_id;
       const currentStatusId = record.status_id;
-      const newStatusId = row.status_id ? 1 : 2; // true -> 1 (ON), false -> 2 (OFF)
+      const newStatusId = row.status_id ? 1 : 2;
       
       let payload = {
         status_id: newStatusId,
@@ -239,13 +224,10 @@ const AssetAvailability = () => {
         machine_make: row.machine_make || record.machine_make,
       };
 
-      // Case 1: Initial machine creation (no previous status)
       if (!currentStatusId) {
         payload.available_from = '2026-01-01T00:00:00';
         payload.available_to = null;
-      }
-      // Case 2: ON -> OFF transition (Switch OFF)
-      else if (newStatusId === 2) {
+      } else if (newStatusId === 2) {
         if (!row.available_from || !row.available_to) {
           message.error('Please provide both "From" and "To" times for OFF status');
           setUpdateLoading(false);
@@ -253,9 +235,7 @@ const AssetAvailability = () => {
         }
         payload.available_from = row.available_from.toISOString();
         payload.available_to = row.available_to.toISOString();
-      }
-      // Case 3: OFF -> ON transition (Switch ON)
-      else if (newStatusId === 1) {
+      } else if (newStatusId === 1) {
         payload.available_from = new Date().toISOString();
         payload.available_to = null;
       }
@@ -264,9 +244,7 @@ const AssetAvailability = () => {
         `${SCHEDULING_API_BASE_URL}/machine-status/machine-status/${machineId}`,
         {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }
       );
@@ -276,7 +254,6 @@ const AssetAvailability = () => {
         message.success('Machine status updated successfully');
         setEditingKey("");
         
-        // Update local state
         if (machineData?.statuses) {
           const updatedStatuses = machineData.statuses.map(status => 
             status.machine_id === machineId 
@@ -303,45 +280,31 @@ const AssetAvailability = () => {
     }
   };
 
-  // Helper function to determine if date fields should be shown
   const shouldShowDateFields = () => {
     if (!selectedMachine || !selectedStatus) return false;
-    
     const currentStatusId = selectedMachine.status_id;
     const newStatusId = selectedStatus;
-    
-    // Show date fields for ON -> OFF transition
     return currentStatusId === 1 && newStatusId === 2;
   };
 
-  // Helper function to get field requirements
   const getFieldRequirements = () => {
     if (!selectedMachine || !selectedStatus) return { fromRequired: false, toRequired: false };
-    
     const currentStatusId = selectedMachine.status_id;
     const newStatusId = selectedStatus;
-    
-    // ON -> OFF: both fields required
     if (currentStatusId === 1 && newStatusId === 2) {
       return { fromRequired: true, toRequired: true };
     }
-    
     return { fromRequired: false, toRequired: false };
   };
 
-  // Calculate KPI values
-  const getTotalMachines = () => {
-    return machineData?.total_machines || 0;
-  };
+  const getTotalMachines = () => machineData?.total_machines || 0;
 
   const getActiveMachines = () => {
     if (!machineData?.statuses) return 0;
     return machineData.statuses.filter(status => {
       const statusName = (status.status_name || '').toLowerCase();
-      return statusName.includes('active') || 
-             statusName.includes('running') || 
-             statusName.includes('on') ||
-             status.status_id === 1; // ON status
+      return statusName.includes('active') || statusName.includes('running') || 
+             statusName.includes('on') || status.status_id === 1;
     }).length;
   };
 
@@ -349,13 +312,16 @@ const AssetAvailability = () => {
     if (!machineData?.statuses) return 0;
     return machineData.statuses.filter(status => {
       const statusName = (status.status_name || '').toLowerCase();
-      return statusName.includes('inactive') || 
-             statusName.includes('down') ||
-             statusName.includes('off') ||
-             statusName.includes('maintenance') ||
-             status.status_id === 2 || // OFF status
-             status.status_id === 3; // MAINTENANCE status
+      return statusName.includes('inactive') || statusName.includes('down') ||
+             statusName.includes('off') || statusName.includes('maintenance') ||
+             status.status_id === 2 || status.status_id === 3;
     }).length;
+  };
+
+  // ← NEW: handle table onChange to capture filter state
+  const handleTableChange = (pagination, filters) => {
+    setMachinePageSize(pagination.pageSize);
+    setTableFilters(filters);
   };
 
   // Table columns for machine status
@@ -364,6 +330,8 @@ const AssetAvailability = () => {
       title: "Machine Name",
       dataIndex: "machine_make",
       key: "machine_make",
+      // ← NEW: A→Z / Z→A sorting
+      sorter: (a, b) => (a.machine_make || '').localeCompare(b.machine_make || ''),
     },
     {
       title: "Work Center",
@@ -385,10 +353,7 @@ const AssetAvailability = () => {
               {({ getFieldValue }) => {
                 const isON = getFieldValue('status_id');
                 return isON ? "-" : (
-                  <Form.Item
-                    name="available_from"
-                    style={{ margin: 0 }}
-                  >
+                  <Form.Item name="available_from" style={{ margin: 0 }}>
                     <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" />
                   </Form.Item>
                 );
@@ -409,16 +374,42 @@ const AssetAvailability = () => {
           return (
             <Form.Item
               noStyle
-              shouldUpdate={(prevValues, currentValues) => prevValues.status_id !== currentValues.status_id}
+              shouldUpdate={(prevValues, currentValues) =>
+                prevValues.status_id !== currentValues.status_id ||
+                prevValues.available_from !== currentValues.available_from
+              }
             >
               {({ getFieldValue }) => {
                 const isON = getFieldValue('status_id');
+                const fromValue = getFieldValue('available_from');
                 return isON ? "-" : (
-                  <Form.Item
-                    name="available_to"
-                    style={{ margin: 0 }}
-                  >
-                    <DatePicker showTime format="YYYY-MM-DD HH:mm:ss" />
+                  <Form.Item name="available_to" style={{ margin: 0 }}>
+                    <DatePicker
+                      showTime
+                      format="YYYY-MM-DD HH:mm:ss"
+                      disabledDate={(current) => {
+                        if (!current) return false;
+                        if (fromValue) return current.isBefore(fromValue, 'day');
+                        return false;
+                      }}
+                      disabledTime={(current) => {
+                        if (!fromValue || !current) return {};
+                        if (current.isSame(fromValue, 'day')) {
+                          return {
+                            disabledHours: () => Array.from({ length: fromValue.hour() }, (_, i) => i),
+                            disabledMinutes: (selectedHour) =>
+                              selectedHour === fromValue.hour()
+                                ? Array.from({ length: fromValue.minute() }, (_, i) => i)
+                                : [],
+                            disabledSeconds: (selectedHour, selectedMinute) =>
+                              selectedHour === fromValue.hour() && selectedMinute === fromValue.minute()
+                                ? Array.from({ length: fromValue.second() }, (_, i) => i)
+                                : [],
+                          };
+                        }
+                        return {};
+                      }}
+                    />
                   </Form.Item>
                 );
               }}
@@ -432,16 +423,20 @@ const AssetAvailability = () => {
       title: "Status",
       dataIndex: "status_id",
       key: "status_id",
+      // ← NEW: ON / OFF filter options
+      filters: [
+        { text: 'ON', value: 1 },
+        { text: 'OFF', value: 2 },
+      ],
+      filteredValue: tableFilters.status_id || null,
+      onFilter: (value, record) => record.status_id === value,
       render: (statusId, record) => {
         const editable = isEditing(record);
         if (editable) {
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Form.Item name="status_id" valuePropName="checked" style={{ margin: 0 }}>
-                <Switch
-                  checkedChildren="ON"
-                  unCheckedChildren="OFF"
-                />
+                <Switch checkedChildren="ON" unCheckedChildren="OFF" />
               </Form.Item>
               <Form.Item
                 noStyle
@@ -473,10 +468,7 @@ const AssetAvailability = () => {
         const editable = isEditing(record);
         if (editable) {
           return (
-            <Form.Item
-              name="description"
-              style={{ margin: 0 }}
-            >
+            <Form.Item name="description" style={{ margin: 0 }}>
               <Input.TextArea rows={2} placeholder="Machine status remarks" />
             </Form.Item>
           );
@@ -500,7 +492,7 @@ const AssetAvailability = () => {
             >
               Save
             </Button>
-              <Button size="small" danger onClick={cancel}>Cancel</Button>
+            <Button size="small" danger onClick={cancel}>Cancel</Button>
           </Space>
         ) : (
           <Button
@@ -527,7 +519,6 @@ const AssetAvailability = () => {
 
   return (
     <div style={{ padding: '0px' }}>
-      {/* Tabs */}
       <Card 
         bordered={false} 
         style={{ 
@@ -592,12 +583,8 @@ const AssetAvailability = () => {
                         </div>
                       </div>
                       <div style={{ 
-                        background: '#f0f5ff', 
-                        padding: '12px', 
-                        borderRadius: '10px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
+                        background: '#f0f5ff', padding: '12px', borderRadius: '10px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
                       }}>
                         <InfoCircleOutlined style={{ fontSize: '24px', color: '#597ef7' }} />
                       </div>
@@ -623,12 +610,8 @@ const AssetAvailability = () => {
                         </div>
                       </div>
                       <div style={{ 
-                        background: '#f6ffed', 
-                        padding: '12px', 
-                        borderRadius: '10px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
+                        background: '#f6ffed', padding: '12px', borderRadius: '10px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
                       }}>
                         <CheckCircleOutlined style={{ fontSize: '24px', color: '#52c41a' }} />
                       </div>
@@ -654,12 +637,8 @@ const AssetAvailability = () => {
                         </div>
                       </div>
                       <div style={{ 
-                        background: '#fff1f0', 
-                        padding: '12px', 
-                        borderRadius: '10px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
+                        background: '#fff1f0', padding: '12px', borderRadius: '10px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
                       }}>
                         <ExclamationCircleOutlined style={{ fontSize: '24px', color: '#f5222d' }} />
                       </div>
@@ -702,17 +681,6 @@ const AssetAvailability = () => {
                       options={getWcOptions()}
                     />
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 500 }}>Status:</span>
-                    <Select
-                      placeholder={<span><FilterOutlined /> All Statuses</span>}
-                      allowClear
-                      style={{ width: 180 }}
-                      value={statusSearchText}
-                      onChange={value => setStatusSearchText(value)}
-                      options={getStatusOptions()}
-                    />
-                  </div>
                 </div>
               </div>
 
@@ -733,11 +701,11 @@ const AssetAvailability = () => {
                       showSizeChanger: true,
                       showQuickJumper: true,
                       pageSizeOptions: ['10', '20', '50', '100'],
-                      onShowSizeChange: (current, size) => setMachinePageSize(size),
-                      showTotal: (total, range) => 
-                        `${range[0]}-${range[1]} of ${total} items`,
+                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
                       simple: window.innerWidth < 768,
                     }}
+                    // ← NEW: captures filter + pagination changes
+                    onChange={handleTableChange}
                     className="custom-table"
                   />
                 </Form>
@@ -765,39 +733,22 @@ const AssetAvailability = () => {
         width={window.innerWidth < 768 ? '95%' : 600}
         centered={window.innerWidth < 768}
       >
-        <Form
-          form={updateForm}
-          layout="vertical"
-          onFinish={handleUpdateSubmit}
-        >
-          <Form.Item
-            label="Machine Name"
-            name="machine_name"
-          >
+        <Form form={updateForm} layout="vertical" onFinish={handleUpdateSubmit}>
+          <Form.Item label="Machine Name" name="machine_name">
             <Input disabled />
           </Form.Item>
 
-          <Form.Item
-            label="Status"
-            name="status_id"
-          >
+          <Form.Item label="Status" name="status_id">
             <Select disabled>
               <Option value={1}>ON</Option>
               <Option value={2}>OFF</Option>
             </Select>
           </Form.Item>
 
-          <Form.Item
-            label="Description"
-            name="description"
-          >
-            <TextArea 
-              rows={3} 
-              placeholder="Enter description (optional)"
-            />
+          <Form.Item label="Description" name="description">
+            <TextArea rows={3} placeholder="Enter description (optional)" />
           </Form.Item>
 
-          {/* Dynamic Date Fields - Only show for ON -> OFF transition */}
           {shouldShowDateFields() && (
             <>
               <Form.Item
@@ -818,17 +769,44 @@ const AssetAvailability = () => {
                 name="available_to"
                 rules={[{ required: getFieldRequirements().toRequired, message: 'Please select available to date' }]}
               >
-                <DatePicker
-                  showTime
-                  style={{ width: '100%' }}
-                  placeholder="Select available to date"
-                  disabledDate={(current) => current && current < dayjs()}
-                />
+                <Form.Item noStyle shouldUpdate={(prev, curr) => prev.available_from !== curr.available_from}>
+                  {({ getFieldValue }) => {
+                    const fromValue = getFieldValue('available_from');
+                    return (
+                      <DatePicker
+                        showTime
+                        style={{ width: '100%' }}
+                        placeholder="Select available to date"
+                        disabledDate={(current) => {
+                          if (!current) return false;
+                          if (fromValue) return current.isBefore(fromValue, 'day');
+                          return current && current < dayjs();
+                        }}
+                        disabledTime={(current) => {
+                          if (!fromValue || !current) return {};
+                          if (current.isSame(fromValue, 'day')) {
+                            return {
+                              disabledHours: () => Array.from({ length: fromValue.hour() }, (_, i) => i),
+                              disabledMinutes: (selectedHour) =>
+                                selectedHour === fromValue.hour()
+                                  ? Array.from({ length: fromValue.minute() }, (_, i) => i)
+                                  : [],
+                              disabledSeconds: (selectedHour, selectedMinute) =>
+                                selectedHour === fromValue.hour() && selectedMinute === fromValue.minute()
+                                  ? Array.from({ length: fromValue.second() }, (_, i) => i)
+                                  : [],
+                            };
+                          }
+                          return {};
+                        }}
+                      />
+                    );
+                  }}
+                </Form.Item>
               </Form.Item>
             </>
           )}
 
-          {/* Info message for automatic date handling */}
           {selectedMachine && selectedStatus && !shouldShowDateFields() && (
             <div style={{ 
               padding: '12px', 
