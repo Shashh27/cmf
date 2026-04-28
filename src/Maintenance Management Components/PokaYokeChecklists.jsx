@@ -236,6 +236,7 @@ const PokaYokeChecklists = () => {
       key: 'name',
       width: 200,
       className: 'table-header-styled',
+      sorter: (a, b) => a.name.localeCompare(b.name),
       render: (text) => <Text strong>{text}</Text>,
     },
     {
@@ -245,6 +246,7 @@ const PokaYokeChecklists = () => {
       width: 300,
       ellipsis: true,
       className: 'table-header-styled',
+      sorter: (a, b) => a.description.localeCompare(b.description),
     },
     {
       title: 'Items',
@@ -253,6 +255,7 @@ const PokaYokeChecklists = () => {
       width: 100,
       align: 'center',
       className: 'table-header-styled',
+      sorter: (a, b) => a.itemsCount - b.itemsCount,
       render: (count) => (
         <Tag color="blue" style={{ fontSize: '12px', padding: '2px 8px' }}>
           {count}
@@ -265,6 +268,7 @@ const PokaYokeChecklists = () => {
       key: 'created_at',
       width: 180,
       className: 'table-header-styled',
+      sorter: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
       render: (date) => <Text type="secondary">{formatDate(date)}</Text>,
     },
     {
@@ -385,6 +389,7 @@ const PokaYokeChecklists = () => {
         rowKey="id"
         size="small"
         scroll={{ x: 1000 }}
+        bordered
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,

@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Spin, Alert, Typography, Button, Switch, Radio, Space } from 'antd';
+import { Spin, Alert, Typography, Button, Switch, Radio, Space, Row, Col, Segmented, Card } from 'antd';
 import { motion } from 'framer-motion';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
-import { TableOutlined, CalendarOutlined } from '@ant-design/icons';
+import { TableOutlined, CalendarOutlined, AppstoreOutlined, LineChartOutlined } from '@ant-design/icons';
 
 import { MachineGrid } from './MachineComponents';
 import { SchedulingAnalytics } from './SchedulingAnalytics';
 
-const { Text } = Typography;
+const { Title, Text } = Typography;
 
 // Main ShopFloorDashboard Component
 const ShopFloorDashboard = ({ onBack }) => {
@@ -105,52 +105,135 @@ const ShopFloorDashboard = ({ onBack }) => {
       transition={{ duration: 0.5 }}
       style={{ padding: '12px', background: '#f5f5f5', minHeight: '100vh' }}
     >
-      {/* View Toggle */}
-      <div style={{
-        marginBottom: '12px',
-        padding: '12px',
-        background: 'white',
-        borderRadius: '8px',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <Text strong style={{ fontSize: '14px' }}>Shop Floor Dashboard</Text>
-          <Switch
-            checked={viewMode === 'analytics'}
-            onChange={(checked) => setViewMode(checked ? 'analytics' : '2d')}
-            checkedChildren="Analytics"
-            unCheckedChildren="2D View"
-            style={{ minWidth: '100px' }}
-          />
-          {viewMode === 'analytics' && (
-            <Radio.Group
-              value={analyticsViewMode}
-              onChange={(e) => setAnalyticsViewMode(e.target.value)}
-              buttonStyle="solid"
-              size="small"
-            >
-              <Radio.Button value="table"><TableOutlined /> Table View</Radio.Button>
-              <Radio.Button value="heatmap"><CalendarOutlined /> Calendar Heatmap</Radio.Button>
-            </Radio.Group>
-          )}
-        </div>
-        <Button
-          type="primary"
-          onClick={onBack}
-          style={{
-            background: '#1976d2',
-            border: 'none',
-            borderRadius: '6px',
-            fontWeight: 500,
-            height: '32px'
-          }}
-        >
-          Back
-        </Button>
-      </div>
+      <style>{`
+        .custom-segmented .ant-segmented-item {
+          border-radius: 6px;
+          transition: all 0.3s ease;
+        }
+        .custom-segmented .ant-segmented-item-selected {
+          background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%) !important;
+          color: white !important;
+          box-shadow: 0 2px 8px rgba(25, 118, 210, 0.3);
+        }
+        .custom-segmented .ant-segmented-item:hover:not(.ant-segmented-item-selected) {
+          background: #e3f2fd;
+        }
+        .custom-segmented .ant-segmented-item-selected .anticon {
+          color: white !important;
+        }
+      `}</style>
+      {/* Header Section */}
+      <Card
+        style={{
+          marginBottom: '16px',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)'
+        }}
+        bodyStyle={{ padding: '16px 24px' }}
+      >
+        <Row justify="space-between" align="middle" gutter={[16, 16]}>
+          <Col xs={24} sm={12} md={8}>
+            <Space size="large" align="center">
+              <div>
+                <Title level={3} style={{ margin: 0, color: '#262626' }}>
+                  Shop Floor Dashboard
+                </Title>
+                <Text type="secondary" style={{ fontSize: '12px' }}>
+                  Monitor and manage shop floor operations
+                </Text>
+              </div>
+            </Space>
+          </Col>
+          <Col xs={24} sm={12} md={16}>
+            <Row justify="end" align="middle" gutter={[12, 12]}>
+              <Col>
+                <Segmented
+                  value={viewMode}
+                  onChange={(value) => setViewMode(value)}
+                  options={[
+                    {
+                      label: (
+                        <Space size={4}>
+                          <AppstoreOutlined />
+                          <span>2D View</span>
+                        </Space>
+                      ),
+                      value: '2d'
+                    },
+                    {
+                      label: (
+                        <Space size={4}>
+                          <LineChartOutlined />
+                          <span>Analytics</span>
+                        </Space>
+                      ),
+                      value: 'analytics'
+                    }
+                  ]}
+                  size="large"
+                  style={{
+                    backgroundColor: '#f5f5f5',
+                    padding: '4px',
+                    borderRadius: '8px'
+                  }}
+                  className="custom-segmented"
+                />
+              </Col>
+              {viewMode === 'analytics' && (
+                <Col>
+                  <Segmented
+                    value={analyticsViewMode}
+                    onChange={(value) => setAnalyticsViewMode(value)}
+                    options={[
+                      {
+                        label: (
+                          <Space size={4}>
+                            <TableOutlined />
+                            <span>Table</span>
+                          </Space>
+                        ),
+                        value: 'table'
+                      },
+                      {
+                        label: (
+                          <Space size={4}>
+                            <CalendarOutlined />
+                            <span>Calendar</span>
+                          </Space>
+                        ),
+                        value: 'heatmap'
+                      }
+                    ]}
+                    size="large"
+                    style={{
+                      backgroundColor: '#f5f5f5',
+                      padding: '4px',
+                      borderRadius: '8px'
+                    }}
+                    className="custom-segmented"
+                  />
+                </Col>
+              )}
+              <Col>
+                <Button
+                  type="primary"
+                  onClick={onBack}
+                  icon={<AppstoreOutlined />}
+                  style={{
+                    background: '#1976d2',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontWeight: 500,
+                    height: '36px'
+                  }}
+                >
+                  Back
+                </Button>
+              </Col>
+            </Row>
+          </Col>
+        </Row>
+      </Card>
 
       {/* Machines Grid Section */}
       <div style={{ marginTop: 0 }}>

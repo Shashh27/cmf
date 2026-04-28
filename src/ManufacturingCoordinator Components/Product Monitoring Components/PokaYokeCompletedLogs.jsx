@@ -186,7 +186,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       const url = `${API_BASE_URL}/pokayoke-completed-logs/item-responses/${selectedResponse.id}/approve`;
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
