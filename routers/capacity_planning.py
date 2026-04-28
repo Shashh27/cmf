@@ -161,21 +161,19 @@ def get_machine_utilization(
         available_hours = max(0, base_available_hours - downtime_hours)
 
         # Calculate utilized hours from planned schedule items
+        # Raw duration only — no efficiency factor applied to utilized hours
         utilized_hours = 0
         machine_planned_items = planned_items_by_machine.get(m.id, [])
-        
+
         for item in machine_planned_items:
             if item.planned_start_time and item.planned_end_time:
                 duration = (item.planned_end_time - item.planned_start_time).total_seconds() / 3600
                 utilized_hours += duration
 
-        # Apply efficiency factor to utilized hours
-        utilized_hours *= efficiency
-
-        # Calculate utilization percentage
+        # utilization % relative to available hours (after downtime deduction)
         utilization_percentage = 0
         if available_hours > 0:
-            utilization_percentage = (utilized_hours / base_available_hours) * 100
+            utilization_percentage = (utilized_hours / available_hours) * 100
 
         remaining_hours = max(0, available_hours - utilized_hours)
 
@@ -324,21 +322,19 @@ def get_machine_utilization_by_range(
         available_hours = max(0, base_available_hours - adjusted_downtime)
 
         # Calculate utilized hours from planned schedule items
+        # Raw duration only — no efficiency factor applied to utilized hours
         utilized_hours = 0
         machine_planned_items = planned_items_by_machine.get(m.id, [])
-        
+
         for item in machine_planned_items:
             if item.planned_start_time and item.planned_end_time:
                 duration = (item.planned_end_time - item.planned_start_time).total_seconds() / 3600
                 utilized_hours += duration
 
-        # Apply efficiency factor to utilized hours
-        utilized_hours *= efficiency
-
-        # Calculate utilization percentage
+        # utilization % relative to available hours (after downtime deduction)
         utilization_percentage = 0
-        if base_available_hours > 0:
-            utilization_percentage = (utilized_hours / base_available_hours) * 100
+        if available_hours > 0:
+            utilization_percentage = (utilized_hours / available_hours) * 100
 
         remaining_hours = max(0, available_hours - utilized_hours)
 
