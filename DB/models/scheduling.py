@@ -328,3 +328,29 @@ class MachineOperatorShiftAssignment(Base):
     machine = relationship("Machine", foreign_keys=[machine_id])
     operator = relationship("AccessUser", foreign_keys=[operator_id])
     shift_config = relationship("ShiftHoursConfiguration", foreign_keys=[shift_config_id])
+
+
+class Rescheduling(Base):
+    __tablename__ = "rescheduling_items"
+    __table_args__ = {'schema': 'scheduling'}
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey('oms.orders.id'), nullable=False)
+    order_number = Column(String, ForeignKey("oms.orders.sale_order_number"), nullable=False)
+    part_id = Column(Integer, ForeignKey('oms.parts.id'), nullable=False)
+    part_number = Column(String, ForeignKey("oms.parts.part_number"), nullable=False)
+    operation_id = Column(Integer, ForeignKey('oms.operations.id'), nullable=False)
+    operation_number = Column(String, nullable=False)
+    machine_id = Column(Integer, ForeignKey('configuration.machines.id'), nullable=False)
+
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+
+    total_qty = Column(Integer, nullable=False)     # Total part qty
+    completed_qty = Column(Integer, nullable=False) # Approved_qty from production logs 
+    remaining_qty = Column(Integer, nullable=False) # Total - Approved
+    status = Column(String, nullable=False)         # Status of the rescheduling item -- scheduled | rescheduled
+    
+    
+
+    
