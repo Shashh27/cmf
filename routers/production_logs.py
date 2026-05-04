@@ -754,6 +754,38 @@ def update_production_log_status(
     elif status_update.status == "completed":
         update_operation_status_if_completed(db_log.operation_id, db)
 
+
+    # ── TRIGGER DYNAMIC RESCHEDULE ──────────────────────────────────────── #
+    # After supervisor approves (completed) or marks rework, re-plan remaining
+    # quantity for this part's entire operation chain in rescheduling_items.
+    #
+    # This is the key wiring:
+    #   supervisor approves 2 out of 3 → approved_so_far = 2 → remaining = 1
+    #   dynamic_reschedule writes a new 'rescheduled' row for 1 unit
+    #   All downstream operations cascade from the actual end time of this op
+    if status_update.status in ["completed", "rework"]:
+        try:
+            from algorithm import dynamic_reschedule
+            from DB.models.scheduling import OperationStatus
+            os_row = db.query(OperationStatus).filter(
+                OperationStatus.operation_id == db_log.operation_id
+            ).first()
+            if os_row:
+                dynamic_reschedule(
+                    db,
+                    triggered_by_part_id = os_row.part_id,
+                    triggered_by_op_id   = db_log.operation_id,
+                )
+                print(
+                    f"[DYNAMIC] Triggered after supervisor action on log {log_id} "
+                    f"(op={db_log.operation_id}, part={os_row.part_id}, "
+                    f"status={status_update.status})"
+                )
+        except Exception as e:
+            # Non-fatal: log the error but don't fail the approval
+            print(f"[WARN] dynamic_reschedule after supervisor approval failed: {e}")
+    # ─────────────────────────────────────────────────────────────────────── #
+ 
     return db_log
 
 @router.get("/operator/{operator_id}", response_model=List[ProductionLogResponse])

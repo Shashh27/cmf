@@ -1296,6 +1296,8 @@ from DB.models.scheduling import (
     MachineStatus,           # machine_id, status_id (1=ON / 2=OFF), available_from, available_to
     EfficiencyFactor,        # efficiency_factor (Float)
     OperationStatus,         # operation status tracking
+    Rescheduling,
+    ProductionLog
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -1305,6 +1307,12 @@ STATUS_OFF          = 2   # MachineStatus.status_id value meaning OFF
 IN_HOUSE_TYPE_ID    = 1   # Part.type_id for IN-House parts
 OUT_SOURCE_TYPE_ID  = 2   # Operation.part_type_id value for Out-Source (oms.part_types id=2)
 OUT_SOURCE_PROVISION = timedelta(days=7)  # Maximum vendor turnaround: 1 week
+
+
+
+# ── Dynamic scheduling constant ───────────────────────────────────────────
+STALE_INPROGRESS_WORKING_DAYS = 1  # Flag op stale after N working days with no log
+
 
 
 # =============================================================================
@@ -2530,6 +2538,15 @@ class SchedulerEngine:
             # Create OperationStatus entries for newly scheduled operations
             if scheduled_operations:
                 self._create_operation_status_entries(scheduled_operations)
+            
+
+            # ── Phase E: seed rescheduling_items (status='scheduled') ──── #
+            # Mirrors planned_schedule_items into rescheduling_items at
+            # version=1 so the Gantt has a live starting point identical
+            # to the baseline plan.  dynamic_reschedule() will later
+            # DELETE+INSERT rows with status='rescheduled' as work progresses.
+            if all_items:
+                self._seed_rescheduling_items(all_items, schedule_version=1)
 
             return {
                 'success':              True,
@@ -2565,6 +2582,64 @@ class SchedulerEngine:
                 'skipped_parts':             skipped_parts,
                 'parts_without_operations':  parts_without_operations,
             }
+    
+    def _seed_rescheduling_items(
+        self,
+        planned_items:    List[PlannedScheduleItem],
+        schedule_version: int,
+    ) -> None:
+        """
+        Called once when generate_schedule() completes.
+ 
+        Clears rescheduling_items entirely, then inserts one row per
+        PlannedScheduleItem with status='scheduled'.  This is the live
+        day-0 view — identical to the baseline plan.
+ 
+        dynamic_reschedule() will later delete+re-insert rows with
+        status='rescheduled' as production progresses.
+        """
+        try:
+            self.db.query(Rescheduling).delete()
+ 
+            # Build op_id → operation_number lookup
+            op_ids = list({item.operation_id for item in planned_items})
+            op_number_map: Dict[int, str] = {}
+            try:
+                ops = self.db.query(Operation).filter(
+                    Operation.id.in_(op_ids)
+                ).all()
+                op_number_map = {op.id: str(op.operation_number) for op in ops}
+            except Exception as e:
+                print(f"[WARN] op_number_map: {e}")
+ 
+            seeds = [
+                Rescheduling(
+                    order_id         = item.sale_order_id,
+                    order_number     = item.sale_order_number,
+                    part_id          = item.part_id,
+                    part_number      = item.part_number,
+                    operation_id     = item.operation_id,
+                    operation_number = op_number_map.get(
+                                           item.operation_id,
+                                           str(item.operation_id)
+                                       ),
+                    machine_id       = item.machine_id,
+                    start_time       = item.planned_start_time,
+                    end_time         = item.planned_end_time,
+                    total_qty        = item.total_quantity,
+                    completed_qty    = 0,
+                    remaining_qty    = item.total_quantity,
+                    status           = 'scheduled',
+                    schedule_version = schedule_version,
+                )
+                for item in planned_items
+            ]
+            self.db.add_all(seeds)
+            self.db.commit()
+            print(f"[SCHEDULE] Seeded {len(seeds)} rescheduling_items (status=scheduled, v{schedule_version}).")
+        except Exception as e:
+            self.db.rollback()
+            print(f"[ERROR] _seed_rescheduling_items: {e}")
 
 
 # =============================================================================
@@ -2578,3 +2653,554 @@ def generate_machine_schedule(
 ) -> Dict:
     """Instantiate SchedulerEngine and run generate_schedule."""
     return SchedulerEngine(db).generate_schedule(start_date, end_date)
+
+
+
+
+# =============================================================================
+# Dynamic Scheduler Engine
+# =============================================================================
+ 
+class DynamicSchedulerEngine(SchedulerEngine):
+    """
+    Dynamic re-scheduling layer built on top of SchedulerEngine.
+ 
+    Triggered after every supervisor approval / production log submission.
+ 
+    Table contract
+    ──────────────
+    rescheduling_items.status = 'scheduled'
+        Seeded once at generate_schedule() time.  NEVER modified here.
+        This is the frozen baseline for Gantt comparison (blue row).
+ 
+    rescheduling_items.status = 'rescheduled'
+        Written by this engine.  For each affected part:
+          DELETE WHERE part_id = X AND status = 'rescheduled'
+          INSERT fresh rows for every operation from the first changed
+          operation onwards (cascaded sequentially).
+        These are the Gantt red rows.
+ 
+    Scenario map
+    ────────────
+    completed  → skip; use actual_end from production_logs as cursor
+                 for the next operation in sequence
+    inprogress (has logs) → remaining_qty = total_qty - approved_so_far
+                            schedule remaining from actual_end of latest log
+                            cascade all downstream ops from this op's new end
+    inprogress (no logs)  → operator mid-job, leave untouched
+                            use baseline end as cascade cursor
+    pending    → schedule full total_qty from cascaded cursor
+    """
+ 
+    # ------------------------------------------------------------------ #
+    #  Production-log readers                                              #
+    # ------------------------------------------------------------------ #
+ 
+    def _approved_so_far(self, operation_id: int) -> int:
+        """SUM(approved_quantity) from ALL production_logs for this operation."""
+        try:
+            rows = self.db.query(ProductionLog).filter(
+                ProductionLog.operation_id == operation_id
+            ).all()
+            return sum((r.approved_quantity or 0) for r in rows)
+        except Exception as e:
+            print(f"[ERROR] _approved_so_far op={operation_id}: {e}")
+            return 0
+ 
+    def _actual_end(self, operation_id: int) -> Optional[datetime]:
+        """
+        MAX(to_date + to_time) from production_logs for this operation.
+        Returns None if no logs exist yet.
+        Used as the downstream cascade cursor when an operation has logs.
+        """
+        try:
+            rows = self.db.query(ProductionLog).filter(
+                ProductionLog.operation_id == operation_id
+            ).all()
+            candidates = [
+                datetime.combine(r.to_date, r.to_time)
+                for r in rows if r.to_date and r.to_time
+            ]
+            return max(candidates) if candidates else None
+        except Exception as e:
+            print(f"[ERROR] _actual_end op={operation_id}: {e}")
+            return None
+ 
+    def _has_any_log(self, operation_id: int) -> bool:
+        """True when at least one production_log row exists."""
+        try:
+            return self.db.query(ProductionLog).filter(
+                ProductionLog.operation_id == operation_id
+            ).first() is not None
+        except Exception as e:
+            print(f"[ERROR] _has_any_log op={operation_id}: {e}")
+            return False
+ 
+    def _op_status(self, operation_id: int) -> str:
+        """Returns operation_status.status or 'pending' when no row exists."""
+        try:
+            row = self.db.query(OperationStatus).filter(
+                OperationStatus.operation_id == operation_id
+            ).first()
+            return row.status if row else 'pending'
+        except Exception as e:
+            print(f"[ERROR] _op_status op={operation_id}: {e}")
+            return 'pending'
+ 
+    def _baseline_end(self, operation_id: int) -> Optional[datetime]:
+        """Latest end_time from rescheduling_items for this op (any status)."""
+        try:
+            row = (
+                self.db.query(Rescheduling)
+                .filter(Rescheduling.operation_id == operation_id)
+                .order_by(Rescheduling.end_time.desc())
+                .first()
+            )
+            return row.end_time if row else None
+        except Exception as e:
+            print(f"[ERROR] _baseline_end op={operation_id}: {e}")
+            return None
+ 
+    # ------------------------------------------------------------------ #
+    #  Version helper                                                      #
+    # ------------------------------------------------------------------ #
+ 
+    def _next_version(self) -> int:
+        """MAX(schedule_version) + 1 from rescheduling_items, or 2."""
+        try:
+            from sqlalchemy import func
+            result = self.db.query(
+                func.max(Rescheduling.schedule_version)
+            ).scalar()
+            return (result + 1) if result else 2
+        except Exception:
+            return 2
+ 
+    # ------------------------------------------------------------------ #
+    #  Machine selection                                                   #
+    # ------------------------------------------------------------------ #
+ 
+    def _select_machine(
+        self,
+        operation:      Operation,
+        all_machines:   Dict[int, Machine],
+        machines_by_wc: Dict[int, List[Machine]],
+        op_cursor:      datetime,
+    ) -> Tuple[Optional[Machine], datetime]:
+        """
+        Three-tier machine selection (same logic as static engine).
+        Tier 1: pinned machine (operation.machine_id) if available.
+        Tier 2: best alternative in WorkCenter if pinned is OFF.
+        Tier 3: best machine in WorkCenter if no pin.
+        """
+        machine:    Optional[Machine] = None
+        cand_start: datetime          = op_cursor
+ 
+        if operation.machine_id and operation.machine_id in all_machines:
+            pinned   = all_machines[operation.machine_id]
+            free     = self.machine_end_time.get(pinned.id, op_cursor)
+            earliest = max(op_cursor, free)
+            avail    = self._machine_next_available(pinned, earliest)
+            if avail is not None:
+                machine, cand_start = pinned, avail
+            else:
+                alt, alt_s = self._pick_best_machine(
+                    operation.workcenter_id, machines_by_wc, op_cursor
+                )
+                if alt:
+                    machine, cand_start = alt, alt_s
+ 
+        if machine is None:
+            machine, cand_start = self._pick_best_machine(
+                operation.workcenter_id, machines_by_wc, op_cursor
+            )
+        return machine, cand_start
+ 
+    # ------------------------------------------------------------------ #
+    #  Convert schedule blocks → Rescheduling rows                        #
+    # ------------------------------------------------------------------ #
+ 
+    def _to_rescheduling_rows(
+        self,
+        blocks:           List[PlannedScheduleItem],
+        operation:        Operation,
+        part_data:        Dict,
+        order_id:         int,
+        total_qty:        int,
+        completed_qty:    int,
+        schedule_version: int,
+    ) -> List[Rescheduling]:
+        """
+        Convert _schedule_operation_blocks() output into Rescheduling rows
+        with status='rescheduled'.
+ 
+        remaining_qty decrements across blocks so each row shows how many
+        units are still outstanding after that block completes.
+        """
+        rows: List[Rescheduling] = []
+        # remaining starts at total not-yet-completed
+        running_remaining = total_qty - completed_qty
+ 
+        for idx, block in enumerate(blocks):
+            # units produced in this block
+            if idx == 0:
+                units_in_block = block.total_quantity - block.remaining_quantity
+            else:
+                units_in_block = (
+                    blocks[idx - 1].remaining_quantity - block.remaining_quantity
+                )
+            running_remaining = max(0, running_remaining - units_in_block)
+ 
+            rows.append(
+                Rescheduling(
+                    order_id         = order_id,
+                    order_number     = part_data['sale_order_number'],
+                    part_id          = part_data['part_id'],
+                    part_number      = part_data['part_number'],
+                    operation_id     = block.operation_id,
+                    operation_number = str(operation.operation_number),
+                    machine_id       = block.machine_id,
+                    start_time       = block.planned_start_time,
+                    end_time         = block.planned_end_time,
+                    total_qty        = total_qty,
+                    completed_qty    = completed_qty,
+                    remaining_qty    = running_remaining,
+                    status           = 'rescheduled',
+                    schedule_version = schedule_version,
+                )
+            )
+        return rows
+ 
+    # ------------------------------------------------------------------ #
+    #  Main entry-point                                                    #
+    # ------------------------------------------------------------------ #
+ 
+    def dynamic_reschedule(
+        self,
+        triggered_by_part_id: Optional[int] = None,
+        triggered_by_op_id:   Optional[int] = None,
+    ) -> Dict:
+        """
+        Re-plan rescheduling_items after a production log is submitted.
+ 
+        Parameters
+        ──────────
+        triggered_by_part_id  Pass the part_id that had a log submitted.
+                              The engine will re-plan that part's entire
+                              operation chain.
+                              Pass None to re-plan ALL active parts (full run).
+ 
+        triggered_by_op_id    Informational only (used in log messages).
+ 
+        DB writes
+        ─────────
+        For each affected part:
+          1. Walk operations in sequence order
+          2. Build new Rescheduling rows for every op from the first
+             changed op onwards (complete cascade)
+          3. DELETE existing 'rescheduled' rows for that part
+          4. INSERT new rows (bulk)
+        """
+        result: Dict = {
+            'success':             False,
+            'message':             '',
+            'reschedule_version':  None,
+            'parts_rescheduled':   0,
+            'operations_inserted': 0,
+            'skipped_parts':       [],
+        }
+ 
+        try:
+            # ── 1. Load orders + parts ────────────────────────────────── #
+            active_orders = self._load_active_orders()
+            if not active_orders:
+                result['message'] = 'No active orders.'
+                return result
+ 
+            order_parts_map: Dict[int, List[Dict]] = {}
+            all_part_ids:    List[int] = []
+            for order in active_orders:
+                parts = self._load_parts_for_order(order)
+                order_parts_map[order['order_id']] = parts
+                all_part_ids.extend(p['part_id'] for p in parts)
+ 
+            # ── 2. Scope: specific part or all parts ──────────────────── #
+            if triggered_by_part_id:
+                scope = [
+                    (order, pd)
+                    for order in active_orders
+                    for pd in order_parts_map.get(order['order_id'], [])
+                    if pd['part_id'] == triggered_by_part_id
+                ]
+            else:
+                scope = [
+                    (order, pd)
+                    for order in active_orders
+                    for pd in order_parts_map.get(order['order_id'], [])
+                ]
+ 
+            if not scope:
+                result['message'] = 'No parts in scope.'
+                return result
+ 
+            # ── 3. Load ops + machines ────────────────────────────────── #
+            ops_by_part    = self._load_operations(all_part_ids)
+            machines_by_wc = self._load_machines_by_workcenter()
+            all_machines: Dict[int, Machine] = {
+                m.id: m
+                for wc_list in machines_by_wc.values()
+                for m in wc_list
+            }
+ 
+            # ── 4. Pre-block machines occupied by inprogress ops ──────── #
+            # Read latest baseline end-time for each inprogress operation
+            # so we don't double-book machines that are physically in use.
+            try:
+                inprogress_ops = self.db.query(OperationStatus).filter(
+                    OperationStatus.status == 'inprogress'
+                ).all()
+                for os_row in inprogress_ops:
+                    b_end = self._baseline_end(os_row.operation_id)
+                    if b_end is None:
+                        continue
+                    # Find which machine this op is on from rescheduling_items
+                    ri = (
+                        self.db.query(Rescheduling)
+                        .filter(Rescheduling.operation_id == os_row.operation_id)
+                        .order_by(Rescheduling.end_time.desc())
+                        .first()
+                    )
+                    if ri and ri.machine_id:
+                        existing = self.machine_end_time.get(ri.machine_id)
+                        if existing is None or b_end > existing:
+                            self.machine_end_time[ri.machine_id] = b_end
+                            print(
+                                f"[DYNAMIC] Pre-blocked machine {ri.machine_id} "
+                                f"until {b_end} (inprogress op {os_row.operation_id})"
+                            )
+            except Exception as e:
+                print(f"[ERROR] pre-block machines: {e}")
+ 
+            version       = self._next_version()
+            all_new_rows: List[Rescheduling] = []
+            parts_done:   set = set()
+ 
+            # ── 5. Process each (order, part) ─────────────────────────── #
+            for order, part_data in scope:
+                order_id  = order['order_id']
+                part_id   = part_data['part_id']
+                total_qty = part_data['quantity']
+ 
+                operations = ops_by_part.get(part_id, [])
+                if not operations:
+                    continue
+ 
+                order_activation    = self.adjust_to_shift(order['activation_time'])
+                part_activation     = self.adjust_to_shift(
+                                          part_data['part_activation_time']
+                                      )
+                earliest_part_start = max(order_activation, part_activation)
+ 
+                # cascade_cursor: earliest datetime the NEXT op can start
+                cascade_cursor         = earliest_part_start
+                part_rescheduled_rows: List[Rescheduling] = []
+                cascade_active         = False  # True once we start inserting rows
+ 
+                for operation in operations:
+                    op_id     = operation.id
+                    status    = self._op_status(op_id)
+                    has_logs  = self._has_any_log(op_id)
+ 
+                    # ── completed: use actual_end, skip insertion ──────── #
+                    if status == 'completed':
+                        actual = self._actual_end(op_id)
+                        if actual:
+                            cascade_cursor = self.adjust_to_shift(actual)
+                        else:
+                            b = self._baseline_end(op_id)
+                            if b:
+                                cascade_cursor = self.adjust_to_shift(b)
+                        print(
+                            f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                            f"COMPLETED — cursor → {cascade_cursor}"
+                        )
+                        continue
+ 
+                    # ── inprogress, no log: operator mid-job, leave alone ─ #
+                    if status == 'inprogress' and not has_logs:
+                        b = self._baseline_end(op_id)
+                        if b:
+                            cascade_cursor = self.adjust_to_shift(b)
+                        print(
+                            f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                            f"INPROGRESS (no log) — untouched."
+                        )
+                        continue
+ 
+                    # ── inprogress with logs: schedule remaining qty ────── #
+                    if status == 'inprogress' and has_logs:
+                        approved      = self._approved_so_far(op_id)
+                        remaining_qty = max(0, total_qty - approved)
+ 
+                        if remaining_qty == 0:
+                            # All units approved; status update may be lagging
+                            actual = self._actual_end(op_id)
+                            if actual:
+                                cascade_cursor = self.adjust_to_shift(actual)
+                            print(
+                                f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                f"fully approved (status lag) — skip."
+                            )
+                            continue
+ 
+                        # Start from when the operator's last log ended
+                        actual = self._actual_end(op_id)
+                        op_cursor = (
+                            self.adjust_to_shift(actual) if actual
+                            else cascade_cursor
+                        )
+ 
+                        machine, cand_start = self._select_machine(
+                            operation, all_machines, machines_by_wc, op_cursor
+                        )
+                        if machine is None:
+                            result['skipped_parts'].append(
+                                f"Part {part_data['part_number']} "
+                                f"Op {operation.operation_number}: no machine available."
+                            )
+                            continue
+ 
+                        print(
+                            f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                            f"INPROGRESS — approved={approved}, remaining={remaining_qty}, "
+                            f"start={cand_start}"
+                        )
+ 
+                        blocks, op_end = self._schedule_operation_blocks(
+                            operation           = operation,
+                            machine             = machine,
+                            quantity            = remaining_qty,
+                            op_start            = cand_start,
+                            schedule_history_id = 0,   # not used here
+                            part_data           = part_data,
+                        )
+                        self.machine_end_time[machine.id] = op_end
+                        cascade_cursor = op_end
+                        cascade_active = True
+ 
+                        part_rescheduled_rows.extend(
+                            self._to_rescheduling_rows(
+                                blocks=blocks, operation=operation,
+                                part_data=part_data, order_id=order_id,
+                                total_qty=total_qty, completed_qty=approved,
+                                schedule_version=version,
+                            )
+                        )
+                        continue
+ 
+                    # ── pending: schedule full qty from cascade_cursor ──── #
+                    # Also handles: cascade_active=True (downstream of changed op)
+                    machine, cand_start = self._select_machine(
+                        operation, all_machines, machines_by_wc, cascade_cursor
+                    )
+                    if machine is None:
+                        result['skipped_parts'].append(
+                            f"Part {part_data['part_number']} "
+                            f"Op {operation.operation_number}: no machine available."
+                        )
+                        continue
+ 
+                    print(
+                        f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                        f"PENDING — full {total_qty} units, start={cand_start}"
+                    )
+ 
+                    blocks, op_end = self._schedule_operation_blocks(
+                        operation           = operation,
+                        machine             = machine,
+                        quantity            = total_qty,
+                        op_start            = cand_start,
+                        schedule_history_id = 0,
+                        part_data           = part_data,
+                    )
+                    self.machine_end_time[machine.id] = op_end
+                    cascade_cursor = op_end
+                    cascade_active = True
+ 
+                    part_rescheduled_rows.extend(
+                        self._to_rescheduling_rows(
+                            blocks=blocks, operation=operation,
+                            part_data=part_data, order_id=order_id,
+                            total_qty=total_qty, completed_qty=0,
+                            schedule_version=version,
+                        )
+                    )
+ 
+                # ── 6. Replace rescheduled rows for this part ─────────── #
+                if part_rescheduled_rows:
+                    deleted = self.db.query(Rescheduling).filter(
+                        Rescheduling.part_id == part_id,
+                        Rescheduling.status  == 'rescheduled',
+                    ).delete(synchronize_session=False)
+                    print(
+                        f"[DYNAMIC] Part {part_id}: deleted {deleted} old "
+                        f"'rescheduled' rows, inserting {len(part_rescheduled_rows)} new."
+                    )
+                    all_new_rows.extend(part_rescheduled_rows)
+                    parts_done.add(part_id)
+ 
+            # ── 7. Bulk INSERT + commit ───────────────────────────────── #
+            if all_new_rows:
+                self.db.add_all(all_new_rows)
+            self.db.commit()
+ 
+            result.update({
+                'success':             True,
+                'message':             (
+                    f"Dynamic reschedule complete — "
+                    f"{len(parts_done)} part(s), "
+                    f"{len(all_new_rows)} row(s) inserted "
+                    f"(version {version})."
+                ),
+                'reschedule_version':  version,
+                'parts_rescheduled':   len(parts_done),
+                'operations_inserted': len(all_new_rows),
+            })
+            return result
+ 
+        except Exception as e:
+            self.db.rollback()
+            print(f"[ERROR] dynamic_reschedule: {e}")
+            result['message'] = f'Dynamic reschedule failed: {str(e)}'
+            return result
+ 
+ 
+# =============================================================================
+# Public wrapper — dynamic reschedule
+# =============================================================================
+ 
+def dynamic_reschedule(
+    db:                   Session,
+    triggered_by_part_id: Optional[int] = None,
+    triggered_by_op_id:   Optional[int] = None,
+) -> Dict:
+    """
+    Re-plan rescheduling_items after a production log is submitted.
+ 
+    Call this from your router after supervisor approves a log:
+ 
+        from algorithm import dynamic_reschedule
+        result = dynamic_reschedule(db, triggered_by_part_id=part_id)
+ 
+    Passing triggered_by_part_id scopes the run to that part only
+    (faster).  Passing nothing reruns all active parts (full refresh).
+ 
+    Gantt reads:
+        Blue  → planned_schedule_items              (frozen baseline)
+        Green → production_logs                     (actual output)
+        Red   → rescheduling_items status=rescheduled (remaining live plan)
+    """
+    return DynamicSchedulerEngine(db).dynamic_reschedule(
+        triggered_by_part_id=triggered_by_part_id,
+        triggered_by_op_id=triggered_by_op_id,
+    )

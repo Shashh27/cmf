@@ -2221,6 +2221,69 @@ def update_operation_status(
         raise HTTPException(500, f"Failed to update operation status: {str(e)}")
 
 
+@router.post("/machine/{machine_id}/initialize-status")
+def initialize_machine_status(
+    machine_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Initialize machine status with default 'off' status.
+    This should be called when setting up a new machine or resetting status.
+    """
+    try:
+        current_time = datetime.now()
+        
+        # Check if machine exists
+        machine = db.query(Machine).filter(Machine.id == machine_id).first()
+        if not machine:
+            raise HTTPException(404, f"Machine with ID {machine_id} not found")
+        
+        # Check if machine_live_status entry exists
+        check_existing_sql = """
+        SELECT id FROM production_monitoring.machine_live_status 
+        WHERE machine_id = :machine_id
+        """
+        
+        existing_result = db.execute(text(check_existing_sql), {"machine_id": machine_id}).fetchone()
+        
+        if existing_result:
+            # Update existing record to 'off' status
+            update_sql = """
+            UPDATE production_monitoring.machine_live_status 
+            SET status = 'off',
+                last_updated = :current_time,
+                current_order_id = NULL,
+                current_part_id = NULL,
+                current_operation_id = NULL
+            WHERE machine_id = :machine_id
+            """
+            db.execute(text(update_sql), {
+                "machine_id": machine_id,
+                "current_time": current_time
+            })
+        else:
+            # Insert new record with 'off' status
+            insert_sql = """
+            INSERT INTO production_monitoring.machine_live_status 
+            (machine_id, status, last_updated, current_order_id, current_part_id, current_operation_id)
+            VALUES (:machine_id, 'off', :current_time, NULL, NULL, NULL)
+            """
+            db.execute(text(insert_sql), {
+                "machine_id": machine_id,
+                "current_time": current_time
+            })
+        
+        db.commit()
+        
+        return {"message": f"Machine {machine_id} status initialized to 'off'"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to initialize machine status: {str(e)}")
+
+
 @router.post("/operation-status/{operation_id}/activate", response_model=OperationStatusResponse)
 def activate_job_card(
     operation_id: int,
@@ -2230,6 +2293,7 @@ def activate_job_card(
     """
     Activate a job card - changes status from 'pending' to 'inprogress'
     and sets the started_at timestamp and operator_id.
+    Also updates machine_live_status table with current operation details.
     
     Args:
         operation_id: ID of the operation to activate
@@ -2255,11 +2319,65 @@ def activate_job_card(
                 f"Cannot activate job card. Current status is '{op_status.status}', expected 'pending'"
             )
         
+        # Get machine_id from PlannedScheduleItem
+        planned_schedule = db.query(PlannedScheduleItem).filter(
+            PlannedScheduleItem.operation_id == operation_id
+        ).first()
+        
+        if not planned_schedule or not planned_schedule.machine_id:
+            raise HTTPException(404, f"No machine assigned to operation ID {operation_id}")
+        
+        machine_id = planned_schedule.machine_id
+        
         # Update status, start time, and operator
         op_status.status = "inprogress"
         op_status.started_at = datetime.now()
         op_status.operator_id = operator_id
         op_status.updated_at = datetime.now()
+        
+        # Update machine_live_status table
+        current_time = datetime.now()
+        
+        # Check if machine_live_status entry exists for this machine
+        check_existing_sql = """
+        SELECT id FROM production_monitoring.machine_live_status 
+        WHERE machine_id = :machine_id
+        """
+        
+        existing_result = db.execute(text(check_existing_sql), {"machine_id": machine_id}).fetchone()
+        
+        if existing_result:
+            # Update existing record
+            update_sql = """
+            UPDATE production_monitoring.machine_live_status 
+            SET status = 'off',
+                last_updated = :current_time,
+                current_order_id = :order_id,
+                current_part_id = :part_id,
+                current_operation_id = :operation_id
+            WHERE machine_id = :machine_id
+            """
+            db.execute(text(update_sql), {
+                "machine_id": machine_id,
+                "current_time": current_time,
+                "order_id": op_status.order_id,
+                "part_id": op_status.part_id,
+                "operation_id": operation_id
+            })
+        else:
+            # Insert new record with 'off' status
+            insert_sql = """
+            INSERT INTO production_monitoring.machine_live_status 
+            (machine_id, status, last_updated, current_order_id, current_part_id, current_operation_id)
+            VALUES (:machine_id, 'off', :current_time, :order_id, :part_id, :operation_id)
+            """
+            db.execute(text(insert_sql), {
+                "machine_id": machine_id,
+                "current_time": current_time,
+                "order_id": op_status.order_id,
+                "part_id": op_status.part_id,
+                "operation_id": operation_id
+            })
         
         db.commit()
         db.refresh(op_status)
@@ -2516,3 +2634,15 @@ def get_inprogress_operations_by_machine(
         raise
     except Exception as e:
         raise HTTPException(500, f"Failed to get in-progress operations: {str(e)}")
+
+
+from algorithm import dynamic_reschedule
+
+@router.post("/dynamic-reschedule")
+def run_dynamic_reschedule(
+    part_id: Optional[int] = None,   # pass from frontend after log submission
+    op_id:   Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    result = dynamic_reschedule(db, triggered_by_part_id=part_id, triggered_by_op_id=op_id)
+    return result

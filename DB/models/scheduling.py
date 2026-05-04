@@ -350,6 +350,7 @@ class Rescheduling(Base):
     completed_qty = Column(Integer, nullable=False) # Approved_qty from production logs 
     remaining_qty = Column(Integer, nullable=False) # Total - Approved
     status = Column(String, nullable=False)         # Status of the rescheduling item -- scheduled | rescheduled
+    schedule_version = Column(Integer, nullable=False, default=1) 
     
     
 
