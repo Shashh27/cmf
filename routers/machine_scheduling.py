@@ -285,6 +285,8 @@ def set_order_status(
         parts_with_raw_material = []
         parts_without_raw_material = []
         
+        print(f"[DEBUG] Raw material check for Order {sale_order_id}: checking {len(parts)} parts")
+        
         for part in parts:
             # Check if part has raw material linked in raw_material_usage table
             raw_material_usage_exists = db.query(RawMaterialUsage).filter(
@@ -293,8 +295,12 @@ def set_order_status(
             
             if raw_material_usage_exists:
                 parts_with_raw_material.append(part)
+                print(f"[DEBUG] Part {part.part_name} (ID: {part.id}): RAW MATERIAL LINKED - will be activated")
             else:
                 parts_without_raw_material.append(part)
+                print(f"[DEBUG] Part {part.part_name} (ID: {part.id}): NO RAW MATERIAL LINKED - will be skipped")
+        
+        print(f"[DEBUG] Raw material summary for Order {sale_order_id}: {len(parts_with_raw_material)} parts with materials, {len(parts_without_raw_material)} parts without materials")
         
         # Keep original parts list for response, but only activate parts with raw materials
         all_inhouse_parts = parts
@@ -764,13 +770,18 @@ def update_part_status(
     raw_material_order_status = None
     raw_material_available = False
     
+    print(f"[DEBUG] Raw material check for Part {part.part_name} (ID: {part_id}) in Order {sale_order_id}")
+    
     if status == "active":
         # Check if part has raw material linked in raw_material_usage table
         raw_material_usage_exists = db.query(RawMaterialUsage).filter(
             RawMaterialUsage.part_id == part_id
         ).first()
         
+        print(f"[DEBUG] Raw material query result for Part {part_id}: {'FOUND' if raw_material_usage_exists else 'NOT FOUND'}")
+        
         if not raw_material_usage_exists:
+            print(f"[DEBUG] Part {part.part_name} (ID: {part_id}) ACTIVATION BLOCKED: No raw material linked")
             return {
                 "message": "Cannot activate this part, raw material not linked. Link raw material first, then activate the part",
                 "sale_order_id": sale_order_id,
@@ -785,6 +796,7 @@ def update_part_status(
         
         raw_material_status = "Raw Material Linked"
         raw_material_available = True
+        print(f"[DEBUG] Part {part.part_name} (ID: {part_id}) ACTIVATION ALLOWED: Raw material linked")
 
     # ----------------------------
     # Existing status record?
@@ -1173,6 +1185,35 @@ def generate_schedule_endpoint(
     in parts_without_operations.
     """
     try:
+        # ── Guard: block if ANY operation is currently inprogress ──────── #
+        # if not force:
+        #     inprogress = (
+        #         db.query(OperationStatus)
+        #         .filter(OperationStatus.status == "inprogress")
+        #         .all()
+        #     )
+        #     if inprogress:
+        #         # Build a helpful list of what's still active
+        #         blocked_ops = [
+        #             {
+        #                 "operation_id": op.operation_id,
+        #                 "order_id":     op.order_id,
+        #                 "part_id":      op.part_id,
+        #                 "started_at":   op.started_at.isoformat() if op.started_at else None,
+        #             }
+        #             for op in inprogress
+        #         ]
+        #         return {
+        #             "success": False,
+        #             "blocked": True,
+        #             "message": (
+        #                 f"Cannot generate schedule — {len(inprogress)} operation(s) "
+        #                 f"are currently IN PROGRESS. Complete all ongoing operations "
+        #                 f"before re-scheduling. Pass force=true to override (admin only)."
+        #             ),
+        #             "inprogress_operations": blocked_ops,
+        #         }
+        # ── End guard ───────────────────────────────────────────────────── #
         from algorithm import generate_machine_schedule
 
         result = generate_machine_schedule(db, start_date, end_date)
