@@ -13,7 +13,7 @@ from sqlalchemy import exists, text
 from DB.database import get_db
 
 from DB.models.oms import Order, Part, Product
-from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration, OperationStatus
+from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration, OperationStatus, Rescheduling
 from DB.models.oms import Order, Part, Product
 from DB.models.configuration import Machine, WorkCenter
 from DB.models.oms import Operation, Part, Order, PartType, OrderPartPriority
@@ -200,6 +200,11 @@ def _remove_order_priority(sale_order_id: int, db: Session):
         )
     
     db.commit()
+
+
+
+
+
 
 
 # =========================================================
@@ -1917,15 +1922,22 @@ def get_machine_operations(
     db: Session = Depends(get_db)
 ):
     """
-    Fetch all planned schedule items (operations) for a specific machine,
-    with full enriched response (same as view_schedule API).
+    Fetch all planned schedule items (operations) for a specific machine.
+ 
+    Each operation in the response includes:
+      can_activate      : bool   — True only if all prior operations of that
+                                   part (lower operation_number) are completed
+      blocked_by        : list   — operations that must complete first
+      operation_status  : str    — current status from operation_status table
+ 
+    Frontend must check can_activate before showing the Activate button.
     """
     try:
         # Check if machine exists
         machine_obj = db.query(Machine).filter(Machine.id == machine_id).first()
         if not machine_obj:
             raise HTTPException(404, f"Machine with ID {machine_id} not found")
-
+ 
         rows = (
             db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority, OperationStatus, Part)
             .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
@@ -1942,13 +1954,12 @@ def get_machine_operations(
             .order_by(PlannedScheduleItem.planned_start_time)
             .all()
         )
-
+ 
         # Group operations by operation_id to consolidate multiple time spans
         operation_groups = {}
         for item, op, machine, wc, priority, operation_status, part in rows:
             op_id = item.operation_id
             if op_id not in operation_groups:
-                # Initialize group with first operation
                 operation_groups[op_id] = {
                     "schedule_id": item.id,
                     "sale_order_id": item.sale_order_id,
@@ -1976,111 +1987,126 @@ def get_machine_operations(
                     "operation_status": operation_status.status if operation_status else None,
                     "operation_started_at": operation_status.started_at if operation_status else None,
                     "operation_completed_at": operation_status.completed_at if operation_status else None,
+                    # stored temporarily for dependency check; removed before response
+                    "_part_id_key": item.part_id,
+                    "_order_id_key": item.sale_order_id,
+                    "_op_number": op.operation_number,
                 }
             else:
-                # Update start_time to earliest and end_time to latest
                 group = operation_groups[op_id]
                 if item.planned_start_time < group["planned_start_time"]:
                     group["planned_start_time"] = item.planned_start_time
                 if item.planned_end_time > group["planned_end_time"]:
                     group["planned_end_time"] = item.planned_end_time
-                    # Update schedule_id to the latest operation's ID
                     group["schedule_id"] = item.id
-                # Update status to the most recent operation's status
                 group["status"] = item.status
-
-        # Calculate duration_hours for consolidated operations
+ 
+        # ── Operation dependency check ────────────────────────────────────
+        # For each operation on this machine, fetch ALL operations of the
+        # same part (same order) ordered by operation_number.
+        # If ANY prior operation (lower operation_number) is NOT completed,
+        # this operation cannot be activated yet.
+        #
+        # Logic:
+        #   can_activate = True   if all previous ops are 'completed'
+        #   can_activate = False  if any previous op is pending/inprogress
+        #   can_activate = True   if already inprogress/completed itself
+        #                         (operator already started — don't block)
+        # ─────────────────────────────────────────────────────────────────
+ 
         result = []
         for group in operation_groups.values():
             duration_hours = round(
                 (group["planned_end_time"] - group["planned_start_time"]).total_seconds() / 3600.0,
                 4
             )
+ 
+            part_id      = group.pop("_part_id_key")
+            order_id     = group.pop("_order_id_key")
+            this_op_num  = group.pop("_op_number")
+            current_status = group["operation_status"]  # from operation_status table
+ 
+            # If already inprogress or completed → don't re-block it
+            if current_status in ("inprogress", "completed"):
+                group["can_activate"] = True
+                group["blocked_by"]   = []
+                group["block_reason"] = None
+            else:
+                # Fetch all operations for this part+order sorted by operation_number
+                all_ops_for_part = (
+                    db.query(Operation, OperationStatus)
+                    .outerjoin(
+                        OperationStatus,
+                        (OperationStatus.operation_id == Operation.id) &
+                        (OperationStatus.order_id     == order_id) &
+                        (OperationStatus.part_id      == part_id)
+                    )
+                    .filter(
+                        Operation.part_id == part_id,
+                    )
+                    .order_by(Operation.operation_number.asc())
+                    .all()
+                )
+ 
+                # Find all prior operations (lower operation_number) that are NOT completed
+                blocking_ops = []
+                for prev_op, prev_status in all_ops_for_part:
+                    # Only check ops that come BEFORE this one in sequence
+                    try:
+                        prev_num  = int(prev_op.operation_number)
+                        this_num  = int(this_op_num)
+                    except (ValueError, TypeError):
+                        # Non-numeric op numbers: string compare
+                        prev_num  = prev_op.operation_number
+                        this_num  = this_op_num
+ 
+                    if prev_num >= this_num:
+                        # Same or later op — not a dependency
+                        continue
+ 
+                    prev_op_status = prev_status.status if prev_status else "pending"
+                    if prev_op_status != "completed":
+                        blocking_ops.append({
+                            "operation_id":     prev_op.id,
+                            "operation_number": prev_op.operation_number,
+                            "operation_name":   prev_op.operation_name,
+                            "status":           prev_op_status,
+                            "machine_id":       prev_op.machine_id,
+                        })
+ 
+                if blocking_ops:
+                    group["can_activate"] = False
+                    group["blocked_by"]   = blocking_ops
+                    group["block_reason"] = (
+                        f"Cannot activate — {len(blocking_ops)} prior operation(s) "
+                        f"must be completed first: "
+                        + ", ".join(
+                            f"Op {b['operation_number']} ({b['operation_name']}) "
+                            f"[{b['status']}]"
+                            for b in blocking_ops
+                        )
+                    )
+                else:
+                    group["can_activate"] = True
+                    group["blocked_by"]   = []
+                    group["block_reason"] = None
+ 
             result.append({
                 **group,
-                "duration_hours": duration_hours
+                "duration_hours": duration_hours,
             })
-
+ 
         return {
             "machine_id": machine_id,
             "machine_name": machine_obj.make if hasattr(machine_obj, 'make') else None,
             "total_operations": len(result),
-            "operations": result
+            "operations": result,
         }
-
+ 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(500, f"Failed to fetch machine operations: {str(e)}")
-
-# =========================================================
-# UPDATE OPERATION STATUS
-# =========================================================
-from pydantic import BaseModel
-
-class OperationStatusUpdate(BaseModel):
-    status: str  # PENDING, IN_PROGRESS, COMPLETED, REWORK
-
-@router.put("/schedule-item/{schedule_item_id}/status")
-def update_operation_status(
-    schedule_item_id: int,
-    data: OperationStatusUpdate,
-    db: Session = Depends(get_db)
-):
-    """
-    Update the status of a planned schedule item (operation).
-    
-    Workflow:
-    - Operator clicks "Start Operation": status → IN_PROGRESS
-    - Supervisor approves: status → COMPLETED
-    - Supervisor disapproves: status → REWORK
-    
-    Valid status values: PENDING, IN_PROGRESS, COMPLETED, REWORK
-    """
-    try:
-        # Valid status values
-        valid_statuses = ["PENDING", "IN-PROGRESS", "COMPLETED", "REWORK"]
-        
-        # Validate status
-        status_upper = data.status.upper()
-        if status_upper not in valid_statuses:
-            raise HTTPException(
-                400, 
-                f"Invalid status '{data.status}'. Valid values: {', '.join(valid_statuses)}"
-            )
-        
-        # Fetch the schedule item
-        item = db.query(PlannedScheduleItem).filter(
-            PlannedScheduleItem.id == schedule_item_id
-        ).first()
-        
-        if not item:
-            raise HTTPException(404, f"Schedule item with ID {schedule_item_id} not found")
-        
-        # Store old status for response
-        old_status = item.status
-        
-        # Update status
-        item.status = status_upper
-        
-        db.commit()
-        db.refresh(item)
-        
-        return {
-            "message": "Operation status updated successfully",
-            "schedule_item_id": schedule_item_id,
-            "part_number": item.part_number,
-            "sale_order_number": item.sale_order_number,
-            "operation_id": item.operation_id,
-            "previous_status": old_status,
-            "current_status": item.status,
-            "updated_at": datetime.now().isoformat()
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"Failed to update operation status: {str(e)}")
 
 
 # =========================================================
@@ -2360,6 +2386,47 @@ def activate_job_card(
                 f"Cannot activate job card. Current status is '{op_status.status}', expected 'pending'"
             )
         
+
+        # ── NEW: Check operation sequence dependency ─────────────────────── #
+        all_ops_for_part = (
+            db.query(Operation, OperationStatus)
+            .outerjoin(
+                OperationStatus,
+                (OperationStatus.operation_id == Operation.id) &
+                (OperationStatus.order_id     == op_status.order_id) &
+                (OperationStatus.part_id      == op_status.part_id)
+            )   
+            .filter(Operation.part_id == op_status.part_id)
+            .order_by(Operation.operation_number.asc())
+            .all()
+        )
+
+        this_op = db.query(Operation).filter(Operation.id == operation_id).first()
+        this_op_num = int(this_op.operation_number) if this_op else 0
+
+        blocking_ops = []
+        for prev_op, prev_status in all_ops_for_part:
+            try:
+                prev_num = int(prev_op.operation_number)
+            except (ValueError, TypeError):
+                continue
+            if prev_num >= this_op_num:
+                continue
+            prev_op_status = prev_status.status if prev_status else "pending"
+            if prev_op_status != "completed":
+                blocking_ops.append(
+                    f"Op {prev_op.operation_number} ({prev_op.operation_name}) [{prev_op_status}]"
+                )
+
+        if blocking_ops:
+            raise HTTPException(
+                400,
+                f"Cannot activate — prior operations not completed: {', '.join(blocking_ops)}"
+            )
+# ──  dependency check done─────────────────────────────────────────── #
+
+
+
         # Get machine_id from PlannedScheduleItem
         planned_schedule = db.query(PlannedScheduleItem).filter(
             PlannedScheduleItem.operation_id == operation_id
@@ -2451,6 +2518,7 @@ def complete_job_card(
     """
     Complete a job card - changes status to 'completed'
     and sets the completed_at timestamp.
+    Also triggers dynamic rescheduling to cascade subsequent operations.
     """
     try:
         op_status = db.query(OperationStatus).filter(
@@ -2477,6 +2545,30 @@ def complete_job_card(
         
         db.commit()
         db.refresh(op_status)
+        
+        # Trigger GLOBAL dynamic rescheduling to maintain chronological order across ALL parts
+        print(f"[DEBUG] Operation {operation_id} completed - triggering GLOBAL dynamic reschedule for ALL parts")
+        try:
+            reschedule_result = dynamic_reschedule(
+                db=db, 
+                triggered_by_part_id=None,  # None = reschedule ALL active parts globally
+                triggered_by_op_id=operation_id
+            )
+            print(f"[DEBUG] Global dynamic reschedule result: {reschedule_result}")
+            
+            # Show what the rescheduling items look like for this part after reschedule
+            reschedule_items = db.query(Rescheduling).filter(
+                Rescheduling.part_id == op_status.part_id,
+                Rescheduling.status.in_(['scheduled', 'rescheduled'])
+            ).order_by(Rescheduling.start_time).all()
+            
+            print(f"[DEBUG] Rescheduling items for part {op_status.part_id} after completion:")
+            for item in reschedule_items:
+                print(f"  Op {item.operation_id} ({item.operation_number}): {item.start_time} -> {item.end_time}")
+                
+        except Exception as reschedule_error:
+            print(f"[ERROR] Dynamic reschedule failed after completing operation {operation_id}: {reschedule_error}")
+            # Don't fail the completion if reschedule fails, but log it
         
         return {
             "id": op_status.id,
@@ -2678,6 +2770,152 @@ def get_inprogress_operations_by_machine(
 
 
 from algorithm import dynamic_reschedule
+
+@router.get("/view-rescheduling/{part_id}")
+def view_part_rescheduling_items(part_id: int, db: Session = Depends(get_db)):
+    """
+    View rescheduling items for a specific part in chronological order.
+    Use this to verify that cascading is working correctly after operation completion.
+    Only returns the latest schedule_version for each operation to eliminate duplicates.
+    """
+    try:
+        # Subquery to get the latest schedule_version for each operation_id for this part
+        latest_versions = (
+            db.query(
+                Rescheduling.operation_id,
+                func.max(Rescheduling.schedule_version).label('max_version')
+            )
+            .filter(
+                Rescheduling.part_id == part_id,
+                Rescheduling.status.in_(['scheduled', 'rescheduled'])
+            )
+            .group_by(Rescheduling.operation_id)
+            .subquery()
+        )
+        
+        # Query rescheduling items for this specific part with chronological ordering, only latest versions
+        reschedule_items = (
+            db.query(Rescheduling)
+            .join(
+                latest_versions,
+                (Rescheduling.operation_id == latest_versions.c.operation_id) &
+                (Rescheduling.schedule_version == latest_versions.c.max_version)
+            )
+            .filter(
+                Rescheduling.part_id == part_id,
+                Rescheduling.status.in_(['scheduled', 'rescheduled'])
+            )
+            .order_by(Rescheduling.start_time)
+            .all()
+        )
+        
+        result = [
+            {
+                "id":                 item.id,
+                "operation_id":       item.operation_id,
+                "operation_number":   item.operation_number,
+                "start_time":         item.start_time,
+                "end_time":           item.end_time,
+                "duration_hours":     round((item.end_time - item.start_time).total_seconds() / 3600, 2),
+                "total_quantity":     item.total_qty,
+                "completed_quantity": item.completed_qty,
+                "remaining_quantity": item.remaining_qty,
+                "status":             item.status,
+                "schedule_version":   item.schedule_version,
+            }
+            for item in reschedule_items
+        ]
+
+        return {
+            "message":          f"Rescheduling items for part {part_id} ({len(result)} operations)",
+            "part_id":          part_id,
+            "total_operations": len(result),
+            "chronological_order": result,  # This is the KEY - ordered by start_time
+        }
+
+    except Exception as e:
+        raise HTTPException(500, f"Failed to view rescheduling items for part {part_id}: {str(e)}")
+
+
+@router.get("/view-rescheduling")
+def view_rescheduling_items(db: Session = Depends(get_db)):
+    """
+    View rescheduling items (live updated schedule) in correct chronological order.
+    This fixes the issue where operations appear out of sequence when ordered by ID.
+    Only returns the latest schedule_version for each operation to eliminate duplicates.
+    """
+    try:
+        # Subquery to get the latest schedule_version for each operation_id
+        latest_versions = (
+            db.query(
+                Rescheduling.operation_id,
+                func.max(Rescheduling.schedule_version).label('max_version')
+            )
+            .filter(Rescheduling.status.in_(['scheduled', 'rescheduled']))
+            .group_by(Rescheduling.operation_id)
+            .subquery()
+        )
+        
+        # Query rescheduling items with correct chronological ordering, only latest versions
+        rows = (
+            db.query(Rescheduling, Operation, Machine, WorkCenter, OrderPartPriority)
+            .join(Operation,  Operation.id  == Rescheduling.operation_id)
+            .outerjoin(Machine,    Machine.id    == Rescheduling.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .outerjoin(
+                OrderPartPriority,
+                (OrderPartPriority.order_id == Rescheduling.order_id) &
+                (OrderPartPriority.part_id == Rescheduling.part_id)
+            )
+            .join(
+                latest_versions,
+                (Rescheduling.operation_id == latest_versions.c.operation_id) &
+                (Rescheduling.schedule_version == latest_versions.c.max_version)
+            )
+            .filter(Rescheduling.status.in_(['scheduled', 'rescheduled']))
+            .order_by(Rescheduling.start_time)  # KEY FIX: Order by start_time, not ID
+            .all()
+        )
+
+        result = [
+            {
+                "id":                 reschedule.id,
+                "sale_order_id":      reschedule.order_id,
+                "sale_order_number":  reschedule.order_number,
+                "part_id":            reschedule.part_id,
+                "part_number":        reschedule.part_number,
+                "priority":           priority.priority if priority else None,
+                "operation_id":       reschedule.operation_id,
+                "operation_number":   op.operation_number,
+                "operation_name":     op.operation_name,
+                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                "machine_id":         reschedule.machine_id,
+                "machine_make":       machine.make if machine else None,
+                "machine_model":      machine.model if machine else None,
+                "work_center_id":     wc.id if wc else None,
+                "work_center_name":   wc.work_center_name if wc else None,
+                "work_center_code":   wc.code if wc else None,
+                "start_time":         reschedule.start_time,
+                "end_time":           reschedule.end_time,
+                "duration_hours":     round((reschedule.end_time - reschedule.start_time).total_seconds() / 3600, 2),
+                "total_quantity":     reschedule.total_qty,
+                "completed_quantity": reschedule.completed_qty,
+                "remaining_quantity": reschedule.remaining_qty,
+                "status":             reschedule.status,
+                "schedule_version":   reschedule.schedule_version,
+            }
+            for reschedule, op, machine, wc, priority in rows
+        ]
+
+        return {
+            "message":          f"Live rescheduling items ({len(result)} operations)",
+            "total_operations": len(result),
+            "rescheduling_items": result,
+        }
+
+    except Exception as e:
+        raise HTTPException(500, f"Failed to view rescheduling items: {str(e)}")
+
 
 @router.post("/dynamic-reschedule")
 def run_dynamic_reschedule(

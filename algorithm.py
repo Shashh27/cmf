@@ -3016,14 +3016,23 @@ class DynamicSchedulerEngine(SchedulerEngine):
                         actual = self._actual_end(op_id)
                         if actual:
                             cascade_cursor = self.adjust_to_shift(actual)
+                            print(
+                                f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                f"COMPLETED — actual_end={actual}, cursor → {cascade_cursor}"
+                            )
                         else:
                             b = self._baseline_end(op_id)
                             if b:
                                 cascade_cursor = self.adjust_to_shift(b)
-                        print(
-                            f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
-                            f"COMPLETED — cursor → {cascade_cursor}"
-                        )
+                                print(
+                                    f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                    f"COMPLETED — NO ACTUAL END, using baseline={b}, cursor → {cascade_cursor}"
+                                )
+                            else:
+                                print(
+                                    f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                    f"COMPLETED — NO ACTUAL END OR BASELINE, keeping cursor={cascade_cursor}"
+                                )
                         continue
  
                     # ── inprogress, no log: operator mid-job, leave alone ─ #
@@ -3137,16 +3146,32 @@ class DynamicSchedulerEngine(SchedulerEngine):
                     )
  
                 # ── 6. Replace rescheduled rows for this part ─────────── #
-                if part_rescheduled_rows:
-                    deleted = self.db.query(Rescheduling).filter(
-                        Rescheduling.part_id == part_id,
-                        Rescheduling.status  == 'rescheduled',
-                    ).delete(synchronize_session=False)
+                # ALWAYS delete old rows for this part (both 'scheduled' and 'rescheduled') —
+                # even when all operations are completed and part_rescheduled_rows
+                # is empty. Without this, stale rows from previous runs would remain 
+                # in the table after the part is fully done, including completed operations.
+                deleted = self.db.query(Rescheduling).filter(
+                    Rescheduling.part_id == part_id,
+                    Rescheduling.status.in_(['scheduled', 'rescheduled']),
+                ).delete(synchronize_session=False)
+                if deleted:
                     print(
                         f"[DYNAMIC] Part {part_id}: deleted {deleted} old "
-                        f"'rescheduled' rows, inserting {len(part_rescheduled_rows)} new."
+                        f"'scheduled'/'rescheduled' rows (including completed ops)."
+                    )
+
+                if part_rescheduled_rows:
+                    print(
+                        f"[DYNAMIC] Part {part_id}: inserting "
+                        f"{len(part_rescheduled_rows)} new 'rescheduled' rows."
                     )
                     all_new_rows.extend(part_rescheduled_rows)
+                    parts_done.add(part_id)
+                else:
+                    print(
+                        f"[DYNAMIC] Part {part_id}: all operations completed — "
+                        f"no new rescheduled rows needed."
+                    )
                     parts_done.add(part_id)
  
             # ── 7. Bulk INSERT + commit ───────────────────────────────── #

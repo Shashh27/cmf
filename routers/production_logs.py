@@ -773,8 +773,12 @@ def update_production_log_status(
             if os_row:
                 dynamic_reschedule(
                     db,
-                    triggered_by_part_id = os_row.part_id,
+                    triggered_by_part_id = None,              # full reschedule — re-plans ALL active parts
                     triggered_by_op_id   = db_log.operation_id,
+                    # Why None instead of os_row.part_id:
+                    # When a part's last operation completes, downstream parts
+                    # need to be re-planned starting from this part's actual end time.
+                    # Scoping to one part misses that cascade to subsequent parts.
                 )
                 print(
                     f"[DYNAMIC] Triggered after supervisor action on log {log_id} "
