@@ -28,6 +28,8 @@ const PokaYokeChecklistForm = ({
   onSubmit,
   onBack,
   approvalInfo,
+  redoOrderLabel,
+  redoPartLabel,
 }) => {
   const isRedo = approvalInfo?.status === 'rejected';
   const rejectedItems = isRedo ? (approvalInfo?.rejection_details?.items || []).filter(i => i.approval_status === 'rejected') : [];
@@ -97,41 +99,73 @@ const PokaYokeChecklistForm = ({
         }}
       >
         <div style={{ fontWeight: 600, marginBottom: 12 }}>Select Production Order</div>
-        <Select
-          loading={ordersLoading}
-          value={selectedOrderId}
-          onChange={(v) => setSelectedOrderId(v)}
-          placeholder="Select a production order"
-          style={{ width: '100%' }}
-          options={orders.map((o) => ({
-            value: o?.id,
-            label:
-              o?.name ??
-              o?.order_name ??
-              o?.title ??
-              o?.sale_order_number ??
-              o?.order_number ??
-              (o?.id ? `Order #${o.id}` : 'Order'),
-          }))}
-        />
+        {isRedo ? (
+          <div
+            style={{
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+              borderRadius: 8,
+              padding: '8px 12px',
+              color: '#0f172a',
+              fontWeight: 500,
+              fontSize: 14,
+            }}
+          >
+            {redoOrderLabel || `Order #${selectedOrderId}` || '—'}
+          </div>
+        ) : (
+          <Select
+            loading={ordersLoading}
+            value={selectedOrderId}
+            onChange={(v) => setSelectedOrderId(v)}
+            placeholder="Select a production order"
+            style={{ width: '100%' }}
+            options={orders.map((o) => ({
+              value: o?.id,
+              label:
+                o?.name ??
+                o?.order_name ??
+                o?.title ??
+                o?.sale_order_number ??
+                o?.order_number ??
+                (o?.id ? `Order #${o.id}` : 'Order'),
+            }))}
+          />
+        )}
         <div style={{ fontWeight: 600, marginTop: 12, marginBottom: 12 }}>Select Part</div>
-        <Select
-          disabled={!selectedOrderId}
-          loading={partsLoading}
-          value={selectedPartId}
-          onChange={(v) => setSelectedPartId(v)}
-          placeholder="Select a part"
-          style={{ width: '100%' }}
-          options={parts.map((p) => {
-            const pid = p?.part_id ?? p?.id;
-            const label =
-              p?.part_name ??
-              p?.name ??
-              p?.part_number ??
-              (pid ? `Part #${pid}` : 'Part');
-            return { value: pid, label };
-          })}
-        />
+        {isRedo ? (
+          <div
+            style={{
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+              borderRadius: 8,
+              padding: '8px 12px',
+              color: redoPartLabel ? '#0f172a' : '#94a3b8',
+              fontWeight: redoPartLabel ? 500 : 400,
+              fontSize: 14,
+            }}
+          >
+            {redoPartLabel || (selectedPartId ? `Part #${selectedPartId}` : 'No part selected')}
+          </div>
+        ) : (
+          <Select
+            disabled={!selectedOrderId}
+            loading={partsLoading}
+            value={selectedPartId}
+            onChange={(v) => setSelectedPartId(v)}
+            placeholder="Select a part"
+            style={{ width: '100%' }}
+            options={parts.map((p) => {
+              const pid = p?.part_id ?? p?.id;
+              const label =
+                p?.part_name ??
+                p?.name ??
+                p?.part_number ??
+                (pid ? `Part #${pid}` : 'Part');
+              return { value: pid, label };
+            })}
+          />
+        )}
       </div>
 
       <div

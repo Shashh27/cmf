@@ -43,18 +43,20 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const [productionStats, setProductionStats] = useState({
     totalProduced: 0,
     totalRework: 0,
+    totalApproved: 0,
     hasRework: false,
     reworkRemarks: ''
   });
 
-  // Use props stats if provided, otherwise use internal state
+  // Dashboard is the single source of truth for production-logs.
+  // propStats is always passed from Dashboard — PartDocumentTab never fetches independently.
   const effectiveStats = propStats || productionStats;
 
   // ── Reset justActivated and production stats whenever the selected job changes ──
 
   useEffect(() => {
     setJustActivated(false);
-    setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
+    setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
   }, [selectedJob?.schedule_id]);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -119,9 +121,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
       if (orderId) {
         fetchPartData(orderId);
-        // Fetch rework data for this operation
-        const operationId = selectedJob?.id || selectedJob?.operation_id || selectedJob?.job_id || selectedJob?.schedule_id;
-        fetchReworkData(operationId);
+        // Production stats are fetched by Dashboard and passed via propStats — no call here.
       }
     };
 
@@ -129,36 +129,6 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     fetchOrderAndData();
   }, [selectedJob]);
 
-  // Fetch production stats for selected job
-  const fetchReworkData = async (operationId) => {
-    if (!operationId) {
-      setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
-      return;
-    }
-    
-    try {
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
-      if (response.ok) {
-        const logs = await response.json();
-        const stats = logs.reduce((acc, log) => {
-          acc.totalProduced += (log.produced_quantity || 0);
-          acc.totalRework += (log.rework_quantity || 0);
-          if (log.status === 'rework') {
-            acc.hasRework = true;
-            acc.reworkRemarks = log.remarks || acc.reworkRemarks;
-          }
-          return acc;
-        }, { totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
-        
-        setProductionStats(stats);
-      } else {
-        setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
-      }
-    } catch (error) {
-      console.error('Error fetching production stats:', error);
-      setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
-    }
-  };
 
 
   const fetchPartData = async (orderId) => {
@@ -282,12 +252,13 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     {
       title: 'Part Qty', key: 'part_qty',
       render: (record) => {
+        // Total qty comes from the hierarchical API response
         const totalQty = selectedJob?.total_quantity || record.total_quantity || record.total_qty || record.quantity || selectedJob?.quantity || 0;
-        const totalProduced = effectiveStats.totalProduced || 0;
-        const totalRework = effectiveStats.totalRework || 0;
-        
-        // Effective completed is what has been produced minus what needs to be redone (rework)
-        const completedQty = Math.max(0, totalProduced - totalRework);
+
+        // ✅ Completed = sum of approved_quantity from production-logs API
+        const completedQty = effectiveStats.totalApproved || 0;
+
+        // ✅ Remaining = total - approved (never go below 0)
         const remainingQty = Math.max(0, totalQty - completedQty);
         
         return (
@@ -526,10 +497,6 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
                 dataSource={operations}
                 columns={operationColumns}
                 rowKey={(record) => record.operation_id || record.id || record.operation_number || record.number}
-                // onRow={(record) => ({
-                //   onClick: () => { setSelectedOperation(record); setActiveTab('op_documents'); },
-                // })}
-                // pagination={false}
                 size="small"
                 scroll={{ x: true }}
               />

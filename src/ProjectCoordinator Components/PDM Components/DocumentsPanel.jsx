@@ -399,7 +399,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
       render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
     },
-    { title: <span className="text-xs font-semibold">VERSION</span>, key: 'ver', width: 150,
+    { title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
       render: (_, r) => {
         const rootId = r.parent_id || r.id;
         const group  = groupedPartDocs[rootId] || [];

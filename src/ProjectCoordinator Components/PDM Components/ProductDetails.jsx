@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, UpOutlined, DownOutlined, LeftOutlined, RightOutlined, ExpandOutlined } from "@ant-design/icons";
-import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space } from "antd";
+import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space, Input, Form } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -17,6 +17,91 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   const [selectedView, setSelectedView] = useState('default');
   const extractedDocsSigRef = useRef("");
   const extractedPartIdRef = useRef(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [selectedExtractedMaterial, setSelectedExtractedMaterial] = useState(null);
+  const [editedMaterial, setEditedMaterial] = useState({});
+
+  const handleExtractedMaterialClick = (record) => {
+    setSelectedExtractedMaterial(record);
+    setEditedMaterial({
+      document_name: record.document_name || '',
+      document_version: record.document_version || '',
+      material: record.material || '',
+      stock_size: record.stock_size || '',
+      stocksize_kg: record.stocksize_kg || '',
+      net_wt_kg: record.net_wt_kg || '',
+      note: record.note || '',
+      title: record.title || ''
+    });
+    setEditModalVisible(true);
+  };
+
+  const handleSaveExtractedMaterial = async () => {
+    if (!selectedExtractedMaterial) return;
+    
+    try {
+      // Show loading state
+      const saveButton = document.querySelector('[data-save-button="true"]');
+      if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = 'Saving...';
+      }
+      
+      // Make API call to update the extracted material data
+      const response = await axios.put(
+        `${API_BASE_URL}/parts/${selectedItem.id}/extracted-materials/${selectedExtractedMaterial._rootId}`,
+        editedMaterial,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+      
+      if (response.status >= 200 && response.status < 300) {
+        // Update local state with the response data
+        setExtractedMaterials(prev => 
+          prev.map(item => 
+            item._rootId === selectedExtractedMaterial._rootId 
+              ? { ...item, ...editedMaterial, ...response.data }
+              : item
+          )
+        );
+        
+        message.success('Material data updated successfully!');
+        setEditModalVisible(false);
+        setSelectedExtractedMaterial(null);
+        setEditedMaterial({});
+      } else {
+        throw new Error('Failed to update material data');
+      }
+    } catch (error) {
+      console.error('Error updating extracted material:', error);
+      
+      // If API call fails, still update local state as fallback
+      setExtractedMaterials(prev => 
+        prev.map(item => 
+          item._rootId === selectedExtractedMaterial._rootId 
+            ? { ...item, ...editedMaterial }
+            : item
+        )
+      );
+      
+      message.warning('Material data updated locally. Changes may not persist after refresh.');
+      setEditModalVisible(false);
+      setSelectedExtractedMaterial(null);
+      setEditedMaterial({});
+    } finally {
+      // Reset button state
+      const saveButton = document.querySelector('[data-save-button="true"]');
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.textContent = 'Save';
+      }
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditModalVisible(false);
+    setSelectedExtractedMaterial(null);
+    setEditedMaterial({});
+  };
 
   const getCurrentUserId = () => {
     try {
@@ -464,6 +549,10 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                     scroll={{ x: 'max-content', y: 120 }} 
                     bordered 
                     className="extracted-materials-table"
+                    onRow={(record) => ({
+                      onClick: () => handleExtractedMaterialClick(record),
+                      style: { cursor: 'pointer' }
+                    })}
                   />
                 </div>
               ) : (
@@ -574,6 +663,83 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
             </div>
           </div>
         )}
+      </Modal>
+      
+      <Modal
+        title="Edit Extracted Material"
+        open={editModalVisible}
+        onCancel={handleCancelEdit}
+        footer={[
+          <Button key="cancel" onClick={handleCancelEdit}>
+            Cancel
+          </Button>,
+          <Button key="save" type="primary" onClick={handleSaveExtractedMaterial} data-save-button="true">
+            Save
+          </Button>
+        ]}
+        width={600}
+      >
+        <Form layout="vertical">
+          <div className="grid grid-cols-2 gap-4">
+            <Form.Item label="Document Name">
+              <Input
+                value={editedMaterial.document_name}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, document_name: e.target.value }))}
+                placeholder="Enter document name"
+              />
+            </Form.Item>
+            <Form.Item label="Version">
+              <Input
+                value={editedMaterial.document_version}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, document_version: e.target.value }))}
+                placeholder="Enter version"
+              />
+            </Form.Item>
+            <Form.Item label="Material">
+              <Input
+                value={editedMaterial.material}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, material: e.target.value }))}
+                placeholder="Enter material"
+              />
+            </Form.Item>
+            <Form.Item label="Stock Size">
+              <Input
+                value={editedMaterial.stock_size}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, stock_size: e.target.value }))}
+                placeholder="Enter stock size"
+              />
+            </Form.Item>
+            <Form.Item label="Stock Size KG">
+              <Input
+                value={editedMaterial.stocksize_kg}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, stocksize_kg: e.target.value }))}
+                placeholder="Enter stock size kg"
+              />
+            </Form.Item>
+            <Form.Item label="Net WT KG">
+              <Input
+                value={editedMaterial.net_wt_kg}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, net_wt_kg: e.target.value }))}
+                placeholder="Enter net weight kg"
+              />
+            </Form.Item>
+            <Form.Item label="Title" className="col-span-2">
+              <Input
+                value={editedMaterial.title}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, title: e.target.value }))}
+                placeholder="Enter title"
+              />
+            </Form.Item>
+            <Form.Item label="Note" className="col-span-2">
+              <Input.TextArea
+                value={editedMaterial.note}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, note: e.target.value }))}
+                placeholder="Enter note"
+                rows={3}
+              />
+            </Form.Item>
+          </div>
+        </Form>
       </Modal>
     </div>
   );
