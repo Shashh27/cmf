@@ -1244,6 +1244,58 @@ def generate_schedule_endpoint(
                 "parts_without_operations":  result.get("parts_without_operations", []),
             }
 
+        # Get the schedule items with remaining_quantity and part_name
+        schedule_items = []
+        if result.get("schedule_history_id"):
+            rows = (
+                db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority, Part)
+                .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+                .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+                .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+                .join(Part,       Part.id       == PlannedScheduleItem.part_id)
+                .outerjoin(
+                    OrderPartPriority,
+                    (OrderPartPriority.order_id == PlannedScheduleItem.sale_order_id) &
+                    (OrderPartPriority.part_id == PlannedScheduleItem.part_id)
+                )
+                .filter(PlannedScheduleItem.schedule_history_id == result["schedule_history_id"])
+                .order_by(PlannedScheduleItem.planned_start_time)
+                .all()
+            )
+            
+            schedule_items = [
+                {
+                    "schedule_id":        item.id,
+                    "sale_order_id":      item.sale_order_id,
+                    "sale_order_number":  item.sale_order_number,
+                    "part_id":            item.part_id,
+                    "part_number":        item.part_number,
+                    "part_name":          part.part_name,
+                    "priority":           priority.priority if priority else None,
+                    "order_part_priority_id": priority.id if priority else None,
+                    "operation_id":       item.operation_id,
+                    "operation_number":   op.operation_number,
+                    "operation_name":     op.operation_name,
+                    "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "machine_id":         item.machine_id,
+                    "machine_make":       machine.make if machine else None,
+                    "machine_model":      machine.model if machine else None,
+                    "machine_type":       machine.type if machine else None,
+                    "work_center_id":     wc.id if wc else None,
+                    "work_center_name":   wc.work_center_name if wc else None,
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time":   item.planned_end_time,
+                    "duration_hours":     round(
+                        (item.planned_end_time - item.planned_start_time)
+                        .total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity":     item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
+                    "status":             item.status,
+                }
+                for item, op, machine, wc, priority, part in rows
+            ]
+
         return {
             "success":                   True,
             "message":                   result["message"],
@@ -1256,6 +1308,7 @@ def generate_schedule_endpoint(
             "skipped_orders":            result.get("skipped_orders", []),
             "skipped_parts":             result.get("skipped_parts", []),
             "parts_without_operations":  result.get("parts_without_operations", []),
+            "schedule_items":            schedule_items,  # Added schedule items with remaining_quantity and part_name
         }
 
     except Exception as e:
@@ -1287,10 +1340,11 @@ def view_schedule(db: Session = Depends(get_db)):
             }
 
         rows = (
-            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority)
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority, Part)
             .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
             .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Part,       Part.id       == PlannedScheduleItem.part_id)
             .outerjoin(
                 OrderPartPriority,
                 (OrderPartPriority.order_id == PlannedScheduleItem.sale_order_id) &
@@ -1308,6 +1362,7 @@ def view_schedule(db: Session = Depends(get_db)):
                 "sale_order_number":  item.sale_order_number,
                 "part_id":            item.part_id,
                 "part_number":        item.part_number,
+                "part_name":          part.part_name,
                 "priority":           priority.priority if priority else None,
                 "order_part_priority_id": priority.id if priority else None,
                 "operation_id":       item.operation_id,
@@ -1330,7 +1385,7 @@ def view_schedule(db: Session = Depends(get_db)):
                 "remaining_quantity": item.remaining_quantity,
                 "status":             item.status,
             }
-            for item, op, machine, wc, priority in rows
+            for item, op, machine, wc, priority, part in rows
         ]
 
         return {
@@ -1367,10 +1422,11 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
             raise HTTPException(404, "Schedule history not found")
 
         rows = (
-            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority)
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority, Part)
             .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
             .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Part,       Part.id       == PlannedScheduleItem.part_id)
             .outerjoin(
                 OrderPartPriority,
                 (OrderPartPriority.order_id == PlannedScheduleItem.sale_order_id) &
@@ -1388,6 +1444,7 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
                 "sale_order_number":  item.sale_order_number,
                 "part_id":            item.part_id,
                 "part_number":        item.part_number,
+                "part_name":          part.part_name,
                 "priority":           priority.priority if priority else None,
                 "order_part_priority_id": priority.id if priority else None,
                 "operation_id":       item.operation_id,
@@ -1410,7 +1467,7 @@ def view_schedule_by_id(schedule_history_id: int, db: Session = Depends(get_db))
                 "remaining_quantity": item.remaining_quantity,
                 "status":             item.status,
             }
-            for item, op, machine, wc, priority in rows
+            for item, op, machine, wc, priority, part in rows
         ]
 
         return {
@@ -1667,10 +1724,11 @@ def get_gantt_data(db: Session = Depends(get_db)):
             }
 
         items = (
-            db.query(PlannedScheduleItem, Machine, WorkCenter, Operation)
+            db.query(PlannedScheduleItem, Machine, WorkCenter, Operation, Part)
             .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
             .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .join(Part,       Part.id       == PlannedScheduleItem.part_id)
             .filter(PlannedScheduleItem.schedule_history_id == latest.id)
             .order_by(PlannedScheduleItem.machine_id, PlannedScheduleItem.planned_start_time)
             .all()
@@ -1681,7 +1739,7 @@ def get_gantt_data(db: Session = Depends(get_db)):
         # Out-source items have no machine — collect under a sentinel key
         OUT_SOURCE_KEY = "out_source"
 
-        for item, machine, wc, op in items:
+        for item, machine, wc, op, part in items:
             if machine is None:
                 # Out-Source operation — no machine allocated
                 if OUT_SOURCE_KEY not in machines_map:
@@ -1701,6 +1759,7 @@ def get_gantt_data(db: Session = Depends(get_db)):
                     "sale_order_number":  item.sale_order_number,
                     "part_id":            item.part_id,
                     "part_number":        item.part_number,
+                    "part_name":          part.part_name,
                     "operation_id":       item.operation_id,
                     "operation_number":   op.operation_number,
                     "operation_name":     op.operation_name,
@@ -1712,6 +1771,7 @@ def get_gantt_data(db: Session = Depends(get_db)):
                         .total_seconds() / 3600.0, 4
                     ),
                     "total_quantity":     item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
                     "status":             item.status,
                 })
             else:
@@ -1733,6 +1793,7 @@ def get_gantt_data(db: Session = Depends(get_db)):
                     "sale_order_number":  item.sale_order_number,
                     "part_id":            item.part_id,
                     "part_number":        item.part_number,
+                    "part_name":          part.part_name,
                     "operation_id":       item.operation_id,
                     "operation_number":   op.operation_number,
                     "operation_name":     op.operation_name,
@@ -1744,6 +1805,7 @@ def get_gantt_data(db: Session = Depends(get_db)):
                         .total_seconds() / 3600.0, 4
                     ),
                     "total_quantity":     item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
                     "status":             item.status,
                 })
 
@@ -1779,10 +1841,11 @@ def get_gantt_data_by_id(schedule_history_id: int, db: Session = Depends(get_db)
             raise HTTPException(404, f"Schedule history {schedule_history_id} not found")
 
         items = (
-            db.query(PlannedScheduleItem, Machine, WorkCenter, Operation)
+            db.query(PlannedScheduleItem, Machine, WorkCenter, Operation, Part)
             .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
             .outerjoin(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .join(Part,       Part.id       == PlannedScheduleItem.part_id)
             .filter(PlannedScheduleItem.schedule_history_id == schedule_history_id)
             .order_by(PlannedScheduleItem.machine_id, PlannedScheduleItem.planned_start_time)
             .all()
@@ -1791,7 +1854,7 @@ def get_gantt_data_by_id(schedule_history_id: int, db: Session = Depends(get_db)
         machines_map: Dict[int, dict] = {}
         OUT_SOURCE_KEY = "out_source"
 
-        for item, machine, wc, op in items:
+        for item, machine, wc, op, part in items:
             if machine is None:
                 # Out-Source operation: no machine allocated
                 if OUT_SOURCE_KEY not in machines_map:
@@ -1811,6 +1874,7 @@ def get_gantt_data_by_id(schedule_history_id: int, db: Session = Depends(get_db)
                     "sale_order_number":  item.sale_order_number,
                     "part_id":            item.part_id,
                     "part_number":        item.part_number,
+                    "part_name":          part.part_name,
                     "operation_id":       item.operation_id,
                     "operation_number":   op.operation_number,
                     "operation_name":     op.operation_name,
@@ -1822,6 +1886,7 @@ def get_gantt_data_by_id(schedule_history_id: int, db: Session = Depends(get_db)
                         .total_seconds() / 3600.0, 4
                     ),
                     "total_quantity":     item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
                     "status":             item.status,
                 })
             else:
@@ -1843,6 +1908,7 @@ def get_gantt_data_by_id(schedule_history_id: int, db: Session = Depends(get_db)
                     "sale_order_number":  item.sale_order_number,
                     "part_id":            item.part_id,
                     "part_number":        item.part_number,
+                    "part_name":          part.part_name,
                     "operation_id":       item.operation_id,
                     "operation_number":   op.operation_number,
                     "operation_name":     op.operation_name,
@@ -1854,6 +1920,7 @@ def get_gantt_data_by_id(schedule_history_id: int, db: Session = Depends(get_db)
                         .total_seconds() / 3600.0, 4
                     ),
                     "total_quantity":     item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
                     "status":             item.status,
                 })
 
