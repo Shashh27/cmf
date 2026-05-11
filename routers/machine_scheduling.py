@@ -411,7 +411,8 @@ def set_order_status(
     ).join(PartType, PartType.id == Part.type_id).filter(
         PartScheduleStatus.sale_order_id == sale_order_id,
         PartScheduleStatus.status == "active",
-        PartType.type_name == "IN-House"
+        PartType.id == 1
+        # PartType.type_name == "IN-House"
     ).count()
 
     order_status = "active" if active_count > 0 else "inactive"
@@ -609,7 +610,8 @@ def get_make_parts_for_order(
 
     parts = db.query(Part).join(PartType).filter(
         Part.product_id == order.product_id,
-        PartType.type_name == "IN-House"
+        PartType.id == 1,
+        # PartType.type_name == "IN-House"
     ).all()
 
     return {
@@ -644,7 +646,8 @@ def get_buy_parts_for_order(
 
     parts = db.query(Part).join(PartType).filter(
         Part.product_id == order.product_id,
-        PartType.type_name == "Out-Source"
+        PartType.id == 2
+        # PartType.type_name == "Out-Source"
     ).all()
 
     return {
@@ -685,12 +688,14 @@ def get_order_parts_metadata(
 
     total_inhouse_parts = db.query(Part).join(PartType).filter(
         Part.product_id == order.product_id,
-        PartType.type_name == "IN-House"
+        PartType.id == 1
+        # PartType.type_name == "IN-House"
     ).count()
 
     total_outsource_parts = db.query(Part).join(PartType).filter(
         Part.product_id == order.product_id,
-        PartType.type_name == "Out-Source"
+        PartType.id == 2
+        # PartType.type_name == "Out-Source"
     ).count()
 
     active_inhouse_parts = db.query(PartScheduleStatus).join(
@@ -700,7 +705,8 @@ def get_order_parts_metadata(
     ).filter(
         PartScheduleStatus.sale_order_id == sale_order_id,
         PartScheduleStatus.status == "active",
-        PartType.type_name == "IN-House"
+        PartType.id == 1
+        # PartType.type_name == "IN-House"
     ).count()
 
     inactive_inhouse_parts = max(total_inhouse_parts - active_inhouse_parts, 0)
@@ -956,7 +962,8 @@ def update_part_status(
     ).join(PartType, PartType.id == Part.type_id).filter(
         PartScheduleStatus.sale_order_id == sale_order_id,
         PartScheduleStatus.status == "active",
-        PartType.type_name == "IN-House"
+        PartType.id == 1
+        # PartType.type_name == "IN-House"
     ).count()
 
     order_status = "active" if active_inhouse_count > 0 else "inactive"
@@ -1150,7 +1157,8 @@ def get_order_summary(sale_order_id: int, db: Session = Depends(get_db)):
         ).join(PartType, PartType.id == Part.type_id).filter(
             PartScheduleStatus.sale_order_id == sale_order_id,
             PartScheduleStatus.status == "active",
-            PartType.type_name == "IN-House"
+            PartType.id == 1
+            # PartType.type_name == "IN-House"
         ).count()
         return {
             "order_id":            sale_order_id,
