@@ -9,7 +9,7 @@ import mimetypes
 
 from DB.database import get_db
 from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel
-from DB.schemas.oms import Document, DocumentUpdate
+from DB.schemas.oms import Document, DocumentUpdate, ExtractedDataUpdate
 from DB.minio_client import get_minio_client
 from .step_converter import StepConverter
 from .rawmaterial_extract import extract_pdf_data
@@ -864,3 +864,73 @@ def get_part_extracted_data(part_id: int, db: Session = Depends(get_db)):
         })
     
     return extracted_data
+
+
+@router.put("/extracted-data/{extracted_id}")
+def update_extracted_data(
+    extracted_id: int,
+    update_data: ExtractedDataUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update extracted data for a specific entry"""
+    
+    # Get the existing extracted data entry
+    extracted_entry = db.query(DocumentExtractedDataModel).filter(
+        DocumentExtractedDataModel.id == extracted_id
+    ).first()
+    
+    if not extracted_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Extracted data entry not found"
+        )
+    
+    # Update fields if provided
+    if update_data.material is not None:
+        extracted_entry.material = update_data.material
+    if update_data.stock_size is not None:
+        extracted_entry.stock_size = update_data.stock_size
+    if update_data.stocksize_kg is not None:
+        extracted_entry.stocksize_kg = update_data.stocksize_kg
+    if update_data.net_wt_kg is not None:
+        extracted_entry.net_wt_kg = update_data.net_wt_kg
+    if update_data.note is not None:
+        extracted_entry.note = update_data.note
+    if update_data.title is not None:
+        extracted_entry.title = update_data.title
+    
+    # Update timestamp
+    extracted_entry.updated_at = datetime.utcnow()
+    
+    try:
+        db.commit()
+        db.refresh(extracted_entry)
+        
+        # Return the updated entry with document details
+        document = db.query(DocumentModel).filter(
+            DocumentModel.id == extracted_entry.document_id
+        ).first()
+        
+        return {
+            "id": extracted_entry.id,
+            "document_id": extracted_entry.document_id,
+            "part_id": extracted_entry.part_id,
+            "note": extracted_entry.note,
+            "title": extracted_entry.title,
+            "stock_size": extracted_entry.stock_size,
+            "material": extracted_entry.material,
+            "stocksize_kg": extracted_entry.stocksize_kg,
+            "net_wt_kg": extracted_entry.net_wt_kg,
+            "created_at": extracted_entry.created_at.isoformat() if extracted_entry.created_at else None,
+            "updated_at": extracted_entry.updated_at.isoformat() if extracted_entry.updated_at else None,
+            "document_name": document.document_name if document else "N/A",
+            "document_version": document.document_version if document else "N/A",
+            "document_type": document.document_type if document else "N/A"
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update extracted data: {str(e)}"
+        )

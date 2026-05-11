@@ -107,14 +107,14 @@ class PartBase(BaseModel):
     part_number: str
     type_id: int
     raw_material_id: Optional[int] = None
-    raw_material_stock_id: Optional[int] = None  # New field for specific stock
+    raw_material_unit_id: Optional[int] = None  # 🔥 Unit-based tracking
+    required_length: Optional[float] = None  # 🔥 REQUIRED LENGTH
     part_detail: Optional[str] = None  # For out-source: WITH_RAW_MATERIAL | WITHOUT_RAW_MATERIAL
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
-  
     qty: Optional[int] = None  # Optional quantity field
-    raw_material_required_quantity: Optional[float] = None  # Required quantity per part for order-linked materials
+    size: Optional[str] = None  # Size specification for the part
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
 
 
@@ -127,14 +127,14 @@ class PartUpdate(BaseModel):
     part_number: Optional[str] = None
     type_id: Optional[int] = None
     raw_material_id: Optional[int] = None
-    raw_material_stock_id: Optional[int] = None  # New field for specific stock
+    raw_material_unit_id: Optional[int] = None  # 🔥 Unit-based tracking
+    required_length: Optional[float] = None  # 🔥 REQUIRED LENGTH
     part_detail: Optional[str] = None
     assembly_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
-
     qty: Optional[int] = None  # Optional quantity field
-    raw_material_required_quantity: Optional[float] = None  # Required quantity per part for order-linked materials
+    size: Optional[str] = None  # Size specification for the part
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
 
 
@@ -143,14 +143,15 @@ class Part(PartBase):
     type_name: Optional[str] = None
     raw_material_name: Optional[str] = None
     raw_material_status: Optional[str] = None  # From raw_materials.status: Available / Not Available / N/A
-    # New stock details fields
+    raw_material_unit_details: Optional[dict] = None  # Unit details: total_length, remaining_length, status
+    # New stock details fields (deprecated - for backward compatibility)
     raw_material_stock_details: Optional[dict] = None  # Stock form, dimensions, quantity, etc.
     raw_material_stock_form_type: Optional[str] = None  # Round, Square, Pipe
     raw_material_stock_dimensions: Optional[str] = None  # Formatted dimensions string
     priority: Optional[int] = None
     user_name: Optional[str] = None
-  
     qty: Optional[int] = None  # Optional quantity field
+    size: Optional[str] = None  # Size specification for the part
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
     vendor_name: Optional[str] = None  # Vendor company name
     created_at: Optional[datetime] = None
@@ -699,3 +700,16 @@ class OutSourcePartStatus(OutSourcePartStatusBase):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Extracted Data Schemas
+# =======================
+class ExtractedDataUpdate(BaseModel):
+    material: Optional[str] = None
+    stock_size: Optional[str] = None
+    stocksize_kg: Optional[str] = None
+    net_wt_kg: Optional[str] = None
+    note: Optional[str] = None
+    title: Optional[str] = None
+    user_id: Optional[int] = None

@@ -28,7 +28,7 @@ def _machine_label(m):
     if not m:
         return None
     if m.make and m.model:
-        return f"{m.make} {m.model}"
+        return f"({m.make}){m.model}"
     return m.make or m.type or f"Machine {m.id}"
 
 def _maps_for_enrichment(db: Session):

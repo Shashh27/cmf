@@ -21,7 +21,7 @@ from DB.models.oms import (
     DocumentExtractedData as DocumentExtractedDataModel,
 )
 from DB.models.configuration import PokayokeCompletedLog
-from DB.models.inventory import RawMaterial, RawMaterialStock, Vendors
+from DB.models.inventory import RawMaterial, RawMaterialStock, RawMaterialUnit, Vendors
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
 
@@ -32,46 +32,27 @@ router = APIRouter(
 
 
 def _build_part_maps(db: Session):
-    """Fetch PartType, RawMaterial, RawMaterialStock, AccessUser, and Vendors rows once and return id→value maps."""
+    """Fetch PartType, RawMaterial, RawMaterialUnit, AccessUser, and Vendors rows once and return id→value maps."""
     type_map = {pt.id: pt.type_name for pt in db.query(PartType).all()}
     rm_map = {rm.id: rm.material_name for rm in db.query(RawMaterial).all()}
-    stock_map = {stock.id: stock for stock in db.query(RawMaterialStock).all()}
+    unit_map = {unit.id: unit for unit in db.query(RawMaterialUnit).all()}
     user_map = {u.id: u.user_name for u in db.query(AccessUser).all()}
     vendor_map = {v.id: v.company_name for v in db.query(Vendors).all()}
-    return type_map, rm_map, stock_map, user_map, vendor_map
+    return type_map, rm_map, unit_map, user_map, vendor_map
 
 
-def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict, user_map: dict, vendor_map: dict) -> dict:
-    # Get stock details if stock_id exists
-    stock_details = None
-    stock_form_type = None
-    stock_dimensions = None
-    
-    if part.raw_material_stock_id and part.raw_material_stock_id in stock_map:
-        stock = stock_map[part.raw_material_stock_id]
-        stock_details = {
-            "id": stock.id,
-            "form_type": stock.form_type,
-            "quantity": stock.quantity,
-            "diameter": stock.diameter,
-            "length": stock.length,
-            "breadth": stock.breadth,
-            "height": stock.height,
-            "inner_diameter": stock.inner_diameter,
-            "outer_diameter": stock.outer_diameter,
-            "status": stock.status
+def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, unit_map: dict, user_map: dict, vendor_map: dict) -> dict:
+    # Get unit details if unit is assigned
+    unit_details = None
+    unit_id = getattr(part, 'raw_material_unit_id', None)
+    if unit_id and unit_id in unit_map:
+        unit = unit_map[unit_id]
+        unit_details = {
+            "id": unit.id,
+            "total_length": unit.total_length,
+            "remaining_length": unit.remaining_length,
+            "status": unit.status
         }
-        stock_form_type = stock.form_type
-        
-        # Format dimensions string
-        if stock.form_type == 'Round':
-            stock_dimensions = f"⌀{stock.diameter} × {stock.length}mm"
-        elif stock.form_type == 'Square':
-            stock_dimensions = f"{stock.breadth} × {stock.height} × {stock.length}mm"
-        elif stock.form_type == 'Pipe':
-            stock_dimensions = f"⌀{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm"
-        else:
-            stock_dimensions = "Custom"
     
     return {
         "id": part.id,
@@ -79,20 +60,18 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, stock_map: dict
         "part_number": part.part_number,
         "type_id": part.type_id,
         "raw_material_id": part.raw_material_id,
-        "raw_material_stock_id": part.raw_material_stock_id,
+        "raw_material_unit_id": getattr(part, 'raw_material_unit_id', None),
+        "required_length": part.required_length,
         "part_detail": part.part_detail,
         "assembly_id": part.assembly_id,
         "product_id": part.product_id,
         "user_id": part.user_id,
-        "size": part.size,
         "qty": part.qty,
-        "raw_material_required_quantity": part.raw_material_required_quantity,
+        "size": part.size,
         "vendor_id": part.vendor_id,
         "type_name": type_map.get(part.type_id),
         "raw_material_name": rm_map.get(part.raw_material_id),
-        "raw_material_stock_details": stock_details,
-        "raw_material_stock_form_type": stock_form_type,
-        "raw_material_stock_dimensions": stock_dimensions,
+        "raw_material_unit_details": unit_details,
         "user_name": user_map.get(part.user_id) if part.user_id else None,
         "vendor_name": vendor_map.get(part.vendor_id) if part.vendor_id else None,
         "created_at": part.created_at,
@@ -111,21 +90,21 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
         )
 
     # Check if raw material allocation is needed
-    needs_allocation = part.raw_material_stock_id and part.raw_material_required_quantity
+    needs_allocation = getattr(part, 'raw_material_unit_id', None) and getattr(part, 'required_length', None)
     
     if needs_allocation:
-        # Validate stock availability before creating part
-        stock = db.query(RawMaterialStock).filter(RawMaterialStock.id == part.raw_material_stock_id).first()
-        if not stock:
+        # Validate unit availability before creating part
+        unit = db.query(RawMaterialUnit).filter(RawMaterialUnit.id == part.raw_material_unit_id).first()
+        if not unit:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Stock item with id {part.raw_material_stock_id} not found"
+                detail=f"Unit with id {part.raw_material_unit_id} not found"
             )
         
-        if stock.available_quantity < part.raw_material_required_quantity:
+        if unit.remaining_length < getattr(part, 'required_length', 0):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Insufficient material. Available: {stock.available_quantity}, Required: {part.raw_material_required_quantity}"
+                detail=f"Not enough length in unit. Required: {getattr(part, 'required_length', 0)}, Available: {unit.remaining_length}"
             )
 
     # Create the part first
@@ -136,19 +115,9 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     
     # Now do the allocation since we have the part ID
     if needs_allocation:
-        try:
-            from services.raw_material_tracking import RawMaterialTrackingService
-            allocation_result = RawMaterialTrackingService.allocate_raw_material_to_part(
-                db, db_part.id, part.raw_material_stock_id, part.raw_material_required_quantity, part.user_id or 30
-            )
-        except Exception as e:
-            # If allocation fails, delete the part and raise error
-            db.delete(db_part)
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Raw material allocation failed: {str(e)}"
-            )
+        # Unit-based allocation is handled by the assign-material endpoint
+        # No automatic allocation needed here
+        pass
 
     # =================================================================
     # IMPORTANT: OrderPartPriority auto-creation is PERMANENTLY DISABLED
@@ -178,8 +147,8 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     )
     db.commit()
 
-    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
-    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map, vendor_map)
+    type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, unit_map, user_map, vendor_map)
 
 
 @router.get("/", response_model=List[Part])
@@ -189,8 +158,8 @@ def get_parts(user_id: int | None = None, db: Session = Depends(get_db)):
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
+    type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, unit_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/{part_id}", response_model=Part)
@@ -202,8 +171,8 @@ def get_part(part_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {part_id} not found"
         )
-    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
-    return _part_to_dict(part, type_map, rm_map, stock_map, user_map, vendor_map)
+    type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(part, type_map, rm_map, unit_map, user_map, vendor_map)
 
 
 @router.get("/product/{product_id}", response_model=List[Part])
@@ -213,8 +182,8 @@ def get_parts_by_product(product_id: int, user_id: int | None = None, db: Sessio
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
+    type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, unit_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/assembly/{assembly_id}", response_model=List[Part])
@@ -224,8 +193,8 @@ def get_parts_by_assembly(assembly_id: int, user_id: int | None = None, db: Sess
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
+    type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, unit_map, user_map, vendor_map) for p in parts]
 
 
 @router.get("/type/{type_id}", response_model=List[Part])
@@ -235,8 +204,8 @@ def get_parts_by_type(type_id: int, user_id: int | None = None, db: Session = De
     if user_id is not None:
         query = query.filter(PartModel.user_id == user_id)
     parts = query.all()
-    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
-    return [_part_to_dict(p, type_map, rm_map, stock_map, user_map, vendor_map) for p in parts]
+    type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+    return [_part_to_dict(p, type_map, rm_map, unit_map, user_map, vendor_map) for p in parts]
 
 
 @router.put("/{part_id}", response_model=Part)
@@ -283,117 +252,62 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
     
     # Check if raw material allocation is being updated
     is_updating_raw_material = any(key in update_data for key in [
-        'raw_material_stock_id', 'raw_material_required_quantity', 'raw_material_id', 'size', 'qty'
+        'raw_material_unit_id', 'raw_material_id', 'qty'
     ])
     
     # Check if all raw material fields are being cleared (set to null)
     is_clearing_raw_material = (
         update_data.get('raw_material_id') is None and
-        update_data.get('raw_material_stock_id') is None and
-        update_data.get('raw_material_required_quantity') is None and
-        update_data.get('size') is None and
-        update_data.get('qty') is None
+        update_data.get('raw_material_unit_id') is None and
+        update_data.get('required_length') is None
     )
     
-    # Also consider clearing if switching to WITHOUT_RAW_MATERIAL and raw material fields are not present
-    if is_switching_to_without_raw and not is_updating_raw_material:
+    # Also consider clearing if switching to WITHOUT_RAW_MATERIAL - this takes priority
+    if is_switching_to_without_raw:
         is_clearing_raw_material = True
-        # Also clear vendor_id for outsource parts when switching to WITHOUT_RAW_MATERIAL
-        update_data['vendor_id'] = None
-        print("Clearing vendor_id when switching to WITHOUT_RAW_MATERIAL")
     
     # If updating raw material allocation, handle the allocation logic
     if is_updating_raw_material or is_clearing_raw_material:
         # Special case: All raw material fields are being cleared
         if is_clearing_raw_material:
-            # If there's an existing allocation, deallocate it
-            if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
-                try:
-                    from services.raw_material_tracking import RawMaterialTrackingService
-                    RawMaterialTrackingService.deallocate_raw_material_from_part(
-                        db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
-                    )
-                except Exception as e:
-                    # Log error but continue
-                    print(f"Warning: Could not deallocate material: {e}")
+            # If there's an existing unit assignment, restore it
+            if db_part.raw_material_unit_id:
+                # Get the unit
+                unit = db.query(RawMaterialUnit).filter(RawMaterialUnit.id == db_part.raw_material_unit_id).first()
+                if unit:
+                    # Get usage record
+                    from DB.models.inventory import RawMaterialUsage as RawMaterialUsageModel
+                    usage = db.query(RawMaterialUsageModel).filter(
+                        RawMaterialUsageModel.raw_material_unit_id == db_part.raw_material_unit_id,
+                        RawMaterialUsageModel.part_id == part_id
+                    ).first()
+                    
+                    if usage:
+                        # Restore unit's remaining length
+                        unit.remaining_length += usage.used_length
+                        
+                        # Update unit status
+                        if unit.remaining_length == unit.total_length:
+                            unit.status = "available"
+                        elif unit.remaining_length > 0:
+                            unit.status = "partially_used"
+                        
+                        # Delete usage record
+                        db.delete(usage)
             
-            # Explicitly set raw material fields to null in the database
+            # Clear part fields
             db_part.raw_material_id = None
-            db_part.raw_material_stock_id = None
-            db_part.raw_material_required_quantity = None
-            db_part.size = None
-            db_part.qty = None
-        else:
-            new_stock_id = update_data.get('raw_material_stock_id')
-            new_required_quantity = update_data.get('raw_material_required_quantity')
-            new_raw_material_id = update_data.get('raw_material_id')
-            
-            # Case 1: Same stock, different quantity (partial update)
-            if new_stock_id == db_part.raw_material_stock_id and new_required_quantity is not None:
-                if new_required_quantity != db_part.raw_material_required_quantity:
-                    try:
-                        from services.raw_material_tracking import RawMaterialTrackingService
-                        RawMaterialTrackingService.update_raw_material_allocation(
-                            db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
-                        )
-                    except Exception as e:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Raw material allocation update failed: {str(e)}"
-                        )
-            
-            # Case 2: Different stock or new allocation
-            elif new_stock_id != db_part.raw_material_stock_id:
-                # If there's an existing allocation, deallocate it first
-                if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
-                    try:
-                        from services.raw_material_tracking import RawMaterialTrackingService
-                        RawMaterialTrackingService.deallocate_raw_material_from_part(
-                            db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
-                        )
-                    except Exception as e:
-                        # Log error but continue with new allocation
-                        print(f"Warning: Could not deallocate previous material: {e}")
-                
-                # If new allocation is provided, allocate it
-                if new_stock_id and new_required_quantity:
-                    try:
-                        from services.raw_material_tracking import RawMaterialTrackingService
-                        RawMaterialTrackingService.allocate_raw_material_to_part(
-                            db, db_part.id, new_stock_id, new_required_quantity, update_data.get('user_id', db_part.user_id or 1)
-                        )
-                    except Exception as e:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Raw material allocation failed: {str(e)}"
-                        )
-            
-            # Update raw_material_id if provided
-            if new_raw_material_id is not None:
-                db_part.raw_material_id = new_raw_material_id
-            
-            # Case 3: Clearing allocation (setting to null/0)
-            elif not new_stock_id or not new_required_quantity:
-                # If there's an existing allocation, deallocate it
-                if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
-                    try:
-                        from services.raw_material_tracking import RawMaterialTrackingService
-                        RawMaterialTrackingService.deallocate_raw_material_from_part(
-                            db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 1
-                        )
-                    except Exception as e:
-                        # Log error but continue
-                        print(f"Warning: Could not deallocate material: {e}")
+            db_part.raw_material_unit_id = None
+            db_part.required_length = None
     
-    # Update other fields normally (but skip only raw material specific fields as they're handled above)
+    # Update other fields normally
     for field, value in update_data.items():
-        if field not in ['raw_material_stock_id', 'raw_material_required_quantity', 'raw_material_id']:
-            setattr(db_part, field, value)
+        setattr(db_part, field, value)
 
     db.commit()
     db.refresh(db_part)
-    type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
-    return _part_to_dict(db_part, type_map, rm_map, stock_map, user_map, vendor_map)
+    type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
+    return _part_to_dict(db_part, type_map, rm_map, unit_map, user_map, vendor_map)
 
 
 @router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -519,13 +433,22 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
         )
 
         # 10. Deallocate raw material if this part has any allocated
-        if db_part.raw_material_stock_id and db_part.raw_material_required_quantity:
+        if db_part.raw_material_unit_id:
             try:
-                from services.raw_material_tracking import RawMaterialTrackingService
-                RawMaterialTrackingService.deallocate_raw_material_from_part(
-                    db, db_part.id, db_part.raw_material_stock_id, db_part.user_id or 30
-                )
-                print(f" Deallocated {db_part.raw_material_required_quantity} units from stock {db_part.raw_material_stock_id}")
+                # Use the unlink endpoint logic to restore unit
+                unit = db.query(RawMaterialUnit).filter(RawMaterialUnit.id == db_part.raw_material_unit_id).first()
+                if unit:
+                    usage = db.query(RawMaterialUsageModel).filter(
+                        RawMaterialUsageModel.raw_material_unit_id == db_part.raw_material_unit_id,
+                        RawMaterialUsageModel.part_id == part_id
+                    ).first()
+                    if usage:
+                        unit.remaining_length += usage.used_length
+                        if unit.remaining_length == unit.total_length:
+                            unit.status = "available"
+                        elif unit.remaining_length > 0:
+                            unit.status = "partially_used"
+                        db.delete(usage)
             except Exception as e:
                 # Log error but don't fail the deletion
                 print(f"Warning: Could not deallocate raw material: {e}")
@@ -675,7 +598,6 @@ async def parse_parts_doc(file: UploadFile = File(...)):
                     "part_name":         part_name,
                     "part_number":       part_number,
                     "qty":               qty,
-                    "size":              _cell(row_cells, COL_SIZE) or None,
                     "raw_material_name": _cell(row_cells, COL_MATERIAL) or None,
                     "type_id":           1,    # default: In-house; user can change in UI
                     "part_detail":       None,
@@ -708,7 +630,6 @@ class BulkPartCreateItem(BaseModel):
     assembly_id:     int | None = None
     product_id:      int | None = None
     user_id:         int | None = None
-    size:            str | None = None
     qty:             int | None = None
  
  

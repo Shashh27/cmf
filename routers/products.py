@@ -23,7 +23,7 @@ from DB.models.configuration import (
     Machine as MachineModel,
     PokayokeCompletedLog,
 )
-from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock, InventoryRequest, InventoryReturnRequest, Vendors as VendorModel
+from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock, RawMaterialUnit, InventoryRequest, InventoryReturnRequest, Vendors as VendorModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.oms import (
     Product,
@@ -468,10 +468,12 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     # Simplified raw materials don't have status - always available
     raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
     
-    # Get all raw material stocks for mapping
-    all_stocks = db.query(RawMaterialStock).all()
-    stock_map = {stock.id: stock for stock in all_stocks}
-
+    # Get all raw material units for mapping (unit details including form_type)
+    all_units = db.query(RawMaterialUnit).options(
+        joinedload(RawMaterialUnit.stock).joinedload(RawMaterialStock.material)
+    ).all()
+    unit_map = {unit.id: unit for unit in all_units}
+    
     # Get all part types for mapping (avoids N+1 per part in create_part_details)
     all_part_types = db.query(PartTypeModel).all()
     part_type_map = {pt.id: pt.type_name for pt in all_part_types}
@@ -589,6 +591,26 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
         else:
             raw_material_status = raw_material_status_map.get(part.raw_material_id, "Not Available")
 
+        # Get unit details if part has a unit assigned
+        unit_details = None
+        raw_material_source_type = None
+        if part.raw_material_unit_id and part.raw_material_unit_id in unit_map:
+            unit = unit_map[part.raw_material_unit_id]
+            unit_details = {
+                'id': unit.id,
+                'total_length': unit.total_length,
+                'remaining_length': unit.remaining_length,
+                'volume': unit.volume,
+                'mass': unit.mass,
+                'weight': unit.weight,
+                'cost': unit.cost,
+                'status': unit.status,
+                'form_type': unit.stock.form_type if unit.stock else None,
+                'material_name': unit.stock.material.material_name if unit.stock and unit.stock.material else None,
+                'source_type': unit.stock.source_type if unit.stock else None,
+            }
+            raw_material_source_type = unit.stock.source_type if unit.stock else None
+
         # Create a new Part model with the type_name included (uses pre-fetched map)
         part_dict = {
             'id': part.id,
@@ -596,61 +618,25 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'part_number': part.part_number,
             'type_id': part.type_id,
             'raw_material_id': part.raw_material_id,
-            'raw_material_stock_id': part.raw_material_stock_id,
-            'raw_material_required_quantity': part.raw_material_required_quantity,
+            'raw_material_unit_id': getattr(part, 'raw_material_unit_id', None),
+            'required_length': part.required_length,
             'part_detail': part.part_detail,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
-            'user_id': part.user_id,
+            'user_id': part.user_id,        
             'qty': part.qty,    # New optional quantity field
+            'size': part.size,  # Size specification for the part
             'vendor_id': part.vendor_id,
             'type_name': part_type_map.get(part.type_id),
             'raw_material_name': raw_material_map.get(part.raw_material_id),
             'raw_material_status': raw_material_status,
+            'raw_material_unit_details': unit_details,
+            'raw_material_source_type': raw_material_source_type,  # Add source_type field
             'user_name': user_map.get(part.user_id) if part.user_id else None,
             'vendor_name': getattr(part.vendor, 'company_name', None) if part.vendor else None,
             'created_at': part.created_at,
             'updated_at': part.updated_at,
         }
-        
-        # Add stock details if stock_id exists
-        if part.raw_material_stock_id and part.raw_material_stock_id in stock_map:
-            stock = stock_map[part.raw_material_stock_id]
-            stock_details = {
-                "id": stock.id,
-                "form_type": stock.form_type,
-                "quantity": stock.quantity,
-                "diameter": stock.diameter,
-                "length": stock.length,
-                "breadth": stock.breadth,
-                "height": stock.height,
-                "inner_diameter": stock.inner_diameter,
-                "outer_diameter": stock.outer_diameter,
-                "status": stock.status
-            }
-            
-            # Format dimensions string
-            stock_form_type = stock.form_type
-            if stock_form_type == 'Round':
-                stock_dimensions = f"⌀{stock.diameter} × {stock.length}mm"
-            elif stock_form_type == 'Square':
-                stock_dimensions = f"{stock.breadth} × {stock.height} × {stock.length}mm"
-            elif stock_form_type == 'Pipe':
-                stock_dimensions = f"⌀{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm"
-            else:
-                stock_dimensions = "Custom"
-            
-            part_dict.update({
-                'raw_material_stock_details': stock_details,
-                'raw_material_stock_form_type': stock_form_type,
-                'raw_material_stock_dimensions': stock_dimensions
-            })
-        else:
-            part_dict.update({
-                'raw_material_stock_details': None,
-                'raw_material_stock_form_type': None,
-                'raw_material_stock_dimensions': None
-            })
         
         part_with_type = PartSchema(**part_dict)
         

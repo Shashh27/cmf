@@ -192,9 +192,11 @@ class Part(Base):
 
     type_id = Column(Integer, ForeignKey("oms.part_types.id"))
 
-    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=True)  # Legacy field
-    
-    raw_material_stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=True)  # New field for specific stock
+    raw_material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=True)
+    raw_material_unit_id = Column(Integer, ForeignKey("inventory.raw_material_units.id"), nullable=True)  # 🔥 Unit-based tracking
+
+    # 🔥 REQUIRED LENGTH (IMPORTANT CHANGE)
+    required_length = Column(Float, nullable=True)
 
     part_detail = Column(String, nullable=True)  # For out-source: WITH_RAW_MATERIAL | WITHOUT_RAW_MATERIAL
 
@@ -208,7 +210,7 @@ class Part(Base):
 
     qty = Column(Integer, nullable=True, default=1)  # Optional quantity field, defaults to 1
     
-    raw_material_required_quantity = Column(Float, nullable=True)  # Required quantity per part for order-linked materials
+    size = Column(String, nullable=True)  # Size specification for the part
 
     vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Vendor for outsourced parts
 
@@ -221,8 +223,6 @@ class Part(Base):
     type = relationship("PartType", back_populates="parts")
 
     raw_material = relationship("RawMaterial")
-
-    raw_material_stock = relationship("RawMaterialStock")
 
     vendor = relationship("Vendors", foreign_keys=[vendor_id])
 
@@ -247,6 +247,10 @@ class Part(Base):
     documents = relationship("Document", back_populates="part", cascade="all, delete-orphan")
 
     tools = relationship("ToolWithPart", back_populates="part", cascade="all, delete-orphan")
+
+    # 🔥 RELATIONS
+    material_usages = relationship("RawMaterialUsage", back_populates="part")
+    material_unit = relationship("RawMaterialUnit", back_populates="parts")
 
 
 
