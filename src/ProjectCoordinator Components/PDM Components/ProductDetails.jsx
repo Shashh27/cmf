@@ -49,7 +49,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       
       // Make API call to update extracted material data
       const response = await axios.put(
-        `${API_BASE_URL}/documents/part/${selectedItem.id}/extracted-data/${selectedExtractedMaterial._rootId}`,
+        `${API_BASE_URL}/documents/extracted-data/${selectedExtractedMaterial.id}`,
         editedMaterial,
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -58,7 +58,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
         // Update local state with the response data
         setExtractedMaterials(prev => 
           prev.map(item => 
-            item._rootId === selectedExtractedMaterial._rootId 
+            item.id === selectedExtractedMaterial.id 
               ? { ...item, ...editedMaterial, ...response.data }
               : item
           )
@@ -77,7 +77,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       // If API call fails, still update local state as fallback
       setExtractedMaterials(prev => 
         prev.map(item => 
-          item._rootId === selectedExtractedMaterial._rootId 
+          item.id === selectedExtractedMaterial.id 
             ? { ...item, ...editedMaterial }
             : item
         )
@@ -400,7 +400,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       render: (text) => cellWithTooltip(text, 'N/A')
     },
     {
-      title: 'Version',
+      title: 'Revision',
       dataIndex: 'document_version',
       key: 'document_version',
       width: 70,
@@ -410,7 +410,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
         const variants = Array.isArray(row?._variants) ? row._variants : [];
         const v = text || '1.0';
         if (variants.length <= 1) {
-          const label = String(v).startsWith('v') ? v : `v${v}`;
+          const label = String(v);
           return (
             <Select
               size="small"
@@ -445,7 +445,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
             }}
             options={variants.map((vv) => {
               const raw = vv.document_version || '1.0';
-              const label = String(raw).startsWith('v') ? raw : `v${raw}`;
+              const label = String(raw);
               return { value: vv.document_id, label };
             })}
           />
@@ -538,7 +538,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                 <Text type="secondary" className="text-xs">Extracted from 2D Files</Text>
                 <Text type="secondary" className="text-xs text-blue-600 ml-2">
                   <InfoCircleOutlined className="mr-1" />
-                  Click any row to edit
+                  Click on row to edit Extracted Data
                 </Text>
                 <span className="text-[10px] text-slate-400 ml-1 sm:hidden">— scroll →</span>
               </div>
@@ -615,7 +615,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                       style={{ minWidth: 'clamp(100px, 20vw, 140px)', fontSize: '11px' }}
                       options={threeDDocuments.map(doc => {
                         const v = doc.document_version;
-                        const vStr = v ? (v.startsWith('v') ? v : `v${v}`) : "";
+                        const vStr = v ? String(v) : "";
                         return {
                           value: doc.id,
                           label: `${doc.document_name || "3D Model"}${vStr ? ` (${vStr})` : ""}`,
@@ -689,15 +689,17 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
             <Form.Item label="Document Name">
               <Input
                 value={editedMaterial.document_name}
-                onChange={(e) => setEditedMaterial(prev => ({ ...prev, document_name: e.target.value }))}
-                placeholder="Enter document name"
+                disabled
+                className="bg-gray-50"
+                placeholder="Document name"
               />
             </Form.Item>
-            <Form.Item label="Version">
+            <Form.Item label="Revision">
               <Input
                 value={editedMaterial.document_version}
-                onChange={(e) => setEditedMaterial(prev => ({ ...prev, document_version: e.target.value }))}
-                placeholder="Enter version"
+                disabled
+                className="bg-gray-50"
+                placeholder="Revision"
               />
             </Form.Item>
             <Form.Item label="Material">
