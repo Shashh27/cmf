@@ -33,6 +33,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const [selectedMaterialStock, setSelectedMaterialStock] = useState(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [selectedMaterialForStock, setSelectedMaterialForStock] = useState(null);
+  const [stockPagination, setStockPagination] = useState({ current: 1, pageSize: 5 });
 
   const fetchingRawMaterials = useRef(false);
   const initializedRef = useRef(false);
@@ -116,6 +117,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const openStockModal = (material) => {
     setSelectedMaterialForStock(material);
     setSelectedMaterialStock(null);
+    setStockPagination({ current: 1, pageSize: 5 });
     setStockModalOpen(true);
     fetchStockForMaterial(material.id);
   };
@@ -598,50 +600,54 @@ const handleDeleteRawMaterial = async (material) => {
                 children: stockLoading ? (
                   <div className="text-center py-8">Loading stock...</div>
                 ) : selectedMaterialStock && selectedMaterialStock.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <Table
-                      dataSource={selectedMaterialStock}
-                      rowKey="id"
-                      size="small"
-                      bordered
-                      pagination={{ pageSize: 5, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
-                      scroll={{ x: 1200 }}
-                      columns={[
-                        { title: 'Form Type', dataIndex: 'form_type', key: 'form_type', width: 100 },
-                        { title: 'Dimensions', key: 'dimensions', width: 200, render: (_, record) => {
-                          if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
-                          if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
-                          if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
-                          return '-';
-                        }},
-                        { title: 'Quantity', dataIndex: 'quantity', key: 'quantity', width: 80 },
-                        { title: 'Volume (m³)', dataIndex: 'volume', key: 'volume', width: 120, render: (v) => v?.toFixed(6) || '-' },
-                        { title: 'Mass (kg)', dataIndex: 'mass', key: 'mass', width: 100, render: (m) => m?.toFixed(3) },
-                        { title: 'Weight (N)', dataIndex: 'weight', key: 'weight', width: 100, render: (w) => w?.toFixed(3) },
-                        { title: 'Cost (₹)', dataIndex: 'cost', key: 'cost', width: 100, render: (c) => c ? `₹${c?.toFixed(2)}` : '-' },
-                        { title: 'Source', dataIndex: 'source_type', key: 'source_type', width: 80, render: (s) => 
-                          s === 'order' ? 'Order' : 'General'
-                        },
-                        { title: 'Order', dataIndex: 'source_order_number', key: 'source_order_number', width: 120, render: (order) => order || '-' },
-                        { title: 'Parts', dataIndex: 'part_numbers', key: 'part_numbers', width: 150, render: (parts) => 
-                          parts?.length > 0 ? parts.join(', ') : '-'
-                        },
-                        { title: 'User Name', dataIndex: 'creator_name', key: 'creator_name', minWidth: 100, render: (name) => name || '-' },
-                        { title: 'Status', dataIndex: 'status', key: 'status', width: 80, render: (s) => <Tag color={s === 'available' ? 'green' : 'red'}>{s}</Tag> },
-                        { title: 'Actions', key: 'actions', width: 80, render: (_, record) => (
-                          <Tooltip title="Delete">
-                            <Button
-                              type="text"
-                              size="small"
-                              icon={<DeleteOutlined />}
-                              className="text-red-500 hover:bg-red-50"
-                              onClick={() => handleDeleteStock(record.id)}
-                            />
-                          </Tooltip>
-                        )},
-                      ]}
-                    />
-                  </div>
+                  <Table
+                    dataSource={selectedMaterialStock}
+                    rowKey="id"
+                    size="small"
+                    bordered
+                    pagination={{
+                    current: stockPagination.current,
+                    pageSize: stockPagination.pageSize,
+                    showSizeChanger: true,
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                    pageSizeOptions: ['5', '10', '20', '50'],
+                    onChange: (page, pageSize) => setStockPagination({ current: page, pageSize })
+                  }}
+                    columns={[
+                      { title: 'Form Type', dataIndex: 'form_type', key: 'form_type' },
+                      { title: 'Dimensions', key: 'dimensions', render: (_, record) => {
+                        if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
+                        if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
+                        if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
+                        return '-';
+                      }},
+                      { title: 'Quantity', dataIndex: 'quantity', key: 'quantity' },
+                      { title: 'Volume (m³)', dataIndex: 'volume', key: 'volume', render: (v) => v?.toFixed(6) || '-' },
+                      { title: 'Mass (kg)', dataIndex: 'mass', key: 'mass', render: (m) => m?.toFixed(3) },
+                      { title: 'Weight (N)', dataIndex: 'weight', key: 'weight', render: (w) => w?.toFixed(3) },
+                      { title: 'Cost (₹)', dataIndex: 'cost', key: 'cost', render: (c) => c ? `₹${c?.toFixed(2)}` : '-' },
+                      { title: 'Source', dataIndex: 'source_type', key: 'source_type', render: (s) => 
+                        s === 'order' ? 'Order' : 'General'
+                      },
+                      { title: 'Order', dataIndex: 'source_order_number', key: 'source_order_number', render: (order) => order || '-' },
+                      { title: 'Parts', dataIndex: 'part_numbers', key: 'part_numbers', render: (parts) => 
+                        parts?.length > 0 ? parts.join(', ') : '-'
+                      },
+                      { title: 'User Name', dataIndex: 'creator_name', key: 'creator_name', render: (name) => name || '-' },
+                      { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'available' ? 'green' : 'red'}>{s}</Tag> },
+                      { title: 'Actions', key: 'actions', render: (_, record) => (
+                        <Tooltip title="Delete">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<DeleteOutlined />}
+                            className="text-red-500 hover:bg-red-50"
+                            onClick={() => handleDeleteStock(record.id)}
+                          />
+                        </Tooltip>
+                      )},
+                    ]}
+                  />
                 ) : (
                   <Empty description="No stock available for this material" />
                 )

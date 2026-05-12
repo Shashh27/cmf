@@ -352,10 +352,7 @@ const ProductDetails = ({ selectedItem }) => {
     const spacing = size === 'small' ? 'compact' : 'default';
     
     const viewButtons = [
-      { key: 'front', label: 'Front' },
-      { key: 'isometric', label: 'Isometric' },
-      { key: 'top', label: 'Top' },
-      { key: 'bottom', label: 'Bottom' }
+      
     ];
     
     return (

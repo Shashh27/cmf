@@ -107,12 +107,20 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
       const part = pd?.part || {};
       const ops = Array.isArray(pd?.operations) ? pd.operations : [];
       ops.forEach((op) => {
+        const setupSec = parseHmsToSeconds(op?.setup_time);
+        const cycleSec = parseHmsToSeconds(op?.cycle_time);
+        const partQty = part?.qty || 1; // Get part quantity, default to 1 if not specified
+        
+        // Calculate total time for all quantities
+        // Setup time is one-time, cycle time is per quantity
+        const totalCycleSec = cycleSec * partQty;
+        const totalSec = setupSec + totalCycleSec;
+        
+        // Check if this is an outsource part
         const isOutSource =
           op?.part_type_id === 2 ||
           String(op?.part_type_name || "").toLowerCase().includes("out");
-        if (isOutSource) return;
-        const setupSec = parseHmsToSeconds(op?.setup_time);
-        const cycleSec = parseHmsToSeconds(op?.cycle_time);
+        
         const machineName = op?.machine_name || (op?.machine_id ? `Machine ${op.machine_id}` : "N/A");
         rows.push({
           key: `${part?.id || "p"}-${op?.id || op?.operation_number || Math.random()}`,
@@ -124,9 +132,11 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
           cycle_time: op?.cycle_time || "00:00:00",
           machine_name: machineName,
           machine_id: op?.machine_id || null,
+          part_qty: partQty, // Store quantity for reference
+          is_outsource: isOutSource, // Store outsource flag
           setup_seconds: setupSec,
-          cycle_seconds: cycleSec,
-          total_seconds: setupSec + cycleSec,
+          cycle_seconds: totalCycleSec, // Total cycle time for all quantities
+          total_seconds: totalSec, // Total time (setup + cycle for all quantities)
         });
       });
     });
@@ -249,7 +259,27 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
       dataIndex: "operation_name",
       key: "op_name",
       width: 150,
-      render: (t) => <span style={{ wordBreak: "break-word", fontSize: 11, lineHeight: "1.3" }}>{t}</span>,
+      render: (t, r) => (
+        <span style={{ 
+          wordBreak: "break-word", 
+          fontSize: 11, 
+          lineHeight: "1.3",
+          color: r.is_outsource ? "#dc2626" : "#1e293b",
+          fontWeight: r.is_outsource ? 600 : "normal"
+        }}>
+          {t} {r.is_outsource && "(OUTSOURCE)"}
+        </span>
+      ),
+    },
+    {
+      title: "Qty",
+      key: "qty",
+      width: 50,
+      render: (_, r) => (
+        <Tag color="blue" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
+          {r.part_qty || 1}
+        </Tag>
+      ),
     },
     {
       title: "Machine",
@@ -405,7 +435,7 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
         <div className="bg-white rounded-lg border border-slate-200 shadow-sm" style={{ display: "flex", flexDirection: "column" }}>
           <SectionHeader
             icon={<PartitionOutlined />}
-            title="Part Operations (IN-House)"
+            title="Part Operations (ALL)"
             count={summary.rows.length}
           />
           <div className="ps-table-scroll" style={{ overflowY: "auto", overflowX: "auto", maxHeight: 420 }}>
@@ -416,8 +446,8 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
               rowKey="key"
               pagination={false}
               size="small"
-              scroll={{ x: 740 }}
-              locale={{ emptyText: <Empty description="No IN-House operations found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+              scroll={{ x: 850 }}
+              locale={{ emptyText: <Empty description="No operations found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
             />
           </div>
         </div>

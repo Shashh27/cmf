@@ -81,7 +81,24 @@ const EditOperationModal = ({
 
   const fromDateWatch = Form.useWatch('from_date', form);
   const partTypeWatch = Form.useWatch('part_type_id', form);
-  const operationNameWatch = Form.useWatch('operation_name', form);
+
+  // Helper to find In-House and Out-Source IDs
+  const getPartTypeIds = () => {
+    const inHouse = partTypes.find(pt => {
+      const name = pt.type_name.toLowerCase().replace(/[^a-z]/g, '');
+      return name === 'inhouse';
+    });
+    const outsource = partTypes.find(pt => {
+      const name = pt.type_name.toLowerCase().replace(/[^a-z]/g, '');
+      return name === 'outsource';
+    });
+    return {
+      inHouseId: inHouse?.id || 1,
+      outsourceId: outsource?.id || 2
+    };
+  };
+
+  const { inHouseId, outsourceId } = getPartTypeIds();
 
   // ── fetch helpers ──────────────────────────────────────────────────────────
   const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
@@ -138,7 +155,7 @@ const EditOperationModal = ({
       fetchVendors();
     }
   }, [open, showAddToolForm]);
-  useEffect(() => { if (open && isCreateMode) { form.resetFields(); form.setFieldsValue({ part_type_id: 1 }); } }, [open, isCreateMode]);
+  useEffect(() => { if (open && isCreateMode) { form.resetFields(); form.setFieldsValue({ part_type_id: inHouseId }); } }, [open, isCreateMode, inHouseId]);
 
   useEffect(() => {
     if (!fromDateWatch) { if (form.getFieldValue('to_date')) form.setFieldsValue({ to_date: null }); return; }
@@ -148,15 +165,15 @@ const EditOperationModal = ({
 
   useEffect(() => {
     if (!open) return;
-    if (partTypeWatch === 2) form.setFieldsValue({ setup_time: null, cycle_time: null, workcenter_id: null, machine_id: null, work_instructions: null, notes: null, vendor_id: null });
-  }, [partTypeWatch, open]);
+    if (partTypeWatch === outsourceId) form.setFieldsValue({ setup_time: null, cycle_time: null, workcenter_id: null, machine_id: null, work_instructions: null, notes: null, vendor_id: null });
+  }, [partTypeWatch, open, outsourceId]);
 
   useEffect(() => {
     if (!open || !operation) return;
     form.setFieldsValue({
       operation_number:  operation.operation_number,
       operation_name:    operation.operation_name,
-      part_type_id:      operation.part_type_id ?? 1,
+      part_type_id:      operation.part_type_id ?? inHouseId,
       vendor_id:         operation.vendor_id,
       from_date:         operation.from_date  ? dayjs(operation.from_date) : null,
       to_date:           operation.to_date    ? dayjs(operation.to_date) : null,
@@ -293,7 +310,7 @@ const EditOperationModal = ({
     try {
       const now = dayjs();
       const { operation_number, setup_time, cycle_time, from_date, to_date, workcenter_id, machine_id, ...rest } = values;
-      const out = rest.part_type_id === 2;
+      const out = rest.part_type_id === outsourceId;
       const ts  = (d) => d ? dayjs(d).hour(now.hour()).minute(now.minute()).second(now.second()).toISOString() : null;
       const payload = {
         ...rest,
@@ -331,7 +348,14 @@ const EditOperationModal = ({
 
   // ── derived ────────────────────────────────────────────────────────────────
   const availableTools  = allTools.filter(t => !existingTools.some(et => et.tool_id === t.id));
-  const partTypeOptions = partTypes.length ? partTypes.map(pt => ({ label: pt.type_name, value: pt.id })) : [{ label: 'IN-House', value: 1 }, { label: 'Out-Source', value: 2 }];
+  const partTypeOptions = partTypes.length
+    ? partTypes
+        .filter(pt => {
+          const name = pt.type_name.toLowerCase().replace(/[^a-z]/g, '');
+          return name === 'inhouse' || name === 'outsource';
+        })
+        .map(pt => ({ label: pt.type_name, value: pt.id }))
+    : [{ label: 'IN-House', value: inHouseId }, { label: 'Out-Source', value: outsourceId }];
   const parseV          = (v) => parseFloat(String(v).replace(/^v/i, ''));
   const fmtV            = (v) => String(v).startsWith('v') ? String(v) : `v${v}`;
 
@@ -544,46 +568,13 @@ const EditOperationModal = ({
           </Col>
         )}
         <Col xs={24} sm={16} md={12}>
-          <Form.Item name="operation_name" label="Operation Name" rules={[{ required: true, message: 'Please select operation name' }]}>
-            {operationNameWatch === 'New' ? (
-              <Input 
-                placeholder="Enter custom operation name" 
-                prefix={<FileTextOutlined className="text-gray-400" />} 
-                autoComplete="off" 
-                maxLength={30}
-                onChange={(e) => {
-                  const cleanedValue = e.target.value.replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
-                  form.setFieldValue('operation_name', cleanedValue);
-                }}
-              />
-            ) : (
-              <Select 
-                placeholder="Select Operation" 
-                allowClear
-                onChange={(value) => {
-                  if (value === 'New') {
-                    form.setFieldValue('operation_name', '');
-                  }
-                }}
-              >
-                <Select.Option value="Heat Treatment">Heat Treatment</Select.Option>
-                <Select.Option value="Cutting">Cutting</Select.Option>
-                <Select.Option value="Drilling">Drilling</Select.Option>
-                <Select.Option value="Milling">Milling</Select.Option>
-                <Select.Option value="Turning">Turning</Select.Option>
-                <Select.Option value="Gear Hobbing">Gear Hobbing</Select.Option>
-                <Select.Option value="Gear Cutting">Gear Cutting</Select.Option>
-                <Select.Option value="Gear grinding">Gear grinding</Select.Option>
-                <Select.Option value="Surface Grinding">Surface Grinding</Select.Option>
-                <Select.Option value="Grooving">Grooving</Select.Option>
-                <Select.Option value="Threading">Threading</Select.Option>
-                <Select.Option value="Inspection">Inspection</Select.Option>
-                <Select.Option value="Die Siking">Die Siking</Select.Option>
-                <Select.Option value="EDM">EDM</Select.Option>
-                <Select.Option value="Laser cutting">Laser cutting</Select.Option>
-                <Select.Option value="New">New (Custom)</Select.Option>
-              </Select>
-            )}
+          <Form.Item name="operation_name" label="Operation Name" rules={[{ required: true, message: 'Please enter operation name' }]}>
+            <Input 
+              placeholder="Enter operation name" 
+              prefix={<FileTextOutlined className="text-gray-400" />} 
+              autoComplete="off" 
+              maxLength={30}
+            />
           </Form.Item>
         </Col>
         <Col xs={24} sm={24} md={8}>
@@ -593,7 +584,7 @@ const EditOperationModal = ({
         </Col>
       </Row>
       <Form.Item noStyle shouldUpdate={(p, c) => p.part_type_id !== c.part_type_id}>
-        {({ getFieldValue }) => getFieldValue('part_type_id') === 2
+        {({ getFieldValue }) => getFieldValue('part_type_id') === outsourceId
           ? (
             <>
               <OutSourceDates form={form} fromDateWatch={fromDateWatch} />
@@ -628,12 +619,12 @@ const EditOperationModal = ({
             <>
               <Row gutter={[12, 0]}>
                 <Col xs={24} sm={12} lg={6}>
-                  <Form.Item name="setup_time" label="Setup Time" rules={timePickerRules('Setup Time')}>
+                  <Form.Item name="setup_time" label="Setup Time" required rules={timePickerRules('Setup Time')}>
                     <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                  <Form.Item name="cycle_time" label="Cycle Time" rules={timePickerRules('Cycle Time')}>
+                  <Form.Item name="cycle_time" label="Cycle Time" required rules={timePickerRules('Cycle Time')}>
                     <TimePicker style={{ width: '100%' }} format="HH:mm:ss" inputReadOnly showNow={false} />
                   </Form.Item>
                 </Col>

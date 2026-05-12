@@ -155,7 +155,7 @@ const CustomersTable = ({ userId }) => {
 
   return (
     <Card
-      title={<span className="text-lg font-bold">Customers</span>}
+     
       extra={
         <Button
           type="primary"

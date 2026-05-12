@@ -1047,25 +1047,46 @@ const CreateProductModal = ({
               }}
             </Form.Item>
 
-            {/* Vendor Selection for All Parts */}
-            <Form.Item
-              name="vendor_id"
-              label={<span className="text-xs sm:text-sm">Vendor</span>}
-              rules={[{ required: false, message: 'Please select a vendor!' }]}
-            >
-              <Select 
-                placeholder="Select vendor" 
-                allowClear 
-                showSearch 
-                optionFilterProp="children" 
-                size="large"
-              >
-                {vendors.map(vendor => (
-                  <Select.Option key={vendor.id} value={vendor.id}>
-                    {vendor.company_name}
-                  </Select.Option>
-                ))}
-              </Select>
+            {/* Vendor Selection - only for outsource/standard parts, hidden for inhouse */}
+            <Form.Item noStyle shouldUpdate={(prev, curr) => prev.type_id !== curr.type_id}>
+              {({ getFieldValue }) => {
+                const typeId = getFieldValue('type_id');
+                const selectedType = partTypes.find(t => t.id === typeId);
+                const typeName = selectedType?.type_name?.toLowerCase() || '';
+                const isInhouse = typeName.includes('in') && typeName.includes('house') || typeName === 'inhouse' || typeName === 'in-house';
+
+                // If inhouse, hide vendor dropdown and clear any previously selected vendor
+                if (isInhouse) {
+                  // Clear vendor_id when switching to inhouse
+                  const currentVendor = getFieldValue('vendor_id');
+                  if (currentVendor != null) {
+                    setTimeout(() => form.setFieldsValue({ vendor_id: null }), 0);
+                  }
+                  return null;
+                }
+
+                return (
+                  <Form.Item
+                    name="vendor_id"
+                    label={<span className="text-xs sm:text-sm">Vendor</span>}
+                    rules={[{ required: true, message: 'Please select a vendor!' }]}
+                  >
+                    <Select 
+                      placeholder="Select vendor" 
+                      allowClear 
+                      showSearch 
+                      optionFilterProp="children" 
+                      size="large"
+                    >
+                      {vendors.map(vendor => (
+                        <Select.Option key={vendor.id} value={vendor.id}>
+                          {vendor.company_name}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                );
+              }}
             </Form.Item>
 
           </>

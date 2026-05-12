@@ -733,3 +733,4 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
 
 export { SchedulingAnalytics };
 export default SchedulingAnalytics;
+

@@ -13,6 +13,7 @@ import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
 import PartDocumentReport from "../../DownloadReports/PartDocumentReport";
+import ModelViewer3D from "./ModelViewer3D";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -248,6 +249,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     const ext = (name || '').split('.').pop().toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) return 'image';
     if (ext === 'pdf') return 'pdf';
+    if (['stl', 'step', 'stp', 'obj', '3ds', 'fbx', 'gltf', 'glb'].includes(ext)) return '3d';
     return 'other';
   };
   const previewPreviewUrl = previewDoc && (previewDoc.source === 'part' ? `${API_BASE_URL}/documents/${previewDoc.doc.id}/preview` : `${API_BASE_URL}/operation-documents/${previewDoc.doc.id}/preview`);
@@ -715,6 +717,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             </div>
           ) : getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === 'pdf' ? (
             <iframe src={`${previewPreviewUrl}#toolbar=0`} title={getDocumentDisplayName(previewDoc.doc)} width="100%" height="100%" style={{ border: 'none' }} />
+          ) : getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === '3d' ? (
+            <div className="w-full h-full">
+              <ModelViewer3D documentId={previewDoc.doc.id} height={500} showControls={true} />
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
               <FileTextOutlined className="text-5xl text-gray-400 mb-4" />

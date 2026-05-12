@@ -6,6 +6,7 @@ import { EditOutlined, DeleteOutlined, PlusOutlined, EyeOutlined } from "@ant-de
 import WorkCenterModal from "../Configuration Components/WorkCenterModal";
 import Machines from "../Configuration Components/Machines";
 import CustomersTable from "../Configuration Components/CustomersTable";
+import VendorsTable from "../Configuration Components/VendorsTable";
 
 const Configuration = () => {
   const [workCenters, setWorkCenters] = useState([]);
@@ -178,7 +179,7 @@ const Configuration = () => {
       label: 'Work Center',
       children: (
         <Card 
-          title="Work Center" 
+         
           extra={
             <Button
               type="primary"
@@ -220,6 +221,11 @@ const Configuration = () => {
       label: 'Customers',
       children: <CustomersTable userId={userId} />,
     },
+    {
+      key: 'vendors',
+      label: 'Vendors',
+      children: <VendorsTable userId={userId} />,
+    },
   ];
 
   return (
@@ -255,7 +261,7 @@ const Configuration = () => {
           }
         }
       `}</style>
-      <h1 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Configuration</h1>
+     
       <Tabs 
         defaultActiveKey="work-center" 
         items={items} 

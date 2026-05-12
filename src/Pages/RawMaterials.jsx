@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { Tabs, Typography, App as AntApp } from "antd";
 
-import { ExperimentOutlined, LinkOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { ExperimentOutlined, LinkOutlined, SafetyCertificateOutlined, ShoppingOutlined, HistoryOutlined } from "@ant-design/icons";
 
 import axios from "axios";
 
@@ -16,9 +16,13 @@ import { API_BASE_URL } from "../Config/auth";
 
 import RawMaterialsTab from "../RawMaterialComponents/RawMaterialsTab";
 
+import LinkGeneralStockImproved from "../RawMaterialComponents/LinkGeneralStockImproved";
+
 import LinkMaterialsTab from "../RawMaterialComponents/LinkMaterialsTab";
 
 import PartsWithRawMaterialStatusTab from "../RawMaterialComponents/PartsWithRawMaterialStatusTab";
+
+import RawMaterialHistoryTab from "../RawMaterialComponents/RawMaterialHistoryTab";
 
 
 
@@ -88,6 +92,16 @@ const RawMaterialsContent = () => {
 
     {
 
+      key: 'link-general-stock',
+
+      label: <span className="flex items-center gap-2 px-2"><ShoppingOutlined /> Assign Stock</span>,
+
+      children: <LinkGeneralStockImproved rawMaterials={sharedRawMaterials} />
+
+    },
+
+    {
+
       key: 'linking',
 
       label: <span className="flex items-center gap-2 px-2"><LinkOutlined /> Procure Raw Materials</span>,
@@ -103,6 +117,16 @@ const RawMaterialsContent = () => {
       label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procurement Status</span>,
 
       children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} />
+
+    },
+
+    {
+
+      key: 'history',
+
+      label: <span className="flex items-center gap-2 px-2"><HistoryOutlined /> History</span>,
+
+      children: <RawMaterialHistoryTab materials={sharedRawMaterials} />
 
     }
 
@@ -168,32 +192,6 @@ const RawMaterialsContent = () => {
 
 
 
-      {/* Header */}
-
-      <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-
-            <div className="w-full sm:w-auto">
-
-                <Title level={2} style={{ margin: 0, fontSize: 'clamp(18px, 4vw, 24px)' }} className="flex items-center gap-2 sm:gap-3 text-gray-800">
-
-                    <ExperimentOutlined className="text-blue-600" />
-
-                    <span>Raw Materials Management</span>
-
-                </Title>
-
-                <Text className="text-gray-500 mt-1 block text-xs sm:text-sm">Manage raw materials, inventory, and order linking</Text>
-
-            </div>
-
-        </div>
-
-      </div>
-
-
-
       <div className="bg-white rounded-lg lg:rounded-xl shadow-lg border border-gray-100 p-1 sm:p-2">
 
         <Tabs 
@@ -235,4 +233,6 @@ const RawMaterials = () => (
 
 
 export default RawMaterials;
+
+
 

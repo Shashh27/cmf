@@ -46,6 +46,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 
 import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
 
+import MCSShopFloorDashboard from "./ManufacturingCoordinator Components/ShopFloorDashboard";
+
 import SupervisorDashboard from "./Pages/SupervisorDashboard";
 
 
@@ -173,6 +175,8 @@ function App() {
           <Route path="/manufacturing_coordinator" element={<Navigate to="/manufacturing_coordinator/dashboard" replace />} />
 
           <Route path="/manufacturing_coordinator/dashboard" element={<ManufacturingCoordinator />} />
+
+          <Route path="/manufacturing_coordinator/shop-floor" element={<MCSShopFloorDashboard />} />
 
           <Route path="/manufacturing_coordinator/oms" element={<Navigate to="/manufacturing_coordinator/oms/orders" replace />} />
 

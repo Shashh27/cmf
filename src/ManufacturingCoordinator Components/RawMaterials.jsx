@@ -5,16 +5,18 @@ import {
   ExperimentOutlined, 
   LinkOutlined, 
   SafetyCertificateOutlined,
-  ShoppingOutlined
+  ShoppingOutlined,
+  HistoryOutlined
 } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
 // Import split components
 import RawMaterialsTab from "./RawMaterialComponents/RawMaterialsTab";
-import LinkGeneralStockTab from "./RawMaterialComponents/LinkGeneralStockTab";
+import LinkGeneralStockImproved from "./RawMaterialComponents/LinkGeneralStockImproved";
 import LinkMaterialsTab from "./RawMaterialComponents/LinkMaterialsTab";
 import PartsWithRawMaterialStatusTab from "./RawMaterialComponents/PartsWithRawMaterialStatusTab";
+import RawMaterialHistoryTab from "./RawMaterialComponents/RawMaterialHistoryTab";
 
 const { Title, Text } = Typography;
 
@@ -56,7 +58,7 @@ const RawMaterialsContent = () => {
     {
       key: 'link-general-stock',
       label: <span className="flex items-center gap-2 px-2"><ShoppingOutlined /> Assign Stock</span>,
-      children: <LinkGeneralStockTab />
+      children: <LinkGeneralStockImproved rawMaterials={sharedRawMaterials} />
     },
     {
       key: 'linking',
@@ -67,6 +69,11 @@ const RawMaterialsContent = () => {
       key: 'order-status',
       label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procurement Status</span>,
       children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} />
+    },
+    {
+      key: 'history',
+      label: <span className="flex items-center gap-2 px-2"><HistoryOutlined /> Raw Material History</span>,
+      children: <RawMaterialHistoryTab materials={sharedRawMaterials} />
     }
   ];
 

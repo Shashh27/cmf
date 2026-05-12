@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined,
   SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined,
-  DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined
+  DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined,
+  HolderOutlined, ExclamationCircleOutlined
 } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
@@ -12,9 +13,29 @@ import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
 import PartDocumentReport from "../DownloadReports/PartDocumentReport";
+import ModelViewer3D from "./ModelViewer3D";
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const { Text } = Typography;
 const { Dragger } = Upload;
+
+// Custom sortable row component for drag-and-drop
+const SortableRow = (props) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props['data-row-key'],
+  });
+
+  const style = {
+    ...props.style,
+    transform: CSS.Transform.toString(transform && { ...transform, scaleY: 1 }),
+    transition,
+    ...(isDragging ? { position: 'relative', zIndex: 9999, opacity: 0.8 } : {}),
+  };
+
+  return <tr {...props} ref={setNodeRef} style={style} {...attributes} {...listeners} />;
+};
 
 // ── OperationDocumentsList ──────────────────────────────────────────────────
 const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
@@ -152,6 +173,15 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     } else { editForm.resetFields(); }
   }, [editingDoc, editForm]);
 
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 1,
+      },
+    })
+  );
+
   const parseV = (v) => parseFloat(String(v).replace(/^v/i, ''));
 
   const groupedPartDocs = useMemo(() =>
@@ -219,6 +249,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     const ext = (name || '').split('.').pop().toLowerCase();
     if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) return 'image';
     if (ext === 'pdf') return 'pdf';
+    if (['stl', 'step', 'stp', 'obj', '3ds', 'fbx', 'gltf', 'glb'].includes(ext)) return '3d';
     return 'other';
   };
   const previewPreviewUrl = previewDoc && (previewDoc.source === 'part' ? `${API_BASE_URL}/documents/${previewDoc.doc.id}/preview` : `${API_BASE_URL}/operation-documents/${previewDoc.doc.id}/preview`);
@@ -338,8 +369,54 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     await fetchDocuments(); setImportOperations([]);
   };
 
+  const onOperationDragEnd = async ({ active, over }) => {
+    if (active.id !== over?.id) {
+      const activeIndex = operations.findIndex((i) => i.id === active.id);
+      const overIndex = operations.findIndex((i) => i.id === over?.id);
+      
+      const sourceOp = operations[activeIndex];
+      const targetOp = operations[overIndex];
+      const sourceOpNumber = sourceOp.operation_number;
+      const targetOpNumber = targetOp.operation_number;
+
+      Modal.confirm({
+        title: 'Confirm Reorder',
+        icon: <ExclamationCircleOutlined />,
+        content: (
+          <div>
+            <p>Are you sure you want to swap these operations?</p>
+            <p><strong>{sourceOp.operation_name}</strong> (Op #{sourceOpNumber})</p>
+            <p>↔</p>
+            <p><strong>{targetOp.operation_name}</strong> (Op #{targetOpNumber})</p>
+          </div>
+        ),
+        okText: 'Yes, Swap',
+        cancelText: 'Cancel',
+        onOk: async () => {
+          try {
+            // Use the dedicated swap endpoint
+            await axios.post(`${API_BASE_URL}/operations/swap`, null, {
+              params: {
+                op1_id: sourceOp.id,
+                op2_id: targetOp.id
+              }
+            });
+            
+            message.success('Operations swapped successfully');
+            await fetchDocuments();
+          } catch (error) {
+            console.error('Error swapping operations:', error);
+            message.error(error?.response?.data?.detail || 'Failed to swap operations');
+            await fetchDocuments();
+          }
+        },
+      });
+    }
+  };
+
   // ── operations table columns ───────────────────────────────────────────────
   const operationsColumns = [
+    { key: 'sort', width: 30, render: () => <HolderOutlined style={{ cursor: 'grab', color: '#999' }} /> },
     { title: 'Op #', dataIndex: 'operation_number', key: 'op', width: 70,
       render: (t, _, i) => <Tag color="cyan" className="font-mono text-sm font-medium m-0 px-1.5 py-0.5">{String(t || i + 1).padStart(2, '0')}</Tag> },
     { title: <span className="font-semibold text-slate-700">Operation Name</span>, dataIndex: 'operation_name', key: 'name', ellipsis: true, minWidth: 150,
@@ -358,11 +435,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
     { title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to',
       render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
-    { title: <span className="font-semibold text-slate-700 text-center block">Actions</span>, key: 'actions', align: 'center', width: 120, fixed: 'right',
+    { title: <span className="font-semibold text-slate-700 text-center block">Actions</span>, key: 'actions', align: 'center', width: 150, fixed: 'right',
       render: (_, r) => {
         const isOut = r.part_type_name === 'Out-Source' || r.part_type_id === 2;
         return (
           <div className="flex gap-0.5 justify-center" onClick={e => e.stopPropagation()}>
+            <Tooltip title="View"><Button size="small" icon={<EyeOutlined />} onClick={() => { setViewOperation(r); setIsViewModalOpen(true); }} className="text-green-500 hover:bg-green-50" /></Tooltip>
             <Tooltip title="Edit"><Button size="small" icon={<EditOutlined />} onClick={() => { setSelectedOperation(r); setModalTab('details'); setShowAddToolForm(false); setIsOperationModalOpen(true); }} className="text-blue-500 hover:bg-blue-50" /></Tooltip>
             {!isOut && <Tooltip title="Add Tool"><Button size="small" icon={<ToolOutlined />} onClick={() => { setSelectedOperation(r); setModalTab('tools'); setShowAddToolForm(true); setIsOperationModalOpen(true); }} className="text-orange-500 hover:bg-orange-50" /></Tooltip>}
             <Popconfirm title="Delete operation?" onConfirm={() => handleDeleteOperation(r.id)} okText="Yes" cancelText="No">
@@ -474,7 +552,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       children: (
         <div className="h-full flex flex-col min-h-0">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
-            <span className="text-xs text-slate-500">Click row to view or edit</span>
+            <span className="text-xs text-slate-500">Drag rows to reorder operations</span>
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               <Button size="small" icon={<UploadOutlined />} onClick={() => setShowImportModal(true)} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Upload MPP</span><span className="sm:hidden">MPP</span>
@@ -489,20 +567,22 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             </div>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
-            <FitTable 
-              dataSource={operations} 
-              columns={operationsColumns} 
-              rowKey="id" 
-              className="docs-ops-table" 
-              locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }} 
-              onRow={(record) => ({
-                onClick: () => {
-                    setViewOperation(record);
-                    setIsViewModalOpen(true);
-                },
-                style: { cursor: 'pointer' }
-              })}
-            />
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onOperationDragEnd}>
+              <SortableContext items={operations.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+                <FitTable 
+                  dataSource={operations} 
+                  columns={operationsColumns} 
+                  rowKey="id" 
+                  className="docs-ops-table" 
+                  locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+                  components={{
+                    body: {
+                      row: SortableRow,
+                    },
+                  }}
+                />
+              </SortableContext>
+            </DndContext>
           </div>
           {/* Small separation line between operations and bottom sections */}
           <div className="border-t border-slate-200 my-1"></div>
@@ -637,6 +717,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             </div>
           ) : getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === 'pdf' ? (
             <iframe src={`${previewPreviewUrl}#toolbar=0`} title={getDocumentDisplayName(previewDoc.doc)} width="100%" height="100%" style={{ border: 'none' }} />
+          ) : getPreviewType(getDocumentDisplayName(previewDoc.doc) || previewDoc.doc.document_name) === '3d' ? (
+            <div className="w-full h-full">
+              <ModelViewer3D documentId={previewDoc.doc.id} height={500} showControls={true} />
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
               <FileTextOutlined className="text-5xl text-gray-400 mb-4" />
