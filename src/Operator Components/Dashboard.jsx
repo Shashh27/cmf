@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Card,Row,Col,Typography,Button,Tag,Space,DatePicker,Select,Input,Tabs } from 'antd';
+import React, { useEffect, useRef, useState } from 'react';
+import { Card,Row,Col,Typography,Button,Tag,Space,DatePicker,Select,Input,Tabs,Badge } from 'antd';
 import { ToolOutlined,DashboardOutlined,ClockCircleOutlined,ProfileOutlined,SettingOutlined,FileTextOutlined,DownloadOutlined,WarningOutlined } from '@ant-design/icons';
 import machineImg from '../assets/machine.png';
 import PokaYokeChecklist from './PokaYokeChecklist';
@@ -8,6 +8,7 @@ import SelectJob from './SelectJob';
 import PartDocumentTab from './PartDocumentTab';
 import ProductionLog from './ProductionLog';
 import { API_BASE_URL } from '../Config/auth.js';
+import config from '../Config/config.js';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 import { message } from 'antd';
 
@@ -27,31 +28,120 @@ const Dashboard = () => {
   const [showSelectJob, setShowSelectJob] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [checklistPending, setChecklistPending] = useState(false);
+  const [rejectedChecklists, setRejectedChecklists] = useState([]);
   const [isActivated, setIsActivated] = useState(false);
   const [completedQuantity, setCompletedQuantity] = useState(0);
-  const [reworkData, setReworkData] = useState(null);
+  const [productionStats, setProductionStats] = useState({
+    totalProduced: 0,
+    totalRework: 0,
+    totalApproved: 0,
+    hasRework: false,
+    reworkRemarks: ''
+  });
+  // Per-job approved qty map — fetched once here, passed to SelectJob for display
+  const [jobStatsMap, setJobStatsMap] = useState({});
+  const [latestHelpReply, setLatestHelpReply] = useState(null);
 
-  // Fetch rework data for the selected job
+  // ─── Cached checklist data passed down to PokaYokeChecklist ───────────────
+  // This prevents PokaYokeChecklist from re-fetching data that Dashboard
+  // already fetched in checkChecklistStatus.
+  const [cachedAssignments, setCachedAssignments] = useState([]);
+  const [cachedLogs, setCachedLogs] = useState([]);
+  const [cachedApprovalStatuses, setCachedApprovalStatuses] = useState({});
+
+  // Clear localStorage on mount to always start fresh
+  useEffect(() => {
+    localStorage.removeItem('selectedJob');
+  }, []);
+
+  // Prevents checkChecklistStatus from running more than once per machineId load.
+  // It will be reset to false only when showChecklist closes (so the badge
+  // refreshes after the operator submits a checklist).
+  const checklistStatusFetchedRef = useRef(false);
+
+  // Fetch latest help reply
+  const fetchLatestReply = async (mId) => {
+    if (!mId) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/maintenance/help-support`);
+      if (res.ok) {
+        const data = await res.json();
+        const machineReplies = data
+          .filter(item => item.machine_id === mId && item.mc_reply)
+          .sort((a, b) => b.id - a.id);
+        
+        if (machineReplies.length > 0) {
+          setLatestHelpReply(machineReplies[0]);
+        } else {
+          setLatestHelpReply(null);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching help reply:', error);
+    }
+  };
+
+  // Fetch production stats for the selected job (passed to PartDocumentTab via productionStats)
   const fetchReworkData = async (operationId) => {
     if (!operationId) {
-      setReworkData(null);
+      setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
       return;
     }
-    
     try {
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
       if (response.ok) {
-        const data = await response.json();
-        // Find the rework entry (status === 'rework')
-        const reworkEntry = data.find(log => log.status === 'rework');
-        setReworkData(reworkEntry || null);
+        const logs = await response.json();
+        // Sort logs by created_at in descending order to get the latest entry first
+        const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        const latestLog = sortedLogs.length > 0 ? sortedLogs[0] : null;
+        
+        if (latestLog) {
+          const stats = {
+            totalProduced: latestLog.produced_quantity || 0,
+            totalRework: latestLog.rework_quantity || 0,
+            totalApproved: latestLog.approved_quantity || 0,
+            hasRework: latestLog.status === 'rework',
+            reworkRemarks: latestLog.remarks || ''
+          };
+          setProductionStats(stats);
+        } else {
+          setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
+        }
       } else {
-        setReworkData(null);
+        setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
       }
     } catch (error) {
-      console.error('Error fetching rework data:', error);
-      setReworkData(null);
+      console.error('Error fetching production stats:', error);
+      setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
     }
+  };
+
+  // Fetch approved_quantity for a list of operations in parallel.
+  // Called after SelectJob loads its jobs, so stats are ready when cards render.
+  const fetchJobStatsMap = async (ops) => {
+    if (!ops || ops.length === 0) return;
+    const results = await Promise.allSettled(
+      ops.map(async (job) => {
+        const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
+        if (!opId) return { opId: null, totalApproved: 0 };
+        try {
+          const r = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${opId}?skip=0`);
+          if (!r.ok) return { opId, totalApproved: 0 };
+          const logs = await r.json();
+          const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
+          return { opId, totalApproved };
+        } catch {
+          return { opId, totalApproved: 0 };
+        }
+      })
+    );
+    const map = {};
+    results.forEach((r) => {
+      if (r.status === 'fulfilled' && r.value.opId != null) {
+        map[r.value.opId] = r.value.totalApproved;
+      }
+    });
+    setJobStatsMap(map);
   };
 
   useEffect(() => {
@@ -67,6 +157,7 @@ const Dashboard = () => {
         const id =
           m?.id ?? m?.machine_id ?? m?.machineId ?? m?.machine?.id ?? null;
         setMachineId(id);
+        fetchLatestReply(id);
       }
     } catch (e) {
       setMachineName('');
@@ -74,35 +165,52 @@ const Dashboard = () => {
     }
   }, []);
 
+  // ─── Single source-of-truth fetch for checklist status ───────────────────
+  // Runs once when machineId is available, and again every time the checklist
+  // modal closes (showChecklist: true→false) so the badge stays up-to-date.
   useEffect(() => {
-    const checkChecklistStatus = async () => {
-      if (!machineId) return;
+    if (!machineId) return;
 
+    // If the modal just opened we do NOT re-fetch — the data is already cached.
+    // We only re-fetch when the modal closes (showChecklist goes true → false).
+    if (showChecklist) return;
+
+    // Guard: skip if we already fetched and the modal was never opened
+    // (i.e. this is the initial mount run that already completed).
+    if (checklistStatusFetchedRef.current) return;
+
+    checklistStatusFetchedRef.current = true;
+
+    const checkChecklistStatus = async () => {
       try {
         // 1. Fetch all assignments for this machine
         const assignRes = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`);
         const assignData = await assignRes.json();
         const assignments = Array.isArray(assignData) ? assignData : [];
 
-        // 2. Filter assignments due today (Same logic as in PokaYokeChecklist.jsx)
+        // 2. Filter assignments due today (same logic as PokaYokeChecklist.jsx)
         const today = new Date();
         const istOptions = { timeZone: 'Asia/Kolkata' };
         const dayOfWeek = today.toLocaleDateString('en-US', { ...istOptions, weekday: 'long' });
         const dayOfMonth = today.toLocaleDateString('en-US', { ...istOptions, day: 'numeric' });
-        const currentHour = parseInt(today.toLocaleTimeString('en-US', { ...istOptions, hour: 'numeric', hour12: false }));
 
         const dueToday = assignments.filter(item => {
           const frequency = (item?.frequency || '').toLowerCase();
           const scheduledDay = (item?.scheduled_day || '');
 
-          if (frequency === 'daily') return true; // Show all daily checklists
+          if (frequency === 'daily') return true;
           if (frequency === 'weekly') return scheduledDay.toLowerCase() === dayOfWeek.toLowerCase();
           if (frequency === 'monthly') return String(scheduledDay) === String(dayOfMonth);
           return false;
         });
 
+        // Cache the full (unfiltered) assignment list for PokaYokeChecklist
+        setCachedAssignments(assignments);
+
         if (dueToday.length === 0) {
           setChecklistPending(false);
+          setCachedLogs([]);
+          setCachedApprovalStatuses({});
           return;
         }
 
@@ -111,47 +219,117 @@ const Dashboard = () => {
         const logsData = await logsRes.json();
         const logs = Array.isArray(logsData) ? logsData : [];
 
+        // Cache logs for PokaYokeChecklist
+        setCachedLogs(logs);
+
         const startOfToday = new Date();
         startOfToday.setHours(0, 0, 0, 0);
 
         const completedTodayIds = new Set(
           logs
             .filter(log => new Date(log.completed_at) >= startOfToday)
-            .map(log => String(log.checklist_id))
+            .map(log => {
+              const cid = String(log.checklist_id);
+              const freq = (log.frequency || '').toLowerCase();
+              const shift = (log.shift || '').toLowerCase();
+              return `${cid}-${freq}-${shift}`;
+            })
         );
 
-        // 4. Check if all due today are completed
-        // Modified logic: Any ONE daily checklist completion satisfies the daily requirement.
-        // Weekly and Monthly checklists still require all to be completed if due.
-        
-        const dueDaily = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'daily');
-        const dueWeekly = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'weekly');
-        const dueMonthly = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'monthly');
+        // 4. Fetch approval status for each due checklist
+        const rejected = [];
+        const approvalStatuses = {};
+        let allApproved = true;
 
-        const isCompleted = (item) => {
-          const cid = item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id;
-          return completedTodayIds.has(String(cid));
-        };
+        for (const item of dueToday) {
+          const cid = String(item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id);
+          const freq = (item?.frequency || '').toLowerCase();
+          const shift = (item?.shift || '').toLowerCase();
+          const key = `${cid}-${freq}-${shift}`;
 
-        const dailyRequirementMet = dueDaily.length === 0 || dueDaily.some(isCompleted);
-        const weeklyRequirementMet = dueWeekly.every(isCompleted);
-        const monthlyRequirementMet = dueMonthly.every(isCompleted);
+          if (completedTodayIds.has(key)) {
+            try {
+              const approvalRes = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/checklists/${cid}/approval-status`);
+              if (approvalRes.ok) {
+                const approvalData = await approvalRes.json();
+                const approvalLogs = approvalData.completed_logs || [];
+                const latestLog = approvalLogs
+                  .filter(l => l.machine_id === machineId && new Date(l.completed_at) >= startOfToday)
+                  .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at))[0];
 
-        const pending = !dailyRequirementMet || !weeklyRequirementMet || !monthlyRequirementMet;
+                if (latestLog) {
+                  approvalStatuses[key] = {
+                    status: latestLog.overall_approval_status,
+                    rejection_details: latestLog,
+                  };
 
-        setChecklistPending(pending);
+                  if (latestLog.overall_approval_status === 'rejected') {
+                    allApproved = false;
+                    // Fetch the checklist name so the Dashboard badge shows the
+                    // real name instead of a fallback like "Checklist (Daily Morning)"
+                    let checklistName = item?.name ?? item?.title ?? null;
+                    if (!checklistName) {
+                      try {
+                        const nameRes = await fetch(`${API_BASE_URL}/pokayoke-checklists/${cid}`, { headers: { accept: 'application/json' } });
+                        if (nameRes.ok) {
+                          const nameData = await nameRes.json();
+                          checklistName = nameData?.name ?? nameData?.title ?? `Checklist #${cid}`;
+                        }
+                      } catch { /* keep fallback */ }
+                    }
+                    rejected.push({
+                      ...item,
+                      checklist_name: checklistName ?? `Checklist #${cid}`,
+                      rejection_details: latestLog
+                    });
+                  } else if (latestLog.overall_approval_status !== 'approved') {
+                    allApproved = false;
+                  }
+                } else {
+                  allApproved = false;
+                }
+              } else {
+                allApproved = false;
+              }
+            } catch (err) {
+              console.error('Error fetching approval status:', err);
+              allApproved = false;
+            }
+          } else {
+            allApproved = false;
+          }
+        }
+
+        // Cache approval statuses for PokaYokeChecklist
+        setCachedApprovalStatuses(approvalStatuses);
+        setRejectedChecklists(rejected);
+        setChecklistPending(!allApproved);
       } catch (error) {
         console.error('Error checking checklist status:', error);
       }
     };
 
     checkChecklistStatus();
-  }, [machineId, showChecklist]); // Re-check when machine changes or checklist modal closes
+  }, [machineId, showChecklist]);
+
+  // When the checklist modal closes:
+  // - If the operator actually submitted something (wasSubmitted=true), reset
+  //   the ref so the effect re-runs and the badge/rejected list refresh.
+  // - If they just dismissed the modal without submitting, keep the ref as-is
+  //   so NO extra network calls are made.
+  const handleChecklistClose = (wasSubmitted = false) => {
+    setShowChecklist(false);
+    if (wasSubmitted) {
+      checklistStatusFetchedRef.current = false;
+    }
+  };
 
   useEffect(() => {
     const id = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
+    return () => {
+      clearInterval(id);
+    };
+  }, [machineId]);
 
   const handleSelectJobClick = () => {
     if (checklistPending) {
@@ -164,6 +342,10 @@ const Dashboard = () => {
 
   const handleProductionSubmit = (submittedQuantity) => {
     setCompletedQuantity(prev => prev + submittedQuantity);
+    const operationId = selectedJob?.id || selectedJob?.operation_id || selectedJob?.job_id || selectedJob?.schedule_id;
+    if (operationId) {
+      fetchReworkData(operationId);
+    }
   };
 
   const hourOptions = Array.from({ length: 24 }, (_, i) => i);
@@ -206,7 +388,7 @@ const Dashboard = () => {
   ];
 
   return (
-    <div style={{ padding: '0px', background: 'transparent' }}>
+    <div style={{ padding: '16px', background: 'transparent', overflowX: 'hidden' }}>
       {/* Header */}
       <Card
         style={{
@@ -242,16 +424,10 @@ const Dashboard = () => {
               fontSize: 13,
             }}
           >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 9999,
-                background: '#ff4d4f',
-                display: 'inline-block',
-              }}
-            />
-            <Text>{currentTime.toLocaleString()}</Text>
+            <Text>
+              {currentTime.toLocaleDateString('en-GB').replace(/\//g, '-')}{", "}
+              {currentTime.toLocaleTimeString()}
+            </Text>
           </div>
           <Button 
             type="primary" 
@@ -264,7 +440,7 @@ const Dashboard = () => {
       </Card>
 
       {/* Top row */}
-      <Row gutter={[24, 24]} style={{ marginTop: '16px' }}>
+      <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
         <Col xs={24} lg={8}>
           <Card
             title={
@@ -274,7 +450,6 @@ const Dashboard = () => {
                   <span>Machine Status</span>
                 </Space>
                 <Space>
-                  {/* <span style={{ width: 8, height: 8, borderRadius: 9999, background: '#ff4d4f', display: 'inline-block' }} /> */}
                   <Button
                     type="link"
                     danger
@@ -317,7 +492,7 @@ const Dashboard = () => {
                   <img
                     src={machineImg}
                     alt="Machine"
-                    style={{ width: 200, height: 160, objectFit: 'contain' }}
+                    style={{ maxWidth: 200, height: 160, objectFit: 'contain' }}
                   />
                 </div>
               </div>
@@ -329,12 +504,12 @@ const Dashboard = () => {
               </div>
               <div style={{ flex: 1, background: '#EAF6FF', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
                 <Text style={{ color: '#64748b' }}>Part Count</Text>
-                <div style={{ marginTop: 6, fontWeight: 700, color: '#52C41A' }}>0</div>
+                <div style={{ marginTop: 6, fontWeight: 700, color: '#52C41A' }}>{productionStats.totalProduced || 0}</div>
               </div>
             </div>
             
             {/* Rework Information */}
-            {reworkData && (
+            {productionStats.hasRework && (
               <div style={{ 
                 marginTop: 16, 
                 background: '#FFF2E8', 
@@ -353,9 +528,19 @@ const Dashboard = () => {
                     minWidth: window.innerWidth < 768 ? '100%' : 'auto',
                     marginBottom: window.innerWidth < 768 ? 8 : 0
                   }}>
+                    <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Produced Quantity</Text>
+                    <div style={{ marginTop: 4, fontWeight: 700, color: '#52C41A', fontSize: 16 }}>
+                      {productionStats.totalProduced || 0}
+                    </div>
+                  </div>
+                  <div style={{ 
+                    flex: 1, 
+                    minWidth: window.innerWidth < 768 ? '100%' : 'auto',
+                    marginBottom: window.innerWidth < 768 ? 8 : 0
+                  }}>
                     <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rework Quantity</Text>
                     <div style={{ marginTop: 4, fontWeight: 700, color: '#FA8C16', fontSize: 16 }}>
-                      {reworkData.rework_quantity || 0}
+                      {productionStats.totalRework || 0}
                     </div>
                   </div>
                   <div style={{ 
@@ -371,8 +556,64 @@ const Dashboard = () => {
                       wordBreak: 'break-word',
                       maxWidth: '100%'
                     }}>
-                      {reworkData.remarks || 'No remarks'}
+                      {productionStats.reworkRemarks || 'No remarks'}
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MC Reply Information */}
+            {latestHelpReply && (
+              <div style={{ 
+                marginTop: 16, 
+                background: '#F6FFED', 
+                borderRadius: 12, 
+                padding: 12, 
+                border: '1px solid #B7EB8F',
+                minHeight: 'auto'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ 
+                    width: 24, 
+                    height: 24, 
+                    borderRadius: '50%', 
+                    background: '#52C41A', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center' 
+                  }}>
+                    <SettingOutlined style={{ color: 'white', fontSize: 14 }} />
+                  </div>
+                  <Text strong style={{ color: '#389E0D', fontSize: 14 }}>MC Response</Text>
+                  {latestHelpReply.replied_at && (
+                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                      {new Date(latestHelpReply.replied_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  )}
+                </div>
+                <div style={{ 
+                  background: 'white', 
+                  borderRadius: 8, 
+                  padding: '8px 12px', 
+                  border: '1px solid #D9F7BE'
+                }}>
+                  {latestHelpReply.description && (
+                    <div style={{ marginBottom: 8 }}>
+                      <Text style={{ color: '#595959', fontSize: 12, display: 'block' }}>
+                        <strong>Operator:</strong> "{latestHelpReply.description}"
+                      </Text>
+                    </div>
+                  )}
+                  <div style={{ marginBottom: 4 }}>
+                    <Text style={{ color: '#237804', fontSize: 13, display: 'block', fontStyle: 'italic' }}>
+                      <strong>MC Response:</strong> "{latestHelpReply.mc_reply}"
+                    </Text>
+                  </div>
+                  <div style={{ marginTop: 4, textAlign: 'right' }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      — {latestHelpReply.replied_by_name || 'Manufacturing Coordinator'}
+                    </Text>
                   </div>
                 </div>
               </div>
@@ -458,7 +699,7 @@ const Dashboard = () => {
       </Row>
 
       {/* Bottom row */}
-      <Row gutter={[24, 24]} style={{ marginTop: 24, marginBottom: 8 }}>
+      <Row gutter={[16, 16]} style={{ marginTop: 24, marginBottom: 8 }}>
         {/* Documents / Operations */}
         <Col xs={24} lg={16}>
           <PartDocumentTab 
@@ -466,6 +707,7 @@ const Dashboard = () => {
             isActivated={isActivated}
             onActivate={() => setIsActivated(true)}
             completedQuantity={completedQuantity}
+            productionStats={productionStats}
           />
         </Col>
 
@@ -474,7 +716,16 @@ const Dashboard = () => {
           <Card
             style={{ borderRadius: 16 }}
             headStyle={{ borderRadius: '16px 16px 0 0' }}
-            title="Poka Yoke & Feedback"
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Poka Yoke & Feedback</span>
+                {rejectedChecklists.length > 0 && (
+                  <Badge count={rejectedChecklists.length} offset={[10, 0]}>
+                    <FileTextOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
+                  </Badge>
+                )}
+              </div>
+            }
           >
             {/* Poka Yoke section */}
             <Button
@@ -482,12 +733,12 @@ const Dashboard = () => {
               block
               style={{
                 borderRadius: 9999,
-                background: '#1677FF',
-                borderColor: '#1677FF',
+                background: rejectedChecklists.length > 0 ? '#ff4d4f' : '#1677FF',
+                borderColor: rejectedChecklists.length > 0 ? '#ff4d4f' : '#1677FF',
               }}
               onClick={() => setShowChecklist(true)}
             >
-              Open Poka Yoke Checklist
+              {rejectedChecklists.length > 0 ? 'Redo Rejected Checklists' : 'Open Poka Yoke Checklist'}
             </Button>
             <div
               style={{
@@ -497,8 +748,34 @@ const Dashboard = () => {
                 textAlign: 'center',
               }}
             >
-              Review and complete poka yoke checkpoints
+              {rejectedChecklists.length > 0 
+                ? 'Some checklists were rejected. Please review and resubmit.' 
+                : 'Review and complete poka yoke checkpoints'}
             </div>
+
+            {/* Rejected Details */}
+            {rejectedChecklists.length > 0 && (
+              <div style={{ marginTop: 16, padding: '12px', background: '#fff1f0', borderRadius: 8, border: '1px solid #ffccc7' }}>
+                <div style={{ fontWeight: 600, color: '#cf1322', marginBottom: 8, fontSize: 13 }}>
+                  Rejected Checklists:
+                </div>
+                {rejectedChecklists.map((rc, idx) => {
+                  console.log('Rejected Checklist Item:', rc);
+                  return (
+                  <div key={idx} style={{ marginBottom: idx < rejectedChecklists.length - 1 ? 8 : 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: '#851111' }}>
+                      • {rc.checklist_name || rc.name || rc.title || 'Checklist'} ({rc.frequency} {rc.shift})
+                    </div>
+                    {rc.rejection_details?.items?.some(i => i.approval_status === 'rejected') && (
+                      <div style={{ fontSize: 11, color: '#ff4d4f', marginLeft: 10, fontStyle: 'italic' }}>
+                        Items rejected: {rc.rejection_details.items.filter(i => i.approval_status === 'rejected').map(i => i.item_text).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Divider */}
             <div
@@ -511,10 +788,15 @@ const Dashboard = () => {
           </Card>
         </Col>
       </Row>
+
+      {/* PokaYokeChecklist receives pre-fetched data — no duplicate API calls */}
       <PokaYokeChecklist
         open={showChecklist}
-        onClose={() => setShowChecklist(false)}
+        onClose={handleChecklistClose}
         machineId={machineId}
+        initialAssignments={cachedAssignments}
+        initialLogs={cachedLogs}
+        initialApprovalStatuses={cachedApprovalStatuses}
       />
       <ReportIssue
         open={showReportIssue}
@@ -524,6 +806,8 @@ const Dashboard = () => {
       <SelectJob
         open={showSelectJob}
         onClose={() => setShowSelectJob(false)}
+        jobStatsMap={jobStatsMap}
+        onJobsLoaded={fetchJobStatsMap}
         onSelectJob={(job) => {
           setSelectedJob(job);
           const isJobActivated = [job.status, job.operation_status].some(s => {
@@ -532,8 +816,6 @@ const Dashboard = () => {
           });
           setIsActivated(isJobActivated);
           setShowSelectJob(false);
-          
-          // Fetch rework data for this operation
           const operationId = job.id || job.operation_id || job.job_id || job.schedule_id;
           fetchReworkData(operationId);
         }}

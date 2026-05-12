@@ -15,7 +15,8 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
   const [orderFilter, setOrderFilter] = useState(null);
   const [machineName, setMachineName] = useState('');
   const [machineId, setMachineId] = useState(null);
-  const [selectedJob, setSelectedJob] = useState(null); // ✅ track selected card
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [jobStatsMap, setJobStatsMap] = useState({});
 
   useEffect(() => {
     const stored = localStorage.getItem('selectedMachine');
@@ -35,7 +36,8 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
   useEffect(() => {
     if (open) {
       fetchJobs();
-      setSelectedJob(null); // ✅ reset selection when drawer opens
+      setSelectedJob(null);
+      setJobStatsMap({});
     }
   }, [open, machineId]);
 
@@ -46,7 +48,9 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
         `${SCHEDULING_API_BASE_URL}/scheduling/machine-operations/${machineId || 1}`
       );
       if (response.status === 200) {
-        setJobs(response.data.operations || []);
+        const ops = response.data.operations || [];
+        setJobs(ops);
+        fetchStatsForJobs(ops);
       }
     } catch (error) {
       console.error('Error fetching jobs:', error);
@@ -55,28 +59,31 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
     }
   };
 
-  // API already filters by machine — only apply part/priority/order filters here
-  const filteredJobs = jobs.filter(job => {
-    const searchMatch =
-      !searchText || job.part_number === searchText;
+  const fetchStatsForJobs = async (ops) => {
+    const results = await Promise.allSettled(
+      ops.map(async (job) => {
+        const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
+        if (!opId) return { opId: null, totalApproved: 0 };
+        try {
+          const res = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${opId}?skip=0`);
+          if (!res.ok) return { opId, totalApproved: 0 };
+          const logs = await res.json();
+          const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
+          return { opId, totalApproved };
+        } catch {
+          return { opId, totalApproved: 0 };
+        }
+      })
+    );
+    const map = {};
+    results.forEach((r) => {
+      if (r.status === 'fulfilled' && r.value.opId != null) {
+        map[r.value.opId] = r.value.totalApproved;
+      }
+    });
+    setJobStatsMap(map);
+  };
 
-    const priorityMatch =
-      !priorityFilter || job.priority === priorityFilter;
-
-    const orderMatch =
-      !orderFilter || job.sale_order_number === orderFilter;
-
-    return searchMatch && priorityMatch && orderMatch;
-  });
-
-  // Sort jobs by priority (lower numbers = higher priority)
-  const sortedJobs = [...filteredJobs].sort((a, b) => {
-    const priorityA = a.priority || 999;
-    const priorityB = b.priority || 999;
-    return priorityA - priorityB;
-  });
-
-  // Check if a job is completed based on status
   const isJobCompleted = (job) => {
     const status = (job.operation_status || job.status || '').toUpperCase();
     return status === 'COMPLETED';
@@ -87,20 +94,35 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
     return status === 'INPROGRESS' || status === 'IN-PROGRESS' || status === 'IN PROGRESS';
   };
 
-  // Find the first non-completed job in priority order
-  const firstAvailableJobIndex = sortedJobs.findIndex(job => !isJobCompleted(job));
+  // ─── Sort ALL jobs by priority first (source of truth for lock order) ───────
+  const allJobsSorted = [...jobs].sort((a, b) => {
+    const priorityA = a.priority || 999;
+    const priorityB = b.priority || 999;
+    return priorityA - priorityB;
+  });
 
-  // Check if a job card should be enabled for clicking
-  const isJobCardEnabled = (job, index) => {
-    // Disable completed jobs completely
+  // The ONE job that is currently unlocked — determined from the full list,
+  // completely independent of any active filters.
+  const firstAvailableJob = allJobsSorted.find(job => !isJobCompleted(job));
+  const firstAvailableScheduleId = firstAvailableJob?.schedule_id ?? null;
+
+  // A job is enabled only if it is THE first non-completed job in the full list AND not blocked by prior operations.
+  // Filters never change this — they only hide/show cards.
+  const isJobCardEnabled = (job) => {
     if (isJobCompleted(job)) return false;
-    
-    // If no jobs are available, all are disabled
-    if (firstAvailableJobIndex === -1) return false;
-    
-    // Only enable the first available (non-completed) job
-    return index === firstAvailableJobIndex;
+    if (firstAvailableScheduleId == null) return false;
+    // Check if job is blocked by prior operations
+    if (job.blocked_by && job.blocked_by.length > 0) return false;
+    return job.schedule_id === firstAvailableScheduleId;
   };
+
+  // ─── Apply filters for display only ─────────────────────────────────────────
+  const filteredJobs = allJobsSorted.filter(job => {
+    const searchMatch  = !searchText    || job.part_number      === searchText;
+    const priorityMatch = !priorityFilter || job.priority        === priorityFilter;
+    const orderMatch   = !orderFilter   || job.sale_order_number === orderFilter;
+    return searchMatch && priorityMatch && orderMatch;
+  });
 
   const handleResetFilters = () => {
     setSearchText('');
@@ -109,8 +131,8 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
   };
 
   const uniquePartNumbers = [...new Set(jobs.map(j => j.part_number))].filter(Boolean).sort();
-  const uniquePriorities = [...new Set(jobs.map(j => j.priority))].filter(Boolean);
-  const uniqueOrders = [...new Set(jobs.map(j => j.sale_order_number))].filter(Boolean);
+  const uniquePriorities  = [...new Set(jobs.map(j => j.priority))].filter(Boolean);
+  const uniqueOrders      = [...new Set(jobs.map(j => j.sale_order_number))].filter(Boolean);
 
   if (!machineId && !machineName) {
     return (
@@ -206,22 +228,23 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
       </div>
 
       <Spin spinning={loading}>
-        {sortedJobs.length > 0 ? (
+        {filteredJobs.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 80 }}>
-            {sortedJobs.map((job, index) => {
-              const isSelected = selectedJob?.schedule_id === job.schedule_id;
-              const isEnabled = isJobCardEnabled(job, index);
+            {filteredJobs.map((job) => {
+              const isSelected  = selectedJob?.schedule_id === job.schedule_id;
+              const isEnabled   = isJobCardEnabled(job);
               const isCompleted = isJobCompleted(job);
-              
+              const isBlocked   = !isCompleted && !isEnabled;
+              const hasBlockReason = job.blocked_by && job.blocked_by.length > 0;
+
               return (
                 <Card
                   key={job.schedule_id}
                   hoverable={isEnabled}
                   style={{
                     borderRadius: 12,
-                    border: '1px solid #f0f0f0',
-                    // Blue left border + light blue background when selected
-                    borderLeft: isSelected ? '4px solid #1677FF' : '1px solid #f0f0f0',
+                    border: isSelected ? '1px solid #f0f0f0' : '1px solid #f0f0f0',
+                    borderLeft: isSelected ? '4px solid #1677FF' : (isEnabled ? '1px solid #f0f0f0' : '1px solid #f0f0f0'),
                     background: isSelected ? '#F0F7FF' : (isEnabled ? '#fff' : '#f5f5f5'),
                     transition: 'all 0.2s ease',
                     opacity: isEnabled ? 1 : 0.6,
@@ -240,15 +263,18 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
                       <Title level={4} style={{ margin: 0, color: isEnabled ? 'inherit' : '#8c8c8c' }}>
                         {job.part_number || 'N/A'}
                       </Title>
-                      <Text type={isEnabled ? 'secondary' : 'secondary'} style={{ fontSize: 12, color: isEnabled ? 'inherit' : '#8c8c8c' }}>
+                      <Text type="secondary" style={{ fontSize: 12, color: isEnabled ? 'inherit' : '#8c8c8c' }}>
                         {job.operation_name || 'No description'}
                       </Text>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                      <Tag color={isCompleted ? 'green' : (isJobInProgress(job) ? 'processing' : 'blue')} style={{ borderRadius: 4, margin: 0 }}>
+                      <Tag
+                        color={isCompleted ? 'green' : (isJobInProgress(job) ? 'processing' : 'blue')}
+                        style={{ borderRadius: 4, margin: 0 }}
+                      >
                         {isCompleted ? 'Completed' : (isJobInProgress(job) ? 'In Progress' : `Priority ${job.priority || 'N/A'}`)}
                       </Tag>
-                      {!isEnabled && !isCompleted && !isJobInProgress(job) && (
+                      {isBlocked && (
                         <Tag color="orange" style={{ borderRadius: 4, margin: 0, fontSize: 11 }}>
                           Blocked
                         </Tag>
@@ -274,10 +300,36 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
                       </div>
                       <div>
                         <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Remaining</Text>
-                        <Text strong>{job.remaining_quantity || 0}</Text>
+                        <Text strong>
+                          {(() => {
+                            const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
+                            const approved = jobStatsMap[opId] ?? 0;
+                            const total = job.total_quantity || 0;
+                            return `${Math.max(0, total - approved)}`;
+                          })()}
+                        </Text>
                       </div>
                     </Col>
                   </Row>
+
+                  {/* Block Reason Message */}
+                  {hasBlockReason && (
+                    <div style={{ 
+                      marginTop: 12, 
+                      padding: 12, 
+                      background: '#fff2e8', 
+                      border: '1px solid #ffbb96', 
+                      borderRadius: 6,
+                      marginBottom: 12 
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <Text strong style={{ color: '#fa8c16', fontSize: 13 }}>🚫 Blocked</Text>
+                      </div>
+                      <Text style={{ color: '#8c4a00', fontSize: 12, lineHeight: 1.4 }}>
+                        {job.block_reason || 'Job is blocked by prior operations'}
+                      </Text>
+                    </div>
+                  )}
 
                   <div style={{ marginTop: 12 }}>
                     <Space direction="vertical" size={2}>
@@ -285,14 +337,16 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
                         <CalendarOutlined style={{ color: '#52c41a' }} />
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           Start: {job.planned_start_time
-                            ? (() => { const d = new Date(job.planned_start_time); return d.toLocaleDateString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB'); })() : 'N/A'}
+                            ? (() => { const d = new Date(job.planned_start_time); return d.toLocaleDateString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB'); })()
+                            : 'N/A'}
                         </Text>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <CalendarOutlined style={{ color: '#f5222d' }} />
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           End: {job.planned_end_time
-                            ? (() => { const d = new Date(job.planned_end_time); return d.toLocaleDateString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB'); })() : 'N/A'}
+                            ? (() => { const d = new Date(job.planned_end_time); return d.toLocaleString('en-GB').replace(/\//g, '-') + ', ' + d.toLocaleTimeString('en-GB'); })()
+                            : 'N/A'}
                         </Text>
                       </div>
                     </Space>

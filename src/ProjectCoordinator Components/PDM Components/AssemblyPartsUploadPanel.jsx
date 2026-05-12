@@ -1,34 +1,7 @@
 import React, { useState, useRef } from "react";
-import {
-  Button,
-  Modal,
-  Upload,
-  Table,
-  Input,
-  InputNumber,
-  Select,
-  Tag,
-  Typography,
-  Space,
-  Alert,
-  Spin,
-  Tooltip,
-  message,
-  Popconfirm,
-  Progress,
-} from "antd";
-import {
-  UploadOutlined,
-  FileWordOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
-  LoadingOutlined,
-  PlusOutlined,
-  InboxOutlined,
-  ThunderboltOutlined,
-} from "@ant-design/icons";
+import {Button,Modal,Upload,Table,Input,InputNumber,Select,Tag,Typography,Space,Alert,Spin,Tooltip,message,Popconfirm,Progress,} from "antd";
+import {UploadOutlined,FileWordOutlined,EditOutlined,DeleteOutlined,CheckCircleOutlined,ExclamationCircleOutlined,LoadingOutlined,
+  PlusOutlined,InboxOutlined,ThunderboltOutlined,} from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 

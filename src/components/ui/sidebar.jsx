@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Layout, Menu, Drawer, Button } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
-  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined
+  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 
@@ -108,6 +108,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       icon: <MonitorOutlined />,
       children: [
         { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`}>Live Monitoring</Link> },
+        { key: `${prefix}/product-monitoring/oee-overview`, label: <Link to={`${prefix}/product-monitoring/oee-overview`}>OEE Overview</Link> },
         { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`}>Planned vs Actual</Link> },
         { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`}>Order Tracking</Link> },
       ],
@@ -178,6 +179,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/documents`} onClick={() => setMobileDrawerOpen(false)}>Documents</Link>,
         icon: <FileTextOutlined />,
       },
+      {
+        key: `${prefix}/leave-log`,
+        label: <Link to={`${prefix}/leave-log`} onClick={() => setMobileDrawerOpen(false)}>Leave Log</Link>,
+        icon: <CalendarOutlined />,
+      },
     ];
   } else if (prefix === '/project_coordinator') {
     items = [
@@ -210,6 +216,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <ExperimentOutlined />,
       },
       {
+        key: `${prefix}/configuration`,
+        label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
+        icon: <SettingOutlined />,
+      },
+      {
         key: 'pps',
         label: 'PPS',
         icon: <AppstoreOutlined />,
@@ -220,16 +231,12 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         ],
       },
       {
-        key: `${prefix}/configuration`,
-        label: <Link to={`${prefix}/configuration`} onClick={() => setMobileDrawerOpen(false)}>Configuration</Link>,
-        icon: <SettingOutlined />,
-      },
-      {
         key: 'production monitoring',
         label: 'Production Monitoring',
         icon: <MonitorOutlined />,
         children: [
           { key: `${prefix}/product-monitoring/live-monitoring`, label: <Link to={`${prefix}/product-monitoring/live-monitoring`} onClick={() => setMobileDrawerOpen(false)}>Live Monitoring</Link> },
+          { key: `${prefix}/product-monitoring/oee-overview`, label: <Link to={`${prefix}/product-monitoring/oee-overview`} onClick={() => setMobileDrawerOpen(false)}>OEE Overview</Link> },
           { key: `${prefix}/product-monitoring/planned-vs-actual`, label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link> },
           { key: `${prefix}/product-monitoring/order-tracking`, label: <Link to={`${prefix}/product-monitoring/order-tracking`} onClick={() => setMobileDrawerOpen(false)}>Order Tracking</Link> },
         ],

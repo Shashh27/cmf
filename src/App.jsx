@@ -122,6 +122,8 @@ function App() {
 
           <Route path="/admin/product-monitoring/live-monitoring" element={<ProductionMonitoring />} />
 
+          <Route path="/admin/product-monitoring/oee-overview" element={<ProductionMonitoring />} />
+
           <Route path="/admin/product-monitoring/planned-vs-actual" element={<ProductionMonitoring />} />
 
           <Route path="/admin/product-monitoring/order-tracking" element={<ProductionMonitoring />} />
@@ -208,9 +210,13 @@ function App() {
 
           <Route path="/manufacturing_coordinator/product-monitoring/live-monitoring" element={<ManufacturingCoordinator />} />
 
+          <Route path="/manufacturing_coordinator/product-monitoring/oee-overview" element={<ManufacturingCoordinator />} />
+
           <Route path="/manufacturing_coordinator/product-monitoring/planned-vs-actual" element={<ManufacturingCoordinator />} />
 
           <Route path="/manufacturing_coordinator/product-monitoring/order-tracking" element={<ManufacturingCoordinator />} />
+
+          <Route path="/manufacturing_coordinator/shop-floor" element={<ManufacturingCoordinator />} />
 
           <Route path="/manufacturing_coordinator/maintenance-management" element={<Navigate to="/manufacturing_coordinator/maintenance-management/maintenance" replace />} />
           <Route path="/manufacturing_coordinator/maintenance-management/maintenance" element={<ManufacturingCoordinator />} />
@@ -265,7 +271,7 @@ function App() {
           <Route path="/operator/inventory-data" element={<OperatorDashboard />} />
 
           <Route path="/operator/documents" element={<OperatorDashboard />} />
-
+          <Route path="/operator/leave-log" element={<OperatorDashboard />} />
           </Route>
 
 

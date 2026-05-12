@@ -1,8 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import ShopFloorDashboard from './shopfloordashboard/ShopFloorDashboard';
+import ShopFloorDashboard from '../shopfloordashboard/ShopFloorDashboard';
 
-const ShopFloorDashboardPage = () => {
+const MCShopFloorDashboard = () => {
   const navigate = useNavigate();
 
   return (
@@ -10,4 +10,4 @@ const ShopFloorDashboardPage = () => {
   );
 };
 
-export default ShopFloorDashboardPage;
+export default MCShopFloorDashboard;

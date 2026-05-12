@@ -6,7 +6,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { API_BASE_URL } from '../Config/auth.js';
-import UserModal from '../Access Control Components/UserModal';
+import UserModal, { roleLabels } from '../Access Control Components/UserModal';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -106,7 +106,7 @@ const AccessControl = () => {
     setIsModalVisible(true);
   };
 
-  const filteredUsers = users.filter(user => 
+  const filteredUsers = users.filter(user =>
     user.username.toLowerCase().includes(searchText.toLowerCase()) ||
     user.role.toLowerCase().includes(searchText.toLowerCase())
   );
@@ -138,7 +138,7 @@ const AccessControl = () => {
         if (role === 'operator') color = 'green';
         return (
           <Tag color={color} key={role}>
-            {role.toUpperCase()}
+            {roleLabels[role] ? roleLabels[role].toUpperCase() : role.toUpperCase()}
           </Tag>
         );
       },
@@ -178,10 +178,10 @@ const AccessControl = () => {
         return (
           <Space>
             <span>{displayText}</span>
-            <Button 
-              type="text" 
-              icon={isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />} 
-              onClick={() => togglePasswordVisibility(record.id)} 
+            <Button
+              type="text"
+              icon={isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+              onClick={() => togglePasswordVisibility(record.id)}
             />
           </Space>
         );
@@ -223,24 +223,24 @@ const AccessControl = () => {
       `}</style>
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex items-center justify-between">
-          <div style={{ display:'grid', gridTemplateColumns:'36px auto', alignItems:'center', columnGap:12 }}>
-            <div ref={lockRef} style={{ width:36, height:36 }} />
-            <div style={{ display:'flex', flexDirection:'column', justifyContent:'center' }}>
-              <Title level={2} style={{ margin:0, lineHeight:'28px', fontSize:'24px' }} className="text-gray-800">
+          <div style={{ display: 'grid', gridTemplateColumns: '36px auto', alignItems: 'center', columnGap: 12 }}>
+            <div ref={lockRef} style={{ width: 36, height: 36 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              <Title level={2} style={{ margin: 0, lineHeight: '28px', fontSize: '24px' }} className="text-gray-800">
                 Access Control Management
               </Title>
-              <Typography.Text style={{ marginTop:4 }} className="text-gray-500">
+              <Typography.Text style={{ marginTop: 4 }} className="text-gray-500">
                 Manage users, roles, and access permissions
               </Typography.Text>
             </div>
           </div>
-          <Button 
-            type="primary" 
-            icon={<PlusOutlined />} 
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
             onClick={() => {
               setEditingUser(null);
               setIsModalVisible(true);
-            }} 
+            }}
             size="large"
             style={{ backgroundColor: '#2563eb' }}
             className="border-none shadow-md no-hover-btn"
@@ -252,21 +252,21 @@ const AccessControl = () => {
 
       <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
         <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
-          <Input 
-            placeholder="Search by username or role..." 
-            prefix={<SearchOutlined />} 
+          <Input
+            placeholder="Search by username or role..."
+            prefix={<SearchOutlined />}
             style={{ width: 300 }}
             onChange={e => setSearchText(e.target.value)}
           />
         </div>
 
-        <Table 
-          columns={columns} 
-          dataSource={filteredUsers} 
+        <Table
+          columns={columns}
+          dataSource={filteredUsers}
           rowKey="id"
           scroll={{ x: 'max-content' }}
           className="modern-table"
-          pagination={{ 
+          pagination={{
             total: filteredUsers.length,
             showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
             defaultPageSize: 10,
@@ -274,11 +274,11 @@ const AccessControl = () => {
             pageSizeOptions: ['10', '20', '50'],
             showQuickJumper: true,
             position: ['bottomCenter']
-          }} 
+          }}
         />
       </div>
 
-      <UserModal 
+      <UserModal
         open={isModalVisible}
         onCancel={() => {
           setIsModalVisible(false);

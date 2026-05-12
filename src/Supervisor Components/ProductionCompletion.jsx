@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {Table, Card, Typography, Tag, message, Button, Space,Tooltip, Empty, Grid, Modal, Input, Select} from 'antd';
-import {SearchOutlined, CheckCircleOutlined,ClockCircleOutlined,SyncOutlined,ReloadOutlined,EditOutlined,CheckSquareOutlined,} from '@ant-design/icons';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {Table, Card, Typography, Tag, message, Button, Space,Tooltip, Empty, Grid, Modal, Input, Select, Pagination} from 'antd';
+import {SearchOutlined, CheckCircleOutlined,ClockCircleOutlined,SyncOutlined,ReloadOutlined,EditOutlined,CheckSquareOutlined,CloseCircleOutlined,RedoOutlined} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 
@@ -11,10 +11,11 @@ const { Option } = Select;
 
 const ProductionCompletion = () => {
   const [logs, setLogs] = useState([]);
-  const [filteredLogs, setFilteredLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMachines, setSelectedMachines] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // ── Remark modal state ────────────────────────────────────────────────────
   const [remarkModal, setRemarkModal] = useState({
@@ -87,7 +88,6 @@ const ProductionCompletion = () => {
       });
 
       setLogs(enrichedLogs);
-      setFilteredLogs(enrichedLogs);
     } catch (error) {
       console.error('Error fetching production logs:', error);
       message.error('Failed to load production logs. Please try again.');
@@ -98,24 +98,25 @@ const ProductionCompletion = () => {
   }, [supervisorId]);
 
   // ── Get unique machine names for dropdown options ────────────────────────
-  const getUniqueMachineNames = () => {
-    const machineNames = logs.map(log => log.planned_schedule_item?.machine_name || 'N/A');
-    return [...new Set(machineNames)].filter(name => name !== 'N/A').sort();
-  };
+  const machineOptions = useMemo(() => {
+    const names = new Set();
+    logs.forEach((log) => {
+      const machineName = log.planned_schedule_item?.machine_name;
+      if (machineName) names.add(machineName);
+    });
+    return Array.from(names).sort().map(name => ({ label: name, value: name }));
+  }, [logs]);
 
   // ── Filter logs by selected machines ─────────────────────────────────────
-  useEffect(() => {
-    if (selectedMachines.length === 0) {
-      setFilteredLogs(logs);
-    } else {
-      const filtered = logs.filter(log => {
-        const machineName = log.planned_schedule_item?.machine_name || '';
-        return selectedMachines.includes(machineName);
-      });
-      setFilteredLogs(filtered);
-    }
+  const filteredLogs = useMemo(() => {
+    if (selectedMachines.length === 0) return logs;
+    return logs.filter(log => {
+      const machineName = log.planned_schedule_item?.machine_name;
+      return selectedMachines.includes(machineName);
+    });
   }, [logs, selectedMachines]);
 
+  
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
@@ -207,33 +208,35 @@ const ProductionCompletion = () => {
     }
   };
 
-  // ── Action buttons (labeled, like image 1) ────────────────────────────────
+  // ── Action buttons (icon-only for desktop) ────────────────────────────────
   const ActionButtons = ({ record }) => {
     const isDisabled = record.status === 'completed' || record.status === 'rework';
     
     return (
       <Space>
         <Tooltip title="Mark as Completed">
-          <Button
-            type="primary"
-            style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
-            icon={<CheckSquareOutlined />}
-            onClick={() => openRemarkModal(record, 'completed')}
-            disabled={isDisabled}
+          <span 
+            style={{ 
+              color: isDisabled ? '#bfbfbf' : '#52c41a', 
+              cursor: isDisabled ? 'not-allowed' : 'pointer',
+              fontSize: '16px'
+            }}
+            onClick={() => !isDisabled && openRemarkModal(record, 'completed')}
           >
-            Complete
-          </Button>
+            <CheckCircleOutlined />
+          </span>
         </Tooltip>
         <Tooltip title="Mark as Rework">
-          <Button
-            type="primary"
-            danger
-            icon={<EditOutlined />}
-            onClick={() => openRemarkModal(record, 'rework')}
-            disabled={isDisabled}
+          <span 
+            style={{ 
+              color: isDisabled ? '#bfbfbf' : '#ff4d4f', 
+              cursor: isDisabled ? 'not-allowed' : 'pointer',
+              fontSize: '16px'
+            }}
+            onClick={() => !isDisabled && openRemarkModal(record, 'rework')}
           >
-            Rework
-          </Button>
+            <RedoOutlined />
+          </span>
         </Tooltip>
       </Space>
     );
@@ -241,119 +244,150 @@ const ProductionCompletion = () => {
 
   // ── Mobile: stacked cards ─────────────────────────────────────────────────
   const MobileList = () => {
+    // Calculate paginated data for mobile
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedLogs = filteredLogs.slice(startIndex, endIndex);
+    
     if (filteredLogs.length === 0) {
       return <Empty description={selectedMachines.length > 0 ? "No production logs found for selected machines" : "No production logs found for this supervisor"} />;
     }
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {filteredLogs.map((record) => (
-          <Card
-            key={record.id}
-            size="small"
-            style={{ borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
-            bodyStyle={{ padding: '12px 14px' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div>
-                <Text strong style={{ fontSize: 14 }}>
-                  {record.operation?.product?.product_name || 'N/A'}
-                </Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Project #{record.operation?.order?.sale_order_number || 'N/A'}
-                </Text>
+      <>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {paginatedLogs.map((record) => (
+            <Card
+              key={record.id}
+              size="small"
+              style={{ borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+              bodyStyle={{ padding: '12px 14px' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <div>
+                  <Text strong style={{ fontSize: 14 }}>
+                    {record.operation?.product?.product_name || 'N/A'}
+                  </Text>
+                  <br />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Project #{record.operation?.order?.sale_order_number || 'N/A'}
+                  </Text>
+                </div>
+                {getStatusTag(record.status)}
               </div>
-              {getStatusTag(record.status)}
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 10 }}>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Part Name</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_name || 'N/A'}</Text>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 10 }}>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Part Name</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_name || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Part Number</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_number || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Total Quantity</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.operation?.part?.quantity || 'N/A'} {record.operation?.part?.unit || ''}
+                  </Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Approved Quantity</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.approved_quantity !== null && record.approved_quantity !== undefined ? record.approved_quantity : '-'}
+                  </Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>{record.operator?.user_name || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>From</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.from_date ? dayjs(record.from_date).format('DD-MM-YYYY') : 'N/A'}
+                    <br />{record.from_time || ''}
+                  </Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>To</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.to_date ? dayjs(record.to_date).format('DD-MM-YYYY') : 'N/A'}
+                    <br />{record.to_time || ''}
+                  </Text>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Created At</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.created_at ? dayjs(record.created_at).format('DD-MM-YYYY, HH:mm:ss') : 'N/A'}
+                  </Text>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Notes</Text>
+                  <br />
+                  <Tooltip title={record.notes || ''}>
+                    <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {record.notes || 'N/A'}
+                    </Text>
+                  </Tooltip>
+                </div>
               </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Part Number</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_number || 'N/A'}</Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Total Quantity</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.operation?.part?.quantity || 'N/A'} {record.operation?.part?.unit || ''}
-                </Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Approved Quantity</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.approved_quantity !== null && record.approved_quantity !== undefined ? record.approved_quantity : '-'}
-                </Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>{record.operator?.user_name || 'N/A'}</Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>From</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.from_date ? dayjs(record.from_date).format('DD-MM-YYYY') : 'N/A'}
-                  <br />{record.from_time || ''}
-                </Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>To</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.to_date ? dayjs(record.to_date).format('DD-MM-YYYY') : 'N/A'}
-                  <br />{record.to_time || ''}
-                </Text>
-              </div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>Created At</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.created_at ? dayjs(record.created_at).format('DD-MM-YYYY, HH:mm:ss') : 'N/A'}
-                </Text>
-              </div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>Notes</Text>
-                <br />
-                <Text style={{ fontSize: 13 }} title={record.notes}>
-                  {record.notes && record.notes.length > 50
-                    ? `${record.notes.substring(0, 50)}...`
-                    : record.notes || 'N/A'}
-                </Text>
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-              <ActionButtons record={record} />
-            </div>
-          </Card>
-        ))}
-      </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                <ActionButtons record={record} />
+              </div>
+            </Card>
+          ))}
+        </div>
+        
+        {/* Mobile Pagination */}
+        {filteredLogs.length > pageSize && (
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <Pagination
+              current={currentPage}
+              pageSize={pageSize}
+              total={filteredLogs.length}
+              showSizeChanger
+              showQuickJumper
+              showTotal={(total, range) => `${range[0]}-${range[1]} of ${total}`}
+              pageSizeOptions={['10', '20', '50', '100']}
+              onChange={(page, size) => {
+                setCurrentPage(page);
+                setPageSize(size);
+              }}
+              onShowSizeChange={(current, size) => {
+                setCurrentPage(1);
+                setPageSize(size);
+              }}
+              size="small"
+              simple={isMobile}
+            />
+          </div>
+        )}
+      </>
     );
   };
 
   // ── Desktop table columns ─────────────────────────────────────────────────
   const columns = [
     {
-      title: 'Project Number',
-      key: 'project_number',
+      title: 'Project Details',
+      key: 'project_details',
+      fixed: 'left',
       render: (_, record) => (
-        <Text strong>{record.operation?.order?.sale_order_number || 'N/A'}</Text>
-      ),
-    },
-    {
-      title: 'Project Name',
-      key: 'project_name',
-      render: (_, record) => (
-        <Text>{record.operation?.product?.product_name || 'N/A'}</Text>
+        <Space direction="vertical" size={0}>
+          <Text strong>{record.operation?.order?.sale_order_number || 'N/A'}</Text>
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            {record.operation?.product?.product_name || 'N/A'}
+          </Text>
+        </Space>
       ),
     },
     {
@@ -378,16 +412,18 @@ const ProductionCompletion = () => {
       ),
     },
     {
-      title: 'Total Quantity',
+      title: 'Total Qty',
       key: 'total_quantity',
       render: (_, record) => (
         <Text>{record.operation?.part?.quantity || 'N/A'} {record.operation?.part?.unit || ''}</Text>
       ),
+      width: 100,
     },
     {
-      title: 'Produced Quantity',
+      title: 'Produced Qty',
       dataIndex: 'produced_quantity',
       key: 'produced_quantity',
+      width: 100,
       render: (quantity) => (
         <Text style={{ fontSize: '12px' }}>
           {quantity !== null && quantity !== undefined ? quantity : '-'}
@@ -395,9 +431,10 @@ const ProductionCompletion = () => {
       ),
     },
     {
-      title: 'Approved Quantity',
+      title: 'Approved Qty',
       dataIndex: 'approved_quantity',
       key: 'approved_quantity',
+      width: 100,
       render: (quantity) => (
         <Text style={{ fontSize: '12px' }}>
           {quantity !== null && quantity !== undefined ? quantity : '-'}
@@ -408,10 +445,13 @@ const ProductionCompletion = () => {
       title: 'Notes',
       dataIndex: 'notes',
       key: 'notes',
+      width: 120,
       render: (notes) => (
-        <Text style={{ fontSize: '12px' }} title={notes}>
-          {notes && notes.length > 20 ? `${notes.substring(0, 20)}...` : notes || '-'}
-        </Text>
+        <Tooltip title={notes || ''}>
+          <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {notes ? (notes.length > 20 ? `${notes.substring(0, 20)}...` : notes) : '-'}
+          </Text>
+        </Tooltip>
       ),
     },
     {
@@ -420,7 +460,7 @@ const ProductionCompletion = () => {
       render: (_, record) => (
         <Space direction="vertical" size={0}>
           <Text style={{ fontSize: '12px' }}>
-            {record.from_date ? dayjs(record.from_date).format('DD-MM-YYYY') : 'N/A'}
+            {record.from_date ? dayjs(record.from_date).format('DD-MM-YYYY,') : 'N/A'}
           </Text>
           <Text style={{ fontSize: '12px' }}>{record.from_time || 'N/A'}</Text>
         </Space>
@@ -442,22 +482,32 @@ const ProductionCompletion = () => {
       title: 'Submitted At',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (date) => (
-        <Text style={{ fontSize: '12px' }}>
-          {date ? dayjs(date).format('DD-MM-YYYY, HH:mm:ss') : 'N/A'}
-        </Text>
-      ),
+      sorter: (a, b) => new Date(a.created_at) - new Date(b.created_at),
+      sortDirections: ['descend', 'ascend'],
+      defaultSortOrder: 'descend',
+      render: (date) => {
+        if (!date) return 'N/A';
+        const formattedDate = dayjs(date).format('DD-MM-YYYY');
+        const formattedTime = dayjs(date).format('HH:mm:ss');
+        return (
+          <Space direction="vertical" size={0}>
+            <Text style={{ fontSize: '12px' }}>{formattedDate},</Text>
+            <Text style={{ fontSize: '12px' }}>{formattedTime}</Text>
+          </Space>
+        );
+      },
     },
     {
       title: 'Remarks',
       dataIndex: 'remarks',
       key: 'remarks',
+      width: 120,
       render: (remarks) => (
-        // <Tooltip title={remarks || ''}>
-          <Text style={{ fontSize: '12px' }}>
-            {remarks && remarks.length > 25 ? `${remarks.substring(0, 25)}...` : remarks || '-'}
+        <Tooltip title={remarks || ''}>
+          <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {remarks ? (remarks.length > 20 ? `${remarks.substring(0, 20)}...` : remarks) : '-'}
           </Text>
-        // </Tooltip>
+        </Tooltip>
       ),
     },
     {
@@ -475,6 +525,7 @@ const ProductionCompletion = () => {
     {
       title: 'Actions',
       key: 'actions',
+      fixed: 'right',
       render: (_, record) => <ActionButtons record={record} />,
     },
   ];
@@ -504,22 +555,11 @@ const ProductionCompletion = () => {
             {refreshing && <SyncOutlined spin />}
           </Space>
         }
-        extra={
-          <Button
-            type="default"
-            icon={<ReloadOutlined />}
-            onClick={handleRefresh}
-            loading={refreshing}
-            size={isMobile ? 'small' : 'middle'}
-          >
-            {!isMobile && 'Refresh'}
-          </Button>
-        }
         className="shadow-sm"
         bodyStyle={{ padding: isMobile ? '8px' : '24px' }}
       >
         {/* Machine Filter Dropdown */}
-        <div style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Select
             mode="multiple"
             allowClear
@@ -528,17 +568,22 @@ const ProductionCompletion = () => {
             style={{ width: '100%', maxWidth: 400 }}
             value={selectedMachines}
             onChange={setSelectedMachines}
+            options={machineOptions}
             filterOption={(input, option) =>
               option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
             }
             size={isMobile ? 'small' : 'middle'}
+          />
+          <Button
+            type="default"
+            icon={<ReloadOutlined />}
+            onClick={handleRefresh}
+            loading={refreshing}
+            size={isMobile ? 'small' : 'middle'}
+            style={{ marginLeft: 16 }}
           >
-            {getUniqueMachineNames().map(machineName => (
-              <Option key={machineName} value={machineName}>
-                {machineName}
-              </Option>
-            ))}
-          </Select>
+            {!isMobile && 'Refresh'}
+          </Button>
         </div>
         {isMobile ? (
           loading ? (
@@ -559,7 +604,26 @@ const ProductionCompletion = () => {
                 <Empty description={selectedMachines.length > 0 ? "No production logs found for selected machines" : "No production logs found for this supervisor"} />
               ),
             }}
-            pagination={{ pageSize: 10 }}
+            sortDirections={['descend', 'ascend']}
+            defaultSortField="created_at"
+            defaultSortOrder="descend"
+            pagination={{
+              current: currentPage,
+              pageSize: pageSize,
+              total: filteredLogs.length,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              pageSizeOptions: ['10', '20', '50', '100'],
+              onChange: (page, size) => {
+                setCurrentPage(page);
+                setPageSize(size);
+              },
+              onShowSizeChange: (current, size) => {
+                setCurrentPage(1);
+                setPageSize(size);
+              },
+            }}
             scroll={{ x: 'max-content' }}
           />
         )}

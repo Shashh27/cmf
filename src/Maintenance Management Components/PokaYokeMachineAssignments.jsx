@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Modal, Form, Select, message, Typography, Space, DatePicker, Spin, Radio } from 'antd';
+import { Button, Modal, Form, Select, message, Typography, Space, DatePicker, Spin, Radio, Popconfirm } from 'antd';
 import {
   PlusOutlined, CalendarOutlined, ReloadOutlined,
-  FileTextOutlined, CloseOutlined, CheckSquareOutlined,
+  FileTextOutlined, CloseOutlined, CheckSquareOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
 import dayjs from 'dayjs';
@@ -222,14 +222,12 @@ const ItemsPopup = ({ visible, onClose, assignment }) => {
 };
 
 /* ─── Assignment detail card (side panel) ────────────────────────────────── */
-const AssignmentCard = ({ assignment, onViewItems }) => (
+const AssignmentCard = ({ assignment, onViewItems, onDelete }) => (
   <div
-    onClick={() => onViewItems(assignment)}
     style={{
       background: T.surface, border: `1px solid ${T.border}`,
       borderRadius: T.radiusSm, padding: '12px 14px', marginBottom: 8,
       borderLeft: `3px solid ${FREQ_COLOR[assignment.frequency] || T.primary}`,
-      cursor: 'pointer',
       transition: 'box-shadow 0.15s, transform 0.15s',
     }}
     onMouseEnter={e => {
@@ -242,46 +240,85 @@ const AssignmentCard = ({ assignment, onViewItems }) => (
     }}
   >
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-      <div style={{
-        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-        background: FREQ_BG[assignment.frequency] || T.primaryBg,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <FileTextOutlined style={{ color: FREQ_COLOR[assignment.frequency] || T.primary, fontSize: 14 }} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6, lineHeight: 1.3 }}>
-          {assignment.checklistName}
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
-          <FreqBadge freq={assignment.frequency} />
-          {assignment.frequency === 'Daily' && assignment.shift && (
-            <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-              ⏱ {assignment.shift} shift
-            </span>
-          )}
-          {assignment.frequency === 'Weekly' && assignment.scheduled_day && (
-            <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-              📅 {assignment.scheduled_day}
-            </span>
-          )}
-          {assignment.frequency === 'Monthly' && assignment.scheduled_day && (
-            <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-              📆 Day {assignment.scheduled_day}
-            </span>
-          )}
-          {/* Items badge */}
-          <span style={{
-            fontSize: 10, color: T.success,
-            background: T.successBg,
-            border: `1px solid ${T.success}40`,
-            borderRadius: 99, padding: '2px 9px', fontWeight: 600,
-            display: 'flex', alignItems: 'center', gap: 4,
+      <div 
+        onClick={() => onViewItems(assignment)}
+        style={{
+          flex: 1, minWidth: 0, cursor: 'pointer',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+            background: FREQ_BG[assignment.frequency] || T.primaryBg,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <CheckSquareOutlined style={{ fontSize: 9 }} />
-            {assignment.itemsCount} Items
-          </span>
+            <FileTextOutlined style={{ color: FREQ_COLOR[assignment.frequency] || T.primary, fontSize: 14 }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6, lineHeight: 1.3 }}>
+              {assignment.checklistName}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+              <FreqBadge freq={assignment.frequency} />
+              {assignment.frequency === 'Daily' && assignment.shift && (
+                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
+                  ⏱ {assignment.shift} shift
+                </span>
+              )}
+              {assignment.frequency === 'Weekly' && assignment.scheduled_day && (
+                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
+                  📅 {assignment.scheduled_day}
+                </span>
+              )}
+              {assignment.frequency === 'Monthly' && assignment.scheduled_day && (
+                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
+                  📆 Day {assignment.scheduled_day}
+                </span>
+              )}
+              {/* Items badge */}
+              <span style={{
+                fontSize: 10, color: T.success,
+                background: T.successBg,
+                border: `1px solid ${T.success}40`,
+                borderRadius: 99, padding: '2px 9px', fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}>
+                <CheckSquareOutlined style={{ fontSize: 9 }} />
+                {assignment.itemsCount} Items
+              </span>
+            </div>
+          </div>
         </div>
+      </div>
+      
+      {/* Delete button */}
+      <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+        <Popconfirm
+          title="Delete Assignment"
+          description={`Are you sure you want to delete the assignment "${assignment.checklistName}"? This action cannot be undone.`}
+          onConfirm={() => onDelete(assignment)}
+          okText="Delete"
+          cancelText="Cancel"
+          okButtonProps={{ danger: true }}
+        >
+          <Button
+            type="text"
+            size="small"
+            icon={<DeleteOutlined />}
+            style={{
+              color: '#EF4444',
+              borderColor: '#EF4444',
+              borderRadius: 6,
+              padding: '4px 8px',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = '#FEF2F2';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          />
+        </Popconfirm>
       </div>
     </div>
   </div>
@@ -397,6 +434,42 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       setItemsPopupVisible(true);
     } catch (e) {
       message.error('Failed to load checklist items: ' + e.message);
+    }
+  };
+
+  const handleDeleteAssignment = async (assignment) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/assignments/${assignment.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to delete assignment');
+      }
+      message.success('Assignment deleted successfully');
+      
+      // Refresh assignments for the selected machine
+      if (selectedMachine) {
+        fetchMachineAssignments(selectedMachine);
+      }
+      
+      // Update selected date assignments if needed
+      if (selectedDate) {
+        const dow = selectedDate.day();
+        const isWeekend = dow === 0 || dow === 6;
+        if (!isWeekend) {
+          const updatedAssignments = getAssignmentsForDate(
+            selectedDate.year(),
+            selectedDate.month(),
+            selectedDate.date(),
+            false,
+            dow
+          );
+          setSelectedDateAssignments(updatedAssignments);
+        }
+      }
+    } catch (e) {
+      message.error('Failed to delete assignment: ' + e.message);
     }
   };
 
@@ -533,7 +606,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           <span style={{
             fontSize: 12, fontWeight: 600, color: T.primary,
             background: T.primaryBg, borderRadius: 99, padding: '4px 12px',
-          }}>{machineName?.make}</span>
+          }}>{machineLabel}</span>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <Button
@@ -684,7 +757,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                 </div>
               ) : selectedDateAssignments.length > 0 ? (
                 selectedDateAssignments.map((a, i) => (
-                  <AssignmentCard key={i} assignment={a} onViewItems={handleViewItems} />
+                  <AssignmentCard key={i} assignment={a} onViewItems={handleViewItems} onDelete={handleDeleteAssignment} />
                 ))
               ) : (
                 <div style={{ textAlign: 'center', padding: '36px 16px', color: T.textMuted }}>

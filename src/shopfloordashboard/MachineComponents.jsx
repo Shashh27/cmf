@@ -525,20 +525,6 @@ const MachineGrid = ({ machines, onBack }) => {
         boxShadow: '0 1px 4px rgba(0,0,0,0.04)'
       }}>
         <Space wrap style={{ width: '100%' }} orientation="horizontal">
-          <Button
-            type="primary"
-            icon={<ArrowLeftOutlined />}
-            onClick={onBack}
-            style={{
-              background: '#1976d2',
-              border: 'none',
-              borderRadius: '6px',
-              fontWeight: 500,
-              height: '32px'
-            }}
-          >
-            Back
-          </Button>
           <Search
             placeholder="Search by make, model, type, or work center"
             allowClear

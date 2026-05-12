@@ -1,6 +1,6 @@
 import React from 'react';
-import { Button, Spin } from 'antd';
-import { FileTextOutlined } from '@ant-design/icons';
+import { Button, Spin, Tag } from 'antd';
+import { FileTextOutlined, CheckCircleOutlined, SyncOutlined, CloseCircleOutlined } from '@ant-design/icons';
 
 const PokaYokeChecklistSelector = ({
   loading,
@@ -8,6 +8,7 @@ const PokaYokeChecklistSelector = ({
   namesByChecklistId,
   onSelectChecklist,
   completedTodayIds = new Set(),
+  approvalStatuses = {},
 }) => {
   const getFrequencyDisplay = (frequency, shift, scheduledDay) => {
     let frequencyDisplay = frequency || '';
@@ -63,7 +64,25 @@ const PokaYokeChecklistSelector = ({
           
           const { frequencyDisplay, badgeStyle } = getFrequencyDisplay(frequency, shift, scheduledDay);
           
-          const isCompleted = cid && completedTodayIds.has(String(cid));
+          const freqKey = (frequency || '').toLowerCase();
+          const shiftKey = (shift || '').toLowerCase();
+          const key = `${cid}-${freqKey}-${shiftKey}`;
+          const isCompleted = cid && completedTodayIds.has(key);
+          const approvalInfo = approvalStatuses[key];
+          const approvalStatus = approvalInfo?.status;
+          
+          const getStatusBadge = () => {
+            if (!isCompleted) return null;
+            if (approvalStatus === 'approved') {
+              return <Tag icon={<CheckCircleOutlined />} color="success">Approved</Tag>;
+            } else if (approvalStatus === 'rejected') {
+              return <Tag icon={<CloseCircleOutlined />} color="error">Rejected</Tag>;
+            } else {
+              return <Tag icon={<SyncOutlined spin />} color="processing">Pending Approval</Tag>;
+            }
+          };
+
+          const canSelect = !isCompleted || approvalStatus === 'rejected';
           
           return (
             <div
@@ -74,7 +93,8 @@ const PokaYokeChecklistSelector = ({
                 padding: '16px 20px',
                 borderBottom: idx < assignments.length - 1 ? '1px solid #e2e8f0' : 'none',
                 gap: 16,
-                opacity: isCompleted ? 0.7 : 1,
+                opacity: (isCompleted && approvalStatus !== 'rejected') ? 0.7 : 1,
+                background: approvalStatus === 'rejected' ? '#fff1f0' : 'transparent',
               }}
             >
               <div
@@ -82,34 +102,38 @@ const PokaYokeChecklistSelector = ({
                   width: 44,
                   height: 44,
                   borderRadius: 10,
-                  background: isCompleted ? '#f1f5f9' : '#E0F2FE',
+                  background: isCompleted && approvalStatus !== 'rejected' ? '#f1f5f9' : (approvalStatus === 'rejected' ? '#fff1f0' : '#E0F2FE'),
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexShrink: 0,
+                  border: approvalStatus === 'rejected' ? '1px solid #ffccc7' : 'none',
                 }}
               >
-                <FileTextOutlined style={{ fontSize: 22, color: isCompleted ? '#94a3b8' : '#0284c7' }} />
+                <FileTextOutlined style={{ fontSize: 22, color: approvalStatus === 'rejected' ? '#ff4d4f' : (isCompleted ? '#94a3b8' : '#0284c7') }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, color: isCompleted ? '#64748b' : '#0f172a', marginBottom: 4 }}>
-                  {name} {isCompleted && <span style={{ color: '#16a34a', fontSize: 12, fontWeight: 500 }}>(Completed)</span>}
+                <div style={{ fontWeight: 600, color: isCompleted && approvalStatus !== 'rejected' ? '#64748b' : '#0f172a', marginBottom: 4 }}>
+                  {name} {isCompleted && approvalStatus === 'approved' && <span style={{ color: '#16a34a', fontSize: 12, fontWeight: 500 }}>(Completed)</span>}
+                  {approvalStatus === 'rejected' && <span style={{ color: '#ff4d4f', fontSize: 12, fontWeight: 500 }}>(Rejected - Redo Required)</span>}
                 </div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                <div style={{ fontSize: 12, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 8 }}>
                   {frequencyDisplay && (
                     <span style={badgeStyle}>
                       {frequencyDisplay}
                     </span>
                   )}
+                  {getStatusBadge()}
                 </div>
               </div>
               <Button
-                type={isCompleted ? "default" : "primary"}
+                type={canSelect ? "primary" : "default"}
                 onClick={() => onSelectChecklist(item)}
                 style={{ borderRadius: 8 }}
-                disabled={isCompleted}
+                disabled={!canSelect}
+                danger={approvalStatus === 'rejected'}
               >
-                {isCompleted ? "Completed" : "Select"}
+                {approvalStatus === 'rejected' ? "Redo" : (isCompleted ? "Completed" : "Select")}
               </Button>
             </div>
           );

@@ -1,13 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, message, Button, Modal } from 'antd';
+import { Table, Tag, message, Button, Modal, Input } from 'antd';
+import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
  
 const ToolIssues = () => {
   const [issues, setIssues] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [filters, setFilters] = useState({});
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [previewVisible, setPreviewVisible] = useState(false);
-  const [previewUrls, setPreviewUrls] = useState([]); // Changed to array
+  const [previewUrls, setPreviewUrls] = useState([]);
  
   const getOperatorId = () => {
     try {
@@ -45,6 +48,11 @@ const ToolIssues = () => {
   useEffect(() => {
     fetchIssues();
   }, []);
+
+  const handleTableChange = (newPagination, newFilters) => {
+    setPagination({ current: newPagination.current, pageSize: newPagination.pageSize });
+    setFilters(newFilters);
+  };
  
   const getStatusColor = (status) => {
     switch ((status || '').toLowerCase()) {
@@ -69,6 +77,12 @@ const ToolIssues = () => {
       key: 'tool_name',
       width: 200,
       ellipsis: true,
+      filteredValue: [searchText],
+      onFilter: (value, record) =>
+        String(record.tool_name || '').toLowerCase().includes(value.toLowerCase()) ||
+        String(record.sale_order_number || '').toLowerCase().includes(value.toLowerCase()) ||
+        String(record.project_name || '').toLowerCase().includes(value.toLowerCase()),
+      sorter: (a, b) => (a.tool_name || '').localeCompare(b.tool_name || ''),
     },
     {
       title: 'Project Number',
@@ -120,11 +134,18 @@ const ToolIssues = () => {
       key: 'status',
       width: 120,
       align: 'center',
+      filteredValue: filters.status || null,
       render: (status) => (
         <Tag color={getStatusColor(status)}>
           {status ? status.toUpperCase() : '-'}
         </Tag>
       ),
+      filters: [
+        { text: 'Pending', value: 'pending' },
+        { text: 'Approved', value: 'approved' },
+        { text: 'Rejected', value: 'rejected' },
+      ],
+      onFilter: (value, record) => record.status?.toLowerCase() === value,
     },
     {
       title: 'Approved By',
@@ -137,8 +158,16 @@ const ToolIssues = () => {
  
   return (
     <div style={{ background: '#fff', padding: 24, borderRadius: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <Button onClick={fetchIssues}>Refresh</Button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+        <Input
+          placeholder="Search tool issues..."
+          allowClear
+          prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+          size="middle"
+          style={{ width: 300 }}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+        <Button icon={<ReloadOutlined />} onClick={fetchIssues}>Refresh</Button>
       </div>
       <Table
         rowKey="id"
@@ -150,8 +179,10 @@ const ToolIssues = () => {
           pageSize: pagination.pageSize,
           showSizeChanger: true,
           showQuickJumper: true,
-          onChange: (page, pageSize) => setPagination({ current: page, pageSize }),
+          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+          position: ['bottomCenter'],
         }}
+        onChange={handleTableChange}
         scroll={{ x: 1100 }}
       />
       <Modal

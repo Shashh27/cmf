@@ -577,8 +577,8 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={12} lg={6}>
-                          <Form.Item {...restField} name={[name, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Version</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
-                            <Input placeholder="v1.0" disabled className="bg-gray-50" />
+                          <Form.Item {...restField} name={[name, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Revision</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
+                            <Input placeholder="Enter revision..." />
                           </Form.Item>
                         </Col>
                       </Row>

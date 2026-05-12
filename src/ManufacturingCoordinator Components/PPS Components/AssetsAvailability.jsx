@@ -12,15 +12,7 @@ dayjs.extend(isSameOrBefore);
 
 import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
 import { Card, Row, Col, Tabs, Table, Tag, Statistic, message, Spin, Button, Modal, Form, Select, DatePicker, Input, Popconfirm, Calendar, Radio, Space } from "antd";
-import { 
-  CheckCircleOutlined, 
-  ExclamationCircleOutlined, 
-  InfoCircleOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  ReloadOutlined,
-  SearchOutlined
-} from "@ant-design/icons";
+import { CheckCircleOutlined, ExclamationCircleOutlined, InfoCircleOutlined,EditOutlined,DeleteOutlined,ReloadOutlined,SearchOutlined} from "@ant-design/icons";
 
 const { TabPane } = Tabs;
 const { Option } = Select;

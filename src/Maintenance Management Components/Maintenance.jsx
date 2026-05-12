@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Tabs, Table, Spin, message, Select } from 'antd';
+import { Card, Tabs, Table, Spin, message, Select, Button } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+
 import { API_BASE_URL } from '../Config/auth';
 
 const formatIST = (iso) => {
@@ -41,48 +43,56 @@ const Maintenance = () => {
   const [oeeIssues, setOeeIssues] = useState([]);
   const [breakdowns, setBreakdowns] = useState([]);
   const [components, setComponents] = useState([]);
+  const [helpSupport, setHelpSupport] = useState([]);
   const [activeTab, setActiveTab] = useState('oee');
   const [oeePagination, setOeePagination] = useState({ current: 1, pageSize: 10 });
   const [breakdownPagination, setBreakdownPagination] = useState({ current: 1, pageSize: 10 });
   const [componentPagination, setComponentPagination] = useState({ current: 1, pageSize: 10 });
+  const [helpSupportPagination, setHelpSupportPagination] = useState({ current: 1, pageSize: 10 });
   const [selectedMachines, setSelectedMachines] = useState([]);
 
+  const loadMaintenanceData = async () => {
+    setLoading(true);
+    try {
+      const [oeeRes, brRes, compRes, helpRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/maintenance/oee-issues`, { headers: { accept: 'application/json' } }),
+        fetch(`${API_BASE_URL}/maintenance/machine-breakdown`, { headers: { accept: 'application/json' } }),
+        fetch(`${API_BASE_URL}/maintenance/component-issues`, { headers: { accept: 'application/json' } }),
+        fetch(`${API_BASE_URL}/maintenance/help-support`, { headers: { accept: 'application/json' } }),
+      ]);
+      const [oeeData, brData, compData, helpData] = await Promise.all([
+        oeeRes.ok ? oeeRes.json() : [],
+        brRes.ok ? brRes.json() : [],
+        compRes.ok ? compRes.json() : [],
+        helpRes.ok ? helpRes.json() : [],
+      ]);
+      setOeeIssues(Array.isArray(oeeData) ? oeeData.sort((a, b) => new Date(b.reported_at || b.created_at) - new Date(a.reported_at || a.created_at)) : []);
+      setBreakdowns(Array.isArray(brData) ? brData.sort((a, b) => new Date(b.reported_at || b.created_at) - new Date(a.reported_at || a.created_at)) : []);
+      setComponents(Array.isArray(compData) ? compData.sort((a, b) => new Date(b.reported_at || b.created_at) - new Date(a.reported_at || a.created_at)) : []);
+      setHelpSupport(Array.isArray(helpData) ? helpData.sort((a, b) => new Date(b.reported_at || b.created_at) - new Date(a.reported_at || a.created_at)) : []);
+    } catch {
+      message.error('Failed to load maintenance data');
+      setOeeIssues([]);
+      setBreakdowns([]);
+      setComponents([]);
+      setHelpSupport([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [oeeRes, brRes, compRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/maintenance/oee-issues`, { headers: { accept: 'application/json' } }),
-          fetch(`${API_BASE_URL}/maintenance/machine-breakdown`, { headers: { accept: 'application/json' } }),
-          fetch(`${API_BASE_URL}/maintenance/component-issues`, { headers: { accept: 'application/json' } }),
-        ]);
-        const [oeeData, brData, compData] = await Promise.all([
-          oeeRes.ok ? oeeRes.json() : [],
-          brRes.ok ? brRes.json() : [],
-          compRes.ok ? compRes.json() : [],
-        ]);
-        setOeeIssues(Array.isArray(oeeData) ? oeeData : []);
-        setBreakdowns(Array.isArray(brData) ? brData : []);
-        setComponents(Array.isArray(compData) ? compData : []);
-      } catch {
-        message.error('Failed to load maintenance data');
-        setOeeIssues([]);
-        setBreakdowns([]);
-        setComponents([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+    loadMaintenanceData();
   }, []);
 
   const machineOptions = useMemo(() => {
     const names = new Set();
-    [...oeeIssues, ...breakdowns, ...components].forEach((item) => {
+    [...oeeIssues, ...breakdowns, ...components, ...helpSupport].forEach((item) => {
       if (item.machine_name) names.add(item.machine_name);
     });
     return Array.from(names).sort().map(name => ({ label: name, value: name }));
-  }, [oeeIssues, breakdowns, components]);
+  }, [oeeIssues, breakdowns, components, helpSupport]);
 
   const filteredOee = useMemo(() => {
     if (selectedMachines.length === 0) return oeeIssues;
@@ -98,6 +108,11 @@ const Maintenance = () => {
     if (selectedMachines.length === 0) return components;
     return components.filter(item => selectedMachines.includes(item.machine_name));
   }, [components, selectedMachines]);
+
+  const filteredHelpSupport = useMemo(() => {
+    if (selectedMachines.length === 0) return helpSupport;
+    return helpSupport.filter(item => selectedMachines.includes(item.machine_name));
+  }, [helpSupport, selectedMachines]);
 
   const oeeColumns = [
     { title: 'Sl No', key: 'sl', width: 70, render: (_, __, idx) => (oeePagination.current - 1) * oeePagination.pageSize + idx + 1 },
@@ -176,45 +191,108 @@ const Maintenance = () => {
   ];
 
   const componentColumns = [
-    { title: 'Sl No', key: 'sl', width: 70, render: (_, __, idx) => (componentPagination.current - 1) * componentPagination.pageSize + idx + 1 },
-    { title: 'Component Status', dataIndex: 'component_status', key: 'component_status', width: 180 },
+    { title: 'Sl No', key: 'sl', width: 60, render: (_, __, idx) => (componentPagination.current - 1) * componentPagination.pageSize + idx + 1 },
+    { title: 'Component Status', dataIndex: 'component_status', key: 'component_status', width: 140 },
     {
       title: 'Production Order',
       key: 'order',
-      width: 220,
+      width: 160,
       render: (_, r) => r.order_name ?? r.production_order_id,
     },
     {
       title: 'Part Name',
       key: 'part',
-      width: 220,
+      width: 160,
       render: (_, r) => r.part_name ?? r.part_id,
     },
     {
       title: 'Machine Name',
       key: 'machine_name',
-      width: 200,
+      width: 140,
       render: (_, r) => r.machine_name ?? r.machine_id,
     },
     {
       title: 'Reported By',
       key: 'reported_by',
-      width: 160,
+      width: 120,
       render: (_, r) => r.operator_name ?? r.reported_by,
     },
     {
       title: 'Reported At',
       dataIndex: 'reported_at',
       key: 'reported_at',
-      width: 190,
+      width: 140,
       render: (v) => formatIST(v),
     },
     {
       title: 'Description',
       dataIndex: 'description',
       key: 'description',
-      width: 320,
+      width: 200,
       render: (v) => <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{titleCase(v)}</span>,
+    },
+  ];
+
+  const helpSupportColumns = [
+    { title: 'Sl No', key: 'sl', width: 60, render: (_, __, idx) => (helpSupportPagination.current - 1) * helpSupportPagination.pageSize + idx + 1 },
+    {
+      title: 'Production Order',
+      key: 'order',
+      width: 160,
+      render: (_, r) => r.order_name ?? r.production_order_id,
+    },
+    {
+      title: 'Part Name',
+      key: 'part',
+      width: 160,
+      render: (_, r) => r.part_name ?? r.part_id,
+    },
+    {
+      title: 'Description',
+      dataIndex: 'description',
+      key: 'description',
+      width: 200,
+      render: (v) => <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{titleCase(v)}</span>,
+    },
+    {
+      title: 'Machine Name',
+      key: 'machine_name',
+      width: 140,
+      render: (_, r) => r.machine_name ?? r.machine_id,
+    },
+    {
+      title: 'Reported By',
+      key: 'reported_by',
+      width: 120,
+      render: (_, r) => r.operator_name ?? r.reported_by,
+    },
+    {
+      title: 'Reported At',
+      dataIndex: 'reported_at',
+      key: 'reported_at',
+      width: 140,
+      render: (v) => formatIST(v),
+    },
+    {
+      title: 'Replied',
+      dataIndex: 'mc_reply',
+      key: 'mc_reply',
+      width: 180,
+      render: (v) => v || '-',
+    },
+    {
+      title: 'Replied By',
+      dataIndex: 'replied_by_name',
+      key: 'replied_by_name',
+      width: 120,
+      render: (v) => v || '-',
+    },
+    {
+      title: 'Replied At',
+      dataIndex: 'replied_at',
+      key: 'replied_at',
+      width: 140,
+      render: (v) => v ? formatIST(v) : '-',
     },
   ];
 
@@ -284,10 +362,35 @@ const Maintenance = () => {
                 columns={componentColumns}
                 dataSource={filteredComponents}
                 rowKey="id"
-                scroll={{ x: 1690 }}
+                scroll={{ x: 1200 }}
                 tableLayout="fixed"
                 pagination={{ ...componentPagination, position: ['bottomRight'] }}
                 onChange={(pagination) => setComponentPagination({ current: pagination.current ?? 1, pageSize: pagination.pageSize ?? 10 })}
+              />
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'help-support',
+      label: 'Help & Support',
+      children: (
+        <div className="maintenance-tab-content">
+          {loading ? (
+            <div style={{ padding: 24, display: 'flex', justifyContent: 'center' }}>
+              <Spin size="large" />
+            </div>
+          ) : (
+            <div className="maintenance-table-scroll">
+              <Table
+                columns={helpSupportColumns}
+                dataSource={filteredHelpSupport}
+                rowKey="id"
+                scroll={{ x: 1200 }}
+                tableLayout="fixed"
+                pagination={{ ...helpSupportPagination, position: ['bottomRight'] }}
+                onChange={(pagination) => setHelpSupportPagination({ current: pagination.current ?? 1, pageSize: pagination.pageSize ?? 10 })}
               />
             </div>
           )}
@@ -303,17 +406,27 @@ const Maintenance = () => {
         style={{ borderRadius: 16 }}
         bodyStyle={{ padding: 0, overflow: 'hidden' }}
       >
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 16 }}>
-          <span style={{ fontWeight: 500 }}>Filter by Machine:</span>
-          <Select
-            mode="multiple"
-            allowClear
-            style={{ minWidth: 300, maxWidth: 600 }}
-            placeholder="Select one or more machines"
-            options={machineOptions}
-            value={selectedMachines}
-            onChange={setSelectedMachines}
-          />
+        <div style={{ padding: '16px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <span style={{ fontWeight: 500 }}>Filter by Machine:</span>
+            <Select
+              mode="multiple"
+              allowClear
+              style={{ minWidth: 300, maxWidth: 600 }}
+              placeholder="Select one or more machines"
+              options={machineOptions}
+              value={selectedMachines}
+              onChange={setSelectedMachines}
+            />
+          </div>
+          <Button
+            type="primary"
+            icon={<ReloadOutlined />}
+            onClick={loadMaintenanceData}
+            loading={loading}
+          >
+            Refresh
+          </Button>
         </div>
         <Tabs
           activeKey={activeTab}
@@ -322,6 +435,7 @@ const Maintenance = () => {
           tabBarStyle={{ padding: '0 16px', marginBottom: 0 }}
         />
       </Card>
+
     </div>
   );
 };

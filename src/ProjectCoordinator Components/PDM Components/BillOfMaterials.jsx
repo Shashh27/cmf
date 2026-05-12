@@ -565,7 +565,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
-          <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{part.part_name}</Text>
+          <Tooltip title={`${part.part_name} (${part.part_number})`}>
+            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{part.part_name} ({part.part_number})</Text>
+          </Tooltip>
         </div>
         <ActionButtons 
           item={part} 
@@ -604,7 +606,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               ) : <div className="w-5" />}
             </div>
             <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly', level)}</span>
-            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{assembly.assembly_name}</Text>
+            <Tooltip title={`${assembly.assembly_name} (${assembly.assembly_number})`}>
+              <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{assembly.assembly_name} ({assembly.assembly_number})</Text>
+            </Tooltip>
           </div>
           <ActionButtons 
             item={assembly} 
@@ -677,10 +681,74 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
+  const flattenBOMItemsForSearch = () => {
+    const allItems = [];
+    
+    products.forEach(product => {
+      const productHierarchy = hierarchicalData[product.id];
+      if (!productHierarchy) return;
+      
+      // Add direct parts
+      (productHierarchy.parts || []).forEach(part => {
+        allItems.push({
+          ...part,
+          itemType: 'part',
+          productId: product.id,
+          productName: product.product_name,
+          displayName: `${part.part_name} (${part.part_number})`
+        });
+      });
+      
+      // Add assemblies and their parts recursively
+      const processAssembly = (assembly, level = 0) => {
+        allItems.push({
+          ...assembly,
+          itemType: 'assembly',
+          level: level,
+          productId: product.id,
+          productName: product.product_name,
+          displayName: `${assembly.assembly_name} (${assembly.assembly_number})`
+        });
+        
+        // Add parts for this assembly
+        const assemblyParts = getPartsForAssembly(assembly.id);
+        assemblyParts.forEach(part => {
+          allItems.push({
+            ...part,
+            itemType: 'part',
+            parentAssembly: assembly,
+            productId: product.id,
+            productName: product.product_name,
+            displayName: `${part.part_name} (${part.part_number})`
+          });
+        });
+        
+        // Process child assemblies
+        const childAssemblies = getNestedAssemblies(assembly.id);
+        childAssemblies.forEach(childAssembly => {
+          processAssembly(childAssembly, level + 1);
+        });
+      };
+      
+      // Process top-level assemblies
+      (productHierarchy.assemblies || []).forEach(assembly => {
+        processAssembly(assembly, 1);
+      });
+    });
+    
+    return allItems;
+  };
+
   const filteredProducts = products.filter(product =>
     // product.product_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
     product.product_name.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  
+  const filteredBOMItems = searchTerm ? flattenBOMItemsForSearch().filter(item =>
+    item.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (item.part_number && item.part_number.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (item.assembly_number && item.assembly_number.toLowerCase().includes(searchTerm.toLowerCase()))
+  ) : [];
 
   if (loading) {
     return (
@@ -727,7 +795,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           </div>
           <Input 
             prefix={<SearchOutlined className="text-slate-400" />} 
-            placeholder="Search products..." 
+            placeholder="Search assemblies, sub-assemblies, and parts..." 
             value={searchTerm}
             onChange={(e) => {
               const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
@@ -739,10 +807,29 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           />
         </div>
         <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">
-          {filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
-            <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
-              <Empty description={searchTerm ? 'No matches' : 'No products'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            </div>
+          {searchTerm ? (
+            filteredBOMItems.length > 0 ? (
+              <div>
+                {filteredBOMItems.map(item => {
+                  if (item.itemType === 'part') {
+                    return renderPartInTree(item, item.level || 0, item.productId);
+                  } else if (item.itemType === 'assembly') {
+                    return renderAssemblyTree(item, item.level || 0, item.productId);
+                  }
+                  return null;
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
+                <Empty description="No matches found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
+            )
+          ) : (
+            filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
+              <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
+                <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              </div>
+            )
           )}
         </div>
       </div>

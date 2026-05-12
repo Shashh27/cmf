@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
-import { Table, Button, message, Popconfirm, Space, Card, Tooltip } from "antd";
+import { Table, Button, message, Popconfirm, Space, Card, Tooltip, Input } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined } from "@ant-design/icons";
 import CustomerModal from "./CustomerModal";
 
@@ -10,6 +10,7 @@ const CustomersTable = ({ userId }) => {
   const [loading, setLoading] = useState(true);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
+  const [searchText, setSearchText] = useState('');
 
   useEffect(() => {
     fetchCustomers();
@@ -72,6 +73,18 @@ const CustomersTable = ({ userId }) => {
       fetchCustomers();
     }
   };
+
+  const filteredCustomers = customers.filter(customer => {
+    const searchLower = searchText.toLowerCase();
+    return (
+      customer.company_name?.toLowerCase().includes(searchLower) ||
+      customer.address?.toLowerCase().includes(searchLower) ||
+      customer.branch?.toLowerCase().includes(searchLower) ||
+      customer.email?.toLowerCase().includes(searchLower) ||
+      customer.contact_number?.toLowerCase().includes(searchLower) ||
+      customer.contact_person?.toLowerCase().includes(searchLower)
+    );
+  });
 
   const columns = [
     {
@@ -155,12 +168,24 @@ const CustomersTable = ({ userId }) => {
 
   return (
     <Card
-     
+      title={
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <span className="text-lg font-bold">Customers</span>
+          <Input.Search
+            placeholder="Search customers..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            style={{ width: 250 }}
+            allowClear
+          />
+        </div>
+      }
       extra={
         <Button
           type="primary"
           icon={<PlusOutlined />}
           onClick={handleCreateCustomer}
+          style={{ marginLeft: '16px' }}
         >
           <span className="hidden sm:inline">New Customer</span>
           <span className="sm:hidden">New</span>
@@ -188,7 +213,7 @@ const CustomersTable = ({ userId }) => {
       `}</style>
       <Table
         columns={columns}
-        dataSource={customers}
+        dataSource={filteredCustomers}
         rowKey="id"
         loading={loading}
         pagination={{ 

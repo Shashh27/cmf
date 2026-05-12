@@ -14,9 +14,9 @@ import {
 } from '@ant-design/icons';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
+import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Sector, Cell, BarChart, Bar, ComposedChart } from 'recharts';
 import dayjs from 'dayjs';
-import { useNavigate } from 'react-router-dom';
 
 const { Title, Text } = Typography;
 
@@ -226,7 +226,7 @@ const Dashboard = () => {
           View Shop Floor
         </Button>
       </div>
-      
+
       {/* Light KPI Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
         <Col xs={24} sm={12} md={6}>

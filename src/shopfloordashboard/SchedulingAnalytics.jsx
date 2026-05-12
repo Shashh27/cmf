@@ -26,7 +26,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
   // Filter and process scheduled items
   const scheduledData = useMemo(() => {
     const data = [];
-    
+
     machines.forEach(machine => {
       const scheduledItems = machine.parts_operations
         .filter(op => op.planned_schedule && op.planned_schedule.planned_start_time)
@@ -50,12 +50,11 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
         }))
         .sort((a, b) => new Date(a.planned_start_time) - new Date(b.planned_start_time));
 
-      if (scheduledItems.length > 0) {
-        data.push({
-          machine,
-          scheduledItems
-        });
-      }
+      // Include all machines, even those without scheduled items
+      data.push({
+        machine,
+        scheduledItems
+      });
     });
 
     return data;
@@ -403,39 +402,38 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
 
       {/* Calendar Heatmap View - Compact Layout with Filters */}
       {viewMode === 'heatmap' && (
-        <Card
-          title={
+        <div style={{ background: 'white', borderRadius: '8px', marginBottom: '12px', padding: '16px' }}>
+          {/* Header with title and filters */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <Space size="middle">
-              <span>Machine Schedule Calendar Heatmap</span>
+              <span style={{ fontSize: '16px', fontWeight: 600 }}>Machine Schedule Calendar Heatmap</span>
               <Space size="small" style={{ marginLeft: 16 }}>
                 <Tooltip title="Scheduled">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <div style={{ width: 12, height: 12, background: '#1890ff', borderRadius: '2px' }}></div>
-                    <Text style={{ fontSize: '10px' }}>Scheduled</Text>
+                    <Text style={{ fontSize: '11px' }}>Scheduled</Text>
                   </div>
                 </Tooltip>
                 <Tooltip title="Available for scheduling">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <div style={{ width: 12, height: 12, background: '#52c41a', borderRadius: '2px' }}></div>
-                    <Text style={{ fontSize: '10px' }}>Available</Text>
+                    <div style={{ width: 12, height: 12, background: 'oklch(64.8% 0.2 131.684)', borderRadius: '2px' }}></div>
+                    <Text style={{ fontSize: '11px' }}>Available</Text>
                   </div>
                 </Tooltip>
                 <Tooltip title="Not Scheduled (Past dates)">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <div style={{ width: 12, height: 12, background: '#ff4d4f', borderRadius: '2px' }}></div>
-                    <Text style={{ fontSize: '10px' }}>Not Scheduled</Text>
+                    <div style={{ width: 12, height: 12, background: 'oklch(64.6% 0.222 41.116)', borderRadius: '2px' }}></div>
+                    <Text style={{ fontSize: '11px' }}>Not Scheduled</Text>
                   </div>
                 </Tooltip>
                 <Tooltip title="Today">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <div style={{ width: 12, height: 12, background: '#52c41a', border: '2px solid #faad14', borderRadius: '2px' }}></div>
-                    <Text style={{ fontSize: '10px' }}>Today</Text>
+                    <div style={{ width: 12, height: 12, background: 'oklch(64.8% 0.2 131.684)', border: '2px solid #faad14', borderRadius: '2px' }}></div>
+                    <Text style={{ fontSize: '11px' }}>Today</Text>
                   </div>
                 </Tooltip>
               </Space>
             </Space>
-          }
-          extra={
             <Space>
               <Radio.Group
                 value={filterMode}
@@ -477,22 +475,20 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                 </Space>
               )}
             </Space>
-          }
-          style={{ marginBottom: '12px', borderRadius: '8px' }}
-        >
+          </div>
 
           <Spin spinning={isLoading} tip="Loading calendar data...">
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto', height: '650px' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead>
                 <tr style={{ background: '#fff' }}>
-                  <th style={{ border: '1px solid #d9d9d9', padding: '2px 4px', background: '#fafafa', minWidth: '150px', fontSize: '10px' }}>Machine</th>
+                  <th style={{ border: '1px solid #d9d9d9', padding: '2px 6px', background: '#fafafa', minWidth: '150px', fontSize: '11px' }}>Machine</th>
                   {Array.from({ length: heatmapData.daysCount }, (_, i) => {
                     const date = heatmapData.startDate.add(i, 'day');
                     const isToday = date.isSame(dayjs(), 'day');
                     const isFirstDayOfMonth = date.date() === 1;
                     const monthIndex = date.month();
-                    const solidColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c', '#a0d911', '#2f54eb', '#fadb14', '#ff4d4f'];
+                    const solidColors = ['#1890ff', 'oklch(64.8% 0.2 131.684)', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c', '#a0d911', '#2f54eb', '#fadb14', 'oklch(64.6% 0.222 41.116)'];
                     const monthName = date.format('MMM');
                     const isYearOrCustom = filterMode === 'year' || (filterMode === 'custom' && heatmapData.daysCount > 31);
                     return (
@@ -501,13 +497,13 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                         borderLeft: isFirstDayOfMonth ? '2px solid #262626' : '1px solid #d9d9d9',
                         padding: '2px',
                         background: isYearOrCustom ? solidColors[monthIndex] : (isToday ? '#fff7e6' : '#fafafa'),
-                        minWidth: filterMode === 'year' ? '24px' : (filterMode === 'month' ? '32px' : '50px'),
-                        fontSize: filterMode === 'year' ? '7px' : (filterMode === 'month' ? '8px' : '9px')
+                        minWidth: filterMode === 'year' ? '26px' : (filterMode === 'month' ? '34px' : '55px'),
+                        fontSize: filterMode === 'year' ? '8px' : (filterMode === 'month' ? '9px' : '10px')
                       }}>
                         <div style={{ fontWeight: 'bold', color: isYearOrCustom ? '#fff' : '#000' }}>
                           {date.format('DD')}
                         </div>
-                        {!isYearOrCustom && filterMode !== 'custom' && <div style={{ fontSize: '7px', color: '#000', fontWeight: 'bold' }}>{date.format('ddd')}</div>}
+                        {!isYearOrCustom && filterMode !== 'custom' && <div style={{ fontSize: '9px', color: '#000', fontWeight: 'bold' }}>{date.format('ddd')}</div>}
                       </th>
                     );
                   })}
@@ -517,8 +513,8 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                 {machines.map(machine => {
                   const machineSchedule = heatmapData.data.filter(d => d.machineId === machine.machine_id);
                   return (
-                    <tr key={machine.machine_id} style={{ height: '22px' }}>
-                      <td style={{ border: '1px solid #d9d9d9', padding: '1px 4px', fontWeight: 'bold', fontSize: '9px', background: '#fff', minWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <tr key={machine.machine_id} style={{ height: '25px' }}>
+                      <td style={{ border: '1px solid #d9d9d9', padding: '2px 6px', fontWeight: 'bold', fontSize: '11px', background: '#fff', minWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {machine.machine_make} {machine.machine_model}
                       </td>
                       {Array.from({ length: heatmapData.daysCount }, (_, i) => {
@@ -542,18 +538,18 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                               style={{
                                 border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
                                 borderLeft: baseBorderLeft,
-                                padding: '1px',
+                                padding: '2px',
                                 background: '#1890ff',
                                 cursor: 'pointer',
                                 transition: 'background 0.2s',
-                                height: '20px',
+                                height: '22px',
                                 textAlign: 'center'
                               }}
                               title={tooltipContent}
                               onMouseEnter={(e) => e.target.style.background = '#40a9ff'}
                               onMouseLeave={(e) => e.target.style.background = '#1890ff'}
                             >
-                              <div style={{ fontSize: filterMode === 'year' ? '6px' : '8px', color: 'white', fontWeight: 'bold', lineHeight: '1' }}>
+                              <div style={{ fontSize: filterMode === 'year' ? '7px' : '9px', color: 'white', fontWeight: 'bold', lineHeight: '1.2' }}>
                                 {scheduledOps.length > 1 ? `${scheduledOps.length} ops` : (filterMode === 'year' ? '•' : dayData.start)}
                               </div>
                             </td>
@@ -565,17 +561,17 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                               style={{
                                 border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
                                 borderLeft: baseBorderLeft,
-                                padding: '1px',
-                                background: '#ff4d4f',
+                                padding: '2px',
+                                background: 'oklch(64.6% 0.222 41.116)',
                                 cursor: 'pointer',
                                 transition: 'background 0.2s',
-                                height: '20px'
+                                height: '22px'
                               }}
                               title="Not Scheduled (Past Date)"
-                              onMouseEnter={(e) => e.target.style.background = '#ff7875'}
-                              onMouseLeave={(e) => e.target.style.background = '#ff4d4f'}
+                              onMouseEnter={(e) => e.target.style.background = 'oklch(74.6% 0.222 41.116)'}
+                              onMouseLeave={(e) => e.target.style.background = 'oklch(64.6% 0.222 41.116)'}
                             >
-                              <div style={{ fontSize: '7px', color: 'white', textAlign: 'center' }}>
+                              <div style={{ fontSize: '7px', color: 'white', textAlign: 'center', fontWeight: 'bold' }}>
                                 {filterMode !== 'year' ? 'NS' : ''}
                               </div>
                             </td>
@@ -587,15 +583,15 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                               style={{
                                 border: '2px solid #faad14',
                                 borderLeft: baseBorderLeft,
-                                padding: '1px',
-                                background: '#52c41a',
+                                padding: '2px',
+                                background: 'oklch(64.8% 0.2 131.684)',
                                 cursor: 'pointer',
                                 transition: 'background 0.2s',
-                                height: '20px'
+                                height: '22px'
                               }}
                               title="Today - Available for scheduling"
-                              onMouseEnter={(e) => e.target.style.background = '#73d13d'}
-                              onMouseLeave={(e) => e.target.style.background = '#52c41a'}
+                              onMouseEnter={(e) => e.target.style.background = 'oklch(74.8% 0.2 131.684)'}
+                              onMouseLeave={(e) => e.target.style.background = 'oklch(64.8% 0.2 131.684)'}
                             >
                             </td>
                           );
@@ -606,15 +602,15 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
                               style={{
                                 border: isToday ? '2px solid #faad14' : '1px solid #d9d9d9',
                                 borderLeft: baseBorderLeft,
-                                padding: '1px',
-                                background: '#52c41a',
+                                padding: '2px',
+                                background: 'oklch(64.8% 0.2 131.684)',
                                 cursor: 'pointer',
                                 transition: 'background 0.2s',
-                                height: '20px'
+                                height: '22px'
                               }}
                               title="Available for scheduling"
-                              onMouseEnter={(e) => e.target.style.background = '#73d13d'}
-                              onMouseLeave={(e) => e.target.style.background = '#52c41a'}
+                              onMouseEnter={(e) => e.target.style.background = 'oklch(74.8% 0.2 131.684)'}
+                              onMouseLeave={(e) => e.target.style.background = 'oklch(64.8% 0.2 131.684)'}
                             >
                             </td>
                           );
@@ -630,7 +626,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
           {filterMode === 'year' && (
             <div style={{ marginTop: '12px', display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
               {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, idx) => {
-                const solidColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c', '#a0d911', '#2f54eb', '#fadb14', '#ff4d4f'];
+                const solidColors = ['#1890ff', 'oklch(64.8% 0.2 131.684)', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa541c', '#a0d911', '#2f54eb', '#fadb14', 'oklch(64.6% 0.222 41.116)'];
                 return (
                   <div key={month} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <div style={{ width: 16, height: 16, background: solidColors[idx], borderRadius: '3px', border: '1px solid #d9d9d9' }}></div>
@@ -640,7 +636,7 @@ const SchedulingAnalytics = ({ machines, viewMode }) => {
               })}
             </div>
           )}
-        </Card>
+        </div>
       )}
 
       {/* Machine-wise Schedule with Availability Gaps - Table View */}

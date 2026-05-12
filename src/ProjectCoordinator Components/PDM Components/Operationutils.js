@@ -3,13 +3,13 @@ export const normalizeVersion = (raw) => {
     let v = raw || '';
     if (v && !v.startsWith('v')) v = 'v' + v;
     v = v.replace(/[^v0-9.a-zA-Z]/g, '');
-    if (v.startsWith('v')) v = 'v' + v.substring(1).replace(/v/g, '');
+    // Remove any existing 'v' prefix and don't add it back
+    if (v.startsWith('v')) v = v.substring(1);
     const parts = v.split('.');
     if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
-    const m = v.match(/^(v\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
-    if (m) return (m[1] || 'v') + '.' + (m[2] ? m[2].substring(0, 3) : '');
-    const init = v.match(/^(v\d{0,2})/);
-    return init ? init[1] + '.' : 'v.';
+    const m = v.match(/^(\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
+    if (m) return m[1] + '.' + (m[2] ? m[2].substring(0, 3) : '');
+    return v;
   };
   
   // Shared utility: simple axios → setState helper with loading + guard

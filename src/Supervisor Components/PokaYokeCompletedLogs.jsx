@@ -185,7 +185,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       const url = `${API_BASE_URL}/pokayoke-completed-logs/item-responses/${selectedResponse.id}/approve`;
 
       const response = await fetch(url, {
-        method: 'POST',
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
@@ -405,23 +405,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
 
   return (
     <div>
-      <div
-        style={{
-          marginBottom: '16px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-        }}
-      >
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            Checklist Completion Logs
-          </Title>
-          <Text type="secondary" style={{ fontSize: '14px' }}>
-            View and analyze checklist completion data
-          </Text>
-        </div>
-      </div>
+     
 
       <Card
         style={{
