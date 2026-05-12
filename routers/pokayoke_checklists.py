@@ -814,6 +814,7 @@ def delete_completed_log(log_id: int, db: Session = Depends(get_db)):
 @completed_logs_router.post("/item-responses", response_model=PokayokeItemResponseSchema, status_code=status.HTTP_201_CREATED)
 def create_item_response(response: PokayokeItemResponseCreate, db: Session = Depends(get_db)):
     """Create a new Pokayoke item response or update existing rejected response"""
+    """Create a new Pokayoke item response or update existing rejected response"""
     # Verify completed log exists
     completed_log = db.query(PokayokeCompletedLog).filter(PokayokeCompletedLog.id == response.completed_log_id).first()
     if not completed_log:
@@ -836,10 +837,38 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
         PokayokeItemResponse.item_id == response.item_id
     ).first()
     
+    # Check if a response already exists for this completed_log + item combination
+    existing_response = db.query(PokayokeItemResponse).filter(
+        PokayokeItemResponse.completed_log_id == response.completed_log_id,
+        PokayokeItemResponse.item_id == response.item_id
+    ).first()
+    
     response_data = response.model_dump()
     if not response_data.get('timestamp'):
         response_data['timestamp'] = datetime.now(IST).replace(tzinfo=None)
     
+    if existing_response:
+        # Update existing response - reset approval fields for resubmission
+        existing_response.response_value = response_data['response_value']
+        existing_response.timestamp = response_data['timestamp']
+        # Reset approval status to None (pending) for resubmission
+        existing_response.approval_status = None
+        existing_response.approved_by = None
+        existing_response.approved_at = None
+        existing_response.approval_comments = None
+        # Recalculate is_confirming based on new response
+        existing_response.is_confirming = response_data['response_value'].lower() == item.expected_value.lower()
+        
+        db.commit()
+        db.refresh(existing_response)
+        return existing_response
+    else:
+        # Create new response
+        db_response = PokayokeItemResponse(**response_data)
+        db.add(db_response)
+        db.commit()
+        db.refresh(db_response)
+        return db_response
     if existing_response:
         # Update existing response - reset approval fields for resubmission
         existing_response.response_value = response_data['response_value']
@@ -896,6 +925,7 @@ def get_item_response(response_id: int, db: Session = Depends(get_db)):
 @completed_logs_router.put("/item-responses/{response_id}", response_model=PokayokeItemResponseSchema)
 def update_item_response(response_id: int, response_update: PokayokeItemResponseUpdate, db: Session = Depends(get_db)):
     """Update a Pokayoke item response - resets approval status if response_value changes for resubmission"""
+    """Update a Pokayoke item response - resets approval status if response_value changes for resubmission"""
     db_response = db.query(PokayokeItemResponse).filter(PokayokeItemResponse.id == response_id).first()
     if not db_response:
         raise HTTPException(
@@ -922,7 +952,27 @@ def update_item_response(response_id: int, response_update: PokayokeItemResponse
         db_response.timestamp = datetime.now(IST).replace(tzinfo=None)
     
     # Update other fields
+    
+    # Check if response_value is being updated
+    if 'response_value' in update_data and update_data['response_value'] != db_response.response_value:
+        # Get the checklist item to recalculate is_confirming
+        item = db.query(PokayokeChecklistItem).filter(PokayokeChecklistItem.id == db_response.item_id).first()
+        if item:
+            db_response.is_confirming = update_data['response_value'].lower() == item.expected_value.lower()
+        
+        # Reset approval status for resubmission - user is editing a rejected item
+        db_response.approval_status = None
+        db_response.approved_by = None
+        db_response.approved_at = None
+        db_response.approval_comments = None
+        
+        # Update timestamp to current time
+        db_response.timestamp = datetime.now(IST).replace(tzinfo=None)
+    
+    # Update other fields
     for field, value in update_data.items():
+        if field not in ['is_confirming', 'approval_status', 'approved_by', 'approved_at', 'approval_comments', 'timestamp']:
+            setattr(db_response, field, value)
         if field not in ['is_confirming', 'approval_status', 'approved_by', 'approved_at', 'approval_comments', 'timestamp']:
             setattr(db_response, field, value)
     
@@ -956,8 +1006,10 @@ class ItemApprovalRequest(BaseModel):
     approval_comments: Optional[str] = None
 
 
+
 @completed_logs_router.put("/item-responses/{response_id}/approve", response_model=PokayokeItemResponseSchema)
 def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: Session = Depends(get_db)):
+    """Approve or reject a Pokayoke item response using PUT endpoint"""
     """Approve or reject a Pokayoke item response using PUT endpoint"""
     db_response = db.query(PokayokeItemResponse).filter(PokayokeItemResponse.id == response_id).first()
     if not db_response:
@@ -973,6 +1025,7 @@ def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: S
             detail="approval_status must be 'approved' or 'rejected'"
         )
 
+    # Update the response with approval info only (do NOT modify is_confirming)
     # Update the response with approval info only (do NOT modify is_confirming)
     db_response.approval_status = approval.approval_status
     db_response.approved_by = approval.approved_by
@@ -1001,6 +1054,11 @@ def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: S
             
             # all_items_passed is True only if all are approved AND all are confirming
             if any_rejected or not all_confirming:
+            # Check if all are confirming (is_confirming is True)
+                all_confirming = all(r.is_confirming for r in all_responses)
+            
+            # all_items_passed is True only if all are approved AND all are confirming
+            if any_rejected or not all_confirming:
                 completed_log.all_items_passed = False
             else:
                 completed_log.all_items_passed = True
@@ -1011,6 +1069,7 @@ def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: S
     return db_response
 
 
+
 @completed_logs_router.get("/checklists/{checklist_id}/approval-status", response_model=ChecklistApprovalStatusResponse)
 def get_approval_status_by_checklist(checklist_id: int, db: Session = Depends(get_db)):
     """Get approval status grouped by completed log (order) for a specific checklist.
@@ -1019,6 +1078,7 @@ def get_approval_status_by_checklist(checklist_id: int, db: Session = Depends(ge
     only return those pending items for approval workflow.
     """
     from DB.models.access_control import AccessUser
+    from DB.models.oms import Order, Part
     from DB.models.oms import Order, Part
 
     # Verify checklist exists
@@ -1035,6 +1095,11 @@ def get_approval_status_by_checklist(checklist_id: int, db: Session = Depends(ge
     ).order_by(PokayokeChecklistItem.sequence_number).all()
 
     if not items:
+        return ChecklistApprovalStatusResponse(
+            checklist_id=checklist_id,
+            checklist_name=checklist.name,
+            completed_logs=[]
+        )
         return ChecklistApprovalStatusResponse(
             checklist_id=checklist_id,
             checklist_name=checklist.name,

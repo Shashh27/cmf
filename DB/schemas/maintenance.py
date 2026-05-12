@@ -230,3 +230,45 @@ class ComponentIssue(ComponentIssueBase):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# Help Support Schemas
+# =======================
+class HelpSupportBase(BaseModel):
+    machine_id: int
+    reported_by: int
+    production_order_id: int
+    part_id: int
+    description: str
+    mc_reply: Optional[str] = None
+    replied_by: Optional[int] = None
+    replied_at: Optional[datetime] = None
+
+
+class HelpSupportCreate(HelpSupportBase):
+    reported_at: Optional[datetime] = None
+
+
+class HelpSupportUpdate(BaseModel):
+    machine_id: Optional[int] = None
+    reported_by: Optional[int] = None
+    production_order_id: Optional[int] = None
+    part_id: Optional[int] = None
+    description: Optional[str] = None
+    mc_reply: Optional[str] = None
+    replied_by: Optional[int] = None
+    replied_at: Optional[datetime] = None
+
+
+class HelpSupport(HelpSupportBase):
+    id: int
+    machine_name: Optional[str] = None
+    operator_name: Optional[str] = None
+    order_name: Optional[str] = None
+    part_name: Optional[str] = None
+    replied_by_name: Optional[str] = None
+    reported_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
