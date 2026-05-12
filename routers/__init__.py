@@ -20,6 +20,8 @@ from .order_documents import router as order_documents_router
 
 from .rawmaterials import router as rawmaterials_router
 
+from .order_raw_materials import router as order_raw_materials_router
+
 from .workcenter import router as workcenter_router
 
 from .machines import router as machines_router
@@ -48,6 +50,9 @@ from .maintenance import router as maintenance_router
 
 from .out_source_parts_status import router as out_source_parts_status_router
 
+from .order_tracking import router as order_tracking_router
+from .monitoring import router as monitoring_router
+from .production_analytics import router as production_analytics_router
 
 
 __all__ = [
@@ -73,6 +78,8 @@ __all__ = [
     "order_documents_router",
 
     "rawmaterials_router",
+
+    "order_raw_materials_router",
 
     "workcenter_router",
 
@@ -100,7 +107,9 @@ __all__ = [
 
     "maintenance_router",
 
-    "out_source_parts_status_router"
-
+    "out_source_parts_status_router",
+    "order_tracking_router",
+    "monitoring_router",
+    "production_analytics_router",
 ]
 

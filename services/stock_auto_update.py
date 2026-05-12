@@ -48,7 +48,7 @@ class StockAutoUpdateService:
                 linked_parts = [part]
             
             # Calculate total required quantity from all linked parts
-            total_required = sum(p.raw_material_required_quantity or 0 for p in linked_parts)
+            total_required = sum(p.required_length or 0 for p in linked_parts)
             
             # Update stock quantities based on part requirements
             old_allocated = stock.allocated_quantity
@@ -112,7 +112,7 @@ class StockAutoUpdateService:
                 linked_parts = db.query(Part).filter(Part.id.in_(part_ids)).all()
                 
                 # Calculate total required quantity from all linked parts
-                total_required = sum(p.raw_material_required_quantity or 0 for p in linked_parts)
+                total_required = sum(p.required_length or 0 for p in linked_parts)
                 
                 # Update stock quantities
                 old_allocated = stock.allocated_quantity
@@ -221,7 +221,7 @@ class StockAutoUpdateService:
                 linked_parts = db.query(Part).filter(Part.id.in_(part_ids)).all()
                 
                 # Calculate total required from parts
-                total_required = sum(p.raw_material_required_quantity or 0 for p in linked_parts)
+                total_required = sum(p.required_length or 0 for p in linked_parts)
                 
                 # Check if quantities match expected formula
                 expected_available = stock.quantity - total_required

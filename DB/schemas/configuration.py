@@ -362,5 +362,67 @@ class PokayokeChecklistItemWithApprovals(BaseModel):
     responses: List[PokayokeItemResponseSimple] = []
 
 
+# Schema for structured approval status by completed log
+class ChecklistItemApprovalStatus(BaseModel):
+    item_id: int
+    item_text: str
+    item_type: str
+    sequence_number: int
+    response_value: str
+    responded_by: Optional[str] = None
+    responded_at: Optional[datetime] = None
+    approval_status: Optional[str] = None
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    approval_comments: Optional[str] = None
+
+
+class ChecklistApprovalByLog(BaseModel):
+    completed_log_id: int
+    production_order_id: Optional[int] = None
+    part_id: Optional[int] = None
+    machine_id: int
+    operator_id: int
+    operator_name: Optional[str] = None
+    completed_at: datetime
+    overall_approval_status: Optional[str] = None  # 'approved', 'rejected', 'pending'
+    items: List[ChecklistItemApprovalStatus] = []
+
+
+class ChecklistApprovalStatusResponse(BaseModel):
+    checklist_id: int
+    checklist_name: str
+    completed_logs: List[ChecklistApprovalByLog] = []
+
+
+# Simplified response schema for item responses by log
+class SimpleItemResponse(BaseModel):
+    item_id: int
+    item_text: str
+    response_value: str
+    approval_status: Optional[str] = None  # 'approved', 'rejected', 'pending'
+    approval_comments: Optional[str] = None
+
+
+class SimpleLogResponse(BaseModel):
+    log_id: int
+    operator_name: str
+    completed_at: datetime
+    overall_status: str  # 'approved', 'rejected', 'pending'
+    items: List[SimpleItemResponse] = []
+
+
+class SimpleCompletedLog(BaseModel):
+    log_id: int
+    checklist_id: int
+    checklist_name: str
+    machine_id: int
+    machine_name: str
+    operator_name: str
+    completed_at: datetime
+    overall_status: str  # 'approved', 'rejected', 'pending'
+    items: List[SimpleItemResponse] = []
+
+
 from .oms import Part as PartSchema, Order as OrderSchema
 PokayokeCompletedLogWithResponses.model_rebuild()

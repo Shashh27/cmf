@@ -4,13 +4,15 @@ from typing import List
 from sqlalchemy.exc import IntegrityError
 
 from DB.database import get_db
-from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock as RawMaterialStockModel, Vendors as VendorsModel
+from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock as RawMaterialStockModel, Vendors as VendorsModel, RawMaterialUnit as RawMaterialUnitModel, RawMaterialUsage as RawMaterialUsageModel
 from DB.models.oms import Order as OrderModel, Part as PartModel
 from DB.models.inventory import RawMaterial, RawMaterialStock, Vendors
 from DB.schemas.inventory import (
     RawMaterial, RawMaterialCreate, RawMaterialUpdate,
     RawMaterialStock, RawMaterialStockCreate, RawMaterialStockUpdate, RawMaterialStockWithDetails,
-    Vendors, VendorsCreate, VendorsUpdate
+    Vendors, VendorsCreate, VendorsUpdate,
+    RawMaterialUnit, RawMaterialUnitCreate, RawMaterialUnitUpdate, RawMaterialUnitWithDetails,
+    RawMaterialUsage, RawMaterialUsageCreate, RawMaterialUsageUpdate, RawMaterialUsageWithDetails
 )
 from services.raw_material_calculations import RawMaterialCalculationService
 
@@ -173,119 +175,6 @@ def delete_vendor(vendor_id: int, db: Session = Depends(get_db)):
     return {"message": "Vendor deleted successfully"}
 
 
-@router.get("/order-parts-raw-material-linked/")
-def get_order_parts_raw_material_linked(
-    admin_id: int = None, 
-    manufacturing_coordinator_id: int = None,
-    db: Session = Depends(get_db)
-):
-    """Get order-linked raw materials filtered by user ID or manufacturing coordinator"""
-    # Query raw material stock items that are order-linked
-    query = db.query(RawMaterialStockModel).options(
-        joinedload(RawMaterialStockModel.material),
-        joinedload(RawMaterialStockModel.source_order),
-        joinedload(RawMaterialStockModel.vendor),
-        joinedload(RawMaterialStockModel.creator)
-    ).filter(RawMaterialStockModel.source_type == "order")
-    
-    # Filter by combined criteria: show materials where user is either admin OR manufacturing coordinator
-    if admin_id is not None or manufacturing_coordinator_id is not None:
-        # Get order IDs where user is admin (if admin_id provided)
-        admin_order_ids = []
-        if admin_id is not None:
-            admin_order_ids = db.query(OrderModel.id).filter(
-                OrderModel.admin_id == admin_id
-            ).all()
-            admin_order_ids = [oid[0] for oid in admin_order_ids]
-        
-        # Get order IDs where user is manufacturing coordinator (if manufacturing_coordinator_id provided)
-        mc_order_ids = []
-        if manufacturing_coordinator_id is not None:
-            mc_order_ids = db.query(OrderModel.id).filter(
-                OrderModel.manufacturing_coordinator_id == manufacturing_coordinator_id
-            ).all()
-            mc_order_ids = [oid[0] for oid in mc_order_ids]
-        
-        # Combine both sets of order IDs (union - no duplicates)
-        all_order_ids = list(set(admin_order_ids + mc_order_ids))
-        
-        # Filter stock items to only those from these orders
-        if all_order_ids:
-            query = query.filter(RawMaterialStockModel.source_order_id.in_(all_order_ids))
-        else:
-            # No orders found for this user in any role, return empty
-            return []
-    
-    stock_items = query.order_by(RawMaterialStockModel.id.desc()).all()
-    
-    # Transform the data to match expected format
-    result = []
-    for stock in stock_items:
-        stock_details = _stock_with_details(stock, db)
-        
-        # Transform to the format expected by frontend
-        transformed_item = {
-            "id": stock_details["id"],
-            "material_id": stock_details["material_id"],
-            "material_name": stock_details.get("material_name", ""),
-            "form_type": stock_details["form_type"],
-            "diameter": stock_details["diameter"],
-            "length": stock_details["length"],
-            "breadth": stock_details["breadth"],
-            "height": stock_details["height"],
-            "inner_diameter": stock_details["inner_diameter"],
-            "outer_diameter": stock_details["outer_diameter"],
-            "quantity": stock_details["quantity"],
-            "allocated_quantity": stock_details.get("allocated_quantity", 0),
-            "available_quantity": stock_details.get("available_quantity", 0),
-            "mass": stock_details["mass"],
-            "weight": stock_details["weight"],
-            "cost": stock_details["cost"],
-            "source_type": stock_details["source_type"],
-            "source_order_id": stock_details["source_order_id"],
-            "order_status": stock_details.get("order_status"),
-            "vendor_id": stock_details["vendor_id"],
-            "vendor_name": stock_details.get("vendor_name"),
-            "received_vendor_id": stock_details.get("received_vendor_id"),
-            "received_vendor_name": stock_details.get("received_vendor_name"),
-            "enquiry_vendor_count": stock_details.get("enquiry_vendor_count"),
-            "user_id": stock_details["user_id"],
-            "creator_name": stock_details.get("creator_name"),
-            "status": stock_details["status"],
-            "material_status": stock_details["status"], # Alias for compatibility
-            "created_at": stock_details["created_at"],
-            "updated_at": stock_details["updated_at"],
-            # Additional fields for compatibility
-            "order_id": stock_details["source_order_id"],
-            "part_ids": stock_details.get("part_ids", []),
-            "part_numbers": stock_details.get("part_numbers", []),
-            "part_names": stock_details.get("part_names", []),
-            "part_required_quantities": stock_details.get("part_required_quantities", []),
-            "source_order_number": stock_details.get("source_order_number"),
-            "linkage_ids": [stock_details["id"]], # Single item array for compatibility
-            "linkage_group_id": stock_details["id"],
-            "order_quantity": stock_details["quantity"],
-        }
-        
-        # Calculate status based on business logic
-        calculated_status = "not available"
-        if stock_details["source_type"] == "general":
-            # For general stock, status depends only on quantity
-            if stock_details["quantity"] > 0:
-                calculated_status = "available"
-        elif stock_details["source_type"] == "order":
-            # For order stock, status depends on order_status
-            if stock_details.get("order_status") == "received" and stock_details["quantity"] > 0:
-                calculated_status = "available"
-        
-        # Update the status in the transformed item
-        transformed_item["status"] = calculated_status
-        
-        result.append(transformed_item)
-    
-    return result
-
-
 @router.get("/{raw_material_id}", response_model=RawMaterial)
 def get_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
     """Get a specific raw material by ID"""
@@ -332,7 +221,7 @@ def update_raw_material(raw_material_id: int, raw_material: RawMaterialUpdate, d
 
 @router.delete("/{raw_material_id}", status_code=status.HTTP_200_OK)
 def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
-    """Delete a raw material and clean up all references"""
+    """Delete a raw material with cascade deletion (stock, units, usage, parts)"""
     db_raw_material = db.query(RawMaterialModel).filter(RawMaterialModel.id == raw_material_id).first()
     if not db_raw_material:
         raise HTTPException(
@@ -341,38 +230,51 @@ def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
         )
     
     try:
-        # Step 1: Find all parts that reference this material
-        referencing_parts = (
-            db.query(PartModel)
-            .filter(
-                (PartModel.raw_material_id == raw_material_id) |
-                (PartModel.raw_material_stock_id.in_(
-                    db.query(RawMaterialStockModel.id)
-                    .filter(RawMaterialStockModel.material_id == raw_material_id)
-                ))
-            )
-            .all()
-        )
-        
-        # Step 2: Clear all part references
-        for part in referencing_parts:
-            part.raw_material_id = None
-            part.raw_material_stock_id = None
-            part.raw_material_required_quantity = None
-        
-        # Step 3: Find and delete all stock items for this material
+        # Step 1: Find all stock items for this material
         stock_items = db.query(RawMaterialStockModel).filter(
             RawMaterialStockModel.material_id == raw_material_id
         ).all()
         
+        stock_ids = [s.id for s in stock_items]
+        
+        # Step 2: Get all units for these stocks
+        if stock_ids:
+            units = db.query(RawMaterialUnitModel).filter(
+                RawMaterialUnitModel.stock_id.in_(stock_ids)
+            ).all()
+            unit_ids = [u.id for u in units]
+            
+            # Step 3: Find all parts that reference these units
+            if unit_ids:
+                referencing_parts = (
+                    db.query(PartModel)
+                    .filter(PartModel.raw_material_unit_id.in_(unit_ids))
+                    .all()
+                )
+                
+                # Clear all part references to these units
+                for part in referencing_parts:
+                    part.raw_material_unit_id = None
+                    part.raw_material_id = None
+                    part.required_length = None
+            
+            # Step 4: Delete all usage records for these units
+            if unit_ids:
+                db.query(RawMaterialUsageModel).filter(
+                    RawMaterialUsageModel.raw_material_unit_id.in_(unit_ids)
+                ).delete(synchronize_session=False)
+            
+            # Step 5: Delete all units for these stocks
+            if stock_ids:
+                db.query(RawMaterialUnitModel).filter(
+                    RawMaterialUnitModel.stock_id.in_(stock_ids)
+                ).delete(synchronize_session=False)
+        
+        # Step 6: Delete all stock items
         for stock in stock_items:
-            # Deallocate any allocated materials before deleting stock
-            if stock.allocated_quantity > 0:
-                stock.allocated_quantity = 0
-                stock.available_quantity = stock.quantity
             db.delete(stock)
         
-        # Step 4: Delete the raw material itself
+        # Step 7: Delete the raw material itself
         db.delete(db_raw_material)
         
         # Commit all changes
@@ -380,8 +282,9 @@ def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
         
         return {
             "message": f"Raw material '{db_raw_material.material_name}' deleted successfully",
-            "parts_updated": len(referencing_parts),
-            "stock_items_deleted": len(stock_items)
+            "stocks_deleted": len(stock_items),
+            "units_deleted": len(units) if stock_ids else 0,
+            "parts_updated": len(referencing_parts) if stock_ids and unit_ids else 0
         }
         
     except Exception as e:
@@ -390,7 +293,6 @@ def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error deleting raw material: {str(e)}"
         )
-    return None
 
 
 # =======================
@@ -465,6 +367,30 @@ def create_raw_material_stock(stock: RawMaterialStockCreate, db: Session = Depen
     db.add(db_stock)
     db.commit()
     db.refresh(db_stock)
+    
+    # 🔥 AUTO-CREATE UNITS ON STOCK CREATION
+    if db_stock.quantity > 0 and db_stock.length:
+        # Calculate per-unit values (divide by quantity)
+        per_unit_volume = db_stock.volume / db_stock.quantity if db_stock.volume else None
+        per_unit_mass = db_stock.mass / db_stock.quantity if db_stock.mass else None
+        per_unit_weight = db_stock.weight / db_stock.quantity if db_stock.weight else None
+        per_unit_cost = db_stock.cost / db_stock.quantity if db_stock.cost else None
+        
+        for i in range(db_stock.quantity):
+            unit = RawMaterialUnitModel(
+                stock_id=db_stock.id,
+                total_length=db_stock.length,
+                remaining_length=db_stock.length,
+                volume=per_unit_volume,
+                mass=per_unit_mass,
+                weight=per_unit_weight,
+                cost=per_unit_cost,
+                status="available"
+            )
+            db.add(unit)
+        
+        db.commit()
+        print(f"🔥 Created {db_stock.quantity} units for stock ID {db_stock.id}")
     
     # Frontend handles allocation directly via /rawmaterials/tracking/allocate API
     # No auto-allocation needed here
@@ -554,7 +480,7 @@ def update_raw_material_stock(stock_id: int, stock: RawMaterialStockUpdate, db: 
                     detail=f"Order with id {source_order_id} not found"
                 )
     
-    # If dimensions or quantity changed, recalculate properties
+    # If dimensions or quantity changed, recalculate properties and recreate units
     recalculate = any(key in update_data for key in [
         "form_type", "diameter", "length", "breadth", "height", 
         "inner_diameter", "outer_diameter", "quantity"
@@ -591,10 +517,77 @@ def update_raw_material_stock(stock_id: int, stock: RawMaterialStockUpdate, db: 
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e)
             )
+        
+        # Delete old units and create new ones
+        old_units = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).all()
+        unit_ids = [u.id for u in old_units]
+        
+        # Clear part references to old units
+        if unit_ids:
+            referencing_parts = (
+                db.query(PartModel)
+                .filter(PartModel.raw_material_unit_id.in_(unit_ids))
+                .all()
+            )
+            for part in referencing_parts:
+                part.raw_material_unit_id = None
+                part.raw_material_id = None
+                part.required_length = None
+        
+        # Delete old usage records
+        if unit_ids:
+            db.query(RawMaterialUsageModel).filter(
+                RawMaterialUsageModel.raw_material_unit_id.in_(unit_ids)
+            ).delete(synchronize_session=False)
+        
+        # Delete old units
+        db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).delete(
+            synchronize_session=False
+        )
+        
+        # Create new units with updated values
+        new_quantity = update_data.get("quantity", db_stock.quantity)
+        new_length = update_data.get("length", db_stock.length)
+        
+        if new_quantity > 0 and new_length:
+            # Calculate per-unit values
+            per_unit_volume = properties.get("volume") / new_quantity if properties.get("volume") else None
+            per_unit_mass = properties.get("mass") / new_quantity if properties.get("mass") else None
+            per_unit_weight = properties.get("weight") / new_quantity if properties.get("weight") else None
+            per_unit_cost = properties.get("cost") / new_quantity if properties.get("cost") else None
+            
+            for i in range(new_quantity):
+                unit = RawMaterialUnitModel(
+                    stock_id=stock_id,
+                    total_length=new_length,
+                    remaining_length=new_length,
+                    volume=per_unit_volume,
+                    mass=per_unit_mass,
+                    weight=per_unit_weight,
+                    cost=per_unit_cost,
+                    status="available"
+                )
+                db.add(unit)
     
     # Apply updates
     for field, value in update_data.items():
         setattr(db_stock, field, value)
+    
+    # Clear unrelated dimension fields based on new form_type
+    new_form_type = update_data.get("form_type", db_stock.form_type)
+    if new_form_type == "Round":
+        db_stock.breadth = None
+        db_stock.height = None
+        db_stock.inner_diameter = None
+        db_stock.outer_diameter = None
+    elif new_form_type == "Square":
+        db_stock.diameter = None
+        db_stock.inner_diameter = None
+        db_stock.outer_diameter = None
+    elif new_form_type == "Pipe":
+        db_stock.diameter = None
+        db_stock.breadth = None
+        db_stock.height = None
     
     db.commit()
     db.refresh(db_stock)
@@ -604,7 +597,7 @@ def update_raw_material_stock(stock_id: int, stock: RawMaterialStockUpdate, db: 
 
 @router.delete("/stock/{stock_id}", status_code=status.HTTP_200_OK)
 def delete_raw_material_stock(stock_id: int, db: Session = Depends(get_db)):
-    """Delete a raw material stock item and clean up part references"""
+    """Delete a raw material stock item with cascade deletion (units, usage, parts)"""
     db_stock = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
     if not db_stock:
         raise HTTPException(
@@ -613,18 +606,34 @@ def delete_raw_material_stock(stock_id: int, db: Session = Depends(get_db)):
         )
     
     try:
-        # Find all parts that reference this stock item
-        referencing_parts = (
-            db.query(PartModel)
-            .filter(PartModel.raw_material_stock_id == stock_id)
-            .all()
-        )
+        # Get all units for this stock
+        units = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).all()
+        unit_ids = [u.id for u in units]
         
-        # Clear all part references to this stock
-        for part in referencing_parts:
-            part.raw_material_stock_id = None
-            part.raw_material_required_quantity = None
-            # Keep raw_material_id if it exists, as the material might still be available
+        # Find all parts that reference these units
+        if unit_ids:
+            referencing_parts = (
+                db.query(PartModel)
+                .filter(PartModel.raw_material_unit_id.in_(unit_ids))
+                .all()
+            )
+            
+            # Clear all part references to these units
+            for part in referencing_parts:
+                part.raw_material_unit_id = None
+                part.raw_material_id = None
+                part.required_length = None
+        
+        # Delete all usage records for these units
+        if unit_ids:
+            db.query(RawMaterialUsageModel).filter(
+                RawMaterialUsageModel.raw_material_unit_id.in_(unit_ids)
+            ).delete(synchronize_session=False)
+        
+        # Delete all units for this stock
+        db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).delete(
+            synchronize_session=False
+        )
         
         # Delete the stock item
         db.delete(db_stock)
@@ -634,7 +643,8 @@ def delete_raw_material_stock(stock_id: int, db: Session = Depends(get_db)):
         
         return {
             "message": f"Stock item deleted successfully",
-            "parts_updated": len(referencing_parts)
+            "units_deleted": len(units),
+            "parts_updated": len(referencing_parts) if unit_ids else 0
         }
         
     except Exception as e:
@@ -772,18 +782,55 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
                 result["part_names"] = [f"{part.part_number} - {part.part_name}" for part in parts]
                 result["part_ids"] = stock.part_id  # Keep original string format
                 
-                # Add part required quantities
-                part_required_quantities = []
+                # Add part required lengths
+                part_required_lengths = []
                 for part in parts:
-                    if part.raw_material_required_quantity:
-                        part_required_quantities.append(str(part.raw_material_required_quantity))
+                    if part.required_length:
+                        part_required_lengths.append(str(part.required_length))
                     else:
-                        part_required_quantities.append("0")
-                result["part_required_quantities"] = part_required_quantities
+                        part_required_lengths.append("0")
+                result["part_required_lengths"] = part_required_lengths
         except (ValueError, AttributeError):
             # If part_id is not valid comma-separated integers, just store as is
             result["part_ids"] = stock.part_id
-            result["part_required_quantities"] = []
+            result["part_required_lengths"] = []
+    
+    # 🔥 NEW: Add part information from usage records for general stock
+    # Fetch parts linked through unit-based tracking
+    from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
+    units = db.query(RawMaterialUnit).filter(RawMaterialUnit.stock_id == stock.id).all()
+    if units:
+        unit_ids = [u.id for u in units]
+        usages = db.query(RawMaterialUsage).filter(RawMaterialUsage.raw_material_unit_id.in_(unit_ids)).all()
+        if usages:
+            linked_part_ids = [usage.part_id for usage in usages]
+            linked_parts = db.query(PartModel).filter(PartModel.id.in_(linked_part_ids)).all()
+            if linked_parts:
+                existing_part_numbers = result.get("part_numbers", [])
+                existing_part_names = result.get("part_names", [])
+                existing_part_ids = result.get("part_ids", "")
+                
+                result["part_numbers"] = existing_part_numbers + [part.part_number for part in linked_parts]
+                result["part_names"] = existing_part_names + [f"{part.part_number} - {part.part_name}" for part in linked_parts]
+                
+                # Handle part_ids concatenation properly
+                new_part_ids = ",".join([str(part.id) for part in linked_parts])
+                if existing_part_ids:
+                    result["part_ids"] = existing_part_ids + "," + new_part_ids
+                else:
+                    result["part_ids"] = new_part_ids
+                
+                # 🔥 NEW: Fetch order information from linked parts
+                product_ids = [part.product_id for part in linked_parts if part.product_id]
+                if product_ids:
+                    orders = db.query(OrderModel).filter(OrderModel.product_id.in_(product_ids)).all()
+                    if orders:
+                        existing_order_numbers = result.get("source_order_number", "")
+                        new_order_numbers = ", ".join([order.sale_order_number for order in orders])
+                        if existing_order_numbers:
+                            result["source_order_number"] = existing_order_numbers + "," + new_order_numbers
+                        else:
+                            result["source_order_number"] = new_order_numbers
     
     # Add vendor details (handle both comma-separated vendor IDs and received vendor)
     if stock.received_vendor_id:
@@ -821,329 +868,352 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
     return result
 
 
-@router.put("/order-parts-raw-material-linked/{stock_id}")
-def update_order_parts_raw_material_linked(stock_id: int, stock_update: RawMaterialStockUpdate, db: Session = Depends(get_db)):
-    """Update order-linked raw material stock"""
-    stock = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
-    if not stock:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stock item not found"
-        )
+# =======================
+# 🔥 UNIT-BASED TRACKING ENDPOINTS
+# =======================
+
+@router.get("/units/", response_model=List[RawMaterialUnitWithDetails])
+def get_raw_material_units(
+    stock_id: int = None,
+    unit_id: int = None,
+    status: str = None,
+    db: Session = Depends(get_db)
+):
+    """Get raw material units with optional filtering"""
+    query = db.query(RawMaterialUnitModel).options(
+        joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.material)
+    )
     
-    update_data = stock_update.model_dump(exclude_unset=True)
+    if unit_id is not None:
+        query = query.filter(RawMaterialUnitModel.id == unit_id)
     
-    # Check if dimensions are being updated for automatic recalculation
-    dimensions_changed = False
-    if stock.form_type == "Round":
-        if ('diameter' in update_data and update_data['diameter'] != stock.diameter) or \
-           ('length' in update_data and update_data['length'] != stock.length):
-            dimensions_changed = True
+    if stock_id is not None:
+        query = query.filter(RawMaterialUnitModel.stock_id == stock_id)
     
-    elif stock.form_type == "Square":
-        if ('length' in update_data and update_data['length'] != stock.length) or \
-           ('breadth' in update_data and update_data['breadth'] != stock.breadth) or \
-           ('height' in update_data and update_data['height'] != stock.height):
-            dimensions_changed = True
+    if status is not None:
+        query = query.filter(RawMaterialUnitModel.status == status)
     
-    elif stock.form_type == "Pipe":
-        if ('outer_diameter' in update_data and update_data['outer_diameter'] != stock.outer_diameter) or \
-           ('inner_diameter' in update_data and update_data['inner_diameter'] != stock.inner_diameter) or \
-           ('length' in update_data and update_data['length'] != stock.length):
-            dimensions_changed = True
+    units = query.order_by(RawMaterialUnitModel.stock_id.asc(), RawMaterialUnitModel.id.asc()).all()
     
-    # Update fields first
-    for field, value in update_data.items():
-        # For order-linked stock, map material_status to order_status
-        if stock.source_type == "order" and field == "material_status":
-            setattr(stock, "order_status", value)
-        else:
-            setattr(stock, field, value)
-    
-    # Recalculate if dimensions changed
-    if dimensions_changed:
-        # Build dimensions dict for calculation
-        dimensions = {
-            'diameter': stock.diameter,
-            'length': stock.length,
-            'breadth': stock.breadth,
-            'height': stock.height,
-            'inner_diameter': stock.inner_diameter,
-            'outer_diameter': stock.outer_diameter
+    result = []
+    for unit in units:
+        unit_dict = {
+            "id": unit.id,
+            "stock_id": unit.stock_id,
+            "total_length": unit.total_length,
+            "remaining_length": unit.remaining_length,
+            "volume": unit.volume,
+            "mass": unit.mass,
+            "weight": unit.weight,
+            "cost": unit.cost,
+            "status": unit.status,
+            "created_at": unit.created_at,
+            "updated_at": unit.updated_at,
+            "material_name": unit.stock.material.material_name if unit.stock and unit.stock.material else None,
+            "stock_details": {
+                "form_type": unit.stock.form_type,
+                "diameter": unit.stock.diameter,
+                "length": unit.stock.length,
+                "breadth": unit.stock.breadth,
+                "height": unit.stock.height,
+                "quantity": unit.stock.quantity
+            } if unit.stock else None
         }
-        
-        # Calculate new values
-        new_volume = RawMaterialCalculationService.calculate_volume(stock.form_type, **dimensions)
-        new_mass = RawMaterialCalculationService.calculate_mass(stock.material.density, new_volume, stock.quantity)
-        new_cost = RawMaterialCalculationService.calculate_cost(new_mass, stock.material.cost_per_kg)
-        
-        # Update stock with calculated values
-        stock.volume = new_volume
-        stock.mass = new_mass
-        stock.cost = new_cost
+        result.append(unit_dict)
     
-    db.commit()
-    db.refresh(stock)
-    return _stock_with_details(stock, db)
-
-
-@router.put("/order-parts-raw-material-linked/status/group/{group_id}")
-def update_order_parts_status_group(group_id: int, status_data: dict, db: Session = Depends(get_db)):
-    """Update status and properties for a group of order-linked stock items"""
-    
-    # Query the specific stock item by ID (since linkage_group_id doesn't exist)
-    stock = db.query(RawMaterialStockModel).filter(
-        RawMaterialStockModel.id == group_id
-    ).first()
-    
-    if not stock:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stock item not found"
-        )
-    
-    # Update order_status if provided
-    if 'order_status' in status_data:
-        stock.order_status = status_data['order_status']
-        
-        # Recalculate status based on new order_status
-        if stock.source_type == "order":
-            if stock.order_status == "received" and stock.quantity > 0:
-                stock.status = "available"
-            else:
-                stock.status = "not available"
-    
-    # Update received_vendor_id if provided
-    if 'received_vendor_id' in status_data:
-        stock.received_vendor_id = status_data['received_vendor_id']
-    
-    # Update part_ids if provided
-    if 'part_ids' in status_data:
-        from DB.models.oms import Part
-        old_part_ids = set()
-        new_part_ids = set()
-        
-        # Get old part IDs before update
-        if stock.part_id:
-            old_part_ids = set(pid.strip() for pid in stock.part_id.split(',') if pid.strip())
-        
-        # Get new part IDs from update
-        if status_data['part_ids']:
-            new_part_ids = set(pid.strip() for pid in status_data['part_ids'].split(',') if pid.strip())
-        
-        # Update stock part_ids
-        stock.part_id = status_data['part_ids']
-        
-        # Handle removed parts - set their fields to NULL
-        removed_part_ids = old_part_ids - new_part_ids
-        if removed_part_ids:
-            for part_id_str in removed_part_ids:
-                try:
-                    part_id = int(part_id_str)
-                    part = db.query(Part).filter(Part.id == part_id).first()
-                    if part:
-                        part.raw_material_stock_id = None
-                        part.raw_material_required_quantity = None
-                except (ValueError, TypeError):
-                    continue
-        
-        # Update quantity if provided
-    if 'order_quantity' in status_data:
-        new_quantity = status_data['order_quantity']
-        
-        # Validate that new quantity is not less than allocated quantity
-        if stock.allocated_quantity and new_quantity < stock.allocated_quantity:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot reduce quantity to {new_quantity}. Already allocated quantity is {stock.allocated_quantity}. Please remove parts or reduce part quantities first."
-            )
-        
-        stock.quantity = new_quantity
-        
-        # Recalculate available quantity after quantity update
-        stock.available_quantity = stock.quantity - stock.allocated_quantity
-    
-    # Update part quantities if provided
-    if 'part_quantities' in status_data:
-        part_quantities = status_data['part_quantities']
-        
-        if stock.part_id and part_quantities:
-            part_ids = [pid.strip() for pid in stock.part_id.split(',') if pid.strip()]
-            
-            # Validate total required quantity doesn't exceed available quantity
-            total_required = 0
-            for part_id_str in part_ids:
-                if str(part_id_str) in part_quantities:
-                    try:
-                        total_required += float(part_quantities[str(part_id_str)])
-                    except (ValueError, TypeError):
-                        continue
-            
-            if total_required > stock.quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Total required quantity ({total_required}) exceeds available stock quantity ({stock.quantity}). Please increase stock quantity or reduce part quantities."
-                )
-            
-            for part_id_str in part_ids:
-                try:
-                    part_id = int(part_id_str)
-                    part = db.query(Part).filter(Part.id == part_id).first()
-                    if part and str(part_id) in part_quantities:
-                        part.raw_material_required_quantity = float(part_quantities[str(part_id)])
-                        # Also update the stock_id reference
-                        part.raw_material_stock_id = stock.id
-                except (ValueError, TypeError):
-                    continue
-        
-        # Recalculate stock quantities based on current parts
-        if new_part_ids:
-            total_allocated = 0
-            for part_id_str in new_part_ids:
-                try:
-                    part_id = int(part_id_str)
-                    part = db.query(Part).filter(Part.id == part_id).first()
-                    if part and part.raw_material_required_quantity:
-                        total_allocated += float(part.raw_material_required_quantity)
-                except (ValueError, TypeError):
-                    continue
-            
-            stock.allocated_quantity = total_allocated
-            stock.available_quantity = stock.quantity - total_allocated
-        else:
-            # No parts linked
-            stock.allocated_quantity = 0
-            stock.available_quantity = stock.quantity
-    
-    # Update quantity if provided
-    if 'order_quantity' in status_data:
-        new_quantity = status_data['order_quantity']
-        
-        # Validate that new quantity is not less than allocated quantity
-        if stock.allocated_quantity and new_quantity < stock.allocated_quantity:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot reduce quantity to {new_quantity}. Already allocated quantity is {stock.allocated_quantity}. Please remove parts or reduce part quantities first."
-            )
-        
-        stock.quantity = new_quantity
-        
-        # Recalculate available quantity after quantity update
-        stock.available_quantity = stock.quantity - stock.allocated_quantity
-    
-    # Update form_type if provided
-    if 'form_type' in status_data:
-        old_form_type = stock.form_type
-        new_form_type = status_data['form_type']
-        stock.form_type = new_form_type
-        
-        # Clear irrelevant dimensions when form type changes
-        if old_form_type != new_form_type:
-            # Clear all dimensions first
-            stock.diameter = None
-            stock.breadth = None
-            stock.height = None
-            stock.inner_diameter = None
-            stock.outer_diameter = None
-            
-            # Then set the provided dimensions for the new form type
-            if new_form_type == 'Round':
-                if 'diameter' in status_data:
-                    stock.diameter = status_data['diameter']
-                if 'length' in status_data:
-                    stock.length = status_data['length']
-                    
-            elif new_form_type == 'Square':
-                if 'length' in status_data:
-                    stock.length = status_data['length']
-                if 'breadth' in status_data:
-                    stock.breadth = status_data['breadth']
-                if 'height' in status_data:
-                    stock.height = status_data['height']
-                    
-            elif new_form_type == 'Pipe':
-                if 'inner_diameter' in status_data:
-                    stock.inner_diameter = status_data['inner_diameter']
-                if 'outer_diameter' in status_data:
-                    stock.outer_diameter = status_data['outer_diameter']
-                if 'length' in status_data:
-                    stock.length = status_data['length']
-    
-    # Update dimensions if provided (only if form_type didn't change)
-    elif 'diameter' in status_data:
-        stock.diameter = status_data['diameter']
-    elif 'length' in status_data:
-        stock.length = status_data['length']
-    elif 'breadth' in status_data:
-        stock.breadth = status_data['breadth']
-    elif 'height' in status_data:
-        stock.height = status_data['height']
-    elif 'inner_diameter' in status_data:
-        stock.inner_diameter = status_data['inner_diameter']
-    elif 'outer_diameter' in status_data:
-        stock.outer_diameter = status_data['outer_diameter']
-    
-    # Update user_id if provided
-    if 'user_id' in status_data:
-        stock.user_id = status_data['user_id']
-    
-    # Recalculate properties if dimensions, form_type, or quantity changed
-    recalc_keys = ['form_type', 'diameter', 'length', 'breadth', 'height', 'inner_diameter', 'outer_diameter', 'quantity']
-    should_recalc = any(key in status_data for key in recalc_keys)
-    
-    if should_recalc:
-        material = db.query(RawMaterialModel).filter(RawMaterialModel.id == stock.material_id).first()
-        if material:
-            try:
-                properties = RawMaterialCalculationService.calculate_stock_item_properties(material, stock)
-                stock.volume = properties['volume']
-                stock.mass = properties['mass']
-                stock.weight = properties['weight']
-                stock.cost = properties['cost']
-            except ValueError:
-                # If calculation fails, continue with existing values
-                pass
-    
-    db.commit()
-    
-    # Return the updated stock details
-    result = _stock_with_details(stock, db)
     return result
 
 
-@router.post("/order-parts-raw-material-linked/bulk")
-def bulk_create_order_parts_raw_material_linked(bulk_data: dict, db: Session = Depends(get_db)):
-    """Bulk create order-linked raw material stock items"""
-    # This is a placeholder - in a real implementation, you would create multiple stock items
-    return {"message": "Bulk operation completed", "created_count": 0}
-
-
-@router.delete("/order-parts-raw-material-linked/{stock_id}")
-def delete_order_parts_raw_material_linked(stock_id: int, db: Session = Depends(get_db)):
-    """Delete order-linked raw material stock and clear part references"""
-    stock = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
-    if not stock:
+@router.post("/assign-material/", response_model=RawMaterialUsageWithDetails, status_code=status.HTTP_201_CREATED)
+def assign_material_to_part(
+    unit_id: int,
+    part_id: int,
+    required_length: float,
+    db: Session = Depends(get_db)
+):
+    """Assign material unit to a part and track usage"""
+    
+    # Get unit
+    unit = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.id == unit_id).first()
+    if not unit:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Stock item not found"
+            detail=f"Unit with id {unit_id} not found"
         )
     
-    # Step 1: Clear part references before deleting stock
-    if stock.part_id:
-        from DB.models.oms import Part as PartModel
-        part_ids = [pid.strip() for pid in stock.part_id.split(',') if pid.strip()]
-        
-        for part_id in part_ids:
-            try:
-                part = db.query(PartModel).filter(PartModel.id == int(part_id)).first()
-                if part and part.raw_material_stock_id == stock_id:
-                    # Clear the raw material references
-                    part.raw_material_stock_id = None
-                    part.raw_material_required_quantity = None
-            except Exception:
-                pass  # Silently ignore errors
+    # Get part
+    part = db.query(PartModel).filter(PartModel.id == part_id).first()
+    if not part:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Part with id {part_id} not found"
+        )
     
-    # Step 2: Delete the stock
-    db.delete(stock)
+    # Check if part already has a different unit assigned
+    if part.raw_material_unit_id and part.raw_material_unit_id != unit_id:
+        # Remove old assignment
+        old_unit = db.query(RawMaterialUnitModel).filter(
+            RawMaterialUnitModel.id == part.raw_material_unit_id
+        ).first()
+        
+        if old_unit:
+            # Restore old unit's remaining length
+            old_usage = db.query(RawMaterialUsageModel).filter(
+                RawMaterialUsageModel.raw_material_unit_id == part.raw_material_unit_id,
+                RawMaterialUsageModel.part_id == part_id
+            ).first()
+            
+            if old_usage:
+                # Restore length
+                old_unit.remaining_length += old_usage.used_length
+                
+                # Update old unit status - BUT only for general stock
+                # For order stock, status is controlled by order_status, not by assignment
+                if old_unit.stock and old_unit.stock.source_type == 'general':
+                    if old_unit.remaining_length == old_unit.total_length:
+                        old_unit.status = "available"
+                    elif old_unit.remaining_length > 0:
+                        old_unit.status = "partially_used"
+                elif old_unit.stock and old_unit.stock.source_type == 'order':
+                    # For order stock, status is controlled by order_status
+                    # Don't change status here - let the order status update handle it
+                    # Keep the status based on the stock's order_status
+                    if old_unit.stock.order_status == 'received':
+                        if old_unit.remaining_length == old_unit.total_length:
+                            old_unit.status = "available"
+                        elif old_unit.remaining_length > 0:
+                            old_unit.status = "partially_used"
+                        else:
+                            old_unit.status = "exhausted"
+                    else:
+                        # For non-received order status, keep as not_available
+                        old_unit.status = "not_available"
+                
+                # Delete old usage record
+                db.delete(old_usage)
+    
+    # Validate remaining length
+    if unit.remaining_length < required_length:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Not enough length. Required: {required_length}, Available: {unit.remaining_length}"
+        )
+    
+    # Update unit remaining length
+    unit.remaining_length -= required_length
+    
+    # Update unit status if exhausted - BUT only for general stock
+    # For order stock, status is controlled by order_status, not by assignment
+    if unit.stock and unit.stock.source_type == 'general':
+        if unit.remaining_length == 0:
+            unit.status = "exhausted"
+        elif unit.remaining_length < unit.total_length:
+            unit.status = "partially_used"
+    elif unit.stock and unit.stock.source_type == 'order':
+        # For order stock, status is controlled by order_status
+        # Keep the status based on the stock's order_status
+        if unit.stock.order_status == 'received':
+            if unit.remaining_length == 0:
+                unit.status = "exhausted"
+            elif unit.remaining_length < unit.total_length:
+                unit.status = "partially_used"
+            else:
+                unit.status = "available"
+        else:
+            # For non-received order status, keep as not_available
+            unit.status = "not_available"
+    
+    # Check if usage record already exists for this part and unit
+    existing_usage = db.query(RawMaterialUsageModel).filter(
+        RawMaterialUsageModel.raw_material_unit_id == unit_id,
+        RawMaterialUsageModel.part_id == part_id
+    ).first()
+    
+    if existing_usage:
+        # Update existing usage record instead of creating new one
+        existing_usage.used_length += required_length
+        usage = existing_usage
+        db.add(usage)
+        # Accumulate required_length in parts table for total
+        part.required_length += required_length
+    else:
+        # Create new usage record
+        usage = RawMaterialUsageModel(
+            raw_material_unit_id=unit_id,
+            part_id=part_id,
+            used_length=required_length
+        )
+        db.add(usage)
+        # Set required_length to new value for new assignment
+        part.required_length = required_length
+    
+    # 🔥 IMPORTANT: Update part with unit tracking information
+    part.raw_material_unit_id = unit_id  # Store the specific unit
+    part.raw_material_id = unit.stock.material_id  # Store the material ID
+    
     db.commit()
-    return {"message": "Stock item deleted successfully"}
+    db.refresh(usage)
+    
+    # Return with details
+    result = {
+        "id": usage.id,
+        "raw_material_unit_id": usage.raw_material_unit_id,
+        "part_id": usage.part_id,
+        "used_length": usage.used_length,
+        "created_at": usage.created_at,
+        "part_name": part.part_name,
+        "part_number": part.part_number,
+        "unit_details": {
+            "id": unit.id,
+            "stock_id": unit.stock_id,
+            "total_length": unit.total_length,
+            "remaining_length": unit.remaining_length,
+            "status": unit.status,
+            "material_name": unit.stock.material.material_name if unit.stock and unit.stock.material else None
+        }
+    }
+    
+    return result
+
+
+@router.delete("/parts/{part_id}/unlink-material")
+def unlink_material_from_part(part_id: int, db: Session = Depends(get_db)):
+    """Unlink material from part - restore unit length and delete part/usage details"""
+    # Get part
+    part = db.query(PartModel).filter(PartModel.id == part_id).first()
+    if not part:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Part with id {part_id} not found"
+        )
+    
+    if not part.raw_material_unit_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Part {part_id} has no material assigned"
+        )
+    
+    # Get the unit
+    unit = db.query(RawMaterialUnitModel).filter(
+        RawMaterialUnitModel.id == part.raw_material_unit_id
+    ).first()
+    
+    if not unit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unit {part.raw_material_unit_id} not found"
+        )
+    
+    # Get usage record
+    usage = db.query(RawMaterialUsageModel).filter(
+        RawMaterialUsageModel.raw_material_unit_id == part.raw_material_unit_id,
+        RawMaterialUsageModel.part_id == part_id
+    ).first()
+    
+    if usage:
+        # Restore unit's remaining length
+        unit.remaining_length += usage.used_length
+        
+        # Update unit status - BUT only for general stock
+        # For order stock, status is controlled by order_status, not by unlink
+        if unit.stock and unit.stock.source_type == 'general':
+            if unit.remaining_length == unit.total_length:
+                unit.status = "available"
+            elif unit.remaining_length > 0:
+                unit.status = "partially_used"
+        elif unit.stock and unit.stock.source_type == 'order':
+            # For order stock, status is controlled by order_status
+            # Keep the status based on the stock's order_status
+            if unit.stock.order_status == 'received':
+                if unit.remaining_length == unit.total_length:
+                    unit.status = "available"
+                elif unit.remaining_length > 0:
+                    unit.status = "partially_used"
+                else:
+                    unit.status = "exhausted"
+            else:
+                # For non-received order status, keep as not_available
+                unit.status = "not_available"
+        
+        # Delete usage record
+        db.delete(usage)
+    
+    # Clear part details
+    part.raw_material_unit_id = None
+    part.raw_material_id = None
+    part.required_length = None
+    
+    db.commit()
+    
+    return {"message": f"Material unlinked from part {part_id} successfully"}
+
+
+@router.get("/usage/", response_model=List[RawMaterialUsageWithDetails])
+def get_material_usage(
+    part_id: int = None,
+    unit_id: int = None,
+    db: Session = Depends(get_db)
+):
+    """Get material usage records with optional filtering"""
+    query = db.query(RawMaterialUsageModel).options(
+        joinedload(RawMaterialUsageModel.unit).joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.material),
+        joinedload(RawMaterialUsageModel.part)
+    )
+    
+    if part_id is not None:
+        query = query.filter(RawMaterialUsageModel.part_id == part_id)
+    
+    if unit_id is not None:
+        query = query.filter(RawMaterialUsageModel.raw_material_unit_id == unit_id)
+    
+    usages = query.order_by(RawMaterialUsageModel.created_at.desc()).all()
+    
+    result = []
+    for usage in usages:
+        usage_dict = {
+            "id": usage.id,
+            "raw_material_unit_id": usage.raw_material_unit_id,
+            "part_id": usage.part_id,
+            "used_length": usage.used_length,
+            "created_at": usage.created_at,
+            "part_name": usage.part.part_name if usage.part else None,
+            "part_number": usage.part.part_number if usage.part else None,
+            "unit_details": {
+                "id": usage.unit.id,
+                "stock_id": usage.unit.stock_id,
+                "total_length": usage.unit.total_length,
+                "remaining_length": usage.unit.remaining_length,
+                "status": usage.unit.status,
+                "material_name": usage.unit.stock.material.material_name if usage.unit.stock and usage.unit.stock.material else None
+            } if usage.unit else None
+        }
+        result.append(usage_dict)
+    
+    return result
+
+
+@router.get("/parts/{part_id}/material-usage", response_model=List[RawMaterialUsageWithDetails])
+def get_part_material_usage(part_id: int, db: Session = Depends(get_db)):
+    """Get all material usage for a specific part"""
+    return get_material_usage(part_id=part_id, db=db)
+
+
+@router.get("/stock/{stock_id}/available-units", response_model=List[RawMaterialUnitWithDetails])
+def get_available_units_for_stock(stock_id: int, db: Session = Depends(get_db)):
+    """Get available units for a specific stock item (backward compatibility)"""
+    return get_raw_material_units(stock_id=stock_id, status="available", db=db)
+
+
+@router.get("/stock/{stock_id}/units", response_model=List[RawMaterialUnitWithDetails])
+def get_all_units_for_stock(stock_id: int, status: str = None, db: Session = Depends(get_db)):
+    """Get all units for a specific stock item (optional status filter)"""
+    return get_raw_material_units(stock_id=stock_id, status=status, db=db)
+
+
+@router.get("/units/{unit_id}", response_model=RawMaterialUnitWithDetails)
+def get_unit_by_id(unit_id: int, db: Session = Depends(get_db)):
+    """Get a specific unit by ID"""
+    units = get_raw_material_units(unit_id=unit_id, db=db)
+    if not units:
+        raise HTTPException(status_code=404, detail=f"Unit {unit_id} not found")
+    return units[0]
