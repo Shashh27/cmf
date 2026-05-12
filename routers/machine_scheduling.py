@@ -2870,7 +2870,8 @@ def view_part_rescheduling_items(part_id: int, db: Session = Depends(get_db)):
         
         # Query rescheduling items for this specific part with chronological ordering, only latest versions
         reschedule_items = (
-            db.query(Rescheduling)
+            db.query(Rescheduling, Part)
+            .join(Part, Part.id == Rescheduling.part_id)
             .join(
                 latest_versions,
                 (Rescheduling.operation_id == latest_versions.c.operation_id) &
@@ -2889,6 +2890,9 @@ def view_part_rescheduling_items(part_id: int, db: Session = Depends(get_db)):
                 "id":                 item.id,
                 "operation_id":       item.operation_id,
                 "operation_number":   item.operation_number,
+                "part_id":            item.part_id,
+                "part_number":        item.part_number,
+                "part_name":          part.part_name,
                 "start_time":         item.start_time,
                 "end_time":           item.end_time,
                 "duration_hours":     round((item.end_time - item.start_time).total_seconds() / 3600, 2),
@@ -2898,7 +2902,7 @@ def view_part_rescheduling_items(part_id: int, db: Session = Depends(get_db)):
                 "status":             item.status,
                 "schedule_version":   item.schedule_version,
             }
-            for item in reschedule_items
+            for item, part in reschedule_items
         ]
 
         return {
@@ -2933,10 +2937,11 @@ def view_rescheduling_items(db: Session = Depends(get_db)):
         
         # Query rescheduling items with correct chronological ordering, only latest versions
         rows = (
-            db.query(Rescheduling, Operation, Machine, WorkCenter, OrderPartPriority)
+            db.query(Rescheduling, Operation, Machine, WorkCenter, OrderPartPriority, Part)
             .join(Operation,  Operation.id  == Rescheduling.operation_id)
             .outerjoin(Machine,    Machine.id    == Rescheduling.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Part,       Part.id       == Rescheduling.part_id)
             .outerjoin(
                 OrderPartPriority,
                 (OrderPartPriority.order_id == Rescheduling.order_id) &
@@ -2952,40 +2957,89 @@ def view_rescheduling_items(db: Session = Depends(get_db)):
             .all()
         )
 
-        result = [
-            {
-                "id":                 reschedule.id,
-                "sale_order_id":      reschedule.order_id,
-                "sale_order_number":  reschedule.order_number,
-                "part_id":            reschedule.part_id,
-                "part_number":        reschedule.part_number,
-                "priority":           priority.priority if priority else None,
-                "operation_id":       reschedule.operation_id,
-                "operation_number":   op.operation_number,
-                "operation_name":     op.operation_name,
-                "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
-                "machine_id":         reschedule.machine_id,
-                "machine_make":       machine.make if machine else None,
-                "machine_model":      machine.model if machine else None,
-                "work_center_id":     wc.id if wc else None,
-                "work_center_name":   wc.work_center_name if wc else None,
-                "work_center_code":   wc.code if wc else None,
-                "start_time":         reschedule.start_time,
-                "end_time":           reschedule.end_time,
-                "duration_hours":     round((reschedule.end_time - reschedule.start_time).total_seconds() / 3600, 2),
-                "total_quantity":     reschedule.total_qty,
-                "completed_quantity": reschedule.completed_qty,
-                "remaining_quantity": reschedule.remaining_qty,
-                "status":             reschedule.status,
-                "schedule_version":   reschedule.schedule_version,
-            }
-            for reschedule, op, machine, wc, priority in rows
-        ]
+        # Group rescheduling items by machine for Gantt chart display
+        machines_map: Dict[int, dict] = {}
+        OUT_SOURCE_KEY = "out_source"
+
+        for reschedule, op, machine, wc, priority, part in rows:
+            if machine is None:
+                # Out-Source operation — no machine allocated
+                if OUT_SOURCE_KEY not in machines_map:
+                    machines_map[OUT_SOURCE_KEY] = {
+                        "machine_id":       None,
+                        "machine_type":     "Out-Source",
+                        "machine_make":     None,
+                        "machine_model":    None,
+                        "work_center_id":   None,
+                        "work_center_name": "Out-Source",
+                        "work_center_code": "OS",
+                        "tasks": []
+                    }
+                machines_map[OUT_SOURCE_KEY]["tasks"].append({
+                    "schedule_item_id":   reschedule.id,
+                    "sale_order_id":      reschedule.order_id,
+                    "sale_order_number":  reschedule.order_number,
+                    "part_id":            reschedule.part_id,
+                    "part_number":        reschedule.part_number,
+                    "part_name":          part.part_name,
+                    "operation_id":       reschedule.operation_id,
+                    "operation_number":   op.operation_number,
+                    "operation_name":     op.operation_name,
+                    "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": reschedule.start_time,
+                    "planned_end_time":   reschedule.end_time,
+                    "duration_hours":     round(
+                        (reschedule.end_time - reschedule.start_time)
+                        .total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity":     reschedule.total_qty,
+                    "remaining_quantity": reschedule.remaining_qty,
+                    "status":             reschedule.status,
+                })
+            else:
+                mid = machine.id
+                if mid not in machines_map:
+                    machines_map[mid] = {
+                        "machine_id":       machine.id,
+                        "machine_type":     machine.type,
+                        "machine_make":     machine.make,
+                        "machine_model":    machine.model,
+                        "work_center_id":   wc.id if wc else None,
+                        "work_center_name": wc.work_center_name if wc else None,
+                        "work_center_code": wc.code              if wc else None,
+                        "tasks": []
+                    }
+                machines_map[mid]["tasks"].append({
+                    "schedule_item_id":   reschedule.id,
+                    "sale_order_id":      reschedule.order_id,
+                    "sale_order_number":  reschedule.order_number,
+                    "part_id":            reschedule.part_id,
+                    "part_number":        reschedule.part_number,
+                    "part_name":          part.part_name,
+                    "operation_id":       reschedule.operation_id,
+                    "operation_number":   op.operation_number,
+                    "operation_name":     op.operation_name,
+                    "operation_type":     ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": reschedule.start_time,
+                    "planned_end_time":   reschedule.end_time,
+                    "duration_hours":     round(
+                        (reschedule.end_time - reschedule.start_time)
+                        .total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity":     reschedule.total_qty,
+                    "remaining_quantity": reschedule.remaining_qty,
+                    "status":             reschedule.status,
+                })
 
         return {
-            "message":          f"Live rescheduling items ({len(result)} operations)",
-            "total_operations": len(result),
-            "rescheduling_items": result,
+            "message":             f"Live rescheduling data for Gantt chart ({len(machines_map)} machines)",
+            "schedule_history_id": None,  # Rescheduling doesn't have schedule_history_id
+            "schedule_version":    None,  # Rescheduling doesn't have version
+            "generated_at":        None,  # Rescheduling is live data
+            "is_active":           True,  # Rescheduling is always active
+            "total_machines":      len(machines_map),
+            "total_tasks":         sum(len(v["tasks"]) for v in machines_map.values()),
+            "gantt":               list(machines_map.values()),
         }
 
     except Exception as e:
