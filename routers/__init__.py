@@ -50,6 +50,9 @@ from .maintenance import router as maintenance_router
 
 from .out_source_parts_status import router as out_source_parts_status_router
 
+from .order_tracking import router as order_tracking_router
+from .monitoring import router as monitoring_router
+from .production_analytics import router as production_analytics_router
 
 
 __all__ = [
@@ -104,7 +107,9 @@ __all__ = [
 
     "maintenance_router",
 
-    "out_source_parts_status_router"
-
+    "out_source_parts_status_router",
+    "order_tracking_router",
+    "monitoring_router",
+    "production_analytics_router",
 ]
 

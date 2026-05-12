@@ -27,3 +27,5 @@ class ProductionLog(Base):
     # Relationships
     operator = relationship("AccessUser", foreign_keys=[operator_id])
     supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
+
+

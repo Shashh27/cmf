@@ -65,7 +65,9 @@ from routers import (
     out_source_parts_status_router,
 
     maintenance_router,
-
+    order_tracking_router,
+    monitoring_router,
+    production_analytics_router,
 )
 
 # Import scheduling router
@@ -285,6 +287,11 @@ app.include_router(out_source_parts_status_router, prefix="/api/v1")
 
 app.include_router(maintenance_router, prefix="/api/v1")
 
+app.include_router(order_tracking_router, prefix="/api/v1")
+
+app.include_router(monitoring_router, prefix="/api/v1")
+app.include_router(production_analytics_router, prefix="/api/v1")
+
 app.include_router(production_logs_router, prefix="/api/v1")
 
 
@@ -435,15 +442,15 @@ def system_info():
 
             "tool_issues": "/api/v1/tool-issues",
 
-            "general_documents": "/general-documents",
+            "general_documents": "/api/v1/general-documents",
 
             "maintenance": "/api/v1/maintenance",
-        
+
+            "order_tracking": "/api/v1/order-tracking",
 
         }
 
     }
-
 
 
 
@@ -494,7 +501,7 @@ if __name__ == "__main__":
 
 
 
-#  uvicorn main:app --reload --host 172.18.7.86 --port 8000
+#  uvicorn main:app --reload --host 172.18.7.89 --port 8000
 
 
 

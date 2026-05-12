@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from DB.database import get_db
-from DB.models.maintenance import OEEIssue as OEEIssueModel, MachineBreakdown as MachineBreakdownModel, ComponentIssue as ComponentIssueModel
+from DB.models.maintenance import OEEIssue as OEEIssueModel, MachineBreakdown as MachineBreakdownModel, ComponentIssue as ComponentIssueModel, HelpSupport as HelpSupportModel
 from DB.models.configuration import Machine as MachineModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Order as OrderModel, Part as PartModel
@@ -17,6 +17,9 @@ from DB.schemas.maintenance import (
     ComponentIssue as ComponentIssueSchema,
     ComponentIssueCreate,
     ComponentIssueUpdate,
+    HelpSupport as HelpSupportSchema,
+    HelpSupportCreate,
+    HelpSupportUpdate,
 )
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
@@ -25,7 +28,7 @@ def _machine_label(m):
     if not m:
         return None
     if m.make and m.model:
-        return f"{m.make} {m.model}"
+        return f"({m.make}){m.model}"
     return m.make or m.type or f"Machine {m.id}"
 
 def _maps_for_enrichment(db: Session):
@@ -368,3 +371,139 @@ def delete_component_issue(id: int, db: Session = Depends(get_db)):
     db.delete(obj)
     db.commit()
     return {"message": "Component issue deleted"}
+
+# =======================
+# Help Support CRUD Endpoints
+# =======================
+@router.post("/help-support", response_model=HelpSupportSchema)
+def create_help_support(payload: HelpSupportCreate, db: Session = Depends(get_db)):
+    obj = HelpSupportModel(
+        machine_id=payload.machine_id,
+        reported_by=payload.reported_by,
+        production_order_id=payload.production_order_id,
+        part_id=payload.part_id,
+        description=payload.description,
+        reported_at=payload.reported_at if payload.reported_at else None,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    # Trigger notification only if creator is operator
+    try:
+        creator = db.query(AccessUserModel).filter(AccessUserModel.id == obj.reported_by).first()
+        role = (creator.role or "").strip().lower() if creator and creator.role else ""
+        if "operator" in role:
+            notif = ComponentIssuesNotificationModel(comp_issues_id=obj.id, is_ack=False)
+            db.add(notif)
+            db.commit()
+    except Exception:
+        db.rollback()
+    return {
+        "id": obj.id,
+        "machine_id": obj.machine_id,
+        "machine_name": _machine_label(db.query(MachineModel).filter(MachineModel.id == obj.machine_id).first()),
+        "reported_by": obj.reported_by,
+        "operator_name": db.query(AccessUserModel).filter(AccessUserModel.id == obj.reported_by).first().user_name if obj.reported_by else None,
+        "production_order_id": obj.production_order_id,
+        "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
+        "part_id": obj.part_id,
+        "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "description": obj.description,
+        "mc_reply": obj.mc_reply,
+        "replied_by": obj.replied_by,
+        "replied_by_name": db.query(AccessUserModel).filter(AccessUserModel.id == obj.replied_by).first().user_name if obj.replied_by else None,
+        "replied_at": obj.replied_at,
+        "reported_at": obj.reported_at,
+    }
+
+@router.get("/help-support", response_model=List[HelpSupportSchema])
+def list_help_support(db: Session = Depends(get_db)):
+    rows = db.query(HelpSupportModel).order_by(HelpSupportModel.id.asc()).all()
+    m_map, u_map, o_map, p_map = _maps_for_enrichment(db)
+    out = []
+    for r in rows:
+        out.append({
+            "id": r.id,
+            "machine_id": r.machine_id,
+            "machine_name": m_map.get(r.machine_id),
+            "reported_by": r.reported_by,
+            "operator_name": u_map.get(r.reported_by),
+            "production_order_id": r.production_order_id,
+            "order_name": o_map.get(r.production_order_id),
+            "part_id": r.part_id,
+            "part_name": p_map.get(r.part_id),
+            "description": r.description,
+            "mc_reply": r.mc_reply,
+            "replied_by": r.replied_by,
+            "replied_by_name": u_map.get(r.replied_by),
+            "replied_at": r.replied_at,
+            "reported_at": r.reported_at,
+        })
+    return out
+
+@router.get("/help-support/{id}", response_model=HelpSupportSchema)
+def get_help_support(id: int, db: Session = Depends(get_db)):
+    obj = db.query(HelpSupportModel).filter(HelpSupportModel.id == id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Help support not found")
+    return {
+        "id": obj.id,
+        "machine_id": obj.machine_id,
+        "machine_name": _machine_label(db.query(MachineModel).filter(MachineModel.id == obj.machine_id).first()),
+        "reported_by": obj.reported_by,
+        "operator_name": db.query(AccessUserModel).filter(AccessUserModel.id == obj.reported_by).first().user_name if obj.reported_by else None,
+        "production_order_id": obj.production_order_id,
+        "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
+        "part_id": obj.part_id,
+        "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "description": obj.description,
+        "mc_reply": obj.mc_reply,
+        "replied_by": obj.replied_by,
+        "replied_by_name": db.query(AccessUserModel).filter(AccessUserModel.id == obj.replied_by).first().user_name if obj.replied_by else None,
+        "replied_at": obj.replied_at,
+        "reported_at": obj.reported_at,
+    }
+
+@router.put("/help-support/{id}", response_model=HelpSupportSchema)
+def update_help_support(id: int, payload: HelpSupportUpdate, db: Session = Depends(get_db)):
+    obj = db.query(HelpSupportModel).filter(HelpSupportModel.id == id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Help support not found")
+    data = payload.dict(exclude_unset=True)
+    
+    # If mc_reply is being added and replied_at is not provided, set it to IST
+    if "mc_reply" in data and data["mc_reply"] and "replied_at" not in data:
+        from datetime import datetime, timedelta
+        # IST is UTC + 5:30
+        obj.replied_at = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        
+    for field, value in data.items():
+        setattr(obj, field, value)
+    db.commit()
+    db.refresh(obj)
+    return {
+        "id": obj.id,
+        "machine_id": obj.machine_id,
+        "machine_name": _machine_label(db.query(MachineModel).filter(MachineModel.id == obj.machine_id).first()),
+        "reported_by": obj.reported_by,
+        "operator_name": db.query(AccessUserModel).filter(AccessUserModel.id == obj.reported_by).first().user_name if obj.reported_by else None,
+        "production_order_id": obj.production_order_id,
+        "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
+        "part_id": obj.part_id,
+        "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "description": obj.description,
+        "mc_reply": obj.mc_reply,
+        "replied_by": obj.replied_by,
+        "replied_by_name": db.query(AccessUserModel).filter(AccessUserModel.id == obj.replied_by).first().user_name if obj.replied_by else None,
+        "replied_at": obj.replied_at,
+        "reported_at": obj.reported_at,
+    }
+
+@router.delete("/help-support/{id}")
+def delete_help_support(id: int, db: Session = Depends(get_db)):
+    obj = db.query(HelpSupportModel).filter(HelpSupportModel.id == id).first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Help support not found")
+    db.delete(obj)
+    db.commit()
+    return {"message": "Help support deleted"}

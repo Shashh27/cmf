@@ -6,6 +6,7 @@ from typing_extensions import Self
 
 from pydantic import BaseModel, field_validator
 from .inventory import ToolsList
+from .scheduling import ProductionLogResponse
 
 if TYPE_CHECKING:
     from .configuration import Customer
@@ -668,6 +669,72 @@ class DocumentExtractedData(DocumentExtractedDataBase):
 # Rebuild forward references for hierarchical schemas
 PartDetails.model_rebuild()
 AssemblyDetails.model_rebuild()
+
+
+# =======================
+# Order Tracking Schemas
+# =======================
+
+class OperationTrackingStatus(BaseModel):
+    operation_id: int
+    operation_number: str
+    operation_name: str
+    status: str
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    operator_id: Optional[int] = None
+    operator_name: Optional[str] = None
+    production_logs: List[ProductionLogResponse] = []
+
+    class Config:
+        from_attributes = True
+
+
+class PartTrackingStatus(BaseModel):
+    part_id: int
+    part_name: str
+    part_number: str
+    part_type_name: Optional[str] = None
+    status: str
+    total_operations: int
+    completed_operations: int
+    pending_operations: int
+    completion_percentage: float
+    operations: List[OperationTrackingStatus] = []
+
+    class Config:
+        from_attributes = True
+
+
+class OrderTrackingStatus(BaseModel):
+    order_id: int
+    sale_order_number: str
+    customer_name: Optional[str] = None
+    product_name: Optional[str] = None
+    quantity: int
+    due_date: Optional[datetime] = None
+    status: str
+    total_parts: int
+    completed_parts: int
+    pending_parts: int
+    completion_percentage: float
+    parts: List[PartTrackingStatus] = []
+
+    class Config:
+        from_attributes = True
+
+
+class OrderTrackingSummary(BaseModel):
+    order_id: int
+    sale_order_number: str
+    total_parts: int
+    completed_parts: int
+    pending_parts: int
+    completion_percentage: float
+    overall_status: str
+
+    class Config:
+        from_attributes = True
 
 
 # =======================

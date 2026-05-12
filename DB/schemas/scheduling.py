@@ -68,3 +68,5 @@ class ProductionLogStatusUpdate(BaseModel):
     supervisor_id: Optional[int] = Field(None, description="ID of the supervisor updating the status")
     remarks: Optional[str] = Field(None, description="Supervisor remarks when updating status")
     approved_quantity: Optional[int] = Field(None, description="Quantity approved by supervisor")
+
+

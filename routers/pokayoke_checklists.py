@@ -34,7 +34,13 @@ from DB.schemas.configuration import (
     PokayokeChecklistItemWithApprovals,
     PokayokeChecklistWithItems,
     PokayokeCompletedLogWithResponses,
-    PokayokeMachineAssignmentWithChecklist
+    PokayokeMachineAssignmentWithChecklist,
+    ChecklistApprovalStatusResponse,
+    ChecklistApprovalByLog,
+    ChecklistItemApprovalStatus,
+    SimpleItemResponse,
+    SimpleLogResponse,
+    SimpleCompletedLog
 )
 
 router = APIRouter(
@@ -520,14 +526,110 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
 
 @completed_logs_router.get("/", response_model=List[PokayokeCompletedLogWithResponses])
 def get_all_completed_logs(db: Session = Depends(get_db)):
-    """Get all Pokayoke completed logs"""
+    """Get all Pokayoke completed logs.
+    
+    When there are pending items (after resubmission of rejected items),
+    only return those pending items for approval workflow.
+    """
     logs = db.query(PokayokeCompletedLog).all()
+
+    # For each log, filter item responses if there are pending items
+    for log in logs:
+        all_responses = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == log.id
+        ).all()
+
+        # Check if there are any pending items
+        pending_responses = [r for r in all_responses if r.approval_status is None]
+
+        # If there are pending items, only show pending + rejected items
+        if pending_responses:
+            log.item_responses = [r for r in all_responses if r.approval_status in [None, 'rejected']]
+
     return logs
+
+
+@completed_logs_router.get("/simple", response_model=List[SimpleCompletedLog])
+def get_all_completed_logs_simple(db: Session = Depends(get_db)):
+    """Get all Pokayoke completed logs with simplified response structure."""
+    from DB.models.access_control import AccessUser
+
+    logs = db.query(PokayokeCompletedLog).all()
+    result = []
+
+    for log in logs:
+        # Get operator name
+        operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
+        operator_name = operator.user_name if operator else 'Unknown'
+
+        # Get machine name
+        machine = db.query(Machine).filter(Machine.id == log.machine_id).first()
+        machine_name = machine.name if machine else 'Unknown'
+
+        # Get checklist name
+        checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == log.checklist_id).first()
+        checklist_name = checklist.name if checklist else 'Unknown'
+
+        # Get all item responses for this log
+        responses = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == log.id
+        ).all()
+
+        # Check if there are pending items
+        pending_responses = [r for r in responses if r.approval_status is None]
+        has_pending = len(pending_responses) > 0
+
+        # Build simplified items list
+        items_data = []
+        for response in responses:
+            # If there are pending items, only show pending + rejected
+            if has_pending:
+                if response.approval_status not in [None, 'rejected']:
+                    continue
+
+            # Get item text
+            item = db.query(PokayokeChecklistItem).filter(
+                PokayokeChecklistItem.id == response.item_id
+            ).first()
+
+            item_data = SimpleItemResponse(
+                item_id=response.item_id,
+                item_text=item.item_text if item else 'Unknown',
+                response_value=response.response_value,
+                approval_status=response.approval_status or 'pending',
+                approval_comments=response.approval_comments
+            )
+            items_data.append(item_data)
+
+        # Calculate overall status
+        overall_status = 'pending'
+        if items_data:
+            all_have_status = all(item.approval_status not in [None, 'pending'] for item in items_data)
+            if all_have_status:
+                overall_status = 'approved' if all(item.approval_status == 'approved' for item in items_data) else 'rejected'
+
+        result.append(SimpleCompletedLog(
+            log_id=log.id,
+            checklist_id=log.checklist_id,
+            checklist_name=checklist_name,
+            machine_id=log.machine_id,
+            machine_name=machine_name,
+            operator_name=operator_name,
+            completed_at=log.completed_at,
+            overall_status=overall_status,
+            items=items_data
+        ))
+
+    return result
 
 
 @completed_logs_router.get("/{log_id}", response_model=PokayokeCompletedLogWithResponses)
 def get_completed_log(log_id: int, db: Session = Depends(get_db)):
-    """Get a specific Pokayoke completed log with item responses"""
+    """Get a specific Pokayoke completed log with item responses.
+    
+    When there are pending items (after resubmission of rejected items),
+    only return those pending items for approval workflow.
+    """
     log = db.query(PokayokeCompletedLog).filter(PokayokeCompletedLog.id == log_id).first()
     if not log:
         raise HTTPException(
@@ -535,13 +637,31 @@ def get_completed_log(log_id: int, db: Session = Depends(get_db)):
             detail=f"Completed log with id {log_id} not found"
         )
     
-    # item_responses is already available via relationship in model
+    # Get all item responses for this log
+    all_responses = db.query(PokayokeItemResponse).filter(
+        PokayokeItemResponse.completed_log_id == log_id
+    ).all()
+    
+    # Check if there are any pending items (approval_status is None)
+    pending_responses = [r for r in all_responses if r.approval_status is None]
+    
+    # If there are pending items, only show those for approval
+    # This happens when operator resubmitted only rejected items
+    if pending_responses:
+        # Filter to only include pending/rejected items
+        log.item_responses = [r for r in all_responses if r.approval_status in [None, 'rejected']]
+    # else: show all responses (all have been processed)
+    
     return log
 
 
 @completed_logs_router.get("/machines/{machine_id}/logs", response_model=List[PokayokeCompletedLogWithResponses])
 def get_machine_completed_logs(machine_id: int, db: Session = Depends(get_db)):
-    """Get all completed logs for a specific machine"""
+    """Get all completed logs for a specific machine.
+
+    When there are pending items (after resubmission of rejected items),
+    only return those pending items for approval workflow.
+    """
     # Verify machine exists
     machine = db.query(Machine).filter(Machine.id == machine_id).first()
     if not machine:
@@ -549,11 +669,108 @@ def get_machine_completed_logs(machine_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Machine with id {machine_id} not found"
         )
-    
+
     logs = db.query(PokayokeCompletedLog).filter(
         PokayokeCompletedLog.machine_id == machine_id
     ).order_by(PokayokeCompletedLog.completed_at.desc()).all()
+
+    # For each log, filter item responses if there are pending items
+    for log in logs:
+        all_responses = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == log.id
+        ).all()
+
+        # Check if there are any pending items
+        pending_responses = [r for r in all_responses if r.approval_status is None]
+
+        # If there are pending items, only show pending + rejected items
+        if pending_responses:
+            log.item_responses = [r for r in all_responses if r.approval_status in [None, 'rejected']]
+
     return logs
+
+
+@completed_logs_router.get("/machines/{machine_id}/logs/simple", response_model=List[SimpleCompletedLog])
+def get_machine_completed_logs_simple(machine_id: int, db: Session = Depends(get_db)):
+    """Get all completed logs for a specific machine with simplified response structure."""
+    from DB.models.access_control import AccessUser
+
+    # Verify machine exists
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Machine with id {machine_id} not found"
+        )
+
+    machine_name = machine.name
+
+    logs = db.query(PokayokeCompletedLog).filter(
+        PokayokeCompletedLog.machine_id == machine_id
+    ).order_by(PokayokeCompletedLog.completed_at.desc()).all()
+
+    result = []
+
+    for log in logs:
+        # Get operator name
+        operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
+        operator_name = operator.user_name if operator else 'Unknown'
+
+        # Get checklist name
+        checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == log.checklist_id).first()
+        checklist_name = checklist.name if checklist else 'Unknown'
+
+        # Get all item responses for this log
+        responses = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == log.id
+        ).all()
+
+        # Check if there are pending items
+        pending_responses = [r for r in responses if r.approval_status is None]
+        has_pending = len(pending_responses) > 0
+
+        # Build simplified items list
+        items_data = []
+        for response in responses:
+            # If there are pending items, only show pending + rejected
+            if has_pending:
+                if response.approval_status not in [None, 'rejected']:
+                    continue
+
+            # Get item text
+            item = db.query(PokayokeChecklistItem).filter(
+                PokayokeChecklistItem.id == response.item_id
+            ).first()
+
+            item_data = SimpleItemResponse(
+                item_id=response.item_id,
+                item_text=item.item_text if item else 'Unknown',
+                response_value=response.response_value,
+                approval_status=response.approval_status or 'pending',
+                approval_comments=response.approval_comments
+            )
+            items_data.append(item_data)
+
+        # Calculate overall status
+        overall_status = 'pending'
+        if items_data:
+            all_have_status = all(item.approval_status not in [None, 'pending'] for item in items_data)
+            if all_have_status:
+                overall_status = 'approved' if all(item.approval_status == 'approved' for item in items_data) else 'rejected'
+
+        result.append(SimpleCompletedLog(
+            log_id=log.id,
+            checklist_id=log.checklist_id,
+            checklist_name=checklist_name,
+            machine_id=log.machine_id,
+            machine_name=machine_name,
+            operator_name=operator_name,
+            completed_at=log.completed_at,
+            overall_status=overall_status,
+            items=items_data
+        ))
+
+    return result
 
 
 @completed_logs_router.put("/{log_id}", response_model=PokayokeCompletedLogSchema)
@@ -596,7 +813,8 @@ def delete_completed_log(log_id: int, db: Session = Depends(get_db)):
 
 @completed_logs_router.post("/item-responses", response_model=PokayokeItemResponseSchema, status_code=status.HTTP_201_CREATED)
 def create_item_response(response: PokayokeItemResponseCreate, db: Session = Depends(get_db)):
-    """Create a new Pokayoke item response"""
+    """Create a new Pokayoke item response or update existing rejected response"""
+    """Create a new Pokayoke item response or update existing rejected response"""
     # Verify completed log exists
     completed_log = db.query(PokayokeCompletedLog).filter(PokayokeCompletedLog.id == response.completed_log_id).first()
     if not completed_log:
@@ -613,16 +831,66 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
             detail=f"Checklist item with id {response.item_id} not found"
         )
     
-    # Set timestamp to current IST time if not provided
+    # Check if a response already exists for this completed_log + item combination
+    existing_response = db.query(PokayokeItemResponse).filter(
+        PokayokeItemResponse.completed_log_id == response.completed_log_id,
+        PokayokeItemResponse.item_id == response.item_id
+    ).first()
+    
+    # Check if a response already exists for this completed_log + item combination
+    existing_response = db.query(PokayokeItemResponse).filter(
+        PokayokeItemResponse.completed_log_id == response.completed_log_id,
+        PokayokeItemResponse.item_id == response.item_id
+    ).first()
+    
     response_data = response.model_dump()
     if not response_data.get('timestamp'):
         response_data['timestamp'] = datetime.now(IST).replace(tzinfo=None)
     
-    db_response = PokayokeItemResponse(**response_data)
-    db.add(db_response)
-    db.commit()
-    db.refresh(db_response)
-    return db_response
+    if existing_response:
+        # Update existing response - reset approval fields for resubmission
+        existing_response.response_value = response_data['response_value']
+        existing_response.timestamp = response_data['timestamp']
+        # Reset approval status to None (pending) for resubmission
+        existing_response.approval_status = None
+        existing_response.approved_by = None
+        existing_response.approved_at = None
+        existing_response.approval_comments = None
+        # Recalculate is_confirming based on new response
+        existing_response.is_confirming = response_data['response_value'].lower() == item.expected_value.lower()
+        
+        db.commit()
+        db.refresh(existing_response)
+        return existing_response
+    else:
+        # Create new response
+        db_response = PokayokeItemResponse(**response_data)
+        db.add(db_response)
+        db.commit()
+        db.refresh(db_response)
+        return db_response
+    if existing_response:
+        # Update existing response - reset approval fields for resubmission
+        existing_response.response_value = response_data['response_value']
+        existing_response.timestamp = response_data['timestamp']
+        # Reset approval status to None (pending) for resubmission
+        existing_response.approval_status = None
+        existing_response.approved_by = None
+        existing_response.approved_at = None
+        existing_response.approval_comments = None
+        # Recalculate is_confirming based on new response
+        existing_response.is_confirming = response_data['response_value'].lower() == item.expected_value.lower()
+        
+        db.commit()
+        db.refresh(existing_response)
+        return existing_response
+    else:
+        # Create new response
+        db_response = PokayokeItemResponse(**response_data)
+        db.add(db_response)
+        db.commit()
+        db.refresh(db_response)
+        return db_response
 
 
 @completed_logs_router.get("/{log_id}/item-responses", response_model=List[PokayokeItemResponseSchema])
@@ -656,7 +924,8 @@ def get_item_response(response_id: int, db: Session = Depends(get_db)):
 
 @completed_logs_router.put("/item-responses/{response_id}", response_model=PokayokeItemResponseSchema)
 def update_item_response(response_id: int, response_update: PokayokeItemResponseUpdate, db: Session = Depends(get_db)):
-    """Update a Pokayoke item response"""
+    """Update a Pokayoke item response - resets approval status if response_value changes for resubmission"""
+    """Update a Pokayoke item response - resets approval status if response_value changes for resubmission"""
     db_response = db.query(PokayokeItemResponse).filter(PokayokeItemResponse.id == response_id).first()
     if not db_response:
         raise HTTPException(
@@ -665,8 +934,47 @@ def update_item_response(response_id: int, response_update: PokayokeItemResponse
         )
     
     update_data = response_update.model_dump(exclude_unset=True)
+    
+    # Check if response_value is being updated
+    if 'response_value' in update_data and update_data['response_value'] != db_response.response_value:
+        # Get the checklist item to recalculate is_confirming
+        item = db.query(PokayokeChecklistItem).filter(PokayokeChecklistItem.id == db_response.item_id).first()
+        if item:
+            db_response.is_confirming = update_data['response_value'].lower() == item.expected_value.lower()
+        
+        # Reset approval status for resubmission - user is editing a rejected item
+        db_response.approval_status = None
+        db_response.approved_by = None
+        db_response.approved_at = None
+        db_response.approval_comments = None
+        
+        # Update timestamp to current time
+        db_response.timestamp = datetime.now(IST).replace(tzinfo=None)
+    
+    # Update other fields
+    
+    # Check if response_value is being updated
+    if 'response_value' in update_data and update_data['response_value'] != db_response.response_value:
+        # Get the checklist item to recalculate is_confirming
+        item = db.query(PokayokeChecklistItem).filter(PokayokeChecklistItem.id == db_response.item_id).first()
+        if item:
+            db_response.is_confirming = update_data['response_value'].lower() == item.expected_value.lower()
+        
+        # Reset approval status for resubmission - user is editing a rejected item
+        db_response.approval_status = None
+        db_response.approved_by = None
+        db_response.approved_at = None
+        db_response.approval_comments = None
+        
+        # Update timestamp to current time
+        db_response.timestamp = datetime.now(IST).replace(tzinfo=None)
+    
+    # Update other fields
     for field, value in update_data.items():
-        setattr(db_response, field, value)
+        if field not in ['is_confirming', 'approval_status', 'approved_by', 'approved_at', 'approval_comments', 'timestamp']:
+            setattr(db_response, field, value)
+        if field not in ['is_confirming', 'approval_status', 'approved_by', 'approved_at', 'approval_comments', 'timestamp']:
+            setattr(db_response, field, value)
     
     db.commit()
     db.refresh(db_response)
@@ -698,9 +1006,11 @@ class ItemApprovalRequest(BaseModel):
     approval_comments: Optional[str] = None
 
 
-@completed_logs_router.post("/item-responses/{response_id}/approve", response_model=PokayokeItemResponseSchema)
+
+@completed_logs_router.put("/item-responses/{response_id}/approve", response_model=PokayokeItemResponseSchema)
 def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: Session = Depends(get_db)):
-    """Approve or reject a Pokayoke item response"""
+    """Approve or reject a Pokayoke item response using PUT endpoint"""
+    """Approve or reject a Pokayoke item response using PUT endpoint"""
     db_response = db.query(PokayokeItemResponse).filter(PokayokeItemResponse.id == response_id).first()
     if not db_response:
         raise HTTPException(
@@ -715,13 +1025,8 @@ def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: S
             detail="approval_status must be 'approved' or 'rejected'"
         )
 
-    # Get the checklist item to compare response with expected value
-    item = db.query(PokayokeChecklistItem).filter(PokayokeChecklistItem.id == db_response.item_id).first()
-    if item:
-        # Calculate is_confirming based on response value vs expected value
-        db_response.is_confirming = db_response.response_value.lower() == item.expected_value.lower()
-
-    # Update the response with approval info
+    # Update the response with approval info only (do NOT modify is_confirming)
+    # Update the response with approval info only (do NOT modify is_confirming)
     db_response.approval_status = approval.approval_status
     db_response.approved_by = approval.approved_by
     db_response.approved_at = datetime.now(IST).replace(tzinfo=None)
@@ -744,10 +1049,18 @@ def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: S
         if all_have_status and all_responses:
             # Check if any are rejected
             any_rejected = any(r.approval_status == 'rejected' for r in all_responses)
-            if any_rejected:
+            # Check if all are confirming (is_confirming is True)
+            all_confirming = all(r.is_confirming for r in all_responses)
+            
+            # all_items_passed is True only if all are approved AND all are confirming
+            if any_rejected or not all_confirming:
+            # Check if all are confirming (is_confirming is True)
+                all_confirming = all(r.is_confirming for r in all_responses)
+            
+            # all_items_passed is True only if all are approved AND all are confirming
+            if any_rejected or not all_confirming:
                 completed_log.all_items_passed = False
             else:
-                # All are approved
                 completed_log.all_items_passed = True
         # If not all have status, leave all_items_passed as None
 
@@ -756,10 +1069,17 @@ def approve_item_response(response_id: int, approval: ItemApprovalRequest, db: S
     return db_response
 
 
-@completed_logs_router.get("/checklists/{checklist_id}/approval-status", response_model=List[PokayokeChecklistItemWithApprovals])
+
+@completed_logs_router.get("/checklists/{checklist_id}/approval-status", response_model=ChecklistApprovalStatusResponse)
 def get_approval_status_by_checklist(checklist_id: int, db: Session = Depends(get_db)):
-    """Get all checklist items with their approved/rejected responses for a specific checklist"""
+    """Get approval status grouped by completed log (order) for a specific checklist.
+    
+    When there are pending items (after resubmission of rejected items),
+    only return those pending items for approval workflow.
+    """
     from DB.models.access_control import AccessUser
+    from DB.models.oms import Order, Part
+    from DB.models.oms import Order, Part
 
     # Verify checklist exists
     checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == checklist_id).first()
@@ -775,58 +1095,193 @@ def get_approval_status_by_checklist(checklist_id: int, db: Session = Depends(ge
     ).order_by(PokayokeChecklistItem.sequence_number).all()
 
     if not items:
-        return []
+        return ChecklistApprovalStatusResponse(
+            checklist_id=checklist_id,
+            checklist_name=checklist.name,
+            completed_logs=[]
+        )
+        return ChecklistApprovalStatusResponse(
+            checklist_id=checklist_id,
+            checklist_name=checklist.name,
+            completed_logs=[]
+        )
 
     # Get all completed logs for this checklist
     completed_logs = db.query(PokayokeCompletedLog).filter(
         PokayokeCompletedLog.checklist_id == checklist_id
+    ).order_by(PokayokeCompletedLog.completed_at.desc()).all()
+
+    # Build result grouped by completed log
+    completed_logs_data = []
+
+    for log in completed_logs:
+        # Get operator name
+        operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
+        operator_name = operator.user_name if operator else None
+
+        # Get all item responses for this log
+        responses = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == log.id
+        ).all()
+        
+        # Check if there are pending items (resubmission scenario)
+        pending_responses = [r for r in responses if r.approval_status is None]
+        has_pending = len(pending_responses) > 0
+
+        # Build items list for this log
+        items_data = []
+        for item in items:
+            # Find response for this item
+            item_response = next((r for r in responses if r.item_id == item.id), None)
+
+            # If there are pending items (resubmission), only show pending + rejected items
+            if has_pending:
+                if not item_response:
+                    continue  # Skip items without any response
+                if item_response.approval_status not in [None, 'rejected']:
+                    continue  # Skip already approved items
+            else:
+                # No pending items - only show items that actually have responses
+                if not item_response:
+                    continue  # Skip items without any response
+
+            if item_response:
+                # Get approver name
+                approver_name = None
+                if item_response.approved_by:
+                    approver = db.query(AccessUser).filter(AccessUser.id == item_response.approved_by).first()
+                    approver_name = approver.user_name if approver else None
+
+                item_status = ChecklistItemApprovalStatus(
+                    item_id=item.id,
+                    item_text=item.item_text,
+                    item_type=item.item_type,
+                    sequence_number=item.sequence_number,
+                    response_value=item_response.response_value,
+                    responded_by=operator_name,
+                    responded_at=item_response.timestamp,
+                    approval_status=item_response.approval_status,
+                    approved_by=approver_name,
+                    approved_at=item_response.approved_at,
+                    approval_comments=item_response.approval_comments
+                )
+                items_data.append(item_status)
+            else:
+                # Item not responded yet
+                item_status = ChecklistItemApprovalStatus(
+                    item_id=item.id,
+                    item_text=item.item_text,
+                    item_type=item.item_type,
+                    sequence_number=item.sequence_number,
+                    response_value="",
+                    responded_by=None,
+                    responded_at=None,
+                    approval_status=None,
+                    approved_by=None,
+                    approved_at=None,
+                    approval_comments=None
+                )
+                items_data.append(item_status)
+
+        # Calculate overall approval status for this log
+        overall_status = None
+        if items_data:
+            # Check if all items have approval status
+            all_have_status = all(item.approval_status is not None for item in items_data)
+            if all_have_status:
+                # If any item is rejected, overall is rejected
+                if any(item.approval_status == 'rejected' for item in items_data):
+                    overall_status = 'rejected'
+                else:
+                    overall_status = 'approved'
+            else:
+                overall_status = 'pending'
+
+        log_data = ChecklistApprovalByLog(
+            completed_log_id=log.id,
+            production_order_id=log.production_order_id,
+            part_id=log.part_id,
+            machine_id=log.machine_id,
+            operator_id=log.operator_id,
+            operator_name=operator_name,
+            completed_at=log.completed_at,
+            overall_approval_status=overall_status,
+            items=items_data
+        )
+        completed_logs_data.append(log_data)
+
+    return ChecklistApprovalStatusResponse(
+        checklist_id=checklist_id,
+        checklist_name=checklist.name,
+        completed_logs=completed_logs_data
+    )
+
+
+@completed_logs_router.get("/{log_id}/responses", response_model=SimpleLogResponse)
+def get_simple_item_responses_for_log(log_id: int, db: Session = Depends(get_db)):
+    """Get simplified item responses for a specific completed log.
+    
+    Returns a flat, easy-to-understand structure with only essential fields.
+    """
+    from DB.models.access_control import AccessUser
+    
+    # Verify completed log exists
+    log = db.query(PokayokeCompletedLog).filter(PokayokeCompletedLog.id == log_id).first()
+    if not log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Completed log with id {log_id} not found"
+        )
+    
+    # Get operator name
+    operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
+    operator_name = operator.user_name if operator else 'Unknown'
+    
+    # Get all item responses for this log
+    responses = db.query(PokayokeItemResponse).filter(
+        PokayokeItemResponse.completed_log_id == log_id
     ).all()
-
-    log_ids = [log.id for log in completed_logs] if completed_logs else []
-
-    # Build result grouped by item
-    result = []
-    for item in items:
-        item_data = {
-            "item": item,
-            "responses": []
-        }
-
-        if log_ids:
-            # Get only approved/rejected responses for this item
-            responses = db.query(PokayokeItemResponse).filter(
-                PokayokeItemResponse.completed_log_id.in_(log_ids),
-                PokayokeItemResponse.item_id == item.id,
-                PokayokeItemResponse.approval_status != None  # Only approved/rejected
-            ).all()
-
-            # Build simplified response data
-            for response in responses:
-                approver_data = None
-                if response.approved_by:
-                    approver = db.query(AccessUser).filter(AccessUser.id == response.approved_by).first()
-                    if approver:
-                        approver_data = {"user_name": approver.user_name}
-
-                response_data = {
-                    "id": response.id,
-                    "completed_log_id": response.completed_log_id,
-                    "response_value": response.response_value,
-                    "is_confirming": response.is_confirming,
-                    "timestamp": response.timestamp,
-                    "approval_status": response.approval_status,
-                    "approved_by": response.approved_by,
-                    "approved_at": response.approved_at,
-                    "approval_comments": response.approval_comments,
-                    "approver": approver_data
-                }
-                item_data["responses"].append(response_data)
-
-        # Only include items that have at least one approved/rejected response
-        if item_data["responses"]:
-            result.append(item_data)
-
-    return result
+    
+    # Check if there are pending items (resubmission scenario)
+    pending_responses = [r for r in responses if r.approval_status is None]
+    has_pending = len(pending_responses) > 0
+    
+    # Build simplified items list
+    items_data = []
+    for response in responses:
+        # If there are pending items, only show pending + rejected
+        if has_pending:
+            if response.approval_status not in [None, 'rejected']:
+                continue
+        
+        # Get item text
+        item = db.query(PokayokeChecklistItem).filter(
+            PokayokeChecklistItem.id == response.item_id
+        ).first()
+        
+        item_data = SimpleItemResponse(
+            item_id=response.item_id,
+            item_text=item.item_text if item else 'Unknown',
+            response_value=response.response_value,
+            approval_status=response.approval_status or 'pending',
+            approval_comments=response.approval_comments
+        )
+        items_data.append(item_data)
+    
+    # Calculate overall status
+    overall_status = 'pending'
+    if items_data:
+        all_have_status = all(item.approval_status not in [None, 'pending'] for item in items_data)
+        if all_have_status:
+            overall_status = 'approved' if all(item.approval_status == 'approved' for item in items_data) else 'rejected'
+    
+    return SimpleLogResponse(
+        log_id=log.id,
+        operator_name=operator_name,
+        completed_at=log.completed_at,
+        overall_status=overall_status,
+        items=items_data
+    )
 
 
 # Export both routers

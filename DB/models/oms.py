@@ -206,6 +206,8 @@ class Part(Base):
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
+
+
     qty = Column(Integer, nullable=True, default=1)  # Optional quantity field, defaults to 1
     
     size = Column(String, nullable=True)  # Size specification for the part

@@ -25,7 +25,8 @@ from .inventory import (
 from .maintenance import (
     OEEIssue,
     MachineBreakdown,
-    ComponentIssue
+    ComponentIssue,
+    HelpSupport
 )
 from .documents import (
     GeneralFolder,
@@ -38,6 +39,8 @@ from .documents import (
 from .scheduling import (
     ProductionLog
 )
+from .monitoring import MachineLiveStatus
+from .production import ShiftSummary, OEEIssue as ProductionOEEIssue
 
 __all__ = [
     "Product",
@@ -60,6 +63,7 @@ __all__ = [
     "OEEIssue",
     "MachineBreakdown",
     "ComponentIssue",
+    "HelpSupport",
     "GeneralFolder",
     "GeneralDocument",
     "MachineFolder",
@@ -67,5 +71,8 @@ __all__ = [
     "CommonFolder",
     "CommonDocument",
     "ProductionLog",
+    "MachineLiveStatus",
+    "ShiftSummary",
+    "ProductionOEEIssue",
     "Base"
 ]
