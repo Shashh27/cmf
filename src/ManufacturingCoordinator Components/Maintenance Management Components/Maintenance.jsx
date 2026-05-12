@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Card, Tabs, Table, Spin, message, Select, Button } from 'antd';
+import { Card, Tabs, Table, Spin, message, Select, Button, Modal, Input, Badge } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
+import { API_BASE_URL } from '../../Config/auth';
 
-import { API_BASE_URL } from '../Config/auth';
+const { TextArea } = Input;
 
 const formatIST = (iso) => {
   if (!iso) return '-';
@@ -50,6 +51,10 @@ const Maintenance = () => {
   const [componentPagination, setComponentPagination] = useState({ current: 1, pageSize: 10 });
   const [helpSupportPagination, setHelpSupportPagination] = useState({ current: 1, pageSize: 10 });
   const [selectedMachines, setSelectedMachines] = useState([]);
+  const [replyModalVisible, setReplyModalVisible] = useState(false);
+  const [selectedHelpRequest, setSelectedHelpRequest] = useState(null);
+  const [replyText, setReplyText] = useState('');
+  const [submittingReply, setSubmittingReply] = useState(false);
 
   const loadMaintenanceData = async () => {
     setLoading(true);
@@ -81,10 +86,56 @@ const Maintenance = () => {
     }
   };
 
-
   useEffect(() => {
     loadMaintenanceData();
   }, []);
+
+  const handleReplyClick = (record) => {
+    setSelectedHelpRequest(record);
+    setReplyText(record.mc_reply || '');
+    setReplyModalVisible(true);
+  };
+
+  const handleSendReply = async () => {
+    if (!replyText.trim()) {
+      message.warning('Please enter a reply');
+      return;
+    }
+
+    setSubmittingReply(true);
+    try {
+      const storedUser = localStorage.getItem('user');
+      const user = storedUser ? JSON.parse(storedUser) : null;
+      const repliedBy = user?.id || 1; // Fallback to 1 if no user found
+
+      const response = await fetch(`${API_BASE_URL}/maintenance/help-support/${selectedHelpRequest.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'accept': 'application/json',
+        },
+        body: JSON.stringify({
+          mc_reply: replyText,
+          replied_by: repliedBy,
+        }),
+      });
+
+      if (response.ok) {
+        message.success('Reply sent successfully');
+        setReplyModalVisible(false);
+        setReplyText('');
+        loadMaintenanceData();
+      } else {
+        const errorData = await response.json();
+        message.error(errorData.detail || 'Failed to send reply');
+      }
+    } catch (error) {
+      console.error('Error sending reply:', error);
+      message.error('An error occurred while sending the reply');
+    } finally {
+      setSubmittingReply(false);
+    }
+  };
 
   const machineOptions = useMemo(() => {
     const names = new Set();
@@ -113,6 +164,10 @@ const Maintenance = () => {
     if (selectedMachines.length === 0) return helpSupport;
     return helpSupport.filter(item => selectedMachines.includes(item.machine_name));
   }, [helpSupport, selectedMachines]);
+
+  const getNewHelpRequestsCount = () => {
+    return helpSupport.filter(item => !item.mc_reply).length;
+  };
 
   const oeeColumns = [
     { title: 'Sl No', key: 'sl', width: 70, render: (_, __, idx) => (oeePagination.current - 1) * oeePagination.pageSize + idx + 1 },
@@ -274,25 +329,26 @@ const Maintenance = () => {
       render: (v) => formatIST(v),
     },
     {
-      title: 'Replied',
+      title: 'Reply',
       dataIndex: 'mc_reply',
       key: 'mc_reply',
       width: 180,
       render: (v) => v || '-',
     },
     {
-      title: 'Replied By',
-      dataIndex: 'replied_by_name',
-      key: 'replied_by_name',
-      width: 120,
-      render: (v) => v || '-',
-    },
-    {
-      title: 'Replied At',
-      dataIndex: 'replied_at',
-      key: 'replied_at',
-      width: 140,
-      render: (v) => v ? formatIST(v) : '-',
+      title: 'Action',
+      key: 'action',
+      width: 100,
+      fixed: 'right',
+      render: (_, record) => (
+        <Button 
+          type="primary" 
+          size="small" 
+          onClick={() => handleReplyClick(record)}
+        >
+          {record.mc_reply ? 'Edit Reply' : 'Reply'}
+        </Button>
+      ),
     },
   ];
 
@@ -374,7 +430,17 @@ const Maintenance = () => {
     },
     {
       key: 'help-support',
-      label: 'Help & Support',
+      label: (
+        <span>
+          <Badge 
+            count={getNewHelpRequestsCount()} 
+            offset={[8, -2]} 
+            style={{ backgroundColor: '#faad14' }}
+          >
+            <span>Help & Support</span>
+          </Badge>
+        </span>
+      ),
       children: (
         <div className="maintenance-tab-content">
           {loading ? (
@@ -436,6 +502,31 @@ const Maintenance = () => {
         />
       </Card>
 
+      <Modal
+        title={selectedHelpRequest?.mc_reply ? "Edit Reply" : "Reply to Help Request"}
+        open={replyModalVisible}
+        onOk={handleSendReply}
+        onCancel={() => setReplyModalVisible(false)}
+        confirmLoading={submittingReply}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 16 }}>
+          <strong>Operator Description:</strong>
+          <div style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+            {selectedHelpRequest?.description}
+          </div>
+        </div>
+        <div>
+          <strong>Your Reply:</strong>
+          <TextArea
+            rows={4}
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            placeholder="Type your reply here..."
+            style={{ marginTop: 8 }}
+          />
+        </div>
+      </Modal>
     </div>
   );
 };

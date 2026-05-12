@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,Input,Tooltip,} from 'antd';
-import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,CheckOutlined,CloseOutlined,UserOutlined,} from '@ant-design/icons';
-import { API_BASE_URL } from "../Config/auth";
+import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,Input,Tooltip} from 'antd';
+import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,CheckOutlined,CloseOutlined,UserOutlined} from '@ant-design/icons';
+import { API_BASE_URL } from "../../Config/auth";
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -405,23 +405,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
 
   return (
     <div>
-      <div
-        style={{
-          marginBottom: '16px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-        }}
-      >
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            Checklist Completion Logs
-          </Title>
-          <Text type="secondary" style={{ fontSize: '14px' }}>
-            View and analyze checklist completion data
-          </Text>
-        </div>
-      </div>
+      
 
       <Card
         style={{

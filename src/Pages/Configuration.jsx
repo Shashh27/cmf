@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
-import { Table, Tabs, Button, Tag, message, Popconfirm, Tooltip, Space, Card } from "antd";
+import { Table, Tabs, Button, Tag, message, Popconfirm, Tooltip, Space, Card, Input } from "antd";
 import { EditOutlined, DeleteOutlined, PlusOutlined, EyeOutlined } from "@ant-design/icons";
 import WorkCenterModal from "../Configuration Components/WorkCenterModal";
 import Machines from "../Configuration Components/Machines";
@@ -14,6 +14,8 @@ const Configuration = () => {
   const [editingWorkCenter, setEditingWorkCenter] = useState(null);
   const [selectedWorkCenter, setSelectedWorkCenter] = useState(null);
   const [showMachines, setShowMachines] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [workCenterMachines, setWorkCenterMachines] = useState({});
 
   const getCurrentUserId = () => {
     try {
@@ -47,6 +49,38 @@ const Configuration = () => {
     }
   };
 
+  const fetchMachinesForAllWorkCenters = async () => {
+    try {
+      const machinePromises = workCenters.map(async (workCenter) => {
+        try {
+          const response = await axios.get(`${API_BASE_URL}/machines/work-center/${workCenter.id}`, {
+            params: userId != null ? { user_id: userId } : undefined,
+          });
+          return { workCenterId: workCenter.id, machines: response.data };
+        } catch (error) {
+          console.error(`Error fetching machines for work center ${workCenter.id}:`, error);
+          return { workCenterId: workCenter.id, machines: [] };
+        }
+      });
+
+      const results = await Promise.all(machinePromises);
+      const machinesMap = {};
+      results.forEach(({ workCenterId, machines }) => {
+        machinesMap[workCenterId] = machines;
+      });
+      setWorkCenterMachines(machinesMap);
+    } catch (error) {
+      console.error("Error fetching machines for work centers:", error);
+    }
+  };
+
+  // Fetch machines when there's search text and work centers are loaded
+  useEffect(() => {
+    if (searchText && workCenters.length > 0 && Object.keys(workCenterMachines).length === 0) {
+      fetchMachinesForAllWorkCenters();
+    }
+  }, [searchText, workCenters.length]);
+
   const handleEdit = (workCenter) => {
     setEditingWorkCenter(workCenter);
     setWorkCenterModalOpen(true);
@@ -78,6 +112,51 @@ const Configuration = () => {
   const handleBackToWorkCenters = () => {
     setShowMachines(false);
     setSelectedWorkCenter(null);
+  };
+
+  const filteredWorkCenters = workCenters.filter(workCenter => {
+    const searchLower = searchText.toLowerCase();
+    const machines = workCenterMachines[workCenter.id] || [];
+    
+    return (
+      workCenter.code?.toLowerCase().includes(searchLower) ||
+      workCenter.work_center_name?.toLowerCase().includes(searchLower) ||
+      workCenter.description?.toLowerCase().includes(searchLower) ||
+      // Search through machines associated with this work center
+      machines.some(machine => 
+        machine.type?.toLowerCase().includes(searchLower) ||
+        machine.make?.toLowerCase().includes(searchLower) ||
+        machine.model?.toLowerCase().includes(searchLower) ||
+        machine.cnc_controller?.toLowerCase().includes(searchLower) ||
+        machine.remarks?.toLowerCase().includes(searchLower) ||
+        machine.password?.toLowerCase().includes(searchLower)
+      )
+    );
+  });
+
+  const getRowClassName = (record) => {
+    if (!searchText) return '';
+    
+    const searchLower = searchText.toLowerCase();
+    const machines = workCenterMachines[record.id] || [];
+    
+    // Check if work center itself matches
+    const workCenterMatches = 
+      record.code?.toLowerCase().includes(searchLower) ||
+      record.work_center_name?.toLowerCase().includes(searchLower) ||
+      record.description?.toLowerCase().includes(searchLower);
+    
+    // Check if any machine matches
+    const machineMatches = machines.some(machine => 
+      machine.type?.toLowerCase().includes(searchLower) ||
+      machine.make?.toLowerCase().includes(searchLower) ||
+      machine.model?.toLowerCase().includes(searchLower) ||
+      machine.cnc_controller?.toLowerCase().includes(searchLower) ||
+      machine.remarks?.toLowerCase().includes(searchLower) ||
+      machine.password?.toLowerCase().includes(searchLower)
+    );
+    
+    return machineMatches && !workCenterMatches ? 'highlighted-row' : '';
   };
 
   const columns = [
@@ -167,6 +246,7 @@ const Configuration = () => {
           workCenter={selectedWorkCenter}
           userId={userId}
           onBack={handleBackToWorkCenters}
+          searchText={searchText}
         />
       </div>
     );
@@ -180,24 +260,34 @@ const Configuration = () => {
         <Card 
           title="Work Center" 
           extra={
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                setEditingWorkCenter(null);
-                setWorkCenterModalOpen(true);
-              }}
-            >
-              Add Work Center
-            </Button>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <Input.Search
+                placeholder="Search work centers & machines..."
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                style={{ width: 250 }}
+                allowClear
+              />
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setEditingWorkCenter(null);
+                  setWorkCenterModalOpen(true);
+                }}
+              >
+                Add Work Center
+              </Button>
+            </div>
           }
           variant="borderless"
           className="shadow-sm"
         >
           <Table
             columns={columns}
-            dataSource={workCenters}
+            dataSource={filteredWorkCenters}
             rowKey="id"
+            rowClassName={getRowClassName}
             loading={loading}
             pagination={{
               pageSize: 10,
@@ -237,6 +327,13 @@ const Configuration = () => {
         .modern-table .ant-table-tbody > tr > td {
           border-bottom: 1px solid #f0f0f0;
         }
+        .modern-table .ant-table-tbody > tr.highlighted-row > td {
+          background-color: #fff7e6 !important;
+          border-left: 3px solid #ffe7ba !important;
+        }
+        .modern-table .ant-table-tbody > tr.highlighted-row:hover > td {
+          background-color: #ffe7ba !important;
+        }
         @media (max-width: 640px) {
           .ant-tabs-nav-list {
             width: 100%;
@@ -255,7 +352,7 @@ const Configuration = () => {
           }
         }
       `}</style>
-      <h1 className="text-xl sm:text-2xl font-bold mb-3 sm:mb-4">Configuration</h1>
+     
       <Tabs 
         defaultActiveKey="work-center" 
         items={items} 

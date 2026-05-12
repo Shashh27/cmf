@@ -29,18 +29,36 @@ const ShopFloorDashboard = ({ onBack }) => {
     }
   };
 
+  const getUserRole = () => {
+    try {
+      const stored = localStorage.getItem('user');
+      if (!stored) return null;
+      const userData = JSON.parse(stored);
+      return userData.role || userData.user_role;
+    } catch { return null; }
+  };
+
   const fetchShopFloorData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const adminId = getCurrentAdminId();
-      if (!adminId) {
-        setError('No admin ID found. Please log in again.');
+      const userId = getCurrentAdminId();
+      const userRole = getUserRole();
+      const normalizedRole = (userRole || '').toLowerCase().replace(/_/g, ' ').trim();
+      
+      if (!userId) {
+        setError('No user ID found. Please log in again.');
         return;
       }
 
+      // Use manufacturing_coordinator_id for MC users, admin_id for admin users
+      const isManufacturingCoordinator = normalizedRole.includes('manufacturing coordinator') || normalizedRole === 'mc';
+      const params = isManufacturingCoordinator 
+        ? { manufacturing_coordinator_id: userId }
+        : { admin_id: userId };
+
       const response = await axios.get(`${API_BASE_URL}/orders/shop-floor/hierarchical`, {
-        params: { admin_id: adminId }
+        params
       });
       setData(response.data);
     } catch (err) {

@@ -4,7 +4,7 @@ import {
   PlusOutlined, CalendarOutlined, ReloadOutlined,
   FileTextOutlined, CloseOutlined, CheckSquareOutlined, DeleteOutlined,
 } from '@ant-design/icons';
-import { API_BASE_URL } from '../Config/auth';
+import { API_BASE_URL } from '../../Config/auth';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -606,7 +606,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           <span style={{
             fontSize: 12, fontWeight: 600, color: T.primary,
             background: T.primaryBg, borderRadius: 99, padding: '4px 12px',
-          }}>{machineLabel}</span>
+          }}>{machineName?.make}</span>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <Button

@@ -274,7 +274,9 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
                       </div>
                       <div>
                         <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Remaining</Text>
-                        <Text strong>{job.remaining_quantity || 0}</Text>
+                        <Text strong>
+                          {Math.max(0, (job.total_quantity || 0) - ((job.produced_quantity || 0) - (job.rework_quantity || 0)))}
+                        </Text>
                       </div>
                     </Col>
                   </Row>

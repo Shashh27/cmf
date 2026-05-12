@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {Table, Card, Typography, Tag, message, Button, Space,Tooltip, Empty, Grid, Modal, Input, Select} from 'antd';
+import {Table, Card, Typography, Tag, message, Button, Space,Tooltip, Empty, Grid, Modal, Input, Select, Pagination} from 'antd';
 import {SearchOutlined, CheckCircleOutlined,ClockCircleOutlined,SyncOutlined,ReloadOutlined,EditOutlined,CheckSquareOutlined,} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
@@ -15,6 +15,8 @@ const ProductionCompletion = () => {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMachines, setSelectedMachines] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   // ── Remark modal state ────────────────────────────────────────────────────
   const [remarkModal, setRemarkModal] = useState({
@@ -241,102 +243,134 @@ const ProductionCompletion = () => {
 
   // ── Mobile: stacked cards ─────────────────────────────────────────────────
   const MobileList = () => {
+    // Calculate paginated data for mobile
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    const paginatedLogs = filteredLogs.slice(startIndex, endIndex);
+    
     if (filteredLogs.length === 0) {
       return <Empty description={selectedMachines.length > 0 ? "No production logs found for selected machines" : "No production logs found for this supervisor"} />;
     }
 
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {filteredLogs.map((record) => (
-          <Card
-            key={record.id}
-            size="small"
-            style={{ borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
-            bodyStyle={{ padding: '12px 14px' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-              <div>
-                <Text strong style={{ fontSize: 14 }}>
-                  {record.operation?.product?.product_name || 'N/A'}
-                </Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Project #{record.operation?.order?.sale_order_number || 'N/A'}
-                </Text>
+      <>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {paginatedLogs.map((record) => (
+            <Card
+              key={record.id}
+              size="small"
+              style={{ borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+              bodyStyle={{ padding: '12px 14px' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                <div>
+                  <Text strong style={{ fontSize: 14 }}>
+                    {record.operation?.product?.product_name || 'N/A'}
+                  </Text>
+                  <br />
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    Project #{record.operation?.order?.sale_order_number || 'N/A'}
+                  </Text>
+                </div>
+                {getStatusTag(record.status)}
               </div>
-              {getStatusTag(record.status)}
-            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 10 }}>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Part Name</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_name || 'N/A'}</Text>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 12px', marginBottom: 10 }}>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Part Name</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_name || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Part Number</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_number || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Total Quantity</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.operation?.part?.quantity || 'N/A'} {record.operation?.part?.unit || ''}
+                  </Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Approved Quantity</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.approved_quantity !== null && record.approved_quantity !== undefined ? record.approved_quantity : '-'}
+                  </Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>{record.operator?.user_name || 'N/A'}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>From</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.from_date ? dayjs(record.from_date).format('DD-MM-YYYY') : 'N/A'}
+                    <br />{record.from_time || ''}
+                  </Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>To</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.to_date ? dayjs(record.to_date).format('DD-MM-YYYY') : 'N/A'}
+                    <br />{record.to_time || ''}
+                  </Text>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Created At</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.created_at ? dayjs(record.created_at).format('DD-MM-YYYY, HH:mm:ss') : 'N/A'}
+                  </Text>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Notes</Text>
+                  <br />
+                  <Tooltip title={record.notes || ''}>
+                    <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {record.notes || 'N/A'}
+                    </Text>
+                  </Tooltip>
+                </div>
               </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Part Number</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_number || 'N/A'}</Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Total Quantity</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.operation?.part?.quantity || 'N/A'} {record.operation?.part?.unit || ''}
-                </Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Approved Quantity</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.approved_quantity !== null && record.approved_quantity !== undefined ? record.approved_quantity : '-'}
-                </Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>{record.operator?.user_name || 'N/A'}</Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>From</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.from_date ? dayjs(record.from_date).format('DD-MM-YYYY') : 'N/A'}
-                  <br />{record.from_time || ''}
-                </Text>
-              </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 11 }}>To</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.to_date ? dayjs(record.to_date).format('DD-MM-YYYY') : 'N/A'}
-                  <br />{record.to_time || ''}
-                </Text>
-              </div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>Created At</Text>
-                <br />
-                <Text style={{ fontSize: 13 }}>
-                  {record.created_at ? dayjs(record.created_at).format('DD-MM-YYYY, HH:mm:ss') : 'N/A'}
-                </Text>
-              </div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>Notes</Text>
-                <br />
-                <Text style={{ fontSize: 13 }} title={record.notes}>
-                  {record.notes && record.notes.length > 50
-                    ? `${record.notes.substring(0, 50)}...`
-                    : record.notes || 'N/A'}
-                </Text>
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
-              <ActionButtons record={record} />
-            </div>
-          </Card>
-        ))}
-      </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid #f0f0f0', paddingTop: 8 }}>
+                <ActionButtons record={record} />
+              </div>
+            </Card>
+          ))}
+        </div>
+        
+        {/* Mobile Pagination */}
+        {filteredLogs.length > pageSize && (
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <Pagination
+              current={currentPage}
+              pageSize={pageSize}
+              total={filteredLogs.length}
+              showSizeChanger
+              showQuickJumper
+              showTotal={(total, range) => `${range[0]}-${range[1]} of ${total}`}
+              pageSizeOptions={['10', '20', '50', '100']}
+              onChange={(page, size) => {
+                setCurrentPage(page);
+                setPageSize(size);
+              }}
+              onShowSizeChange={(current, size) => {
+                setCurrentPage(1);
+                setPageSize(size);
+              }}
+              size="small"
+              simple={isMobile}
+            />
+          </div>
+        )}
+      </>
     );
   };
 
@@ -409,9 +443,11 @@ const ProductionCompletion = () => {
       dataIndex: 'notes',
       key: 'notes',
       render: (notes) => (
-        <Text style={{ fontSize: '12px' }} title={notes}>
-          {notes && notes.length > 20 ? `${notes.substring(0, 20)}...` : notes || '-'}
-        </Text>
+        <Tooltip title={notes || ''}>
+          <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxWidth: '200px' }}>
+            {notes || '-'}
+          </Text>
+        </Tooltip>
       ),
     },
     {
@@ -453,11 +489,11 @@ const ProductionCompletion = () => {
       dataIndex: 'remarks',
       key: 'remarks',
       render: (remarks) => (
-        // <Tooltip title={remarks || ''}>
-          <Text style={{ fontSize: '12px' }}>
-            {remarks && remarks.length > 25 ? `${remarks.substring(0, 25)}...` : remarks || '-'}
+        <Tooltip title={remarks || ''}>
+          <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxWidth: '200px' }}>
+            {remarks || '-'}
           </Text>
-        // </Tooltip>
+        </Tooltip>
       ),
     },
     {
@@ -559,7 +595,23 @@ const ProductionCompletion = () => {
                 <Empty description={selectedMachines.length > 0 ? "No production logs found for selected machines" : "No production logs found for this supervisor"} />
               ),
             }}
-            pagination={{ pageSize: 10 }}
+            pagination={{
+              current: currentPage,
+              pageSize: pageSize,
+              total: filteredLogs.length,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              pageSizeOptions: ['10', '20', '50', '100'],
+              onChange: (page, size) => {
+                setCurrentPage(page);
+                setPageSize(size);
+              },
+              onShowSizeChange: (current, size) => {
+                setCurrentPage(1);
+                setPageSize(size);
+              },
+            }}
             scroll={{ x: 'max-content' }}
           />
         )}

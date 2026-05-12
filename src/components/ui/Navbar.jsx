@@ -137,6 +137,7 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/inspection-results')) return 'Inspection Results';
     if (path.includes('/inventory-data')) return 'Inventory Data';
     if (path.includes('/documents')) return 'Documents';
+    if (path.includes('/leave-log')) return 'Leave Log';
     return '';
   };
 

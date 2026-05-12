@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card,Row,Col,Typography,Button,Tag,Space,DatePicker,Select,Input,Tabs } from 'antd';
+import { Card,Row,Col,Typography,Button,Tag,Space,DatePicker,Select,Input,Tabs,Badge } from 'antd';
 import { ToolOutlined,DashboardOutlined,ClockCircleOutlined,ProfileOutlined,SettingOutlined,FileTextOutlined,DownloadOutlined,WarningOutlined } from '@ant-design/icons';
 import machineImg from '../assets/machine.png';
 import PokaYokeChecklist from './PokaYokeChecklist';
@@ -8,6 +8,7 @@ import SelectJob from './SelectJob';
 import PartDocumentTab from './PartDocumentTab';
 import ProductionLog from './ProductionLog';
 import { API_BASE_URL } from '../Config/auth.js';
+import config from '../Config/config.js';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 import { message } from 'antd';
 
@@ -27,30 +28,67 @@ const Dashboard = () => {
   const [showSelectJob, setShowSelectJob] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [checklistPending, setChecklistPending] = useState(false);
+  const [rejectedChecklists, setRejectedChecklists] = useState([]);
   const [isActivated, setIsActivated] = useState(false);
   const [completedQuantity, setCompletedQuantity] = useState(0);
-  const [reworkData, setReworkData] = useState(null);
+  const [productionStats, setProductionStats] = useState({
+    totalProduced: 0,
+    totalRework: 0,
+    hasRework: false,
+    reworkRemarks: ''
+  });
+  const [latestHelpReply, setLatestHelpReply] = useState(null);
 
-  // Fetch rework data for the selected job
+  // Fetch latest help reply
+  const fetchLatestReply = async (mId) => {
+    if (!mId) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/maintenance/help-support`);
+      if (res.ok) {
+        const data = await res.json();
+        const machineReplies = data
+          .filter(item => item.machine_id === mId && item.mc_reply)
+          .sort((a, b) => b.id - a.id);
+        
+        if (machineReplies.length > 0) {
+          setLatestHelpReply(machineReplies[0]);
+        } else {
+          setLatestHelpReply(null);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching help reply:', error);
+    }
+  };
+
+  // Fetch production stats for the selected job
   const fetchReworkData = async (operationId) => {
     if (!operationId) {
-      setReworkData(null);
+      setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
       return;
     }
     
     try {
       const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
       if (response.ok) {
-        const data = await response.json();
-        // Find the rework entry (status === 'rework')
-        const reworkEntry = data.find(log => log.status === 'rework');
-        setReworkData(reworkEntry || null);
+        const logs = await response.json();
+        const stats = logs.reduce((acc, log) => {
+          acc.totalProduced += (log.produced_quantity || 0);
+          acc.totalRework += (log.rework_quantity || 0);
+          if (log.status === 'rework') {
+            acc.hasRework = true;
+            acc.reworkRemarks = log.remarks || acc.reworkRemarks;
+          }
+          return acc;
+        }, { totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
+        
+        setProductionStats(stats);
       } else {
-        setReworkData(null);
+        setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
       }
     } catch (error) {
-      console.error('Error fetching rework data:', error);
-      setReworkData(null);
+      console.error('Error fetching production stats:', error);
+      setProductionStats({ totalProduced: 0, totalRework: 0, hasRework: false, reworkRemarks: '' });
     }
   };
 
@@ -67,6 +105,7 @@ const Dashboard = () => {
         const id =
           m?.id ?? m?.machine_id ?? m?.machineId ?? m?.machine?.id ?? null;
         setMachineId(id);
+        fetchLatestReply(id);
       }
     } catch (e) {
       setMachineName('');
@@ -117,29 +156,62 @@ const Dashboard = () => {
         const completedTodayIds = new Set(
           logs
             .filter(log => new Date(log.completed_at) >= startOfToday)
-            .map(log => String(log.checklist_id))
+            .map(log => {
+              const cid = String(log.checklist_id);
+              const freq = (log.frequency || '').toLowerCase();
+              const shift = (log.shift || '').toLowerCase();
+              return `${cid}-${freq}-${shift}`;
+            })
         );
 
-        // 4. Check if all due today are completed
-        // Modified logic: Any ONE daily checklist completion satisfies the daily requirement.
-        // Weekly and Monthly checklists still require all to be completed if due.
-        
-        const dueDaily = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'daily');
-        const dueWeekly = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'weekly');
-        const dueMonthly = dueToday.filter(item => (item?.frequency || '').toLowerCase() === 'monthly');
+        // 4. Fetch approval status for each due checklist
+        const rejected = [];
+        let allApproved = true;
 
-        const isCompleted = (item) => {
-          const cid = item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id;
-          return completedTodayIds.has(String(cid));
-        };
+        for (const item of dueToday) {
+          const cid = String(item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id);
+          const freq = (item?.frequency || '').toLowerCase();
+          const shift = (item?.shift || '').toLowerCase();
+          const key = `${cid}-${freq}-${shift}`;
 
-        const dailyRequirementMet = dueDaily.length === 0 || dueDaily.some(isCompleted);
-        const weeklyRequirementMet = dueWeekly.every(isCompleted);
-        const monthlyRequirementMet = dueMonthly.every(isCompleted);
+          if (completedTodayIds.has(key)) {
+            try {
+              const approvalRes = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/checklists/${cid}/approval-status`);
+              if (approvalRes.ok) {
+                const approvalData = await approvalRes.json();
+                const logs = approvalData.completed_logs || [];
+                // Get the latest log for this machine today
+                const latestLog = logs
+                  .filter(l => l.machine_id === machineId && new Date(l.completed_at) >= startOfToday)
+                  .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at))[0];
 
-        const pending = !dailyRequirementMet || !weeklyRequirementMet || !monthlyRequirementMet;
+                if (latestLog) {
+                  if (latestLog.overall_approval_status === 'rejected') {
+                    allApproved = false;
+                    rejected.push({
+                      ...item,
+                      rejection_details: latestLog
+                    });
+                  } else if (latestLog.overall_approval_status !== 'approved') {
+                    allApproved = false; // pending or unknown
+                  }
+                } else {
+                  allApproved = false; // No log found despite being in completedTodayIds?
+                }
+              } else {
+                allApproved = false;
+              }
+            } catch (err) {
+              console.error('Error fetching approval status:', err);
+              allApproved = false;
+            }
+          } else {
+            allApproved = false; // Not completed yet
+          }
+        }
 
-        setChecklistPending(pending);
+        setRejectedChecklists(rejected);
+        setChecklistPending(!allApproved);
       } catch (error) {
         console.error('Error checking checklist status:', error);
       }
@@ -150,8 +222,12 @@ const Dashboard = () => {
 
   useEffect(() => {
     const id = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(id);
-  }, []);
+    // const replyInterval = setInterval(() => fetchLatestReply(machineId), 30000);
+    return () => {
+      clearInterval(id);
+      // clearInterval(replyInterval);
+    };
+  }, [machineId]);
 
   const handleSelectJobClick = () => {
     if (checklistPending) {
@@ -164,6 +240,11 @@ const Dashboard = () => {
 
   const handleProductionSubmit = (submittedQuantity) => {
     setCompletedQuantity(prev => prev + submittedQuantity);
+    // Re-fetch production stats to update the dashboard immediately
+    const operationId = selectedJob?.id || selectedJob?.operation_id || selectedJob?.job_id || selectedJob?.schedule_id;
+    if (operationId) {
+      fetchReworkData(operationId);
+    }
   };
 
   const hourOptions = Array.from({ length: 24 }, (_, i) => i);
@@ -206,7 +287,7 @@ const Dashboard = () => {
   ];
 
   return (
-    <div style={{ padding: '0px', background: 'transparent' }}>
+    <div style={{ padding: '16px', background: 'transparent', overflowX: 'hidden' }}>
       {/* Header */}
       <Card
         style={{
@@ -242,16 +323,10 @@ const Dashboard = () => {
               fontSize: 13,
             }}
           >
-            <span
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 9999,
-                background: '#ff4d4f',
-                display: 'inline-block',
-              }}
-            />
-            <Text>{currentTime.toLocaleString()}</Text>
+            <Text>
+              {currentTime.toLocaleDateString('en-GB').replace(/\//g, '-')}{", "}
+              {currentTime.toLocaleTimeString()}
+            </Text>
           </div>
           <Button 
             type="primary" 
@@ -264,7 +339,7 @@ const Dashboard = () => {
       </Card>
 
       {/* Top row */}
-      <Row gutter={[24, 24]} style={{ marginTop: '16px' }}>
+      <Row gutter={[16, 16]} style={{ marginTop: '16px' }}>
         <Col xs={24} lg={8}>
           <Card
             title={
@@ -274,7 +349,6 @@ const Dashboard = () => {
                   <span>Machine Status</span>
                 </Space>
                 <Space>
-                  {/* <span style={{ width: 8, height: 8, borderRadius: 9999, background: '#ff4d4f', display: 'inline-block' }} /> */}
                   <Button
                     type="link"
                     danger
@@ -317,7 +391,7 @@ const Dashboard = () => {
                   <img
                     src={machineImg}
                     alt="Machine"
-                    style={{ width: 200, height: 160, objectFit: 'contain' }}
+                    style={{ maxWidth: 200, height: 160, objectFit: 'contain' }}
                   />
                 </div>
               </div>
@@ -329,12 +403,12 @@ const Dashboard = () => {
               </div>
               <div style={{ flex: 1, background: '#EAF6FF', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
                 <Text style={{ color: '#64748b' }}>Part Count</Text>
-                <div style={{ marginTop: 6, fontWeight: 700, color: '#52C41A' }}>0</div>
+                <div style={{ marginTop: 6, fontWeight: 700, color: '#52C41A' }}>{productionStats.totalProduced || 0}</div>
               </div>
             </div>
             
             {/* Rework Information */}
-            {reworkData && (
+            {productionStats.hasRework && (
               <div style={{ 
                 marginTop: 16, 
                 background: '#FFF2E8', 
@@ -355,7 +429,7 @@ const Dashboard = () => {
                   }}>
                     <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rework Quantity</Text>
                     <div style={{ marginTop: 4, fontWeight: 700, color: '#FA8C16', fontSize: 16 }}>
-                      {reworkData.rework_quantity || 0}
+                      {productionStats.totalRework || 0}
                     </div>
                   </div>
                   <div style={{ 
@@ -371,8 +445,55 @@ const Dashboard = () => {
                       wordBreak: 'break-word',
                       maxWidth: '100%'
                     }}>
-                      {reworkData.remarks || 'No remarks'}
+                      {productionStats.reworkRemarks || 'No remarks'}
                     </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MC Reply Information */}
+            {latestHelpReply && (
+              <div style={{ 
+                marginTop: 16, 
+                background: '#F6FFED', 
+                borderRadius: 12, 
+                padding: 12, 
+                border: '1px solid #B7EB8F',
+                minHeight: 'auto'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ 
+                    width: 24, 
+                    height: 24, 
+                    borderRadius: '50%', 
+                    background: '#52C41A', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center' 
+                  }}>
+                    <SettingOutlined style={{ color: 'white', fontSize: 14 }} />
+                  </div>
+                  <Text strong style={{ color: '#389E0D', fontSize: 14 }}>MC Response</Text>
+                  {latestHelpReply.replied_at && (
+                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
+                      {new Date(latestHelpReply.replied_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  )}
+                </div>
+                <div style={{ 
+                  background: 'white', 
+                  borderRadius: 8, 
+                  padding: '8px 12px', 
+                  border: '1px solid #D9F7BE'
+                }}>
+                  <Text style={{ color: '#237804', fontSize: 13, display: 'block', fontStyle: 'italic' }}>
+                    "{latestHelpReply.mc_reply}"
+                  </Text>
+                  <div style={{ marginTop: 4, textAlign: 'right' }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      — {latestHelpReply.replied_by_name || 'Manufacturing Coordinator'}
+                    </Text>
                   </div>
                 </div>
               </div>
@@ -458,7 +579,7 @@ const Dashboard = () => {
       </Row>
 
       {/* Bottom row */}
-      <Row gutter={[24, 24]} style={{ marginTop: 24, marginBottom: 8 }}>
+      <Row gutter={[16, 16]} style={{ marginTop: 24, marginBottom: 8 }}>
         {/* Documents / Operations */}
         <Col xs={24} lg={16}>
           <PartDocumentTab 
@@ -466,6 +587,7 @@ const Dashboard = () => {
             isActivated={isActivated}
             onActivate={() => setIsActivated(true)}
             completedQuantity={completedQuantity}
+            productionStats={productionStats}
           />
         </Col>
 
@@ -474,7 +596,16 @@ const Dashboard = () => {
           <Card
             style={{ borderRadius: 16 }}
             headStyle={{ borderRadius: '16px 16px 0 0' }}
-            title="Poka Yoke & Feedback"
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Poka Yoke & Feedback</span>
+                {rejectedChecklists.length > 0 && (
+                  <Badge count={rejectedChecklists.length} offset={[10, 0]}>
+                    <FileTextOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
+                  </Badge>
+                )}
+              </div>
+            }
           >
             {/* Poka Yoke section */}
             <Button
@@ -482,12 +613,12 @@ const Dashboard = () => {
               block
               style={{
                 borderRadius: 9999,
-                background: '#1677FF',
-                borderColor: '#1677FF',
+                background: rejectedChecklists.length > 0 ? '#ff4d4f' : '#1677FF',
+                borderColor: rejectedChecklists.length > 0 ? '#ff4d4f' : '#1677FF',
               }}
               onClick={() => setShowChecklist(true)}
             >
-              Open Poka Yoke Checklist
+              {rejectedChecklists.length > 0 ? 'Redo Rejected Checklists' : 'Open Poka Yoke Checklist'}
             </Button>
             <div
               style={{
@@ -497,8 +628,31 @@ const Dashboard = () => {
                 textAlign: 'center',
               }}
             >
-              Review and complete poka yoke checkpoints
+              {rejectedChecklists.length > 0 
+                ? 'Some checklists were rejected. Please review and resubmit.' 
+                : 'Review and complete poka yoke checkpoints'}
             </div>
+
+            {/* Rejected Details */}
+            {rejectedChecklists.length > 0 && (
+              <div style={{ marginTop: 16, padding: '12px', background: '#fff1f0', borderRadius: 8, border: '1px solid #ffccc7' }}>
+                <div style={{ fontWeight: 600, color: '#cf1322', marginBottom: 8, fontSize: 13 }}>
+                  Rejected Checklists:
+                </div>
+                {rejectedChecklists.map((rc, idx) => (
+                  <div key={idx} style={{ marginBottom: idx < rejectedChecklists.length - 1 ? 8 : 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: '#851111' }}>
+                      • {rc.name || rc.title || 'Checklist'} ({rc.frequency} {rc.shift})
+                    </div>
+                    {rc.rejection_details?.items?.some(i => i.approval_status === 'rejected') && (
+                      <div style={{ fontSize: 11, color: '#ff4d4f', marginLeft: 10, fontStyle: 'italic' }}>
+                        Items rejected: {rc.rejection_details.items.filter(i => i.approval_status === 'rejected').map(i => i.item_text).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Divider */}
             <div

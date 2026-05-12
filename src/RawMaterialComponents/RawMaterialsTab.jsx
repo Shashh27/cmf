@@ -33,6 +33,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const [selectedMaterialStock, setSelectedMaterialStock] = useState(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [selectedMaterialForStock, setSelectedMaterialForStock] = useState(null);
+  const [stockPagination, setStockPagination] = useState({ current: 1, pageSize: 5 });
 
   const fetchingRawMaterials = useRef(false);
   const initializedRef = useRef(false);
@@ -61,9 +62,12 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     fetchingRawMaterials.current = true;
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`);
+      const uid = getCurrentUserId();
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/`, {
+        params: uid != null ? { admin_id: uid } : undefined,
+      });
       const materials = response.data || [];
-      
+
       // Backend already returns materials with stock status
       // No need for individual stock calls
       setRawMaterials(materials);
@@ -113,8 +117,29 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const openStockModal = (material) => {
     setSelectedMaterialForStock(material);
     setSelectedMaterialStock(null);
+    setStockPagination({ current: 1, pageSize: 5 });
     setStockModalOpen(true);
     fetchStockForMaterial(material.id);
+  };
+
+  const handleDeleteStock = async (stockId) => {
+    Modal.confirm({
+      title: 'Delete Stock',
+      content: 'This will delete the stock, all its units, usage records, and clear part references. Are you sure?',
+      okText: 'Yes, Delete',
+      okType: 'danger',
+      cancelText: 'No, Cancel',
+      onOk: async () => {
+        try {
+          await axios.delete(`${API_BASE_URL}/rawmaterials/stock/${stockId}`);
+          message.success('Stock deleted successfully!');
+          fetchStockForMaterial(selectedMaterialForStock?.id);
+        } catch (error) {
+          console.error('Error deleting stock:', error);
+          message.error(error.response?.data?.detail || 'Failed to delete stock');
+        }
+      }
+    });
   };
 
   const openCreateRawMaterial = () => {
@@ -582,7 +607,14 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
                       rowKey="id"
                       size="small"
                       bordered
-                      pagination={{ pageSize: 5, showSizeChanger: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
+                      pagination={{
+                      current: stockPagination.current,
+                      pageSize: stockPagination.pageSize,
+                      showSizeChanger: true,
+                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                      pageSizeOptions: ['5', '10', '20', '50'],
+                      onChange: (page, pageSize) => setStockPagination({ current: page, pageSize })
+                    }}
                       scroll={{ x: 1200 }}
                       columns={[
                         { title: 'Form Type', dataIndex: 'form_type', key: 'form_type', width: 100 },
@@ -606,6 +638,17 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
                         },
                         { title: 'User Name', dataIndex: 'creator_name', key: 'creator_name', minWidth: 100, render: (name) => name || '-' },
                         { title: 'Status', dataIndex: 'status', key: 'status', width: 80, render: (s) => <Tag color={s === 'available' ? 'green' : 'red'}>{s}</Tag> },
+                        { title: 'Actions', key: 'actions', width: 80, render: (_, record) => (
+                          <Tooltip title="Delete">
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<DeleteOutlined />}
+                              className="text-red-500 hover:bg-red-50"
+                              onClick={() => handleDeleteStock(record.id)}
+                            />
+                          </Tooltip>
+                        )},
                       ]}
                     />
                   </div>

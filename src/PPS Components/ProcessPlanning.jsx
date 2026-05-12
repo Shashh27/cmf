@@ -27,6 +27,8 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
   const [partOpDetails, setPartOpDetails] = useState({});
   const [partOpLoading, setPartOpLoading] = useState({});
+  const [operationStatus, setOperationStatus] = useState({});
+  const [operationStatusLoading, setOperationStatusLoading] = useState({});
   const [expandedRowKeys, setExpandedRowKeys] = useState([]);
 
   // ================================
@@ -113,11 +115,37 @@ const ProcessPlanning = ({ initialOrderId }) => {
       const res = await axios.get(`${SCHEDULING_API_BASE_URL}/scheduling/part-operation-details/${selectedOrderId}/${partId}`);
       if (res.status === 200) {
         setPartOpDetails(prev => ({ ...prev, [partId]: res.data.operations || [] }));
+        
+        // Fetch operation status for each unique operation in the response
+        const operations = res.data.operations || [];
+        const uniqueOperationIds = [...new Set(operations.map(op => op.operation_id))];
+        
+        uniqueOperationIds.forEach(operationId => {
+          if (operationId && !operationStatus[operationId]) {
+            fetchOperationStatus(operationId);
+          }
+        });
       }
     } catch {
       // ignore
     }
     setPartOpLoading(prev => ({ ...prev, [partId]: false }));
+  };
+
+  const fetchOperationStatus = async (operationId) => {
+    if (!operationId) return;
+    if (operationStatus[operationId]) return;
+
+    setOperationStatusLoading(prev => ({ ...prev, [operationId]: true }));
+    try {
+      const res = await axios.get(`http://172.18.7.85:8989/api/v1/production-logs/operation/${operationId}/status-summary`);
+      if (res.status === 200) {
+        setOperationStatus(prev => ({ ...prev, [operationId]: res.data }));
+      }
+    } catch {
+      // ignore
+    }
+    setOperationStatusLoading(prev => ({ ...prev, [operationId]: false }));
   };
 
   // ================================
@@ -285,15 +313,15 @@ const ProcessPlanning = ({ initialOrderId }) => {
   );
 
   // Fetch all part operation details for in-house parts to get start/end times
-  // useEffect(() => {
-  //   if (!selectedOrderId || inHouseParts.length === 0) return;
+  useEffect(() => {
+    if (!selectedOrderId || inHouseParts.length === 0) return;
     
-  //   inHouseParts.forEach(part => {
-  //     if (!partOpDetails[part.id]) {
-  //       fetchPartOperationDetails(part.id);
-  //     }
-  //   });
-  // }, [selectedOrderId, inHouseParts.length]);
+    inHouseParts.forEach(part => {
+      if (!partOpDetails[part.id]) {
+        fetchPartOperationDetails(part.id);
+      }
+    });
+  }, [selectedOrderId, inHouseParts.length]);
 
   const outSourceParts = useMemo(() => allParts.filter(p => p.type_name.includes("out")), [allParts]);
 
@@ -448,20 +476,51 @@ const ProcessPlanning = ({ initialOrderId }) => {
     }
 
     try {
-      await Promise.all(
+      const responses = await Promise.all(
         selectedInIds.map(pid =>
           axios.put(`${SCHEDULING_API_BASE_URL}/scheduling/update-part-status/${selectedOrderId}/${pid}?status=${status}`)
         )
       );
 
-      message.success("Parts updated");
+      // Check for specific error messages in responses
+      const errorMessages = [];
+      const successCount = responses.filter(res => res.data && !res.data.message).length;
+      
+      responses.forEach((response, index) => {
+        if (response.data && response.data.message) {
+          errorMessages.push(`Part ${selectedInIds[index]}: ${response.data.message}`);
+        }
+      });
+
+      if (errorMessages.length > 0) {
+        // Show specific error messages
+        Modal.error({
+          title: "Part Status Update Issues",
+          content: (
+            <div>
+              {errorMessages.map((msg, idx) => (
+                <div key={idx} style={{ marginBottom: 8 }}>{msg}</div>
+              ))}
+              {successCount > 0 && (
+                <div style={{ marginTop: 12, color: '#52c41a' }}>
+                  {successCount} part(s) updated successfully.
+                </div>
+              )}
+            </div>
+          ),
+          width: 600,
+        });
+      } else {
+        // All parts updated successfully
+        message.success("Parts updated successfully");
+      }
 
       await fetchActiveParts(selectedOrderId);
       await fetchOrderSummary(selectedOrderId);
       await fetchOrderPartsMetadata(selectedOrderId);
 
       setSelectedInIds([]);
-    } catch {
+    } catch (error) {
       message.error("Failed updating parts");
     }
   };
@@ -658,13 +717,18 @@ const ProcessPlanning = ({ initialOrderId }) => {
       launchedQuantity: order.launched_quantity ?? order.quantity ?? "-",
       startDate: dateOnly(order.order_date || order.start_date),
       dueDate: dateOnly(order.due_date),
-      pdc: order.pdc || order.pdc_date || "Not yet scheduled",
+      pdc: (() => {
+        const allEndTimes = Object.values(partOpDetails).flat().map(op => op.planned_end_time).filter(Boolean);
+        if (allEndTimes.length === 0) return "Not yet scheduled";
+        const latestEndTime = dayjs(allEndTimes.sort().reverse()[0]);
+        return latestEndTime.isValid() ? latestEndTime.format("DD-MM-YYYY") : "Not yet scheduled";
+      })(),
       totalActiveParts: orderPartsMetadata?.active_inhouse_parts ?? "-",
       inactiveParts: orderPartsMetadata?.inactive_inhouse_parts ?? "-",
       totalOutsourceParts: orderPartsMetadata?.total_outsource_parts ?? "-",
       totalInHousePartsCount: totalInHousePartsCount > 0 ? totalInHousePartsCount : "-",
     };
-  }, [orderDetails, orderPartsMetadata]);
+  }, [orderDetails, orderPartsMetadata, partOpDetails]);
 
   // ================================
   // UI
@@ -734,7 +798,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
                 ],
                 ["PDC", (String(summary.pdc).toLowerCase().includes("not yet")
                   ? <span key="pdc-tag" style={{ color: "#555", fontWeight: 600 }}>{summary.pdc}</span>
-                  : <span key="pdc-tag" style={{ color: "#1677FF", fontWeight: 600 }}>{summary.pdc}</span>)],
+                  : <span key="pdc-tag" style={{ color: "#555", fontWeight: 600 }}>{summary.pdc}</span>)],
                 ["Total Active Parts", summary.totalActiveParts],
                 ["Inactive Parts", summary.inactiveParts],
                 ["Total In-House Parts", summary.totalInHousePartsCount],
@@ -853,6 +917,24 @@ const ProcessPlanning = ({ initialOrderId }) => {
                         title: "End Time",
                         dataIndex: "planned_end_time",
                         render: (v) => v ? dayjs(v).format("DD-MM-YYYY, HH:mm") : "-"
+                      },
+                       {
+                        title: "Operation Status",
+                        key: "operation_status",
+                        render: (_, record) => {
+                          const statusData = operationStatus[record.operation_id];
+                          if (operationStatusLoading[record.operation_id]) {
+                            return <Spin size="small" />;
+                          }
+                          if (!statusData) {
+                            return "-";
+                          }
+                          const status = statusData.operation_status;
+                          const color = status === "completed" ? "green" : 
+                                       status === "inprogress" ? "blue" : 
+                                       status === "pending" ? "orange" : "default";
+                          return <Tag color={color}>{status?.toUpperCase() || "-"}</Tag>;
+                        }
                       },
                     ];
                     return (

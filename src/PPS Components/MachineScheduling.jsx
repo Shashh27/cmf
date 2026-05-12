@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Layout, Card, Button, Select, DatePicker, Tooltip, Tabs, message, Modal } from 'antd';
-import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined,ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
+import { Layout, Card, Button, Select, DatePicker, Tooltip, message, Modal } from 'antd';
+import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import { Timeline } from "vis-timeline";
 import { DataSet } from "vis-data";
 import "vis-timeline/styles/vis-timeline-graph2d.css";
@@ -11,16 +11,15 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 
 const { Content } = Layout;
 const { Option } = Select;
-const { TabPane } = Tabs;
 
 // ─────────────────────────────────────────────────────────────
 //  COLOUR HELPERS
 // ─────────────────────────────────────────────────────────────
 const generateDistinctColors = (count) => {
   const base = [
-    '#1890ff','#13c2c2','#52c41a','#faad14','#f5222d',
-    '#722ed1','#eb2f96','#fa8c16','#a0d911','#fadb14',
-    '#2f54eb','#fa541c','#08979c','#389e0d','#9254de',
+    '#1890ff', '#13c2c2', '#52c41a', '#faad14', '#f5222d',
+    '#722ed1', '#eb2f96', '#fa8c16', '#a0d911', '#fadb14',
+    '#2f54eb', '#fa541c', '#08979c', '#389e0d', '#9254de',
   ];
   const colors = [...base];
   while (colors.length < count) {
@@ -46,8 +45,8 @@ const getComponentColors = (operations) => {
 // ─────────────────────────────────────────────────────────────
 //  TIME HELPERS
 // ─────────────────────────────────────────────────────────────
-const getTimeAxisScale = (v) => ({ year:'month', month:'day', week:'hour', day:'hour' }[v] || 'hour');
-const getTimeAxisStep  = (v) => ({ year:1, month:1, week:3, day:3 }[v] || 1);
+const getTimeAxisScale = (v) => ({ year: 'month', month: 'day', week: 'hour', day: 'hour' }[v] || 'hour');
+const getTimeAxisStep = (v) => ({ year: 1, month: 1, week: 3, day: 3 }[v] || 1);
 
 const SHIFT_MS = 30 * 60 * 1000;
 
@@ -56,40 +55,39 @@ const getTimeRange = (viewType, dateRange, scheduleData) => {
   const allOps = scheduleData?.scheduled_operations || [];
 
   const dataMin = allOps.length
-    ? moment(Math.min(...allOps.map(o => new Date(o.start_time)))).subtract(1,'month').toDate()
-    : now.clone().subtract(1,'year').toDate();
+    ? moment(Math.min(...allOps.map(o => new Date(o.start_time)))).subtract(1, 'month').toDate()
+    : now.clone().subtract(1, 'year').toDate();
   const dataMax = allOps.length
-    ? moment(Math.max(...allOps.map(o => new Date(o.end_time)))).add(1,'month').toDate()
-    : now.clone().add(1,'year').toDate();
+    ? moment(Math.max(...allOps.map(o => new Date(o.end_time)))).add(1, 'month').toDate()
+    : now.clone().add(1, 'year').toDate();
 
   let start, end;
   if (dateRange && dateRange[0] && dateRange[1]) {
     start = moment(dateRange[0]).hour(8).minute(30).second(0).toDate();
-    end   = moment(dateRange[1]).hour(17).minute(0).second(0).toDate();
+    end = moment(dateRange[1]).hour(17).minute(0).second(0).toDate();
   } else {
     switch (viewType) {
       case 'year':
         start = now.clone().startOf('year').toDate();
-        end   = now.clone().endOf('year').toDate();
+        end = now.clone().endOf('year').toDate();
         break;
       case 'month':
         start = now.clone().startOf('month').toDate();
-        end   = now.clone().endOf('month').toDate();
+        end = now.clone().endOf('month').toDate();
         break;
       case 'day':
         start = now.clone().startOf('day').hour(8).minute(30).toDate();
-        end   = now.clone().endOf('day').hour(17).minute(0).toDate();
+        end = now.clone().endOf('day').hour(17).minute(0).toDate();
         break;
       case 'week':
       default:
         start = now.clone().startOf('isoWeek').hour(8).minute(30).toDate();
-        end   = now.clone().startOf('isoWeek').add(4,'days').hour(17).minute(0).toDate();
+        end = now.clone().startOf('isoWeek').add(4, 'days').hour(17).minute(0).toDate();
     }
   }
 
-  // Shift start/end forward for 8:30 grid alignment
   start = new Date(start.getTime() + SHIFT_MS);
-  end   = new Date(end.getTime() + SHIFT_MS);
+  end = new Date(end.getTime() + SHIFT_MS);
 
   return { start, end, dataMin, dataMax };
 };
@@ -98,21 +96,21 @@ const getTimeRange = (viewType, dateRange, scheduleData) => {
 //  ComponentLegend
 // ─────────────────────────────────────────────────────────────
 const ComponentLegend = ({ componentColors, title, onToggle, active }) => (
-  <div style={{ marginTop:12, padding:'10px 14px', background:'#fafafa', borderRadius:6, border:'1px solid #f0f0f0' }}>
-    <div style={{ fontWeight:600, fontSize:13, marginBottom:8 }}>{title}</div>
-    <div style={{ display:'flex', flexWrap:'wrap', gap:10 }}>
+  <div style={{ marginTop: 12, padding: '10px 14px', background: '#fafafa', borderRadius: 6, border: '1px solid #f0f0f0' }}>
+    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{title}</div>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
       {Object.entries(componentColors).map(([po, c]) => (
         <span
           key={po}
           onClick={() => onToggle && onToggle(po)}
           style={{
-            display:'inline-flex', alignItems:'center', gap:6,
-            cursor:'pointer', fontSize:12,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            cursor: 'pointer', fontSize: 12,
             opacity: !active || active.length === 0 || active.includes(po) ? 1 : 0.35,
-            transition:'opacity .2s',
+            transition: 'opacity .2s',
           }}
         >
-          <span style={{ width:13, height:13, borderRadius:3, flexShrink:0, background:c.backgroundColor, display:'inline-block' }} />
+          <span style={{ width: 13, height: 13, borderRadius: 3, flexShrink: 0, background: c.backgroundColor, display: 'inline-block' }} />
           {po}
         </span>
       ))}
@@ -130,27 +128,27 @@ const MachineScheduling = () => {
     component_status: {},
   });
 
-  const [viewType,                 setViewType]                 = useState('week');
-  const [dateRange,                setDateRange]                = useState(null);
-  const [selectedMachines,         setSelectedMachines]         = useState([]);
-  const [selectedComponents,       setSelectedComponents]       = useState([]);
+  const [viewType, setViewType] = useState('week');
+  const [dateRange, setDateRange] = useState(null);
+  const [selectedMachines, setSelectedMachines] = useState([]);
+  const [selectedComponents, setSelectedComponents] = useState([]);
   const [selectedProductionOrders, setSelectedProductionOrders] = useState([]);
-  const [componentColors,          setComponentColors]          = useState({});
-  const [orders,                   setOrders]                   = useState([]);
-  const [parts,                    setParts]                    = useState([]);
-  const [selectedProjectId,        setSelectedProjectId]        = useState(null);
-  const [helpOpen,                 setHelpOpen]                 = useState(false);
-  const [updateModalOpen,          setUpdateModalOpen]          = useState(false);
-  const [updateScheduleLoading,    setUpdateScheduleLoading]    = useState(false);
-  const [skippedData,              setSkippedData]              = useState({
+  const [componentColors, setComponentColors] = useState({});
+  const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateScheduleLoading, setUpdateScheduleLoading] = useState(false);
+  const [skippedData, setSkippedData] = useState({
     skipped_orders: [],
     skipped_parts: [],
     parts_without_operations: []
   });
 
-  const timelineRef          = useRef(null);
+  const timelineRef = useRef(null);
   const timelineContainerRef = useRef(null);
-  const styleElementRef      = useRef(null);
+  const styleElementRef = useRef(null);
 
   const fetchSchedule = async () => {
     try {
@@ -160,7 +158,9 @@ const MachineScheduling = () => {
       const ops = [];
       const gantt = Array.isArray(data?.gantt) ? data.gantt : [];
       gantt.forEach(g => {
-        const machineName = g.machine_make && g.machine_model ? `(${g.machine_make}) ${g.machine_model}` : (g.machine_make || g.machine_model || '').trim();
+        const machineName = g.machine_make && g.machine_model
+          ? `(${g.machine_make}) ${g.machine_model}`
+          : (g.machine_make || g.machine_model || '').trim();
         const tasks = Array.isArray(g.tasks) ? g.tasks : [];
         tasks.forEach(t => {
           if (g.machine_id != null) {
@@ -177,10 +177,7 @@ const MachineScheduling = () => {
           }
         });
       });
-      setScheduleData(prev => ({
-        ...prev,
-        scheduled_operations: ops,
-      }));
+      setScheduleData(prev => ({ ...prev, scheduled_operations: ops }));
     } catch (e) { console.error(e); }
   };
 
@@ -195,14 +192,11 @@ const MachineScheduling = () => {
         const data = await res.json();
         setUpdateModalOpen(false);
         message.success('Schedule generated');
-        
-        // Store skipped data
         setSkippedData({
           skipped_orders: data.skipped_orders || [],
           skipped_parts: data.skipped_parts || [],
           parts_without_operations: data.parts_without_operations || []
         });
-        
         await fetchSchedule();
       } else {
         const err = await res.text().catch(() => '');
@@ -231,13 +225,9 @@ const MachineScheduling = () => {
 
   const machineMapping = useMemo(() => {
     const map = new Map();
-    availableMachines.forEach(m => {
-      map.set(m.machineId, m.machineId);
-    });
+    availableMachines.forEach(m => map.set(m.machineId, m.machineId));
     return map;
   }, [availableMachines]);
-
-  // Production order list removed with dropdown; legend uses componentColors only
 
   useEffect(() => {
     const fetchMachines = async () => {
@@ -245,17 +235,12 @@ const MachineScheduling = () => {
         const mRes = await fetch(`${API_BASE_URL}/machines/`);
         const machines = mRes.ok ? await mRes.json() : [];
         const formatted = (machines || []).map(m => {
-          const modelName = m.make && m.model ? `(${m.make}) ${m.model}` : (m.make || m.model || `Machine-${m.id}`);
-          return {
-            id: m.id,
-            name: modelName,
-            type: m.type || null,
-          };
+          const modelName = m.make && m.model
+            ? `(${m.make}) ${m.model}`
+            : (m.make || m.model || `Machine-${m.id}`);
+          return { id: m.id, name: modelName, type: m.type || null };
         });
-        setScheduleData(prev => ({
-          ...prev,
-          machines: formatted,
-        }));
+        setScheduleData(prev => ({ ...prev, machines: formatted }));
       } catch (e) { console.error(e); }
     };
     const fetchOrders = async () => {
@@ -276,19 +261,39 @@ const MachineScheduling = () => {
     return () => clearTimeout(id);
   }, []);
 
+  // ── Project selection → filter Gantt by that sale order ────
   const handleProjectChange = (orderId) => {
     setSelectedProjectId(orderId);
+    setParts([]);
+    setSelectedComponents([]);
+
+    if (!orderId) {
+      // Cleared — remove the production order filter
+      setSelectedProductionOrders([]);
+      return;
+    }
+
     const order = orders.find(o => o.id === orderId);
     const so = order?.sale_order_number;
-    setParts([]);
-    if (!so) return;
-    fetch(`${API_BASE_URL}/orders/sale-order/${so}/parts`)
-      .then(r => r.ok ? r.json() : [])
-      .then(d => {
-        const list = Array.isArray(d) ? d : (d.parts || []);
-        setParts(list);
-      })
-      .catch(() => {});
+
+    // Push the sale_order_number into the production-order filter so the
+    // Gantt immediately shows only ops that belong to this project
+    if (so) {
+      setSelectedProductionOrders([so]);
+    } else {
+      setSelectedProductionOrders([]);
+    }
+
+    // Also fetch parts for the part-number filter dropdown
+    if (so) {
+      fetch(`${API_BASE_URL}/orders/sale-order/${so}/parts`)
+        .then(r => r.ok ? r.json() : [])
+        .then(d => {
+          const list = Array.isArray(d) ? d : (d.parts || []);
+          setParts(list);
+        })
+        .catch(() => { });
+    }
   };
 
   // ── INIT TIMELINE ────────────────────────────────────────────
@@ -297,66 +302,59 @@ const MachineScheduling = () => {
       if (!timelineContainerRef.current) return;
 
       try {
-        // 1. Filter operations
         let operations = scheduleData.scheduled_operations.filter(op => {
-          const mc = selectedComponents.length === 0        || selectedComponents.includes(op.component);
-          const mo = selectedProductionOrders.length === 0  || selectedProductionOrders.includes(op.production_order);
-          const mm = selectedMachines.length === 0          || selectedMachines.includes(op.machineId);
+          const mc = selectedComponents.length === 0 || selectedComponents.includes(op.component);
+          const mo = selectedProductionOrders.length === 0 || selectedProductionOrders.includes(op.production_order);
+          const mm = selectedMachines.length === 0 || selectedMachines.includes(op.machineId);
           return mc && mo && mm;
         });
 
-        // 2. Colors for ALL operations
         const colors = getComponentColors(scheduleData.scheduled_operations);
         setComponentColors(colors);
 
-        // 3. Items
         const items = new DataSet(
           operations.map((op, index) => {
             const start = new Date(new Date(op.start_time).getTime() + SHIFT_MS);
-            const end   = new Date(new Date(op.end_time).getTime() + SHIFT_MS);
+            const end = new Date(new Date(op.end_time).getTime() + SHIFT_MS);
             return {
-              id:        index,
-              group:     op.machineId,
-              content:   `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.component}</div><div style="font-size:10px;opacity:0.85;">${op.production_order} · ${op.description}</div></div>`,
-              start:     start,
-              end:       end,
+              id: index,
+              group: op.machineId,
+              content: `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.component}</div><div style="font-size:10px;opacity:0.85;">${op.production_order} · ${op.description}</div></div>`,
+              start,
+              end,
               className: `order-${op.production_order.replace(/[^a-zA-Z0-9]/g, '-')}`,
               operation: op,
-              style:     `background-color:${colors[op.production_order].backgroundColor};border-color:${colors[op.production_order].borderColor};color:white;border-radius:4px;`,
+              style: `background-color:${colors[op.production_order].backgroundColor};border-color:${colors[op.production_order].borderColor};color:white;border-radius:4px;`,
             };
           })
         );
 
-        // 4. Groups
         const groupsArr = availableMachines
           .filter(machine => {
             const machineSelected = selectedMachines.length === 0 || selectedMachines.includes(machine.machineId);
             if (selectedComponents.length === 0 && selectedProductionOrders.length === 0) {
               return machineSelected;
             }
-            const hasComp  = selectedComponents.length === 0 ||
+            const hasComp = selectedComponents.length === 0 ||
               operations.some(op => selectedComponents.includes(op.component) && op.machineId === machine.machineId);
             const hasOrder = selectedProductionOrders.length === 0 ||
               operations.some(op => selectedProductionOrders.includes(op.production_order) && op.machineId === machine.machineId);
             return hasComp && hasOrder && machineSelected;
           })
           .map(machine => ({
-            id:        machine.machineId,
-            content:   `<div style="padding:4px 10px;font-size:13px;font-weight:500;white-space:nowrap;">${machine.displayName}</div>`,
+            id: machine.machineId,
+            content: `<div style="padding:4px 10px;font-size:13px;font-weight:500;white-space:nowrap;">${machine.displayName}</div>`,
             className: operations.some(op => op.machineId === machine.machineId) ? 'machine-with-ops' : 'machine-without-ops',
-            order:     machine.order,
+            order: machine.order,
           }));
 
         const groups = new DataSet(groupsArr);
-        const groupCount = groupsArr.length;
-        const rowHeight = 34; // Reduced from 40 for more compact view
-        const timelineHeightPx = Math.max(300, groupCount * rowHeight + 45); // Added 45 for timeline header and reduced min-height from 560
+        const rowHeight = 34;
+        const timelineHeightPx = Math.max(300, groupsArr.length * rowHeight + 28);
 
-        // 5. Dynamic styles
         if (styleElementRef.current) styleElementRef.current.remove();
         const styleEl = document.createElement('style');
         styleEl.textContent = `
-          // .vis-custom-time { background-color:#e53935!important; width:2px!important; }
           .vis-current-time { background-color:#ff9800!important; width:2px!important; }
           .vis-item { border-width:1px!important; min-height:28px!important; height:28px!important; }
           .vis-item .timeline-item { height:28px!important; }
@@ -366,41 +364,36 @@ const MachineScheduling = () => {
           .machine-without-ops { color:#aaa; }
           .machine-with-ops    { font-weight:500; }
           ${Object.entries(colors).map(([po, c]) => `
-            .order-${po.replace(/[^a-zA-Z0-9]/g,'-')} { background-color:${c.backgroundColor}!important; border-color:${c.borderColor}!important; }
-            .order-${po.replace(/[^a-zA-Z0-9]/g,'-')}:hover { background-color:${c.hoverColor}!important; }
+            .order-${po.replace(/[^a-zA-Z0-9]/g, '-')} { background-color:${c.backgroundColor}!important; border-color:${c.borderColor}!important; }
+            .order-${po.replace(/[^a-zA-Z0-9]/g, '-')}:hover { background-color:${c.hoverColor}!important; }
           `).join('')}
         `;
         document.head.appendChild(styleEl);
         styleElementRef.current = styleEl;
 
-        // 6. Options
         const timeRange = getTimeRange(viewType, dateRange, scheduleData);
         const options = {
-          stack:       false,
-          moveable:    true,
-          zoomable:    true,
-          zoomKey:     '',
+          stack: false,
+          moveable: true,
+          zoomable: true,
+          zoomKey: '',
           orientation: 'top',
-          height:      `${timelineHeightPx}px`,
-          margin: {
-            item:  { horizontal:10, vertical: 4 },
-            axis:  5,
-          },
-          start:   timeRange.start,
-          end:     timeRange.end,
+          height: `${timelineHeightPx}px`,
+          margin: { item: { horizontal: 10, vertical: 4 }, axis: 5 },
+          start: timeRange.start,
+          end: timeRange.end,
           zoomMin: 1000 * 60 * 30,
           zoomMax: 1000 * 60 * 60 * 24 * 365 * 2,
           editable: false,
           showCurrentTime: true,
           tooltip: {
-            followMouse:    true,
+            followMouse: true,
             overflowMethod: 'cap',
             template: (item) => {
               const op = item.operation;
               if (!op) return '';
-              // Subtract SHIFT_MS for display
               const displayStart = moment(op.start_time);
-              const displayEnd   = moment(op.end_time);
+              const displayEnd = moment(op.end_time);
               return `<div style="padding:10px 14px;min-width:220px;font-size:13px;line-height:1.9;background:#fff;border-radius:6px;">
                 <div><b>Production Order:</b> ${op.production_order}</div>
                 <div><b>Part Number:</b> ${op.component}</div>
@@ -414,32 +407,28 @@ const MachineScheduling = () => {
           },
           timeAxis: { scale: getTimeAxisScale(viewType), step: getTimeAxisStep(viewType) },
           format: {
-            minorLabels: (date, scale, step) => {
-              // Round to nearest hour to ensure grid alignment across all days
+            minorLabels: (date, scale) => {
               const d = moment(date).startOf('hour').subtract(30, 'minutes');
               if (scale === 'hour') return d.format('HH:mm');
-              if (scale === 'day')  return d.format('D');
+              if (scale === 'day') return d.format('D');
               if (scale === 'month') return d.format('MMM');
               return d.format('HH:mm');
             },
-            majorLabels: (date, scale, step) => {
+            majorLabels: (date, scale) => {
               const d = moment(date).startOf('hour').subtract(30, 'minutes');
               if (scale === 'hour') return d.format('ddd D MMM');
-              if (scale === 'day')  return d.format('MMMM YYYY');
+              if (scale === 'day') return d.format('MMMM YYYY');
               if (scale === 'month') return d.format('YYYY');
               return d.format('ddd D MMM');
             },
           },
           hiddenDates: [
-            // Standardize hidden periods to avoid fractional shifts on subsequent days
-            { start:'1970-01-01 00:00:00', end:'1970-01-01 09:00:00', repeat:'daily' },
-            { start:'1970-01-01 17:00:00', end:'1970-01-01 23:59:59', repeat:'daily' },
-            // Weekend hide (exact day boundaries)
-            { start:'1970-01-03 00:00:00', end:'1970-01-05 00:00:00', repeat:'weekly' },
+            { start: '1970-01-01 00:00:00', end: '1970-01-01 09:00:00', repeat: 'daily' },
+            { start: '1970-01-01 17:00:00', end: '1970-01-01 23:59:59', repeat: 'daily' },
+            { start: '1970-01-03 00:00:00', end: '1970-01-05 00:00:00', repeat: 'weekly' },
           ],
         };
 
-        // 7. Destroy old, create new
         if (timelineRef.current) {
           timelineRef.current.destroy();
           timelineRef.current = null;
@@ -447,9 +436,13 @@ const MachineScheduling = () => {
 
         const tl = new Timeline(timelineContainerRef.current, items, groups, options);
         timelineRef.current = tl;
-        tl.setWindow(timeRange.start, timeRange.end, { animation: false });
 
-        // try { tl.addCustomTime(new Date(), 'now'); } catch (e) { console.error(e); }
+        // If a project is selected, auto-fit to its operations; otherwise use default window
+        if (selectedProductionOrders.length > 0 && operations.length > 0) {
+          tl.fit({ animation: false });
+        } else {
+          tl.setWindow(timeRange.start, timeRange.end, { animation: false });
+        }
 
       } catch (err) {
         console.error('Timeline init error:', err);
@@ -471,14 +464,30 @@ const MachineScheduling = () => {
     };
   }, [scheduleData, selectedMachines, selectedComponents, selectedProductionOrders, dateRange, viewType, availableMachines, machineMapping]);
 
+  // ── Live current-time ticker (offset-corrected) ──────────────
+  useEffect(() => {
+    const updateCurrentTime = () => {
+      if (!timelineRef.current) return;
+
+    // Shift "now" forward by SHIFT_MS to match item display times
+    const shiftedNow = new Date(Date.now() + SHIFT_MS);
+    timelineRef.current.setCurrentTime(shiftedNow);
+   };
+
+    updateCurrentTime(); // run immediately on mount
+    const interval = setInterval(updateCurrentTime, 1000); // update every second
+
+    return () => clearInterval(interval);
+  }, []); // runs once, cleans up on unmount
+
   // ── Navigation ──────────────────────────────────────────────
   const handleTimelineNavigation = (direction) => {
     if (!timelineRef.current) return;
-    const win   = timelineRef.current.getWindow();
+    const win = timelineRef.current.getWindow();
     const start = moment(win.start);
-    const end   = moment(win.end);
+    const end = moment(win.end);
     const delta = direction === 'left' ? -1 : 1;
-    const unit  = { day:'day', week:'week', month:'month', year:'year' }[viewType] || 'week';
+    const unit = { day: 'day', week: 'week', month: 'month', year: 'year' }[viewType] || 'week';
     timelineRef.current.setWindow(
       start.clone().add(delta, unit).toDate(),
       end.clone().add(delta, unit).toDate(),
@@ -508,248 +517,217 @@ const MachineScheduling = () => {
   return (
     <Layout className="min-h-screen bg-gray-50 p-4">
       <Content>
-        <Card bodyStyle={{ padding:0 }} className="overflow-hidden">
-          <Tabs defaultActiveKey="machine" type="card" style={{ paddingLeft:16, paddingTop:8, marginBottom:0 }}>
-            <TabPane tab="Machine Schedule" key="machine">
+        {/* Controls */}
+        <div style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
+            <Option value="day">Daily</Option>
+            <Option value="week">Weekly</Option>
+            <Option value="month">Monthly</Option>
+            <Option value="year">Yearly</Option>
+          </Select>
 
-              {/* Controls */}
-              <div style={{ padding:'8px 16px 12px', borderBottom:'1px solid #f0f0f0', display:'flex', flexWrap:'wrap', gap:8, alignItems:'center' }}>
+          <DatePicker.RangePicker
+            size="small"
+            format="DD-MM-YYYY"
+            value={
+              dateRange
+                ? [dayjs(dateRange[0].format('YYYY-MM-DD')), dayjs(dateRange[1].format('YYYY-MM-DD'))]
+                : null
+            }
+            onChange={(vals) =>
+              setDateRange(vals
+                ? [moment(vals[0].format('YYYY-MM-DD')), moment(vals[1].format('YYYY-MM-DD'))]
+                : null
+              )
+            }
+            placeholder={['Start Date', 'End Date']}
+            style={{ width: 220 }}
+          />
 
-                <Select value={viewType} onChange={handleViewTypeChange} style={{ width:110 }} size="small">
-                  <Option value="day">Daily</Option>
-                  <Option value="week">Weekly</Option>
-                  <Option value="month">Monthly</Option>
-                  <Option value="year">Yearly</Option>
-                </Select>
+          <Select
+            mode="multiple"
+            placeholder="Select Machines"
+            showSearch
+            filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+            value={selectedMachines}
+            onChange={setSelectedMachines}
+            style={{ minWidth: 210 }} allowClear size="small" maxTagCount={1}
+          >
+            {availableMachines.map(m => (
+              <Option key={m.machineId} value={m.machineId} label={m.displayName}>
+                {m.displayName}
+              </Option>
+            ))}
+          </Select>
 
-                <Button size="small" icon={<LeftOutlined />}  onClick={() => handleTimelineNavigation('left')} />
-                <Button size="small" icon={<RightOutlined />} onClick={() => handleTimelineNavigation('right')} />
+          <Select
+            placeholder="Select Project"
+            showSearch
+            filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+            value={selectedProjectId}
+            onChange={handleProjectChange}
+            style={{ minWidth: 180 }} allowClear size="small"
+          >
+            {orders.map(o => {
+              const label = o.sale_order_number || `Order ${o.id}`;
+              return (
+                <Option key={o.id} value={o.id} label={label}>{label}</Option>
+              );
+            })}
+          </Select>
 
-                <DatePicker.RangePicker
-                  size="small"
-                  format="DD-MM-YYYY"
-                  value={
-                    dateRange
-                      ? [dayjs(dateRange[0].format('YYYY-MM-DD')), dayjs(dateRange[1].format('YYYY-MM-DD'))]
-                      : null
-                  }
-                  onChange={(vals) =>
-                    setDateRange(vals
-                      ? [moment(vals[0].format('YYYY-MM-DD')), moment(vals[1].format('YYYY-MM-DD'))]
-                      : null
-                    )
-                  }
-                  placeholder={['Start Date','End Date']}
-                  style={{ width:220 }}
-                />
+          <Select
+            mode="multiple"
+            placeholder="Select Parts"
+            showSearch
+            filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+            value={selectedComponents}
+            onChange={setSelectedComponents}
+            style={{ minWidth: 260 }} allowClear size="small" maxTagCount={1}
+          >
+            {parts.map(p => (
+              <Option key={p.id} value={p.part_number} label={`${p.part_name || ''} (${p.part_number})`}>
+                {p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number}
+              </Option>
+            ))}
+          </Select>
 
-                <Select
-                  mode="multiple" placeholder="Select Machines"
-                  showSearch
-                  filterOption={(input, option) => {
-                    const label = option?.label || '';
-                    return label.toLowerCase().includes(input.toLowerCase());
-                  }}
-                  value={selectedMachines} onChange={setSelectedMachines}
-                  style={{ minWidth:210 }} allowClear size="small" maxTagCount={1}
-                >
-                  {availableMachines.map(m => (
-                    <Option key={m.machineId} value={m.machineId} label={m.displayName}>
-                      {m.displayName}
-                    </Option>
-                  ))}
-                </Select>
+          <Button.Group size="small">
+            <Tooltip title="Zoom In">
+              <Button icon={<ZoomInOutlined />} onClick={() => timelineRef.current?.zoomIn(0.5)} />
+            </Tooltip>
+            <Tooltip title="Zoom Out">
+              <Button icon={<ZoomOutOutlined />} onClick={() => timelineRef.current?.zoomOut(0.5)} />
+            </Tooltip>
+            <Tooltip title="Fit All">
+              <Button icon={<FullscreenOutlined />} onClick={() => timelineRef.current?.fit()} />
+            </Tooltip>
+            <Button icon={<LeftOutlined />} onClick={() => handleTimelineNavigation('left')} />
+            <Button icon={<RightOutlined />} onClick={() => handleTimelineNavigation('right')} />
+          </Button.Group>
 
-                <Select
-                  placeholder="Select Project"
-                  showSearch
-                  filterOption={(input, option) => {
-                    const label = option?.label || '';
-                    return label.toLowerCase().includes(input.toLowerCase());
-                  }}
-                  value={selectedProjectId}
-                  onChange={handleProjectChange}
-                  style={{ minWidth:180 }} allowClear size="small"
-                >
-                  {orders.map(o => {
-                    const label = o.sale_order_number || `Order ${o.id}`;
-                    return (
-                      <Option key={o.id} value={o.id} label={label}>
-                        {label}
-                      </Option>
-                    );
-                  })}
-                </Select>
+          <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
+          <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
+          <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
+        </div>
 
-                <Select
-                  mode="multiple" placeholder="Select Parts"
-                  showSearch
-                  filterOption={(input, option) => {
-                    const label = option?.label || '';
-                    return label.toLowerCase().includes(input.toLowerCase());
-                  }}
-                  value={selectedComponents}
-                  onChange={setSelectedComponents}
-                  style={{ minWidth:260 }} allowClear size="small" maxTagCount={1}
-                >
-                  {parts.map(p => (
-                    <Option key={p.id} value={p.part_number} label={`${p.part_name || ''} (${p.part_number})`}>
-                      {p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number}
-                    </Option>
-                  ))}
-                </Select>
-
-                
-
-                <Button.Group size="small">
-                  <Tooltip title="Zoom In">
-                    <Button icon={<ZoomInOutlined />}    onClick={() => timelineRef.current?.zoomIn(0.5)} />
-                  </Tooltip>
-                  <Tooltip title="Zoom Out">
-                    <Button icon={<ZoomOutOutlined />}   onClick={() => timelineRef.current?.zoomOut(0.5)} />
-                  </Tooltip>
-                  <Tooltip title="Fit All">
-                    <Button icon={<FullscreenOutlined />} onClick={() => timelineRef.current?.fit()} />
-                  </Tooltip>
-                </Button.Group>
-
-                <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
-
-                <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background:'#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
-                <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
-              </div>
-
-              {/* Skipped Information Box */}
-              <div style={{ padding:'0 16px 12px' }}>
-                <Card size="small" style={{ background: '#f6f8ff', border: '1px solid #d6e4ff' }}>
-                  <div style={{ display:'flex', gap:16, flexWrap:'wrap', fontSize:'12px' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ fontWeight:600, color:'#1677ff' }}>Skipped Orders:</span>
-                      <span style={{ color:'#666' }}>
-                        {skippedData.skipped_orders.length > 0 
-                          ? skippedData.skipped_orders.join(', ')
-                          : 'No orders skipped'
-                        }
-                      </span>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ fontWeight:600, color:'#1677ff' }}>Skipped Parts:</span>
-                      <span style={{ color:'#666' }}>
-                        {skippedData.skipped_parts.length > 0 
-                          ? skippedData.skipped_parts.join(', ')
-                          : 'No parts skipped'
-                        }
-                      </span>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ fontWeight:600, color:'#1677ff' }}>Parts Without Operations:</span>
-                      <span style={{ color:'#666' }}>
-                        {skippedData.parts_without_operations.length > 0 
-                          ? skippedData.parts_without_operations.map(part => part.part_number).join(', ')
-                          : 'No parts without operations'
-                        }
-                      </span>
-                    </div>
-                  </div>
-                </Card>
-              </div>
-
-              {/* Timeline - scrollable when many machines */}
-              <div style={{ padding:'12px 16px' }}>
-                <div
-                  style={{
-                    maxHeight: '70vh',
-                    overflowY: 'auto',
-                    overflowX: 'hidden',
-                    border: '1px solid #e8e8e8',
-                    borderRadius: 8,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                    background: '#fff',
-                  }}
-                >
-                  <div
-                    ref={timelineContainerRef}
-                    style={{
-                      minHeight: 300,
-                      background: '#fff',
-                    }}
-                  />
+          {/* Skipped Information Box */}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ padding: 12, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 6 }}>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Orders:</span>
+                  <span style={{ color: '#666' }}>
+                    {skippedData.skipped_orders.length > 0 ? skippedData.skipped_orders.join(', ') : 'No orders skipped'}
+                  </span>
                 </div>
-
-                {Object.keys(componentColors).length > 0 && (
-                  <ComponentLegend
-                    componentColors={componentColors}
-                    title="Production Orders"
-                    active={selectedProductionOrders}
-                    onToggle={(po) =>
-                      setSelectedProductionOrders(prev =>
-                        prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
-                      )
-                    }
-                  />
-                )}
-                <Modal
-                  title="How to Use Timeline"
-                  open={helpOpen}
-                  onCancel={() => setHelpOpen(false)}
-                  footer={[
-                    <Button key="close" onClick={() => setHelpOpen(false)}>Close</Button>
-                  ]}
-                >
-                  <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-                    <div style={{ fontWeight:600 }}>Navigation</div>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <LeftOutlined /> <RightOutlined /> <span>Use arrow buttons or drag to move</span>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <CalendarOutlined /> <span>Use date picker to jump to dates</span>
-                    </div>
-                    <div style={{ fontWeight:600, marginTop:8 }}>Zooming</div>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <ZoomInOutlined /> <span>Click "+" to zoom in</span>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <ZoomOutOutlined /> <span>Click "-" to zoom out</span>
-                    </div>
-                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                      <FullscreenOutlined /> <span>Click "Fit" to show all</span>
-                    </div>
-                    <div style={{ fontWeight:600, marginTop:8 }}>Interaction</div>
-                    <div>Click a task to view details</div>
-                    <div style={{ background:'#f6f7fb', border:'1px solid #e5e7eb', borderRadius:6, padding:10 }}>
-                      <InfoCircleOutlined style={{ marginRight:8 }} />
-                      <span>Hold CTRL and use mouse wheel to zoom at cursor position</span>
-                    </div>
-                  </div>
-                </Modal>
-                <Modal
-                  title={
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <WarningOutlined style={{ color: '#faad14', fontSize: 22 }} />
-                      Update Schedule
-                    </span>
-                  }
-                  open={updateModalOpen}
-                  onCancel={() => !updateScheduleLoading && setUpdateModalOpen(false)}
-                  footer={[
-                    <Button key="cancel" onClick={() => setUpdateModalOpen(false)} disabled={updateScheduleLoading}>
-                      Cancel
-                    </Button>,
-                    <Button key="ok" type="primary" loading={updateScheduleLoading} onClick={handleUpdateSchedule}>
-                      OK
-                    </Button>,
-                  ]}
-                  closable={!updateScheduleLoading}
-                  maskClosable={!updateScheduleLoading}
-                >
-                  <p style={{ margin: 0 }}>
-                    Do you want to generate a new schedule? Please wait while we generate the new schedule.
-                  </p>
-                </Modal>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Parts:</span>
+                  <span style={{ color: '#666' }}>
+                    {skippedData.skipped_parts.length > 0 ? skippedData.skipped_parts.join(', ') : 'No parts skipped'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontWeight: 600, color: '#1677ff' }}>Parts Without Operations:</span>
+                  <span style={{ color: '#666' }}>
+                    {skippedData.parts_without_operations.length > 0
+                      ? skippedData.parts_without_operations.map(p => p.part_number).join(', ')
+                      : 'No parts without operations'}
+                  </span>
+                </div>
               </div>
-            </TabPane>
-          </Tabs>
-        </Card>
+            </div>
+          </div>
+
+          {/* Timeline */}
+          <div>
+            <div
+              style={{
+                 height: availableMachines.length > 24 ? '70vh' : 'auto',
+                overflowY: availableMachines.length > 24 ? 'auto' : 'hidden',
+                overflowX: 'hidden',
+                border: '1px solid #e8e8e8',
+                borderRadius: 8,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                background: '#fff',
+              }}
+            >
+              <div ref={timelineContainerRef} style={{ minHeight: 300, background: '#fff' }} />
+            </div>
+          </div>
+
+            {Object.keys(componentColors).length > 0 && (
+              <ComponentLegend
+                componentColors={componentColors}
+                title="Production Orders"
+                active={selectedProductionOrders}
+                onToggle={(po) =>
+                  setSelectedProductionOrders(prev =>
+                    prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
+                  )
+                }
+              />
+            )}
+
+            {/* Help Modal */}
+            <Modal
+              title="How to Use Timeline"
+              open={helpOpen}
+              onCancel={() => setHelpOpen(false)}
+              footer={[<Button key="close" onClick={() => setHelpOpen(false)}>Close</Button>]}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontWeight: 600 }}>Navigation</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <LeftOutlined /> <RightOutlined /> <span>Use arrow buttons or drag to move</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CalendarOutlined /> <span>Use date picker to jump to dates</span>
+                </div>
+                <div style={{ fontWeight: 600, marginTop: 8 }}>Zooming</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ZoomInOutlined /> <span>Click "+" to zoom in</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <ZoomOutOutlined /> <span>Click "-" to zoom out</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <FullscreenOutlined /> <span>Click "Fit" to show all</span>
+                </div>
+                <div style={{ fontWeight: 600, marginTop: 8 }}>Interaction</div>
+                <div>Click a task to view details</div>
+                <div style={{ background: '#f6f7fb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10 }}>
+                  <InfoCircleOutlined style={{ marginRight: 8 }} />
+                  <span>Hold CTRL and use mouse wheel to zoom at cursor position</span>
+                </div>
+              </div>
+            </Modal>
+
+            {/* Update Modal */}
+            <Modal
+              title={
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <WarningOutlined style={{ color: '#faad14', fontSize: 22 }} />
+                  Update Schedule
+                </span>
+              }
+              open={updateModalOpen}
+              onCancel={() => !updateScheduleLoading && setUpdateModalOpen(false)}
+              footer={[
+                <Button key="cancel" onClick={() => setUpdateModalOpen(false)} disabled={updateScheduleLoading}>
+                  Cancel
+                </Button>,
+                <Button key="ok" type="primary" loading={updateScheduleLoading} onClick={handleUpdateSchedule}>
+                  OK
+                </Button>,
+              ]}
+              closable={!updateScheduleLoading}
+              maskClosable={!updateScheduleLoading}
+            >
+              <p style={{ margin: 0 }}>
+                Do you want to generate a new schedule? Please wait while we generate the new schedule.
+              </p>
+            </Modal>
       </Content>
     </Layout>
   );

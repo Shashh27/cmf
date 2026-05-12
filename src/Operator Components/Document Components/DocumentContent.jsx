@@ -3,8 +3,7 @@ import { Table, Empty, Typography, Button, Tag, Space, message, Modal, Select } 
 import { 
   FolderOutlined, 
   FileOutlined, 
-  EyeOutlined,
-  DownloadOutlined
+  EyeOutlined
 } from '@ant-design/icons';
 import { API_BASE_URL } from "../../Config/auth";
 
@@ -185,13 +184,6 @@ const OperatorDocumentContent = ({ selectedNode }) => {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
           <Empty description="Preview not available for this file type" />
-          <Button 
-            type="primary" 
-            icon={<DownloadOutlined />} 
-            onClick={() => handleDownloadDocument(document)}
-          >
-            Download to View
-          </Button>
         </div>
       );
     }
@@ -347,17 +339,11 @@ const OperatorDocumentContent = ({ selectedNode }) => {
             icon={<EyeOutlined style={{ color: '#1890ff' }} />}
             onClick={() => {
               if (!isPreviewable(record)) {
-                handleDownloadDocument(record);
+                message.info('Preview not available for this file type');
               } else {
                 handleViewDocument(record);
               }
             }}
-          />
-          <Button
-            type="text"
-            size="small"
-            icon={<DownloadOutlined style={{ color: '#52c41a' }} />}
-            onClick={() => handleDownloadDocument(record)}
           />
         </Space>
       ),
@@ -412,13 +398,6 @@ const OperatorDocumentContent = ({ selectedNode }) => {
           setPreviewingDocument(null);
         }}
         footer={[
-          <Button key="download" icon={<DownloadOutlined />} onClick={() => {
-            if (previewingDocument) {
-              handleDownloadDocument(previewingDocument);
-            }
-          }}>
-            Download
-          </Button>,
           <Button key="close" type="primary" onClick={() => {
             setPreviewModalVisible(false);
             setPreviewingDocument(null);
