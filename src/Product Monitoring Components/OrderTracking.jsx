@@ -206,7 +206,7 @@ const OrderTracking = () => {
       overflow: 'hidden'
     }}>
       {/* Top Header / Stats Row */}
-      <Card bodyStyle={{ padding: '12px 24px' }} style={{ borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', flexShrink: 0 }}>
+      <Card styles={{ body: { padding: '12px 24px' } }} style={{ borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', flexShrink: 0 }}>
         <Row align="middle" justify="space-between">
           <Col>
             <Space size="middle">
@@ -217,10 +217,10 @@ const OrderTracking = () => {
           {selectedOrderId && (
             <Col>
               <Space size="large">
-                <Statistic title="Total Parts" value={totalParts} valueStyle={{ fontSize: '20px' }} />
-                <Statistic title="Completed" value={completedParts} valueStyle={{ color: '#52c41a', fontSize: '20px' }} />
-                <Statistic title="In Progress" value={inProgressParts} valueStyle={{ color: '#1890ff', fontSize: '20px' }} />
-                <Statistic title="Pending" value={pendingParts} valueStyle={{ color: '#faad14', fontSize: '20px' }} />
+                <Statistic title="Total Parts" value={totalParts} styles={{ content: { fontSize: '20px' } }} />
+                <Statistic title="Completed" value={completedParts} styles={{ content: { color: '#52c41a', fontSize: '20px' } }} />
+                <Statistic title="In Progress" value={inProgressParts} styles={{ content: { color: '#1890ff', fontSize: '20px' } }} />
+                <Statistic title="Pending" value={pendingParts} styles={{ content: { color: '#faad14', fontSize: '20px' } }} />
               </Space>
             </Col>
           )}
@@ -232,8 +232,7 @@ const OrderTracking = () => {
         <Card 
           title={<Space><DatabaseOutlined /> Orders</Space>}
           style={{ width: '280px', display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }}
-          bodyStyle={{ padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-          headStyle={{ padding: '0 16px', flexShrink: 0 }}
+          styles={{ body: { padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }, header: { padding: '0 16px', flexShrink: 0 } }}
         >
           <div style={{ padding: '12px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
             <Select

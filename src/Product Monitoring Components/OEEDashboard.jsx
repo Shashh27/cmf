@@ -69,19 +69,16 @@ const OEEDashboard = () => {
   // Initialize data on component mount
   useEffect(() => {
     const initializeDashboard = async () => {
-      console.log('Initializing OEE Dashboard...');
       let currentMachines = [];
       
       try {
         const response = await axios.get(`${API_BASE_URL}/monitoring/live`);
-        console.log('Fetched machines:', response.data);
         currentMachines = response.data.map(m => ({
           machine_id: m.machine_id,
           machine_name: m.machine_name
         }));
         setMachines(currentMachines);
       } catch (error) {
-        console.error('Error fetching machines list:', error);
       }
 
       // Fetch ALL analytics in a single call
@@ -118,7 +115,6 @@ const OEEDashboard = () => {
       );
       
       const data = response.data;
-      console.log('Fetched Hierarchical OEE Data:', data);
 
       // 1. Set Overall KPI Data
       setOverallOEEData(data);
@@ -148,7 +144,6 @@ const OEEDashboard = () => {
       setShiftSummaryData(tableData);
 
     } catch (error) {
-      console.error('Error fetching hierarchical OEE data:', error);
     } finally {
       setIsLoadingOverallOEE(false);
       setIsLoadingShiftSummary(false);
@@ -225,7 +220,6 @@ const OEEDashboard = () => {
       setTrendData(chartData);
     }
   } catch (error) {
-    console.error('Error fetching trend data:', error);
   } finally {
     setTrendModalLoading(false);
   }

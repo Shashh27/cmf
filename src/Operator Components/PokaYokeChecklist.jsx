@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {Modal,Button,Typography,message} from 'antd';
 import {CheckCircleOutlined,CloseOutlined,FileTextOutlined,CheckOutlined} from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
@@ -8,7 +8,15 @@ import PokaYokeChecklistForm from './PokaYokeChecklistForm.jsx';
 
 const { Title, Text } = Typography;
 
-const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
+const PokaYokeChecklist = ({
+  open,
+  onClose,
+  machineId: propMachineId,
+  // Pre-fetched data passed from Dashboard — prevents duplicate API calls
+  initialAssignments = [],
+  initialLogs = [],
+  initialApprovalStatuses = {},
+}) => {
   const nowIST = () => {
     const parts = Object.fromEntries(
       new Intl.DateTimeFormat('en-CA', {
@@ -27,10 +35,11 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
     const ms = String(new Date().getMilliseconds()).padStart(3, '0');
     return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${ms}`;
   };
+
   const [loading, setLoading] = useState(false);
   const [assignments, setAssignments] = useState([]);
   const [completedTodayIds, setCompletedTodayIds] = useState(new Set());
-  const [approvalStatuses, setApprovalStatuses] = useState({}); // { key: { status, rejection_details } }
+  const [approvalStatuses, setApprovalStatuses] = useState({});
   const [selected, setSelected] = useState(null);
   const [namesByChecklistId, setNamesByChecklistId] = useState({});
   const [items, setItems] = useState([]);
@@ -46,6 +55,42 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMeta, setSuccessMeta] = useState({ orderText: '', partText: '' });
+  // Display labels for the order/part in redo mode (read from rejection_details)
+  const [redoOrderLabel, setRedoOrderLabel] = useState('');
+  const [redoPartLabel, setRedoPartLabel] = useState('');
+
+  const isRedo = useMemo(() => {
+    if (!selected) return false;
+    const cid =
+      selected?.checklist_id ??
+      selected?.pokayoke_checklist_id ??
+      selected?.checklistId ??
+      selected?.checklist?.id ??
+      null;
+    const freq = (selected?.frequency || '').toLowerCase();
+    const shift = (selected?.shift || '').toLowerCase();
+    const key = `${cid}-${freq}-${shift}`;
+    return approvalStatuses[key]?.status === 'rejected';
+  }, [selected, approvalStatuses]);
+
+  // Tracks whether we've already run the fetch for the current open session.
+  // Prevents running again on modal close (open: true → false) or extra renders.
+  const prevOpenRef = useRef(false);
+  // Tracks whether the operator submitted a checklist in this session.
+  // Used to tell Dashboard whether to re-fetch status on close.
+  const submittedRef = useRef(false);
+
+  // parent re-render (e.g. Dashboard re-fetching after close) doesn't cause this
+  // component's effect to re-run and flash a reload.
+  const snapshotRef = useRef({ assignments: [], logs: [], approvalStatuses: {} });
+  if (!prevOpenRef.current && open) {
+    // Capture snapshot at open time before prevOpenRef is set
+    snapshotRef.current = {
+      assignments: initialAssignments,
+      logs: initialLogs,
+      approvalStatuses: initialApprovalStatuses,
+    };
+  }
 
   const machineId = useMemo(() => {
     if (propMachineId) return propMachineId;
@@ -87,88 +132,120 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
     }
   }, []);
 
+  // Reset success screen and submission flag when modal closes
   useEffect(() => {
     if (!open) {
       setShowSuccess(false);
       setSuccessMeta({ orderText: '', partText: '' });
+      // Reset the open guard so next open triggers a fresh fetch
+      prevOpenRef.current = false;
+      submittedRef.current = false;
     }
   }, [open]);
+
+  // ─── Main data fetch ──────────────────────────────────────────────────────
+  // Runs ONLY when the modal transitions from closed → open (prevOpenRef guard).
   useEffect(() => {
     const fetchAssignments = async () => {
+      // Modal is closing — do nothing
       if (!open) return;
+
+      // Already ran for this open session — skip
+      if (prevOpenRef.current) return;
+      prevOpenRef.current = true;
+
       if (!machineId) {
         setAssignments([]);
         return;
       }
+
       setLoading(true);
       try {
-        const res = await fetch(
-          `${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`,
-          {
-            headers: { accept: 'application/json' },
-          }
-        );
-        const data = await res.json();
-        let arr = Array.isArray(data) ? data : [];
+        // ── Step 1: Assignments ──────────────────────────────────────────────
+        const { assignments: snapAssignments, logs: snapLogs, approvalStatuses: snapApprovalStatuses } = snapshotRef.current;
 
-        // Filtering logic based on frequency, shift, and scheduled day
+        let rawArr;
+        if (snapAssignments.length > 0) {
+          rawArr = snapAssignments;
+        } else {
+          const res = await fetch(
+            `${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`,
+            { headers: { accept: 'application/json' } }
+          );
+          const data = await res.json();
+          rawArr = Array.isArray(data) ? data : [];
+        }
+
+        // Filter by frequency / scheduled day (same logic as Dashboard)
         const today = new Date();
         const istOptions = { timeZone: 'Asia/Kolkata' };
-        
-        const dayOfWeek = today.toLocaleDateString('en-US', { ...istOptions, weekday: 'long' }); // e.g., "Monday"
-        const dayOfMonth = today.toLocaleDateString('en-US', { ...istOptions, day: 'numeric' }); // e.g., "27"
-        const currentHour = parseInt(today.toLocaleTimeString('en-US', { ...istOptions, hour: 'numeric', hour12: false }));
+        const dayOfWeek = today.toLocaleDateString('en-US', { ...istOptions, weekday: 'long' });
+        const dayOfMonth = today.toLocaleDateString('en-US', { ...istOptions, day: 'numeric' });
 
-        arr = arr.filter(item => {
-            const frequency = (item?.frequency || '').toLowerCase();
-            const scheduledDay = (item?.scheduled_day || '');
-  
-            if (frequency === 'daily') {
-              return true; // Show all daily checklists regardless of shift
-            } else if (frequency === 'weekly') {
-              // Check if today matches the scheduled day (e.g., "Monday")
-              return scheduledDay.toLowerCase() === dayOfWeek.toLowerCase();
-            } else if (frequency === 'monthly') {
-              // Check if today matches the scheduled day (e.g., "27")
-              return String(scheduledDay) === String(dayOfMonth);
-            }
-            return true; // Default to showing if frequency is unknown
-          });
+        const arr = rawArr.filter(item => {
+          const frequency = (item?.frequency || '').toLowerCase();
+          const scheduledDay = (item?.scheduled_day || '');
+
+          if (frequency === 'daily') return true;
+          if (frequency === 'weekly') return scheduledDay.toLowerCase() === dayOfWeek.toLowerCase();
+          if (frequency === 'monthly') return String(scheduledDay) === String(dayOfMonth);
+          return true;
+        });
 
         setAssignments(arr);
 
-        // Fetch completed logs for today to disable them in selector
-        try {
-          const logsRes = await fetch(`${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`);
-          const logsData = await logsRes.json();
-          const logs = Array.isArray(logsData) ? logsData : [];
+        // ── Step 2: Completed logs ───────────────────────────────────────────
+        let logs;
+        if (snapLogs.length > 0) {
+          logs = snapLogs;
+        } else {
+          try {
+            const logsRes = await fetch(
+              `${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`
+            );
+            const logsData = await logsRes.json();
+            logs = Array.isArray(logsData) ? logsData : [];
+          } catch {
+            logs = [];
+          }
+        }
 
-          const startOfToday = new Date();
-          startOfToday.setHours(0, 0, 0, 0);
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
 
-          const idsSet = new Set(
-            logs
-              .filter(log => new Date(log.completed_at) >= startOfToday)
-              .map(log => {
-                const cid = String(log.checklist_id);
-                const freq = (log.frequency || '').toLowerCase();
-                const shift = (log.shift || '').toLowerCase();
-                return `${cid}-${freq}-${shift}`;
-              })
-          );
-          setCompletedTodayIds(idsSet);
+        const idsSet = new Set(
+          logs
+            .filter(log => new Date(log.completed_at) >= startOfToday)
+            .map(log => {
+              const cid = String(log.checklist_id);
+              const freq = (log.frequency || '').toLowerCase();
+              const shift = (log.shift || '').toLowerCase();
+              return `${cid}-${freq}-${shift}`;
+            })
+        );
+        setCompletedTodayIds(idsSet);
 
-          // Fetch approval status for each completed assignment
+        // ── Step 3: Approval statuses ────────────────────────────────────────
+        if (Object.keys(snapApprovalStatuses).length > 0) {
+          setApprovalStatuses(snapApprovalStatuses);
+        } else {
           const statuses = {};
           for (const item of arr) {
-            const cid = String(item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id);
+            const cid = String(
+              item?.checklist_id ??
+              item?.pokayoke_checklist_id ??
+              item?.checklistId ??
+              item?.checklist?.id
+            );
             const freq = (item?.frequency || '').toLowerCase();
             const shift = (item?.shift || '').toLowerCase();
             const key = `${cid}-${freq}-${shift}`;
 
             if (idsSet.has(key)) {
               try {
-                const approvalRes = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/checklists/${cid}/approval-status`);
+                const approvalRes = await fetch(
+                  `${config.API_BASE_URL}/pokayoke-completed-logs/checklists/${cid}/approval-status`
+                );
                 if (approvalRes.ok) {
                   const approvalData = await approvalRes.json();
                   const cLogs = approvalData.completed_logs || [];
@@ -179,7 +256,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
                   if (latestLog) {
                     statuses[key] = {
                       status: latestLog.overall_approval_status,
-                      rejection_details: latestLog
+                      rejection_details: latestLog,
                     };
                   }
                 }
@@ -189,14 +266,13 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
             }
           }
           setApprovalStatuses(statuses);
-        } catch (err) {
-          console.error('Error fetching completed logs:', err);
         }
 
+        // ── Step 4: Checklist names ──────────────────────────────────────────
         const ids = arr
-          .map((it) => it?.checklist_id ?? it?.pokayoke_checklist_id ?? it?.checklistId ?? it?.checklist?.id ?? null)
-          .filter((id) => id !== null);
-        const missing = ids.filter((id) => namesByChecklistId[String(id)] === undefined);
+          .map(it => it?.checklist_id ?? it?.pokayoke_checklist_id ?? it?.checklistId ?? it?.checklist?.id ?? null)
+          .filter(id => id !== null);
+        const missing = ids.filter(id => namesByChecklistId[String(id)] === undefined);
         if (missing.length > 0) {
           const results = await Promise.all(
             missing.map(async (id) => {
@@ -224,6 +300,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
         setLoading(false);
       }
     };
+
     fetchAssignments();
   }, [open, machineId]);
 
@@ -262,17 +339,26 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
         if (approval && approval.status === 'rejected') {
           const prevResponses = {};
           const rejectionDetails = approval.rejection_details || {};
-          (rejectionDetails.items || []).forEach(item => {
-            const itemId = item.item_id;
-            const value = item.response_value;
-            // Find the item in the current items list to get the correct key for responses state
-            const currentItem = arr.find(it => (it.id ?? null) === itemId);
-            const responseKey = currentItem?.id ?? currentItem?.item_text ?? currentItem?.name ?? 'Item';
-            prevResponses[responseKey] = value;
+          
+          // Map responses using both ID and Item Text to be as robust as possible
+          (rejectionDetails.items || []).forEach(oldItem => {
+            const itemId = oldItem.item_id;
+            const itemText = oldItem.item_text;
+            const value = oldItem.response_value;
+            
+            // Try to find the matching item in the fresh items list
+            const matchingItem = arr.find(it => 
+              (itemId && it.id === itemId) || 
+              (itemText && (it.item_text === itemText || it.name === itemText))
+            );
+            
+            if (matchingItem) {
+              const responseKey = matchingItem.id ?? matchingItem.item_text ?? matchingItem.name ?? 'Item';
+              prevResponses[responseKey] = value;
+            }
           });
           setResponses(prevResponses);
           
-          // Also set production order and part if available from rejection details
           if (rejectionDetails.production_order_id) {
             setSelectedOrderId(rejectionDetails.production_order_id);
           }
@@ -282,8 +368,48 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
           if (rejectionDetails.comments) {
             setComments(rejectionDetails.comments);
           }
+
+          // Try to set labels from existing orders list first
+          const existingOrder = orders.find(o => o.id === rejectionDetails.production_order_id);
+          if (existingOrder) {
+            const label = existingOrder.sale_order_number ?? existingOrder.order_number ?? existingOrder.name ?? existingOrder.title ?? `Order #${rejectionDetails.production_order_id}`;
+            setRedoOrderLabel(label);
+          }
+
+          // Fetch order label for redo display if not found or to ensure latest
+          if (rejectionDetails.production_order_id) {
+            try {
+              const orderRes = await fetch(`${API_BASE_URL}/orders/${rejectionDetails.production_order_id}`, {
+                headers: { accept: 'application/json' },
+              });
+              if (orderRes.ok) {
+                const orderData = await orderRes.json();
+                const label = orderData?.sale_order_number ?? orderData?.order_number ?? orderData?.name ?? orderData?.title ?? `Order #${rejectionDetails.production_order_id}`;
+                setRedoOrderLabel(label);
+
+                if (rejectionDetails.part_id) {
+                  try {
+                    const saleOrderNumber = orderData?.sale_order_number ?? orderData?.order_number ?? orderData?.id;
+                    const partsRes = await fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, {
+                      headers: { accept: 'application/json' },
+                    });
+                    if (partsRes.ok) {
+                      const partsData = await partsRes.json();
+                      const partsArr = Array.isArray(partsData) ? partsData : [];
+                      setParts(partsArr);
+                      const partObj = partsArr.find(p => String(p?.part_id ?? p?.id) === String(rejectionDetails.part_id));
+                      const partLabel = partObj?.part_name ?? partObj?.name ?? partObj?.part_number ?? `Part #${rejectionDetails.part_id}`;
+                      setRedoPartLabel(partLabel);
+                    }
+                  } catch (e) { console.error('Error fetching redo parts:', e); }
+                }
+              }
+            } catch (e) { console.error('Error fetching redo order:', e); }
+          }
         } else {
           setResponses({});
+          setRedoOrderLabel('');
+          setRedoPartLabel('');
         }
       } catch {
         setItems([]);
@@ -314,7 +440,9 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
 
   useEffect(() => {
     const loadParts = async () => {
-      setSelectedPartId(null);
+      if (!isRedo) {
+        setSelectedPartId(null);
+      }
       setParts([]);
       if (!selectedOrderId) return;
       setPartsLoading(true);
@@ -339,13 +467,14 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
     };
     loadParts();
   }, [selectedOrderId, orders]);
-  // Compute if any response is non-conforming (answer "No" when expected "Yes", etc.)
+
+  // Compute if any response is non-conforming
   const hasNonConforming = useMemo(() => {
     const truthy = new Set(['true', 'yes', 'y', '1', 'on']);
     const falsy = new Set(['false', 'no', 'n', '0', 'off']);
     return items.some((it) => {
       const required = it?.is_required ?? it?.required ?? it?.mandatory ?? false;
-      if (!required) return false; // Only required items can block submission by being non-conforming
+      if (!required) return false;
 
       const id = it?.id ?? it?.item_text ?? it?.name ?? 'Item';
       const val = responses[id];
@@ -365,7 +494,6 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
         
         if (Number.isNaN(vNum)) return false;
         
-        // Handle range comparisons
         if (expStr.startsWith('<=')) {
           const eNum = parseFloat(expStr.substring(2).trim());
           return Number.isNaN(eNum) || vNum > eNum;
@@ -379,16 +507,14 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
           const eNum = parseFloat(expStr.substring(1).trim());
           return Number.isNaN(eNum) || vNum <= eNum;
         } else if (expStr.includes('-')) {
-          // Handle range format like "80-100"
-          const parts = expStr.split('-');
-          if (parts.length === 2) {
-            const min = parseFloat(parts[0].trim());
-            const max = parseFloat(parts[1].trim());
+          const rangeParts = expStr.split('-');
+          if (rangeParts.length === 2) {
+            const min = parseFloat(rangeParts[0].trim());
+            const max = parseFloat(rangeParts[1].trim());
             return Number.isNaN(min) || Number.isNaN(max) || vNum < min || vNum > max;
           }
         }
         
-        // Handle exact equality
         const eNum = parseFloat(expStr);
         return Number.isNaN(eNum) || vNum !== eNum;
       } else {
@@ -403,8 +529,14 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
     return items
       .filter((it) => it?.is_required ?? it?.required ?? it?.mandatory ?? false)
       .every((it) => {
-        const id = it?.id ?? it?.item_text ?? it?.name ?? 'Item';
-        const val = responses[id];
+        const id = it?.id;
+        const text = it?.item_text ?? it?.name ?? 'Item';
+        
+        // Check responses by ID first, then by text
+        const valById = id !== undefined && id !== null ? responses[String(id)] : undefined;
+        const valByText = responses[text];
+        const val = valById !== undefined ? valById : valByText;
+
         return val !== undefined && val !== null && val !== '';
       });
   }, [items, responses]);
@@ -415,14 +547,23 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
     selected?.checklistId ??
     selected?.checklist?.id ??
     null;
-  const requirePart = parts.length > 0;
-  const canSubmit =
-    Boolean(machineId) &&
-    Boolean(checklistId) &&
-    Boolean(selectedOrderId) &&
-    Boolean(operatorId) &&
-    (!requirePart || Boolean(selectedPartId)) &&
-    allRequiredComplete; // Allow both conforming and non-conforming submissions
+
+  const canSubmit = useMemo(() => {
+    const hasBaseFields =
+      Boolean(machineId) &&
+      Boolean(checklistId) &&
+      Boolean(selectedOrderId) &&
+      Boolean(operatorId) &&
+      allRequiredComplete;
+
+    if (!hasBaseFields) return false;
+
+    // In redo mode, we should have a part ID if it was originally there.
+    // Otherwise, if the parts list has loaded and has entries, one must be selected.
+    const hasPartSelection = isRedo ? Boolean(selectedPartId) : (parts.length === 0 || Boolean(selectedPartId));
+    
+    return hasPartSelection;
+  }, [machineId, checklistId, selectedOrderId, operatorId, allRequiredComplete, isRedo, selectedPartId, parts.length]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitLoading) return;
@@ -433,18 +574,16 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       const assignmentFrequency = selectedAssignment?.frequency ?? null;
       const assignmentShift = selectedAssignment?.shift ?? null;
       
-      // Check if this is a redo (rejected checklist)
       const freq = (assignmentFrequency || '').toLowerCase();
       const shift = (assignmentShift || '').toLowerCase();
       const key = `${checklistId}-${freq}-${shift}`;
       const approval = approvalStatuses[key];
       const isRedo = approval?.status === 'rejected';
       
-      // Get rejected item IDs if redo
       const rejectedItemIds = isRedo 
         ? new Set((approval?.rejection_details?.items || [])
             .filter(i => i.approval_status === 'rejected')
-            .map(i => i.item_id))
+            .map(i => String(i.item_id)))
         : null;
       
       const payload = {
@@ -462,12 +601,19 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
         all_items_passed: !hasNonConforming && allRequiredComplete,
         responses: items
           .map((it) => {
-            const id = it?.id ?? null;
-            const key = id ?? (it?.item_text ?? it?.name ?? 'Item');
-            const value = responses[key];
+            const id = it?.id;
+            const text = it?.item_text ?? it?.name ?? 'Item';
+            
+            // Consistent lookup with allRequiredComplete
+            const valById = id !== undefined && id !== null ? responses[String(id)] : undefined;
+            const valByText = responses[text];
+            const value = valById !== undefined ? valById : valByText;
+
             if (value === undefined || value === null) return null;
-            // If redo, only include rejected items
-            if (isRedo && !rejectedItemIds.has(id)) return null;
+            
+            // Only send the rejected items if we are in redo mode
+            if (isRedo && id && !rejectedItemIds.has(String(id))) return null;
+            
             return {
               item_id: id,
               value,
@@ -525,7 +671,6 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
               if (Number.isNaN(vNum)) {
                 isConfirming = false;
               } else {
-                // Handle range comparisons
                 if (expStr.startsWith('<=')) {
                   const eNum = parseFloat(expStr.substring(2).trim());
                   isConfirming = !Number.isNaN(eNum) && vNum <= eNum;
@@ -539,17 +684,15 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
                   const eNum = parseFloat(expStr.substring(1).trim());
                   isConfirming = !Number.isNaN(eNum) && vNum > eNum;
                 } else if (expStr.includes('-')) {
-                  // Handle range format like "80-100"
-                  const parts = expStr.split('-');
-                  if (parts.length === 2) {
-                    const min = parseFloat(parts[0].trim());
-                    const max = parseFloat(parts[1].trim());
+                  const rangeParts = expStr.split('-');
+                  if (rangeParts.length === 2) {
+                    const min = parseFloat(rangeParts[0].trim());
+                    const max = parseFloat(rangeParts[1].trim());
                     isConfirming = !Number.isNaN(min) && !Number.isNaN(max) && vNum >= min && vNum <= max;
                   } else {
                     isConfirming = false;
                   }
                 } else {
-                  // Handle exact equality
                   const eNum = parseFloat(expStr);
                   isConfirming = !Number.isNaN(eNum) && vNum === eNum;
                 }
@@ -594,19 +737,20 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
       setSuccessMeta({ orderText, partText });
       setShowSuccess(true);
       
-      // Update completedTodayIds immediately
+      // Optimistically update local state so the selector reflects submission
       if (checklistId) {
-        const freq = (assignmentFrequency || '').toLowerCase();
-        const shift = (assignmentShift || '').toLowerCase();
-        const key = `${String(checklistId)}-${freq}-${shift}`;
-        setCompletedTodayIds(prev => new Set([...prev, key]));
+        const submitFreq = (assignmentFrequency || '').toLowerCase();
+        const submitShift = (assignmentShift || '').toLowerCase();
+        const submitKey = `${String(checklistId)}-${submitFreq}-${submitShift}`;
+        setCompletedTodayIds(prev => new Set([...prev, submitKey]));
         setApprovalStatuses(prev => ({
           ...prev,
-          [key]: { status: 'pending', rejection_details: null }
+          [submitKey]: { status: 'pending', rejection_details: null }
         }));
       }
 
       message.success('Checklist submitted');
+      submittedRef.current = true;
       setSubmitLoading(false);
     } catch (e) {
       message.error(String(e?.message || 'Submit failed'));
@@ -622,14 +766,15 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
     setResponses({});
     setActiveStep(1);
     setSelectedOrderId(null);
-    setSelectedPartId(null);
+    setRedoOrderLabel('');
+    setRedoPartLabel('');
     setComments('');
   };
 
   return (
     <Modal
       open={open}
-      onCancel={onClose}
+      onCancel={() => onClose(submittedRef.current)}
       footer={null}
       width={780}
       closable={false}
@@ -681,7 +826,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
           </span>
         </div>
         <button
-          onClick={onClose}
+          onClick={() => onClose(submittedRef.current)}
           style={{
             background: 'transparent',
             border: 'none',
@@ -741,7 +886,7 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
               <Button type="primary" onClick={handleNewChecklist} style={{ borderRadius: 8 }}>
                 New Checklist
               </Button>
-              <Button onClick={onClose} style={{ borderRadius: 8 }}>
+              <Button onClick={() => onClose(submittedRef.current)} style={{ borderRadius: 8 }}>
                 Close
               </Button>
             </div>
@@ -877,6 +1022,8 @@ const PokaYokeChecklist = ({ open, onClose, machineId: propMachineId }) => {
             onSubmit={handleSubmit}
             onBack={() => setSelected(null)}
             approvalInfo={approvalStatuses[`${selected?.checklist_id ?? selected?.pokayoke_checklist_id ?? selected?.checklistId ?? selected?.checklist?.id}-${(selected?.frequency || '').toLowerCase()}-${(selected?.shift || '').toLowerCase()}`]}
+            redoOrderLabel={redoOrderLabel}
+            redoPartLabel={redoPartLabel}
           />
         )}
           </>

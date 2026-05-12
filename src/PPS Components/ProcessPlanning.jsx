@@ -30,6 +30,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const [operationStatus, setOperationStatus] = useState({});
   const [operationStatusLoading, setOperationStatusLoading] = useState({});
   const [expandedRowKeys, setExpandedRowKeys] = useState([]);
+  const [inhouseSearchText, setInhouseSearchText] = useState('');
 
   // ================================
   // FETCH ORDERS
@@ -555,7 +556,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
   const inHouseColumns = [
     { title: "Part No", dataIndex: "part_number" },
     { title: "Part Name", dataIndex: "part_name" },
-    { title: "Assemblies", dataIndex: "assemblies" },
+    { title: "Assemblies/Sub-Assemblies", dataIndex: "assemblies" },
     {
       title: "Start Time",
       render: (_, record) => {
@@ -731,6 +732,24 @@ const ProcessPlanning = ({ initialOrderId }) => {
   }, [orderDetails, orderPartsMetadata, partOpDetails]);
 
   // ================================
+  // FILTERED INHOUSE PARTS
+  // ================================
+  const filteredInHouseParts = useMemo(() => {
+    if (!inhouseSearchText) return inHouseParts;
+    
+    const searchLower = inhouseSearchText.toLowerCase();
+    return inHouseParts.filter(part => {
+      return (
+        (part.part_number && part.part_number.toLowerCase().includes(searchLower)) ||
+        (part.part_name && part.part_name.toLowerCase().includes(searchLower)) ||
+        (part.assemblies && part.assemblies.toString().toLowerCase().includes(searchLower)) ||
+        (part.qty && part.qty.toString().toLowerCase().includes(searchLower)) ||
+        (partStatuses[part.id] && partStatuses[part.id].toLowerCase().includes(searchLower))
+      );
+    });
+  }, [inHouseParts, inhouseSearchText, partStatuses]);
+
+  // ================================
   // UI
   // ================================
   return (
@@ -833,13 +852,20 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
           <Tabs defaultActiveKey="1">
             <Tabs.TabPane tab="In House Parts" key="1">
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                <Input
+                  placeholder="Search by any field..."
+                  value={inhouseSearchText}
+                  onChange={(e) => setInhouseSearchText(e.target.value)}
+                  style={{ width: 300 }}
+                  allowClear
+                />
                 <Button type="primary" onClick={showPartStatusPopup}>Update Status</Button>
               </div>
 
               <Table
                 columns={inHouseColumns}
-                dataSource={inHouseParts}
+                dataSource={filteredInHouseParts}
                 rowKey="id"
                 scroll={{ x: "max-content" }}
                 style={{ width: "100%" }}

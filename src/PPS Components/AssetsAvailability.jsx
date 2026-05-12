@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from "react";
 import dayjs from "dayjs";
-import Lottie from "lottie-react";
-import warningAnimation from "../assets/warning.json";
 
 import isSameOrAfter from "dayjs/plugin/isSameOrAfter";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
@@ -15,6 +13,7 @@ import { Card, Row, Col, Tabs, Table, Tag, message, Spin, Button, Modal, Form, S
 import { CheckCircleOutlined, ExclamationCircleOutlined, InfoCircleOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, FilterOutlined, UploadOutlined, EyeOutlined, DownloadOutlined, LeftOutlined, DeleteOutlined 
 } from "@ant-design/icons";
 import MaintenanceSection from "./MaintenanceSection";
+import MachineAssignment from "./Machineassignment";
 
 const { TabPane } = Tabs;
 const { Option } = Select;
@@ -717,6 +716,9 @@ const AssetAvailability = () => {
           </TabPane>
           <TabPane tab="Shift Hours Configuration" key="shift-hours">
             <MaintenanceSection activeTab={activeTab} machineData={machineData} />
+          </TabPane>
+          <TabPane tab="Machine Assignment" key="machine-assignment">
+            <MachineAssignment activeTab={activeTab} machineData={machineData} />
           </TabPane>
           <TabPane tab="Leave Logs" key="leave-logs">
             <MaintenanceSection activeTab={activeTab} machineData={machineData} />

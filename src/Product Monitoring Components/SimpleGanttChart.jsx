@@ -121,8 +121,7 @@ const SimpleGanttChart = ({
     const refreshData = () => {
       if (onSubmit) {
         onSubmit(false);
-        console.log('Auto-refreshing data...', new Date().toLocaleString());
-      }
+              }
       return 60;
     };
 
@@ -140,10 +139,8 @@ const SimpleGanttChart = ({
         });
       }, 1000);
 
-      console.log('Auto-refresh enabled', new Date().toLocaleString());
     } else {
       setCountdown(60);
-      console.log('Auto-refresh disabled', new Date().toLocaleString());
     }
 
     return () => {
@@ -188,11 +185,9 @@ const SimpleGanttChart = ({
 
       // Don't render if no data
       if (!data || data.length === 0) {
-        console.log('No data to render timeline');
         return;
       }
 
-      console.log('Rendering timeline with data:', data.length, 'items');
 
       // Get unique machines from data (like BEL)
       let uniqueMachines = [...new Set(data.map(item => item.machine))].sort();
@@ -200,7 +195,6 @@ const SimpleGanttChart = ({
       // Use the filtered data for rendering
       const itemsToRender = filteredData;
 
-      console.log('Unique machines:', uniqueMachines);
 
       // Create groups for hierarchical structure
       const groups = [];
@@ -252,7 +246,6 @@ const SimpleGanttChart = ({
         });
       });
 
-      console.log('Created groups:', groups.length);
 
       // Create timeline items
       const items = itemsToRender.map((item, idx) => {
@@ -261,7 +254,6 @@ const SimpleGanttChart = ({
           const endTime = dayjs(item.end_time);
           
           if (!startTime.isValid() || !endTime.isValid()) {
-            console.warn('Invalid dates for item:', item);
             return null;
           }
 
@@ -299,12 +291,10 @@ const SimpleGanttChart = ({
             `
           };
         } catch (error) {
-          console.error('Error processing item:', item, error);
           return null;
         }
       }).filter(Boolean);
 
-      console.log('Created items:', items.length);
 
       // Calculate appropriate time range
       const startRange = dateRange?.[0] ? dateRange[0].toDate() : dayjs().startOf('day').toDate();
@@ -343,8 +333,8 @@ const SimpleGanttChart = ({
         // Group configuration
         groupOrder: 'order',
         groupHeightMode: 'fixed',
-        groupMinHeight: 30,  // Reduced height for more compact view
-        groupMaxHeight: 30,
+        groupMinHeight: 40,
+        groupMaxHeight: 60,
         
         // Scrolling
         horizontalScroll: true,
@@ -363,9 +353,6 @@ const SimpleGanttChart = ({
         },
         
         // Visual features
-        showCurrentTime: true,
-        showMajorLabels: true,
-        showMinorLabels: true,
         
         // Tooltip
         tooltip: {
@@ -396,13 +383,12 @@ const SimpleGanttChart = ({
         
         // Additional width and spacing options
         autoResize: true,
-        fit: true
+        min: 'fit'
       };
 
       // Create timeline
       timelineRef.current = new Timeline(containerRef.current, items, groups, options);
       
-      console.log('Timeline created successfully');
 
       // Event listeners
       timelineRef.current.on('select', (event) => {
@@ -452,7 +438,6 @@ const SimpleGanttChart = ({
       });
 
     } catch (error) {
-      console.error('Error creating timeline:', error);
     }
   }, [data, dateRange, viewMode, selectedMachine, selectedOrder]);
 
@@ -679,7 +664,7 @@ const SimpleGanttChart = ({
           alignItems: 'center', 
           height: '500px' 
         }}>
-          <Spin size="large" tip="Loading data..." />
+          <Spin size="large" />
         </div>
       ) : data && data.length > 0 ? (
         <>
@@ -712,7 +697,7 @@ const SimpleGanttChart = ({
       )}
 
       {/* Global Styles */}
-      <style jsx global>{`
+      <style>{`
         .gantt-chart {
           background: white;
           border-radius: 12px;

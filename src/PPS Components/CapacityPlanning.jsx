@@ -37,9 +37,8 @@ const CustomXAxisTick = ({ x, y, payload }) => {
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     const dataItem = payload[0].payload;
-    // Try different possible field names for workcenter
     const workcenterName = dataItem.work_center_name || dataItem.work_center || dataItem.workcenter || "N/A";
-    
+
     return (
       <div
         style={{
@@ -54,8 +53,14 @@ const CustomTooltip = ({ active, payload, label }) => {
         <p style={{ margin: 0, color: "#1890ff" }}>
           Available: {dataItem.available_hours}h
         </p>
+        <p style={{ margin: 0, color: "#ff4d4f" }}>
+          Planned (Utilized): {dataItem.utilized_hours}h
+        </p>
         <p style={{ margin: 0, color: "#52c41a" }}>
           Remaining: {dataItem.remaining_hours}h
+        </p>
+        <p style={{ margin: 0, color: "#faad14", fontWeight: 600, marginTop: 4 }}>
+          Utilization: {dataItem.utilization_percentage}%
         </p>
         <p style={{ margin: 0, color: "#8c8c8c", fontSize: "12px", marginTop: 5 }}>
           Workcenter: {workcenterName}
@@ -128,7 +133,6 @@ const CapacityPlanning = () => {
         `${SCHEDULING_API_BASE_URL}/machine-utilization/machine-utilization`
       );
       setData(res.data);
-      // Initialize range to current month
       setRange([dayjs().startOf('month'), dayjs().endOf('month')]);
     } catch {
       message.error("Failed to fetch utilization");
@@ -168,18 +172,17 @@ const CapacityPlanning = () => {
   }, []);
 
   // Derived workcenters for dropdown
-  const workcenters = [...new Set(data.map(item => 
+  const workcenters = [...new Set(data.map(item =>
     item.work_center_name || item.work_center || item.workcenter || "N/A"
   ))].sort();
 
   // Filtered data for chart
-  const filteredData = selectedWorkcenter 
+  const filteredData = selectedWorkcenter
     ? data.filter(item => (item.work_center_name || item.work_center || item.workcenter || "N/A") === selectedWorkcenter)
     : data;
 
   return (
     <div style={{ padding: 20 }}>
-      {/* <Title level={3}>Machine Capacity Planning</Title> */}
 
       {/* CONTROLS */}
       <Card style={{ marginBottom: 20 }}>
@@ -259,43 +262,56 @@ const CapacityPlanning = () => {
       </Card>
 
       <Card>
-  {loading ? (
-    <div style={{ textAlign: "center", padding: 40 }}>
-      <Spin size="large" />
+        {loading ? (
+          <div style={{ textAlign: "center", padding: 40 }}>
+            <Spin size="large" />
+          </div>
+        ) : (
+
+          // SCROLLABLE WRAPPER
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ width: Math.max(filteredData.length * 80, 800) }}>
+
+              <ResponsiveContainer width="100%" height={420}>
+                <BarChart data={filteredData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+
+                  <XAxis
+                    dataKey="machine_make"
+                    interval={0}
+                    tick={<CustomXAxisTick />}
+                    height={100}
+                  />
+
+                  <YAxis label={{ value: "Hours", angle: -90, position: "insideLeft", offset: 10 }} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend
+                    formatter={(value) => {
+                      if (value === "available_hours") return "Available Hours";
+                      if (value === "utilized_hours") return "Planned Hours";
+                      if (value === "remaining_hours") return "Remaining Hours";
+                      return value;
+                    }}
+                  />
+
+                  {/* Blue: Available — standalone bar */}
+                  <Bar dataKey="available_hours" stackId="a" fill="#1890ff" name="available_hours" radius={[4, 4, 0, 0]} />
+
+                  {/* Red: Utilized (Planned) — bottom of stacked bar */}
+                  <Bar dataKey="utilized_hours" stackId="b" fill="#ff4d4f" name="utilized_hours" radius={[4, 4, 0, 0]} />
+
+                  {/* Green: Remaining — stacked on top of utilized */}
+                  <Bar dataKey="remaining_hours" stackId="b" fill="#52c41a" name="remaining_hours" radius={[4, 4, 0, 0]} />
+
+                </BarChart>
+              </ResponsiveContainer>
+
+            </div>
+          </div>
+
+        )}
+      </Card>
     </div>
-  ) : (
-
-    //  SCROLLABLE WRAPPER
-    <div style={{ overflowX: "auto" }}>
-      <div style={{ width: Math.max(filteredData.length * 80, 800) }}>
-
-        <ResponsiveContainer width="100%" height={420}>
-          <BarChart data={filteredData}>
-            <CartesianGrid strokeDasharray="3 3" />
-
-            <XAxis
-              dataKey="machine_make"
-              interval={0}
-              tick={<CustomXAxisTick />}
-              height={100}
-            />
-
-            <YAxis />
-            <Tooltip content={<CustomTooltip />} />
-            <Legend />
-
-            <Bar dataKey="available_hours" fill="#1890ff" />
-            <Bar dataKey="remaining_hours" fill="#52c41a" />
-
-          </BarChart>
-        </ResponsiveContainer>
-
-      </div>
-    </div>
-
-  )}
-</Card>
-</div>
   );
 };
 

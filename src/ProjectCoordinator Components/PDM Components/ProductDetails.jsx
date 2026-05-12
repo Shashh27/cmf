@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, UpOutlined, DownOutlined, LeftOutlined, RightOutlined, ExpandOutlined } from "@ant-design/icons";
-import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space } from "antd";
+import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space, Input, Form } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -17,6 +17,91 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   const [selectedView, setSelectedView] = useState('default');
   const extractedDocsSigRef = useRef("");
   const extractedPartIdRef = useRef(null);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [selectedExtractedMaterial, setSelectedExtractedMaterial] = useState(null);
+  const [editedMaterial, setEditedMaterial] = useState({});
+
+  const handleExtractedMaterialClick = (record) => {
+    setSelectedExtractedMaterial(record);
+    setEditedMaterial({
+      document_name: record.document_name || '',
+      document_version: record.document_version || '',
+      material: record.material || '',
+      stock_size: record.stock_size || '',
+      stocksize_kg: record.stocksize_kg || '',
+      net_wt_kg: record.net_wt_kg || '',
+      note: record.note || '',
+      title: record.title || ''
+    });
+    setEditModalVisible(true);
+  };
+
+  const handleSaveExtractedMaterial = async () => {
+    if (!selectedExtractedMaterial) return;
+    
+    try {
+      // Show loading state
+      const saveButton = document.querySelector('[data-save-button="true"]');
+      if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = 'Saving...';
+      }
+      
+      // Make API call to update extracted material data
+      const response = await axios.put(
+        `${API_BASE_URL}/documents/extracted-data/${selectedExtractedMaterial.id}`,
+        editedMaterial,
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+      
+      if (response.status >= 200 && response.status < 300) {
+        // Update local state with the response data
+        setExtractedMaterials(prev => 
+          prev.map(item => 
+            item.id === selectedExtractedMaterial.id 
+              ? { ...item, ...editedMaterial, ...response.data }
+              : item
+          )
+        );
+        
+        message.success('Material data updated successfully!');
+        setEditModalVisible(false);
+        setSelectedExtractedMaterial(null);
+        setEditedMaterial({});
+      } else {
+        throw new Error('Failed to update material data');
+      }
+    } catch (error) {
+      console.error('Error updating extracted material:', error);
+      
+      // If API call fails, still update local state as fallback
+      setExtractedMaterials(prev => 
+        prev.map(item => 
+          item.id === selectedExtractedMaterial.id 
+            ? { ...item, ...editedMaterial }
+            : item
+        )
+      );
+      
+      message.warning('Material data updated locally. Changes may not persist after refresh.');
+      setEditModalVisible(false);
+      setSelectedExtractedMaterial(null);
+      setEditedMaterial({});
+    } finally {
+      // Reset button state
+      const saveButton = document.querySelector('[data-save-button="true"]');
+      if (saveButton) {
+        saveButton.disabled = false;
+        saveButton.textContent = 'Save';
+      }
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditModalVisible(false);
+    setSelectedExtractedMaterial(null);
+    setEditedMaterial({});
+  };
 
   const getCurrentUserId = () => {
     try {
@@ -315,7 +400,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       render: (text) => cellWithTooltip(text, 'N/A')
     },
     {
-      title: 'Version',
+      title: 'Revision',
       dataIndex: 'document_version',
       key: 'document_version',
       width: 70,
@@ -325,7 +410,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
         const variants = Array.isArray(row?._variants) ? row._variants : [];
         const v = text || '1.0';
         if (variants.length <= 1) {
-          const label = String(v).startsWith('v') ? v : `v${v}`;
+          const label = String(v);
           return (
             <Select
               size="small"
@@ -360,7 +445,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
             }}
             options={variants.map((vv) => {
               const raw = vv.document_version || '1.0';
-              const label = String(raw).startsWith('v') ? raw : `v${raw}`;
+              const label = String(raw);
               return { value: vv.document_id, label };
             })}
           />
@@ -451,6 +536,10 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
               <div className="flex items-center gap-1 mb-1 flex-wrap">
                 <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
                 <Text type="secondary" className="text-xs">Extracted from 2D Files</Text>
+                <Text type="secondary" className="text-xs text-blue-600 ml-2">
+                  <InfoCircleOutlined className="mr-1" />
+                  Click on row to edit Extracted Data
+                </Text>
                 <span className="text-[10px] text-slate-400 ml-1 sm:hidden">— scroll →</span>
               </div>
               {extractedMaterials.length > 0 ? (
@@ -463,7 +552,12 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                     pagination={false} 
                     scroll={{ x: 'max-content', y: 120 }} 
                     bordered 
-                    className="extracted-materials-table"
+                    className="extracted-materials-table hover:bg-blue-50"
+                    onRow={(record) => ({
+                      onClick: () => handleExtractedMaterialClick(record),
+                      style: { cursor: 'pointer' },
+                      title: 'Click to edit this material data'
+                    })}
                   />
                 </div>
               ) : (
@@ -521,7 +615,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                       style={{ minWidth: 'clamp(100px, 20vw, 140px)', fontSize: '11px' }}
                       options={threeDDocuments.map(doc => {
                         const v = doc.document_version;
-                        const vStr = v ? (v.startsWith('v') ? v : `v${v}`) : "";
+                        const vStr = v ? String(v) : "";
                         return {
                           value: doc.id,
                           label: `${doc.document_name || "3D Model"}${vStr ? ` (${vStr})` : ""}`,
@@ -574,6 +668,85 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
             </div>
           </div>
         )}
+      </Modal>
+      
+      <Modal
+        title="Edit Extracted Material"
+        open={editModalVisible}
+        onCancel={handleCancelEdit}
+        footer={[
+          <Button key="cancel" onClick={handleCancelEdit}>
+            Cancel
+          </Button>,
+          <Button key="save" type="primary" onClick={handleSaveExtractedMaterial} data-save-button="true">
+            Save
+          </Button>
+        ]}
+        width={600}
+      >
+        <Form layout="vertical">
+          <div className="grid grid-cols-2 gap-4">
+            <Form.Item label="Document Name">
+              <Input
+                value={editedMaterial.document_name}
+                disabled
+                className="bg-gray-50"
+                placeholder="Document name"
+              />
+            </Form.Item>
+            <Form.Item label="Revision">
+              <Input
+                value={editedMaterial.document_version}
+                disabled
+                className="bg-gray-50"
+                placeholder="Revision"
+              />
+            </Form.Item>
+            <Form.Item label="Material">
+              <Input
+                value={editedMaterial.material}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, material: e.target.value }))}
+                placeholder="Enter material"
+              />
+            </Form.Item>
+            <Form.Item label="Stock Size">
+              <Input
+                value={editedMaterial.stock_size}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, stock_size: e.target.value }))}
+                placeholder="Enter stock size"
+              />
+            </Form.Item>
+            <Form.Item label="Stock Size KG">
+              <Input
+                value={editedMaterial.stocksize_kg}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, stocksize_kg: e.target.value }))}
+                placeholder="Enter stock size kg"
+              />
+            </Form.Item>
+            <Form.Item label="Net WT KG">
+              <Input
+                value={editedMaterial.net_wt_kg}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, net_wt_kg: e.target.value }))}
+                placeholder="Enter net weight kg"
+              />
+            </Form.Item>
+            <Form.Item label="Title" className="col-span-2">
+              <Input
+                value={editedMaterial.title}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, title: e.target.value }))}
+                placeholder="Enter title"
+              />
+            </Form.Item>
+            <Form.Item label="Note" className="col-span-2">
+              <Input.TextArea
+                value={editedMaterial.note}
+                onChange={(e) => setEditedMaterial(prev => ({ ...prev, note: e.target.value }))}
+                placeholder="Enter note"
+                rows={3}
+              />
+            </Form.Item>
+          </div>
+        </Form>
       </Modal>
     </div>
   );

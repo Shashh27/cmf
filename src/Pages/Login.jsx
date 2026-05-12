@@ -186,8 +186,8 @@ const Login = () => {
   const roleOptions = [
     { value: 'admin', label: 'Admin' },
     { value: 'supervisor', label: 'Supervisor' },
-    { value: 'coordinator', label: 'Project Coordinator' },
     { value: 'inventory_supervisor', label: 'Supervisor-Tool Crib' },
+    { value: 'coordinator', label: 'Project Coordinator' },
     { value: 'manufacturing_coordinator', label: 'Manufacturing Coordinator' },
     { value: 'operator', label: 'Operator' },
   ];
