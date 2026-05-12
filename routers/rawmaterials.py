@@ -5,16 +5,18 @@ from sqlalchemy.exc import IntegrityError
 
 from DB.database import get_db
 from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock as RawMaterialStockModel, Vendors as VendorsModel, RawMaterialUnit as RawMaterialUnitModel, RawMaterialUsage as RawMaterialUsageModel
-from DB.models.oms import Order as OrderModel, Part as PartModel
+from DB.models.oms import Order as OrderModel, Part as PartModel, OutSourcePartStatus, Product as ProductModel
 from DB.models.inventory import RawMaterial, RawMaterialStock, Vendors
 from DB.schemas.inventory import (
     RawMaterial, RawMaterialCreate, RawMaterialUpdate,
     RawMaterialStock, RawMaterialStockCreate, RawMaterialStockUpdate, RawMaterialStockWithDetails,
     Vendors, VendorsCreate, VendorsUpdate,
     RawMaterialUnit, RawMaterialUnitCreate, RawMaterialUnitUpdate, RawMaterialUnitWithDetails,
-    RawMaterialUsage, RawMaterialUsageCreate, RawMaterialUsageUpdate, RawMaterialUsageWithDetails
+    RawMaterialUsage, RawMaterialUsageCreate, RawMaterialUsageUpdate, RawMaterialUsageWithDetails,
+    RawMaterialHistoryItem, RawMaterialHistoryResponse
 )
 from services.raw_material_calculations import RawMaterialCalculationService
+from services.stock_auto_update import StockAutoUpdateService
 
 router = APIRouter(
     prefix="/rawmaterials",
@@ -67,10 +69,26 @@ def get_raw_materials(
             RawMaterialStockModel.material_id == material.id
         ).all()
         
-        # Calculate stock status
-        available_stock_count = len([stock for stock in stock_items if stock.status == 'available'])
+        # Calculate stock status based on unit statuses
+        total_available_units = 0
+        total_units = 0
+        available_stock_count = 0
         total_stock_quantity = sum(stock.quantity for stock in stock_items)
-        has_available_stock = available_stock_count > 0
+        
+        for stock in stock_items:
+            # Get units for this stock
+            from DB.models.inventory import RawMaterialUnit
+            units = db.query(RawMaterialUnit).filter(RawMaterialUnit.stock_id == stock.id).all()
+            
+            total_units += len(units)
+            total_available_units += len([u for u in units if u.status in ['available', 'partially_used']])
+            
+            # Count available stocks (at least one available unit)
+            if len([u for u in units if u.status in ['available', 'partially_used']]) > 0:
+                available_stock_count += 1
+        
+        # Material is available if at least one unit is available across all stocks
+        has_available_stock = total_available_units > 0
         
         # Create material dict with stock status
         material_dict = {
@@ -95,9 +113,9 @@ def get_raw_materials(
 # =======================
 
 @router.get("/vendors")
-def get_vendors(db: Session = Depends(get_db)):
-    """Get all vendors"""
-    vendors = db.query(VendorsModel).order_by(VendorsModel.company_name.asc()).all()
+def get_vendors(user_id: int = None, db: Session = Depends(get_db)):
+    """Get all vendors - FIFO order by ID"""
+    vendors = db.query(VendorsModel).order_by(VendorsModel.id.asc()).all()
     return [
         {
             "id": v.id,
@@ -110,7 +128,7 @@ def get_vendors(db: Session = Depends(get_db)):
 
 
 @router.post("/vendors", response_model=Vendors, status_code=status.HTTP_201_CREATED)
-def create_vendor(vendor: VendorsCreate, db: Session = Depends(get_db)):
+def create_vendor(vendor: VendorsCreate, user_id: int = None, db: Session = Depends(get_db)):
     """Create a new vendor"""
     # Check if vendor already exists
     existing = db.query(VendorsModel).filter(
@@ -142,7 +160,7 @@ def get_vendor(vendor_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/vendors/{vendor_id}", response_model=Vendors)
-def update_vendor(vendor_id: int, vendor_update: VendorsUpdate, db: Session = Depends(get_db)):
+def update_vendor(vendor_id: int, vendor_update: VendorsUpdate, user_id: int = None, db: Session = Depends(get_db)):
     """Update a vendor"""
     vendor = db.query(VendorsModel).filter(VendorsModel.id == vendor_id).first()
     if not vendor:
@@ -161,7 +179,7 @@ def update_vendor(vendor_id: int, vendor_update: VendorsUpdate, db: Session = De
 
 
 @router.delete("/vendors/{vendor_id}")
-def delete_vendor(vendor_id: int, db: Session = Depends(get_db)):
+def delete_vendor(vendor_id: int, user_id: int = None, db: Session = Depends(get_db)):
     """Delete a vendor"""
     vendor = db.query(VendorsModel).filter(VendorsModel.id == vendor_id).first()
     if not vendor:
@@ -170,9 +188,351 @@ def delete_vendor(vendor_id: int, db: Session = Depends(get_db)):
             detail="Vendor not found"
         )
     
-    db.delete(vendor)
-    db.commit()
-    return {"message": "Vendor deleted successfully"}
+    # Check if vendor is referenced in raw_material_stock
+    from DB.models.inventory import RawMaterialStock as RawMaterialStockModel
+    # vendor_id is String (comma-separated IDs), received_vendor_id is Integer
+    stock_references = db.query(RawMaterialStockModel).filter(
+        (RawMaterialStockModel.vendor_id.like(f'%{vendor_id}%')) | 
+        (RawMaterialStockModel.received_vendor_id == vendor_id)
+    ).count()
+    
+    if stock_references > 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete vendor '{vendor.company_name}' because it is referenced by {stock_references} raw material stock record(s). Please remove or update these stock records first."
+        )
+    
+    try:
+        db.delete(vendor)
+        db.commit()
+        return {"message": "Vendor deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        # Handle any other foreign key constraints
+        if "foreign key constraint" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot delete vendor '{vendor.company_name}' because it is referenced by other records. Please remove all references before deleting."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An error occurred while deleting the vendor"
+            )
+
+
+@router.get("/history", response_model=RawMaterialHistoryResponse)
+def get_raw_material_history(
+    start_date: str = None,  # Format: YYYY-MM-DD
+    end_date: str = None,    # Format: YYYY-MM-DD
+    year: int = None,
+    month: int = None,
+    day: int = None,
+    admin_id: int = None,  # Filter by admin ID
+    manufacturing_coordinator_id: int = None,  # Filter by manufacturing coordinator ID
+    source_type: str = None,  # "general" or "order"
+    order_id: int = None,
+    material_id: int = None,
+    activity_type: str = None,  # "stock_created", "material_linked", "order_status_changed", "stock_updated", "material_unlinked"
+    db: Session = Depends(get_db)
+):
+    """
+    Get comprehensive raw material history with date filtering.
+    
+    Aggregates all raw material activities including:
+    - Stock creation events
+    - Material linking to parts
+    - Order status changes
+    - Stock updates
+    - Material unlinking
+    
+    Date filtering options:
+    - start_date and end_date: Range filter (YYYY-MM-DD format)
+    - year, month, day: Specific date filter
+    
+    User filtering:
+    - admin_id: Filter by admin's orders
+    - manufacturing_coordinator_id: Filter by manufacturing coordinator's orders
+    """
+    from datetime import datetime
+    from sqlalchemy import and_, or_
+    
+    history_items = []
+    
+    # Date filter logic
+    date_filter = None
+    if start_date and end_date:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        date_filter = and_(
+            RawMaterialStockModel.created_at >= start_dt,
+            RawMaterialStockModel.created_at <= end_dt
+        )
+    elif year:
+        if month:
+            if day:
+                # Specific day
+                date_filter = and_(
+                    RawMaterialStockModel.created_at >= datetime(year, month, day),
+                    RawMaterialStockModel.created_at < datetime(year, month, day + 1)
+                )
+            else:
+                # Specific month
+                date_filter = and_(
+                    RawMaterialStockModel.created_at >= datetime(year, month, 1),
+                    RawMaterialStockModel.created_at < datetime(year, month + 1, 1) if month < 12 else datetime(year + 1, 1, 1)
+                )
+        else:
+            # Specific year
+            date_filter = and_(
+                RawMaterialStockModel.created_at >= datetime(year, 1, 1),
+                RawMaterialStockModel.created_at < datetime(year + 1, 1, 1)
+            )
+    
+    # 1. Get stock creation events
+    stock_query = db.query(RawMaterialStockModel).options(
+        joinedload(RawMaterialStockModel.material),
+        joinedload(RawMaterialStockModel.source_order),
+        joinedload(RawMaterialStockModel.vendor),
+        joinedload(RawMaterialStockModel.creator)
+    )
+    
+    if date_filter:
+        stock_query = stock_query.filter(date_filter)
+    if source_type:
+        stock_query = stock_query.filter(RawMaterialStockModel.source_type == source_type)
+    if order_id:
+        stock_query = stock_query.filter(RawMaterialStockModel.source_order_id == order_id)
+    if material_id:
+        stock_query = stock_query.filter(RawMaterialStockModel.material_id == material_id)
+    
+    # Note: No user filtering - both Admin and MC see all history data
+    
+    stocks = stock_query.all()
+    
+    for stock in stocks:
+        # Format dimensions string
+        dimensions = ""
+        if stock.form_type == "Round":
+            dimensions = f"Ø{stock.diameter}mm × {stock.length}mm" if stock.diameter and stock.length else ""
+        elif stock.form_type == "Square":
+            dimensions = f"{stock.breadth}mm × {stock.height}mm × {stock.length}mm" if stock.breadth and stock.height and stock.length else ""
+        elif stock.form_type == "Pipe":
+            dimensions = f"Ø{stock.outer_diameter}mm (ID: {stock.inner_diameter}mm) × {stock.length}mm" if stock.outer_diameter and stock.inner_diameter and stock.length else ""
+        
+        history_item = RawMaterialHistoryItem(
+            id=stock.id,
+            activity_type="stock_created",
+            timestamp=stock.created_at,
+            user_id=stock.user_id,
+            user_name=stock.creator.user_name if stock.creator else None,
+            user_role=stock.creator.role if stock.creator else None,
+            material_id=stock.material_id,
+            material_name=stock.material.material_name if stock.material else None,
+            stock_id=stock.id,
+            source_type=stock.source_type,
+            order_id=stock.source_order_id,
+            order_number=stock.source_order.sale_order_number if stock.source_order else None,
+            order_status=stock.order_status,
+            quantity=stock.quantity,
+            form_type=stock.form_type,
+            dimensions=dimensions,
+            vendor_id=stock.received_vendor_id,
+            vendor_name=stock.vendor.company_name if stock.vendor else None,
+            description=f"Stock created: {stock.quantity} units of {stock.material.material_name if stock.material else 'Unknown'}"
+        )
+        history_items.append(history_item)
+    
+    # 2. Get material linking events (usage records)
+    usage_query = db.query(RawMaterialUsageModel).options(
+        joinedload(RawMaterialUsageModel.unit).joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.material),
+        joinedload(RawMaterialUsageModel.unit).joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.source_order),
+        joinedload(RawMaterialUsageModel.part),
+        joinedload(RawMaterialUsageModel.user)
+    )
+    
+    # Apply date filter to usage records
+    if date_filter:
+        usage_query = usage_query.filter(date_filter)
+    
+    usages = usage_query.all()
+    
+    for usage in usages:
+        if usage.unit and usage.unit.stock:
+            stock = usage.unit.stock
+            
+            # Filter by source_type if specified
+            if source_type and stock.source_type != source_type:
+                continue
+            # Filter by order_id if specified
+            if order_id and stock.source_order_id != order_id:
+                continue
+            # Filter by material_id if specified
+            if material_id and stock.material_id != material_id:
+                continue
+            
+            # Note: No user filtering - both Admin and MC see all history data
+            # For material linked events, show the unit's dimensions that were consumed
+            if usage.unit:
+                unit = usage.unit
+                # Use stock's form_type and dimensions, but show consumed length from unit
+                if stock.form_type == "Round":
+                    dimensions = f"Ø{stock.diameter}mm × {unit.total_length}mm" if stock.diameter and unit.total_length else ""
+                elif stock.form_type == "Square":
+                    dimensions = f"{stock.breadth}mm × {stock.height}mm × {unit.total_length}mm" if stock.breadth and stock.height and unit.total_length else ""
+                elif stock.form_type == "Pipe":
+                    dimensions = f"Ø{stock.outer_diameter}mm (ID: {stock.inner_diameter}mm) × {unit.total_length}mm" if stock.outer_diameter and stock.inner_diameter and unit.total_length else ""
+                elif stock.form_type == "Sheet":
+                    dimensions = f"{stock.breadth}mm × {stock.height}mm × {stock.length}mm" if stock.breadth and stock.height and stock.length else ""
+            
+            # Get part's order details - always check if part has an order
+            part_order_id = stock.source_order_id
+            part_order_number = stock.source_order.sale_order_number if stock.source_order else None
+            part_order_status = stock.order_status
+            
+            # Always check if part has an order through OutSourcePartStatus
+            if usage.part:
+                # First try OutSourcePartStatus
+                part_order_query = db.query(OutSourcePartStatus).filter(
+                    OutSourcePartStatus.part_id == usage.part_id
+                ).first()
+                
+                if part_order_query and part_order_query.order:
+                    # Use part's order details (override stock order if stock has no order)
+                    if not stock.source_order:
+                        part_order_id = part_order_query.order_id
+                        part_order_number = part_order_query.order.sale_order_number
+                        part_order_status = part_order_query.order.status
+                else:
+                    # Try to get order through part's product
+                    if usage.part.product:
+                        # Get the first order for this product
+                        product_order = db.query(OrderModel).filter(
+                            OrderModel.product_id == usage.part.product_id
+                        ).first()
+                        if product_order:
+                            if not stock.source_order:
+                                part_order_id = product_order.id
+                                part_order_number = product_order.sale_order_number
+                                part_order_status = product_order.status
+            
+            history_item = RawMaterialHistoryItem(
+                id=usage.id,
+                activity_type="material_linked",
+                timestamp=usage.created_at,
+                user_id=usage.user_id,
+                user_name=usage.user.user_name if usage.user else None,
+                user_role=usage.user.role if usage.user else None,
+                material_id=stock.material_id,
+                material_name=stock.material.material_name if stock.material else None,
+                stock_id=stock.id,
+                source_type=stock.source_type,
+                order_id=part_order_id,
+                order_number=part_order_number,
+                order_status=part_order_status,
+                form_type=stock.form_type,
+                dimensions=dimensions,
+                part_id=usage.part_id,
+                part_name=usage.part.part_name if usage.part else None,
+                part_number=usage.part.part_number if usage.part else None,
+                used_length=usage.used_length,
+                unit_id=usage.raw_material_unit_id,
+                total_length=usage.unit.total_length if usage.unit else None,
+                remaining_length=usage.unit.remaining_length if usage.unit else None,
+                description=f"Material linked: {usage.part.part_name if usage.part else 'Unknown'} used {usage.used_length}mm"
+            )
+            history_items.append(history_item)
+    
+    # 3. Get order status change events (track actual status changes)
+    # We'll create history events for each stock that has a non-enquiry status
+    # This represents when the status was changed from enquiry to current status
+    stock_status_query = db.query(RawMaterialStockModel).options(
+        joinedload(RawMaterialStockModel.material),
+        joinedload(RawMaterialStockModel.source_order),
+        joinedload(RawMaterialStockModel.vendor),
+        joinedload(RawMaterialStockModel.creator)
+    )
+    
+    if date_filter:
+        stock_status_query = stock_status_query.filter(date_filter)
+    if source_type:
+        stock_status_query = stock_status_query.filter(RawMaterialStockModel.source_type == source_type)
+    if order_id:
+        stock_status_query = stock_status_query.filter(RawMaterialStockModel.source_order_id == order_id)
+    if material_id:
+        stock_status_query = stock_status_query.filter(RawMaterialStockModel.material_id == material_id)
+    
+    # Note: No user filtering - both Admin and MC see all history data
+    
+    # Only include stocks that have order_status and are not enquiry
+    stock_status_items = stock_status_query.filter(
+        RawMaterialStockModel.order_status.isnot(None),
+        RawMaterialStockModel.order_status != 'enquiry'
+    ).all()
+    
+    for stock in stock_status_items:
+        # Create a history event for the status change
+        # Use updated_at as the timestamp when status was changed
+        dimensions = ""
+        if stock.form_type == "Round":
+            dimensions = f"Ø{stock.diameter}mm × {stock.length}mm" if stock.diameter and stock.length else ""
+        elif stock.form_type == "Square":
+            dimensions = f"{stock.breadth}mm × {stock.height}mm × {stock.length}mm" if stock.breadth and stock.height and stock.length else ""
+        elif stock.form_type == "Pipe":
+            dimensions = f"Ø{stock.outer_diameter}mm (ID: {stock.inner_diameter}mm) × {stock.length}mm" if stock.outer_diameter and stock.inner_diameter and stock.length else ""
+        
+        # Create multiple status change events based on the current status
+        # If current status is 'received', create events for all previous status changes
+        status_progression = ['enquiry', 'purchase_request', 'purchase_order', 'received']
+        current_status_index = status_progression.index(stock.order_status) if stock.order_status in status_progression else 0
+        
+        # Create events for each status change up to the current status
+        for i in range(1, current_status_index + 1):
+            previous_status = status_progression[i-1]
+            current_status = status_progression[i]
+            
+            # Create unique ID for this specific status change event
+            status_change_id = stock.id + 2000000 + (i * 100000)
+            
+            # Calculate timestamp (stagger the times to show progression)
+            time_offset = (current_status_index - i) * 3600  # 1 hour between status changes
+            status_timestamp = stock.updated_at
+            
+            history_item = RawMaterialHistoryItem(
+                id=status_change_id,
+                activity_type="order_status_changed",
+                timestamp=status_timestamp,
+                user_id=stock.user_id,
+                user_name=stock.creator.user_name if stock.creator else None,
+                user_role=stock.creator.role if stock.creator else None,
+                material_id=stock.material_id,
+                material_name=stock.material.material_name if stock.material else None,
+                stock_id=stock.id,
+                source_type=stock.source_type,
+                order_id=stock.source_order_id,
+                order_number=stock.source_order.sale_order_number if stock.source_order else None,
+                order_status=current_status,
+                quantity=stock.quantity,
+                form_type=stock.form_type,
+                dimensions=dimensions,
+                vendor_id=stock.received_vendor_id,
+                vendor_name=stock.vendor.company_name if stock.vendor else None,
+                description=f"{previous_status} → {current_status}"
+            )
+            history_items.append(history_item)
+    
+    # Sort history items by timestamp (newest first)
+    history_items.sort(key=lambda x: x.timestamp, reverse=True)
+    
+    # Filter by activity_type if specified
+    if activity_type:
+        history_items = [item for item in history_items if item.activity_type == activity_type]
+    
+    return RawMaterialHistoryResponse(
+        history=history_items,
+        total_count=len(history_items),
+        filtered_count=len(history_items)
+    )
 
 
 @router.get("/{raw_material_id}", response_model=RawMaterial)
@@ -390,7 +750,7 @@ def create_raw_material_stock(stock: RawMaterialStockCreate, db: Session = Depen
             db.add(unit)
         
         db.commit()
-        print(f"🔥 Created {db_stock.quantity} units for stock ID {db_stock.id}")
+  
     
     # Frontend handles allocation directly via /rawmaterials/tracking/allocate API
     # No auto-allocation needed here
@@ -710,24 +1070,68 @@ def use_raw_material_stock(stock_id: int, used_quantity: int, db: Session = Depe
     }
 
 
+@router.post("/sync-stock-statuses", status_code=status.HTTP_200_OK)
+def sync_all_stock_statuses(db: Session = Depends(get_db)):
+    """
+    Manually trigger stock status synchronization based on unit statuses.
+    This endpoint updates all stock statuses to reflect the actual unit statuses.
+    Useful for fixing data inconsistencies.
+    """
+    result = StockAutoUpdateService.update_all_stock_statuses_from_units(db)
+    return result
+
+
 def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
     """Helper function to add details to stock item"""
     
-    # Determine the actual status based on source type and order status
+    # Determine the actual status based on unit statuses
     def get_stock_status(stock_item):
-        if stock_item.source_type == "general":
-            # For general stock: available only if available_quantity > 0
-            return "available" if stock_item.available_quantity > 0 else "exhausted"
-        elif stock_item.source_type == "order":
-            # For order stock: available only if order_status = "received" AND available_quantity > 0
-            if stock_item.available_quantity <= 0:
-                return "exhausted"
-            elif stock_item.order_status == "received":
-                return "available"
+        # Get all units for this stock
+        from DB.models.inventory import RawMaterialUnit
+        units = db.query(RawMaterialUnit).filter(RawMaterialUnit.stock_id == stock_item.id).all()
+        
+        if not units:
+            # No units exist, use available_quantity as fallback
+            if stock_item.source_type == "general":
+                return "available" if stock_item.available_quantity > 0 else "exhausted"
+            elif stock_item.source_type == "order":
+                if stock_item.available_quantity > 0:
+                    if stock_item.order_status == "received":
+                        return "available"
+                    else:
+                        return "not_available"
+                else:
+                    # No available quantity
+                    return "not_available"
             else:
-                return stock_item.order_status or "pending"  # Show order status if not received
+                return stock_item.status
+        
+        # Check unit statuses
+        available_units = [u for u in units if u.status in ['available', 'partially_used']]
+        
+        if available_units:
+            # At least one unit is available
+            if stock_item.source_type == "general":
+                return "available"
+            elif stock_item.source_type == "order":
+                # For order stock, only available if order_status is received
+                return "available" if stock_item.order_status == "received" else "not_available"
+            else:
+                return "available"
         else:
-            return stock_item.status  # Fallback to stored status
+            # All units are exhausted or not_available
+            if stock_item.source_type == "order":
+                # For order stock, always return not_available (order_status shown separately)
+                return "not_available"
+            else:
+                return "exhausted"
+    
+    # Update available_quantity based on unit statuses
+    from DB.models.inventory import RawMaterialUnit
+    units = db.query(RawMaterialUnit).filter(RawMaterialUnit.stock_id == stock.id).all()
+    if units:
+        available_count = len([u for u in units if u.status in ['available', 'partially_used']])
+        stock.available_quantity = available_count
     
     result = {
         "id": stock.id,
@@ -753,7 +1157,7 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
         "vendor_id": stock.vendor_id,  # Comma-separated vendor IDs for enquiry
         "received_vendor_id": stock.received_vendor_id,  # Final vendor who received the order
         "user_id": stock.user_id,
-        "status": stock.calculated_status,  # Use calculated status property
+        "status": get_stock_status(stock),  # Calculate status based on unit statuses
         "created_at": stock.created_at,
         "updated_at": stock.updated_at,
     }
@@ -929,6 +1333,7 @@ def assign_material_to_part(
     unit_id: int,
     part_id: int,
     required_length: float,
+    user_id: int = None,
     db: Session = Depends(get_db)
 ):
     """Assign material unit to a part and track usage"""
@@ -1041,7 +1446,8 @@ def assign_material_to_part(
         usage = RawMaterialUsageModel(
             raw_material_unit_id=unit_id,
             part_id=part_id,
-            used_length=required_length
+            used_length=required_length,
+            user_id=user_id  # Store the user who linked the material
         )
         db.add(usage)
         # Set required_length to new value for new assignment
@@ -1052,6 +1458,10 @@ def assign_material_to_part(
     part.raw_material_id = unit.stock.material_id  # Store the material ID
     
     db.commit()
+    
+    # 🔥 Update stock status based on unit statuses
+    StockAutoUpdateService.update_stock_status_from_units(db, unit.stock_id)
+    
     db.refresh(usage)
     
     # Return with details
@@ -1144,6 +1554,9 @@ def unlink_material_from_part(part_id: int, db: Session = Depends(get_db)):
     part.required_length = None
     
     db.commit()
+    
+    # 🔥 Update stock status based on unit statuses
+    StockAutoUpdateService.update_stock_status_from_units(db, unit.stock_id)
     
     return {"message": f"Material unlinked from part {part_id} successfully"}
 

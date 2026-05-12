@@ -518,6 +518,8 @@ class RawMaterialUsage(Base):
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
 
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # User who linked the material
+
 
 
     used_length = Column(Float, nullable=False)
@@ -533,4 +535,6 @@ class RawMaterialUsage(Base):
     unit = relationship("RawMaterialUnit", back_populates="usages")
 
     part = relationship("Part", back_populates="material_usages")
+
+    user = relationship("AccessUser", foreign_keys=[user_id])
 

@@ -24,6 +24,7 @@ from DB.models.configuration import PokayokeCompletedLog
 from DB.models.inventory import RawMaterial, RawMaterialStock, RawMaterialUnit, Vendors
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
+from services.stock_auto_update import StockAutoUpdateService
 
 router = APIRouter(
     prefix="/parts",
@@ -82,12 +83,25 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, unit_map: dict,
 @router.post("/", response_model=Part, status_code=status.HTTP_201_CREATED)
 def create_part(part: PartCreate, db: Session = Depends(get_db)):
     """Create a new part"""
-    db_part = db.query(PartModel).filter(PartModel.part_number == part.part_number).first()
-    if db_part:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Part with number {part.part_number} already exists"
-        )
+    # Check for duplicate part number only within the same product
+    if part.product_id:
+        db_part = db.query(PartModel).filter(
+            PartModel.part_number == part.part_number,
+            PartModel.product_id == part.product_id
+        ).first()
+        if db_part:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Part with number {part.part_number} already exists in this product"
+            )
+    else:
+        # If no product_id is provided, check globally (backward compatibility)
+        db_part = db.query(PartModel).filter(PartModel.part_number == part.part_number).first()
+        if db_part:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Part with number {part.part_number} already exists"
+            )
 
     # Check if raw material allocation is needed
     needs_allocation = getattr(part, 'raw_material_unit_id', None) and getattr(part, 'required_length', None)
@@ -305,6 +319,10 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
         setattr(db_part, field, value)
 
     db.commit()
+    
+    # 🔥 Update stock status based on unit statuses if raw material was cleared
+    if is_clearing_raw_material and unit:
+        StockAutoUpdateService.update_stock_status_from_units(db, unit.stock_id)
     db.refresh(db_part)
     type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
     return _part_to_dict(db_part, type_map, rm_map, unit_map, user_map, vendor_map)
@@ -433,11 +451,13 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
         )
 
         # 10. Deallocate raw material if this part has any allocated
+        stock_id_to_update = None
         if db_part.raw_material_unit_id:
             try:
                 # Use the unlink endpoint logic to restore unit
                 unit = db.query(RawMaterialUnit).filter(RawMaterialUnit.id == db_part.raw_material_unit_id).first()
                 if unit:
+                    stock_id_to_update = unit.stock_id
                     usage = db.query(RawMaterialUsageModel).filter(
                         RawMaterialUsageModel.raw_material_unit_id == db_part.raw_material_unit_id,
                         RawMaterialUsageModel.part_id == part_id
@@ -456,6 +476,10 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
         # Finally, delete the part itself
         db.delete(db_part)
         db.commit()
+        
+        # 🔥 Update stock status based on unit statuses after part deletion
+        if stock_id_to_update:
+            StockAutoUpdateService.update_stock_status_from_units(db, stock_id_to_update)
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -531,46 +555,65 @@ async def parse_parts_doc(file: UploadFile = File(...)):
             detail="No tables found in the document.",
         )
  
-    COL_SIZE     = 3
-    COL_MATERIAL = 5
-    COL_QTY      = 6   # "No. of Parts"
-    COL_NAME     = 7   # "Name of Part"
-    COL_PARTNO   = 9   # "Part (Assy) No., Drg. Size"
-    FOOTER_ROWS  = 4   # rows immediately after each header that are page footer
- 
+    # ── Column-discovery helpers ──────────────────────────────────────────────
     def _is_header(cells: list) -> bool:
         joined = " ".join(c.lower() for c in cells)
         return "name of part" in joined and (
             "no. of parts" in joined or "no of parts" in joined
         )
- 
+
+    def find_col(header_row, keywords):
+        # Pass 1: exact match (whole cell == keyword)
+        for i, c in enumerate(header_row):
+            if any(c.strip().lower() == kw for kw in keywords):
+                return i
+        # Pass 2: substring match (fallback)
+        for i, c in enumerate(header_row):
+            if any(kw in c.lower() for kw in keywords):
+                return i
+        return -1
+
+    # ── Page-metadata row guard ───────────────────────────────────────────────
+    PAGE_META_KEYWORDS = [
+        "central manufacturing", "assembly no", "sheet no", "prepared by",
+        "replaced", "superceded", "type of machine", "group overall",
+    ]
+
+    def _is_page_meta(cells: list) -> bool:
+        """Return True when a row contains document-metadata text (not a part)."""
+        joined = " ".join(c.lower() for c in cells)
+        return any(kw in joined for kw in PAGE_META_KEYWORDS)
+
     def _cell(row_cells: list, idx: int) -> str:
-        if idx >= len(row_cells):
+        if idx < 0 or idx >= len(row_cells):
             return ""
         return re.sub(r"\s+", " ", row_cells[idx]).strip()
- 
+
     parts: list[dict] = []
- 
+
     for table in doc.tables:
         all_rows = [[c.text for c in row.cells] for row in table.rows]
- 
+
         header_indices = [i for i, r in enumerate(all_rows) if _is_header(r)]
         if not header_indices:
             continue  # not a BOM table
- 
-        # Mark header + its 4 footer rows as skip
-        skip: set[int] = set()
-        for hi in header_indices:
-            for offset in range(FOOTER_ROWS + 1):
-                skip.add(hi + offset)
- 
+
+        # ── Dynamically discover column positions from the FIRST header row ──
+        first_header = [c.lower().strip() for c in all_rows[header_indices[0]]]
+        COL_NAME     = find_col(first_header, ["name of part"])
+        COL_QTY      = find_col(first_header, ["no. of parts", "no of parts"])
+        COL_PARTNO   = find_col(first_header, ["part (assy) no"])
+        COL_MATERIAL = find_col(first_header, ["material"])
+        COL_SIZE     = find_col(first_header, ["size"])
+
         for ri, row_cells in enumerate(all_rows):
-            if ri in skip:
+            if _is_header(row_cells) or _is_page_meta(row_cells):
                 continue
  
             part_name   = _cell(row_cells, COL_NAME)
             part_number = _cell(row_cells, COL_PARTNO)
             qty_raw     = _cell(row_cells, COL_QTY)
+            size_raw    = _cell(row_cells, COL_SIZE)
  
             # 1. Both name and number empty → spacer row
             if not part_name and not part_number:
@@ -598,6 +641,7 @@ async def parse_parts_doc(file: UploadFile = File(...)):
                     "part_name":         part_name,
                     "part_number":       part_number,
                     "qty":               qty,
+                    "size":              size_raw or None,
                     "raw_material_name": _cell(row_cells, COL_MATERIAL) or None,
                     "type_id":           1,    # default: In-house; user can change in UI
                     "part_detail":       None,
@@ -631,6 +675,7 @@ class BulkPartCreateItem(BaseModel):
     product_id:      int | None = None
     user_id:         int | None = None
     qty:             int | None = None
+    size:            str | None = None
  
  
 class BulkPartCreateRequest(BaseModel):
@@ -661,18 +706,44 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
     type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
  
     # Pre-check all part numbers in ONE query to avoid N round-trips
+    # Check for duplicates only within the same product
     incoming_numbers = [item.part_number for item in payload.parts if item.part_number]
     existing_numbers: set[str] = set()
     if incoming_numbers:
-        existing_numbers = {
-            row.part_number
-            for row in db.query(PartModel.part_number)
-            .filter(PartModel.part_number.in_(incoming_numbers))
-            .all()
-        }
- 
+        # Group parts by product_id to check duplicates within each product
+        product_groups = {}
+        for item in payload.parts:
+            if item.part_number:
+                if item.product_id not in product_groups:
+                    product_groups[item.product_id] = []
+                product_groups[item.product_id].append(item.part_number)
+        
+        # Check existing numbers for each product group
+        for product_id, numbers in product_groups.items():
+            if product_id is not None:
+                # Check within specific product
+                existing_in_product = {
+                    row.part_number
+                    for row in db.query(PartModel.part_number)
+                    .filter(
+                        PartModel.part_number.in_(numbers),
+                        PartModel.product_id == product_id
+                    )
+                    .all()
+                }
+                existing_numbers.update(existing_in_product)
+            else:
+                # If no product_id, check globally (backward compatibility)
+                existing_global = {
+                    row.part_number
+                    for row in db.query(PartModel.part_number)
+                    .filter(PartModel.part_number.in_(numbers))
+                    .all()
+                }
+                existing_numbers.update(existing_global)
+
     for item in payload.parts:
-        # Intra-batch duplicate check (catches repeated numbers within the same payload)
+        # Intra-batch duplicate check (catches repeated numbers within the same payload and product)
         if item.part_number in existing_numbers:
             duplicates.append(item.part_number)
             continue

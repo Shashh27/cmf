@@ -22,6 +22,7 @@ from DB.schemas.inventory import (
     OrderMaterialLinkRequest,
 )
 from services.raw_material_calculations import RawMaterialCalculationService
+from services.stock_auto_update import StockAutoUpdateService
 
 router = APIRouter(
     tags=["Order Raw Materials"]
@@ -291,6 +292,7 @@ def receive_order_material(stock_id: int, db: Session = Depends(get_db)):
                         used_length=part.required_length,
                         remaining_length=unit.remaining_length - part.required_length,
                         usage_date=stock.updated_at,
+                        user_id=user_id  # Store the user who linked the material
                     )
                     db.add(usage)
                     
@@ -302,6 +304,9 @@ def receive_order_material(stock_id: int, db: Session = Depends(get_db)):
                     unit_index += 1
         
         db.commit()
+        
+        # 🔥 Update stock status based on unit statuses
+        StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
         
         return {
             "message": "Order material received successfully",
@@ -438,9 +443,10 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
 @router.get("/order-parts-raw-material-linked/")
 def get_order_parts_raw_material_linked(
     manufacturing_coordinator_id: Optional[int] = None,
+    admin_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get order-linked raw materials filtered by manufacturing coordinator"""
+    """Get order-linked raw materials filtered by order association (admin or MC involved in order)"""
     from routers.rawmaterials import _stock_with_details
     
     # Query order-type stock items
@@ -450,9 +456,25 @@ def get_order_parts_raw_material_linked(
         joinedload(RawMaterialStockModel.vendor),
     ).filter(RawMaterialStockModel.source_type == "order")
     
-    # Filter by manufacturing coordinator if provided
-    if manufacturing_coordinator_id:
-        query = query.filter(RawMaterialStockModel.user_id == manufacturing_coordinator_id)
+    # Filter by order association: get orders where user is admin or manufacturing coordinator
+    if manufacturing_coordinator_id or admin_id:
+        # Get order IDs where the user is either admin or manufacturing coordinator
+        order_query = db.query(OrderModel.id)
+        
+        if manufacturing_coordinator_id:
+            order_query = order_query.filter(OrderModel.manufacturing_coordinator_id == manufacturing_coordinator_id)
+        
+        if admin_id:
+            order_query = order_query.filter(OrderModel.admin_id == admin_id)
+        
+        order_ids = [order[0] for order in order_query.all()]
+        
+        # Filter stock items by these order IDs
+        if order_ids:
+            query = query.filter(RawMaterialStockModel.source_order_id.in_(order_ids))
+        else:
+            # If no orders found, return empty result
+            return []
     
     stock_items = query.order_by(RawMaterialStockModel.id.desc()).all()
     
@@ -562,7 +584,30 @@ def update_order_parts_raw_material_linked(
                         cost=stock.cost / new_quantity if new_quantity > 0 else 0
                     )
                     db.add(new_unit)
-            # Don't delete existing units - they might be linked
+            elif new_quantity < existing_count:
+                # Remove unused units for the decrease
+                units_to_remove = existing_count - new_quantity
+                # Get units that are NOT linked to any parts (safe to delete)
+                from DB.models.oms import Part as PartModel
+                linked_unit_ids = db.query(PartModel.raw_material_unit_id).filter(
+                    PartModel.raw_material_unit_id.isnot(None),
+                    PartModel.raw_material_unit_id.in_([u.id for u in existing_units])
+                ).all()
+                linked_unit_ids = set([u[0] for u in linked_unit_ids])
+                
+                # Find units that are not linked to any parts
+                units_to_delete = [u for u in existing_units if u.id not in linked_unit_ids]
+                
+                # Delete the required number of unused units (oldest first)
+                if len(units_to_delete) >= units_to_remove:
+                    for i in range(units_to_remove):
+                        db.delete(units_to_delete[i])
+                else:
+                    # Not enough unused units - raise error
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot reduce quantity to {new_quantity}. {len(units_to_delete)} unused units available, but need to remove {units_to_remove} units. Some units are linked to parts."
+                    )
         
         # Update stock and units status based on order_status
         if 'order_status' in update_data:
@@ -586,6 +631,9 @@ def update_order_parts_raw_material_linked(
         
         db.commit()
         
+        # 🔥 Update stock status based on unit statuses (this will respect order_status logic)
+        StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+        
         return _stock_with_details(stock, db)
         
     except Exception as e:
@@ -600,6 +648,7 @@ def update_order_parts_raw_material_linked(
 def update_order_parts_status_group(
     group_id: str,
     update_data: dict,
+    user_id: int = None,
     db: Session = Depends(get_db)
 ):
     """Update status for a group of order-linked stock items with full logic"""
@@ -692,6 +741,9 @@ def update_order_parts_status_group(
                             unit.status = 'available'
                         else:
                             unit.status = 'not_available'
+                    
+                    # 🔥 Update stock status based on unit statuses after unlinking parts
+                    StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
                 
                 stock.part_id = new_part_ids_str
             
@@ -768,6 +820,10 @@ def update_order_parts_status_group(
         
         db.commit()
         
+        # 🔥 Update stock status based on unit statuses for all stocks in the group
+        for stock in stocks:
+            StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+        
         # Return updated stocks
         result = [_stock_with_details(stock, db) for stock in stocks]
         return result[0] if len(result) == 1 else result
@@ -815,11 +871,22 @@ def delete_order_parts_raw_material_linked(
         )
     
     # Optional user authorization verification
-    if user_id and stock.user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this stock item"
-        )
+    # User can delete if: 1) They created the stock, OR 2) They are admin or MC of the associated order
+    if user_id:
+        if stock.user_id != user_id:
+            # Check if user is admin or manufacturing_coordinator of the order
+            if stock.source_order_id:
+                order = db.query(OrderModel).filter(OrderModel.id == stock.source_order_id).first()
+                if order and order.admin_id != user_id and order.manufacturing_coordinator_id != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Not authorized to delete this stock item"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not authorized to delete this stock item"
+                )
     
     try:
         # Rule 3: Delete all related data

@@ -911,6 +911,7 @@ class RawMaterialUsageBase(BaseModel):
     raw_material_unit_id: int
     part_id: int
     used_length: float
+    user_id: Optional[int] = None  # User who linked the material
 
 
 class RawMaterialUsageCreate(RawMaterialUsageBase):
@@ -921,6 +922,7 @@ class RawMaterialUsageUpdate(BaseModel):
     raw_material_unit_id: Optional[int] = None
     part_id: Optional[int] = None
     used_length: Optional[float] = None
+    user_id: Optional[int] = None  # User who linked the material
 
 
 class RawMaterialUsage(RawMaterialUsageBase):
@@ -938,4 +940,56 @@ class RawMaterialUsageWithDetails(RawMaterialUsage):
 
     class Config:
         from_attributes = True
+
+
+# =======================
+# 🔥 Raw Material History Schemas
+# =======================
+
+class RawMaterialHistoryItem(BaseModel):
+    """Single history item for raw material activities"""
+    id: int
+    activity_type: str  # "stock_created", "material_linked", "order_status_changed", "stock_updated", "material_unlinked"
+    timestamp: datetime
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    
+    # Material details
+    material_id: Optional[int] = None
+    material_name: Optional[str] = None
+    
+    # Stock details
+    stock_id: Optional[int] = None
+    source_type: Optional[str] = None  # "general" or "order"
+    order_id: Optional[int] = None
+    order_number: Optional[str] = None
+    order_status: Optional[str] = None
+    quantity: Optional[int] = None
+    form_type: Optional[str] = None
+    dimensions: Optional[str] = None
+    
+    # Part details
+    part_id: Optional[int] = None
+    part_name: Optional[str] = None
+    part_number: Optional[str] = None
+    used_length: Optional[float] = None
+    
+    # Unit details
+    unit_id: Optional[int] = None
+    total_length: Optional[float] = None
+    remaining_length: Optional[float] = None
+    
+    # Vendor details
+    vendor_id: Optional[int] = None
+    vendor_name: Optional[str] = None
+    
+    # Additional details
+    description: Optional[str] = None
+
+
+class RawMaterialHistoryResponse(BaseModel):
+    """Response model for raw material history"""
+    history: List[RawMaterialHistoryItem]
+    total_count: int
+    filtered_count: int
 
