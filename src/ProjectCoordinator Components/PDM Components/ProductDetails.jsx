@@ -47,9 +47,9 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
         saveButton.textContent = 'Saving...';
       }
       
-      // Make API call to update the extracted material data
+      // Make API call to update extracted material data
       const response = await axios.put(
-        `${API_BASE_URL}/parts/${selectedItem.id}/extracted-materials/${selectedExtractedMaterial._rootId}`,
+        `${API_BASE_URL}/documents/part/${selectedItem.id}/extracted-data/${selectedExtractedMaterial._rootId}`,
         editedMaterial,
         { headers: { 'Content-Type': 'application/json' } }
       );
@@ -536,6 +536,10 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
               <div className="flex items-center gap-1 mb-1 flex-wrap">
                 <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
                 <Text type="secondary" className="text-xs">Extracted from 2D Files</Text>
+                <Text type="secondary" className="text-xs text-blue-600 ml-2">
+                  <InfoCircleOutlined className="mr-1" />
+                  Click any row to edit
+                </Text>
                 <span className="text-[10px] text-slate-400 ml-1 sm:hidden">— scroll →</span>
               </div>
               {extractedMaterials.length > 0 ? (
@@ -548,10 +552,11 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                     pagination={false} 
                     scroll={{ x: 'max-content', y: 120 }} 
                     bordered 
-                    className="extracted-materials-table"
+                    className="extracted-materials-table hover:bg-blue-50"
                     onRow={(record) => ({
                       onClick: () => handleExtractedMaterialClick(record),
-                      style: { cursor: 'pointer' }
+                      style: { cursor: 'pointer' },
+                      title: 'Click to edit this material data'
                     })}
                   />
                 </div>

@@ -246,6 +246,14 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       render: (record) => record.operation_name || record.name || record.op_name || '-'
     },
     {
+      title: 'Setup Time', key: 'setup_time',
+      render: (record) => record.setup_time || record.setupTime || record.preparation_time || '-'
+    },
+    {
+      title: 'Cycle Time', key: 'cycle_time',
+      render: (record) => record.cycle_time || record.cycleTime || record.run_time || '-'
+    },
+    {
       title: 'Work Center', key: 'wc_name',
       render: (record) => record.work_center_name || record.work_center?.name || '-'
     },
@@ -260,7 +268,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
         // ✅ Remaining = total - approved (never go below 0)
         const remainingQty = Math.max(0, totalQty - completedQty);
-        
+
         return (
           <div style={{ fontSize: '12px' }}>
             <div>Total: {totalQty}</div>
@@ -271,10 +279,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       }
     },
     {
-      title: 'Duration (hrs)', key: 'duration',
-      render: () => {
-        return selectedJob?.duration_hours ?? '-';
-      }
+      title: 'Operation Type', key: 'operation_type',
+      render: (record) => record.part_type_name || record.operation_type || record.type || record.op_type || '-'
     },
     {
       title: 'Action', key: 'action',
@@ -308,16 +314,25 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     if (!selectedJob) return true;
     if (!selectedJob.operation_name && !selectedJob.operation_number) return true;
 
-    const opNameMatch = selectedJob.operation_name && (
-      (op.operation_name && op.operation_name.toLowerCase() === selectedJob.operation_name.toLowerCase()) ||
-      (op.name && op.name.toLowerCase() === selectedJob.operation_name.toLowerCase())
-    );
+    // Prioritize operation_number matching when available
+    if (selectedJob.operation_number) {
+      const opNumMatch = (
+        (op.operation_number && op.operation_number.toString() === selectedJob.operation_number.toString()) ||
+        (op.number && op.number.toString() === selectedJob.operation_number.toString())
+      );
+      if (opNumMatch) return true;
+    }
 
-    const opNumMatch = selectedJob.operation_number && (
-      (op.operation_number && op.operation_number.toString() === selectedJob.operation_number.toString()) ||
-      (op.number && op.number.toString() === selectedJob.operation_number.toString())
-    );
-    return opNameMatch || opNumMatch;
+    // Only use operation_name as fallback if operation_number is not available
+    if (selectedJob.operation_name && !selectedJob.operation_number) {
+      const opNameMatch = (
+        (op.operation_name && op.operation_name.toLowerCase() === selectedJob.operation_name.toLowerCase()) ||
+        (op.name && op.name.toLowerCase() === selectedJob.operation_name.toLowerCase())
+      );
+      if (opNameMatch) return true;
+    }
+
+    return false;
   });
 
 

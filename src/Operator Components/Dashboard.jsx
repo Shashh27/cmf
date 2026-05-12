@@ -49,6 +49,11 @@ const Dashboard = () => {
   const [cachedLogs, setCachedLogs] = useState([]);
   const [cachedApprovalStatuses, setCachedApprovalStatuses] = useState({});
 
+  // Clear localStorage on mount to always start fresh
+  useEffect(() => {
+    localStorage.removeItem('selectedJob');
+  }, []);
+
   // Prevents checkChecklistStatus from running more than once per machineId load.
   // It will be reset to false only when showChecklist closes (so the badge
   // refreshes after the operator submits a checklist).
