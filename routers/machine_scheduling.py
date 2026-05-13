@@ -1998,190 +1998,330 @@ def get_machine_operations(
 ):
     """
     Fetch all planned schedule items (operations) for a specific machine.
- 
+
     Each operation in the response includes:
-      can_activate      : bool   — True only if all prior operations of that
-                                   part (lower operation_number) are completed
-      blocked_by        : list   — operations that must complete first
-      operation_status  : str    — current status from operation_status table
- 
-    Frontend must check can_activate before showing the Activate button.
+      can_activate      : bool
+      blocked_by        : list
+      operation_status  : str
     """
+
     try:
         # Check if machine exists
-        machine_obj = db.query(Machine).filter(Machine.id == machine_id).first()
+        machine_obj = (
+            db.query(Machine)
+            .filter(Machine.id == machine_id)
+            .first()
+        )
+
         if not machine_obj:
-            raise HTTPException(404, f"Machine with ID {machine_id} not found")
- 
+            raise HTTPException(
+                status_code=404,
+                detail=f"Machine with ID {machine_id} not found"
+            )
+
         rows = (
-            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, OrderPartPriority, OperationStatus, Part)
-            .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
-            .outerjoin(Part, Part.id == PlannedScheduleItem.part_id)
-            .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
+            db.query(
+                Rescheduling,
+                Operation,
+                Machine,
+                WorkCenter,
+                OrderPartPriority,
+                OperationStatus,
+                Part
+            )
+            .join(Operation, Operation.id == Rescheduling.operation_id)
+            .outerjoin(Part, Part.id == Rescheduling.part_id)
+            .outerjoin(Machine, Machine.id == Rescheduling.machine_id)
             .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
             .outerjoin(
                 OrderPartPriority,
-                (OrderPartPriority.order_id == PlannedScheduleItem.sale_order_id) &
-                (OrderPartPriority.part_id == PlannedScheduleItem.part_id)
+                (OrderPartPriority.order_id == Rescheduling.order_id) &
+                (OrderPartPriority.part_id == Rescheduling.part_id)
             )
-            .outerjoin(OperationStatus, OperationStatus.operation_id == PlannedScheduleItem.operation_id)
-            .filter(PlannedScheduleItem.machine_id == machine_id)
-            .order_by(PlannedScheduleItem.planned_start_time)
+            .outerjoin(
+                OperationStatus,
+                (OperationStatus.operation_id == Rescheduling.operation_id) &
+                (OperationStatus.order_id == Rescheduling.order_id) &
+                (OperationStatus.part_id == Rescheduling.part_id)
+            )
+            .filter(Rescheduling.machine_id == machine_id)
+            .order_by(Rescheduling.start_time.asc())
             .all()
         )
- 
-        # Group operations by operation_id to consolidate multiple time spans
+
+        # Group operations
         operation_groups = {}
-        for item, op, machine, wc, priority, operation_status, part in rows:
-            op_id = item.operation_id
+
+        for (
+            reschedule,
+            op,
+            machine,
+            wc,
+            priority,
+            operation_status,
+            part
+        ) in rows:
+
+            op_id = reschedule.operation_id
+
             if op_id not in operation_groups:
+
                 operation_groups[op_id] = {
-                    "schedule_id": item.id,
-                    "sale_order_id": item.sale_order_id,
-                    "sale_order_number": item.sale_order_number,
-                    "part_id": item.part_id,
-                    "part_number": item.part_number,
+                    "schedule_id": reschedule.id,
+
+                    "sale_order_id": reschedule.order_id,
+                    "sale_order_number": reschedule.order_number,
+
+                    "part_id": reschedule.part_id,
+                    "part_number": reschedule.part_number,
                     "part_name": part.part_name if part else None,
+
                     "priority": priority.priority if priority else None,
-                    "order_part_priority_id": priority.id if priority else None,
-                    "operation_id": item.operation_id,
+                    "order_part_priority_id": (
+                        priority.id if priority else None
+                    ),
+
+                    "operation_id": reschedule.operation_id,
                     "operation_number": op.operation_number,
                     "operation_name": op.operation_name,
-                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
-                    "machine_id": item.machine_id,
+
+                    "operation_type": (
+                        "Out-Source"
+                        if op.part_type_id == 2
+                        else "IN-House"
+                    ),
+
+                    "machine_id": reschedule.machine_id,
                     "machine_make": machine.make if machine else None,
                     "machine_model": machine.model if machine else None,
                     "machine_type": machine.type if machine else None,
+
                     "work_center_id": wc.id if wc else None,
-                    "work_center_name": wc.work_center_name if wc else None,
-                    "planned_start_time": item.planned_start_time,
-                    "planned_end_time": item.planned_end_time,
-                    "total_quantity": item.total_quantity,
-                    "remaining_quantity": item.remaining_quantity,
-                    "status": item.status,
-                    "operation_status": operation_status.status if operation_status else None,
-                    "operation_started_at": operation_status.started_at if operation_status else None,
-                    "operation_completed_at": operation_status.completed_at if operation_status else None,
-                    # stored temporarily for dependency check; removed before response
-                    "_part_id_key": item.part_id,
-                    "_order_id_key": item.sale_order_id,
-                    "_op_number": op.operation_number,
+                    "work_center_name": (
+                        wc.work_center_name if wc else None
+                    ),
+
+                    "planned_start_time": reschedule.start_time,
+                    "planned_end_time": reschedule.end_time,
+
+                    "total_quantity": reschedule.total_qty,
+                    "completed_quantity": reschedule.completed_qty,
+                    "remaining_quantity": reschedule.remaining_qty,
+
+                    "status": reschedule.status,
+
+                    "operation_status": (
+                        operation_status.status
+                        if operation_status else "pending"
+                    ),
+
+                    "operation_started_at": (
+                        operation_status.started_at
+                        if operation_status else None
+                    ),
+
+                    "operation_completed_at": (
+                        operation_status.completed_at
+                        if operation_status else None
+                    ),
+
+                    # temp values for dependency logic
+                    "_part_id_key": reschedule.part_id,
+                    "_order_id_key": reschedule.order_id,
+                    "_op_number": reschedule.operation_number,
                 }
+
             else:
+
                 group = operation_groups[op_id]
-                if item.planned_start_time < group["planned_start_time"]:
-                    group["planned_start_time"] = item.planned_start_time
-                if item.planned_end_time > group["planned_end_time"]:
-                    group["planned_end_time"] = item.planned_end_time
-                    group["schedule_id"] = item.id
-                group["status"] = item.status
- 
-        # ── Operation dependency check ────────────────────────────────────
-        # For each operation on this machine, fetch ALL operations of the
-        # same part (same order) ordered by operation_number.
-        # If ANY prior operation (lower operation_number) is NOT completed,
-        # this operation cannot be activated yet.
-        #
-        # Logic:
-        #   can_activate = True   if all previous ops are 'completed'
-        #   can_activate = False  if any previous op is pending/inprogress
-        #   can_activate = True   if already inprogress/completed itself
-        #                         (operator already started — don't block)
-        # ─────────────────────────────────────────────────────────────────
- 
+
+                # update earliest start
+                if (
+                    reschedule.start_time <
+                    group["planned_start_time"]
+                ):
+                    group["planned_start_time"] = (
+                        reschedule.start_time
+                    )
+
+                # update latest end
+                if (
+                    reschedule.end_time >
+                    group["planned_end_time"]
+                ):
+                    group["planned_end_time"] = (
+                        reschedule.end_time
+                    )
+
+                group["status"] = reschedule.status
+
         result = []
+
         for group in operation_groups.values():
+
+            start_time = group["planned_start_time"]
+            end_time = group["planned_end_time"]
+
             duration_hours = round(
-                (group["planned_end_time"] - group["planned_start_time"]).total_seconds() / 3600.0,
+                (end_time - start_time).total_seconds() / 3600.0,
                 4
             )
- 
-            part_id      = group.pop("_part_id_key")
-            order_id     = group.pop("_order_id_key")
-            this_op_num  = group.pop("_op_number")
-            current_status = group["operation_status"]  # from operation_status table
- 
-            # If already inprogress or completed → don't re-block it
+
+            part_id = group.pop("_part_id_key")
+            order_id = group.pop("_order_id_key")
+            this_op_num = group.pop("_op_number")
+
+            current_status = group["operation_status"]
+
+            # Already started/completed
             if current_status in ("inprogress", "completed"):
+
                 group["can_activate"] = True
-                group["blocked_by"]   = []
+                group["blocked_by"] = []
                 group["block_reason"] = None
+
             else:
-                # Fetch all operations for this part+order sorted by operation_number
+
                 all_ops_for_part = (
-                    db.query(Operation, OperationStatus)
+                    db.query(
+                        Rescheduling,
+                        Operation,
+                        OperationStatus
+                    )
+                    .join(
+                        Operation,
+                        Operation.id == Rescheduling.operation_id
+                    )
                     .outerjoin(
                         OperationStatus,
-                        (OperationStatus.operation_id == Operation.id) &
-                        (OperationStatus.order_id     == order_id) &
-                        (OperationStatus.part_id      == part_id)
+                        (OperationStatus.operation_id ==
+                         Rescheduling.operation_id) &
+                        (OperationStatus.order_id ==
+                         Rescheduling.order_id) &
+                        (OperationStatus.part_id ==
+                         Rescheduling.part_id)
                     )
                     .filter(
-                        Operation.part_id == part_id,
+                        Rescheduling.part_id == part_id,
+                        Rescheduling.order_id == order_id
                     )
-                    .order_by(Operation.operation_number.asc())
+                    .order_by(
+                        Rescheduling.operation_number.asc()
+                    )
                     .all()
                 )
- 
-                # Find all prior operations (lower operation_number) that are NOT completed
+
                 blocking_ops = []
-                for prev_op, prev_status in all_ops_for_part:
-                    # Only check ops that come BEFORE this one in sequence
+
+                for (
+                    prev_reschedule,
+                    prev_op,
+                    prev_status
+                ) in all_ops_for_part:
+
                     try:
-                        prev_num  = int(prev_op.operation_number)
-                        this_num  = int(this_op_num)
-                    except (ValueError, TypeError):
-                        # Non-numeric op numbers: string compare
-                        prev_num  = prev_op.operation_number
-                        this_num  = this_op_num
- 
-                    if prev_num >= this_num:
-                        # Same or later op — not a dependency
-                        continue
- 
-                    prev_op_status = prev_status.status if prev_status else "pending"
-                    if prev_op_status != "completed":
-                        blocking_ops.append({
-                            "operation_id":     prev_op.id,
-                            "operation_number": prev_op.operation_number,
-                            "operation_name":   prev_op.operation_name,
-                            "status":           prev_op_status,
-                            "machine_id":       prev_op.machine_id,
-                        })
- 
-                if blocking_ops:
-                    group["can_activate"] = False
-                    group["blocked_by"]   = blocking_ops
-                    group["block_reason"] = (
-                        f"Cannot activate — {len(blocking_ops)} prior operation(s) "
-                        f"must be completed first: "
-                        + ", ".join(
-                            f"Op {b['operation_number']} ({b['operation_name']}) "
-                            f"[{b['status']}]"
-                            for b in blocking_ops
+                        prev_num = int(
+                            prev_reschedule.operation_number
                         )
+
+                        this_num = int(this_op_num)
+
+                    except (ValueError, TypeError):
+
+                        prev_num = (
+                            prev_reschedule.operation_number
+                        )
+
+                        this_num = this_op_num
+
+                    # Skip current and future ops
+                    if prev_num >= this_num:
+                        continue
+
+                    prev_status_value = (
+                        prev_status.status
+                        if prev_status else "pending"
                     )
+
+                    if prev_status_value != "completed":
+
+                        blocking_ops.append({
+                            "operation_id":
+                                prev_reschedule.operation_id,
+
+                            "operation_number":
+                                prev_reschedule.operation_number,
+
+                            "operation_name":
+                                prev_op.operation_name,
+
+                            "status":
+                                prev_status_value,
+
+                            "machine_id":
+                                prev_reschedule.machine_id,
+                        })
+
+                if blocking_ops:
+
+                    group["can_activate"] = False
+                    group["blocked_by"] = blocking_ops
+
+                    group["block_reason"] = (
+                        f"Cannot activate — "
+                        f"{len(blocking_ops)} prior "
+                        f"operation(s) must be completed first."
+                    )
+
                 else:
+
                     group["can_activate"] = True
-                    group["blocked_by"]   = []
+                    group["blocked_by"] = []
                     group["block_reason"] = None
- 
+
             result.append({
                 **group,
                 "duration_hours": duration_hours,
             })
- 
+
         return {
             "machine_id": machine_id,
-            "machine_name": machine_obj.make if hasattr(machine_obj, 'make') else None,
+
+            "machine_make": (
+                machine_obj.make if machine_obj else None
+            ),
+
+            "machine_model": (
+                machine_obj.model if machine_obj else None
+            ),
+
+            "machine_type": (
+                machine_obj.type if machine_obj else None
+            ),
+
+            "work_center_id": (
+                machine_obj.work_center_id
+                if machine_obj else None
+            ),
+
+            "work_center_name": (
+                machine_obj.work_center.work_center_name
+                if machine_obj.work_center else None
+            ),
+
             "total_operations": len(result),
+
             "operations": result,
         }
- 
+
     except HTTPException:
         raise
+
     except Exception as e:
-        raise HTTPException(500, f"Failed to fetch machine operations: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch machine operations: {str(e)}"
+        )
 
 
 # =========================================================
@@ -2426,16 +2566,15 @@ def initialize_machine_status(
         raise HTTPException(500, f"Failed to initialize machine status: {str(e)}")
 
 
-@router.post("/operation-status/{operation_id}/activate", response_model=OperationStatusResponse)
+@router.post("/operation-status/{operation_id}/activate")
 def activate_job_card(
     operation_id: int,
     operator_id: int,
     db: Session = Depends(get_db)
 ):
     """
-    Activate a job card - changes status from 'pending' to 'inprogress'
-    and sets the started_at timestamp and operator_id.
-    Also updates machine_live_status table with current operation details.
+    Activate a job card - creates production log with operator_status 'inprogress'
+    and automatic from_date/from_time. Uses only Rescheduling table.
     
     Args:
         operation_id: ID of the operation to activate
@@ -2444,138 +2583,149 @@ def activate_job_card(
     try:
         # Verify operator exists
         from DB.models import AccessUser
+        from DB.models.scheduling import ProductionLog
         operator = db.query(AccessUser).filter(AccessUser.id == operator_id).first()
         if not operator:
             raise HTTPException(404, f"Operator with ID {operator_id} not found")
         
-        op_status = db.query(OperationStatus).filter(
-            OperationStatus.operation_id == operation_id
-        ).first()
+        # Get rescheduling item for this operation
+        rescheduling_item = db.query(Rescheduling).filter(
+            Rescheduling.operation_id == operation_id,
+            Rescheduling.status.in_(['scheduled', 'rescheduled'])
+        ).order_by(Rescheduling.start_time.desc()).first()
         
-        if not op_status:
-            raise HTTPException(404, f"Operation status for operation ID {operation_id} not found")
+        if not rescheduling_item:
+            raise HTTPException(404, f"No rescheduling record found for operation ID {operation_id}")
         
-        if op_status.status != "pending":
-            raise HTTPException(
-                400,
-                f"Cannot activate job card. Current status is '{op_status.status}', expected 'pending'"
-            )
-        
-
-        # ── NEW: Check operation sequence dependency ─────────────────────── #
-        all_ops_for_part = (
-            db.query(Operation, OperationStatus)
-            .outerjoin(
-                OperationStatus,
-                (OperationStatus.operation_id == Operation.id) &
-                (OperationStatus.order_id     == op_status.order_id) &
-                (OperationStatus.part_id      == op_status.part_id)
-            )   
-            .filter(Operation.part_id == op_status.part_id)
-            .order_by(Operation.operation_number.asc())
-            .all()
-        )
-
-        this_op = db.query(Operation).filter(Operation.id == operation_id).first()
-        this_op_num = int(this_op.operation_number) if this_op else 0
-
-        blocking_ops = []
-        for prev_op, prev_status in all_ops_for_part:
-            try:
-                prev_num = int(prev_op.operation_number)
-            except (ValueError, TypeError):
-                continue
-            if prev_num >= this_op_num:
-                continue
-            prev_op_status = prev_status.status if prev_status else "pending"
-            if prev_op_status != "completed":
-                blocking_ops.append(
-                    f"Op {prev_op.operation_number} ({prev_op.operation_name}) [{prev_op_status}]"
-                )
-
-        if blocking_ops:
-            raise HTTPException(
-                400,
-                f"Cannot activate — prior operations not completed: {', '.join(blocking_ops)}"
-            )
-# ──  dependency check done─────────────────────────────────────────── #
-
-
-
-        # Get machine_id from PlannedScheduleItem
-        planned_schedule = db.query(PlannedScheduleItem).filter(
-            PlannedScheduleItem.operation_id == operation_id
-        ).first()
-        
-        if not planned_schedule or not planned_schedule.machine_id:
+        if not rescheduling_item.machine_id:
             raise HTTPException(404, f"No machine assigned to operation ID {operation_id}")
         
-        machine_id = planned_schedule.machine_id
+        machine_id = rescheduling_item.machine_id
         
-        # Update status, start time, and operator
-        op_status.status = "inprogress"
-        op_status.started_at = datetime.now()
-        op_status.operator_id = operator_id
-        op_status.updated_at = datetime.now()
+        # Check operation sequence dependency using Rescheduling
+        operation = db.query(Operation).filter(Operation.id == operation_id).first()
+        if operation:
+            all_ops = db.query(Operation).filter(
+                Operation.part_id == rescheduling_item.part_id
+            ).order_by(Operation.operation_number.asc()).all()
+            
+            this_op_num = int(operation.operation_number) if operation.operation_number else 0
+            
+            blocking_ops = []
+            for prev_op in all_ops:
+                try:
+                    prev_num = int(prev_op.operation_number)
+                except (ValueError, TypeError):
+                    continue
+                if prev_num >= this_op_num:
+                    continue
+                
+                # Check if there are approved production logs for previous operation
+                from sqlalchemy import text
+                total_approved = db.execute(text("""
+                    SELECT COALESCE(SUM(approved_quantity), 0)
+                    FROM scheduling.production_logs
+                    WHERE operation_id = :op_id AND approved_quantity IS NOT NULL
+                """), {"op_id": prev_op.id}).scalar()
+                
+                # Also check if there's a completed OperationStatus (backward compatibility)
+                try:
+                    from DB.models.scheduling import OperationStatus
+                    prev_status = db.query(OperationStatus).filter(
+                        OperationStatus.operation_id == prev_op.id
+                    ).first()
+                    is_completed = prev_status and prev_status.status == "completed"
+                except:
+                    is_completed = False
+                
+                if not (total_approved > 0 or is_completed):
+                    blocking_ops.append(
+                        f"Op {prev_op.operation_number} ({prev_op.operation_name})"
+                    )
+            
+            if blocking_ops:
+                raise HTTPException(
+                    400,
+                    f"Cannot activate — prior operations not completed: {', '.join(blocking_ops)}"
+                )
         
-        # Update machine_live_status table
+        # Create or update production log
         current_time = datetime.now()
+        current_date = current_time.date()
+        current_time_only = current_time.time()
         
-        # Check if machine_live_status entry exists for this machine
-        check_existing_sql = """
-        SELECT id FROM production_monitoring.machine_live_status 
-        WHERE machine_id = :machine_id
-        """
+        # Check if there's an existing production log with operator_status 'inprogress'
+        existing_log = db.query(ProductionLog).filter(
+            ProductionLog.operation_id == operation_id,
+            ProductionLog.operator_status == "inprogress"
+        ).first()
         
-        existing_result = db.execute(text(check_existing_sql), {"machine_id": machine_id}).fetchone()
+        if not existing_log:
+            # Create new production log
+            new_log = ProductionLog(
+                operation_id=operation_id,
+                operator_id=operator_id,
+                from_date=current_date,
+                from_time=current_time_only,
+                operator_status="inprogress"
+            )
+            db.add(new_log)
         
-        if existing_result:
-            # Update existing record
-            update_sql = """
-            UPDATE production_monitoring.machine_live_status 
-            SET status = 'off',
-                last_updated = :current_time,
-                current_order_id = :order_id,
-                current_part_id = :part_id,
-                current_operation_id = :operation_id
+        # Update machine_live_status table if it exists
+        current_time = datetime.now()
+        try:
+            check_existing_sql = """
+            SELECT id FROM production_monitoring.machine_live_status 
             WHERE machine_id = :machine_id
             """
-            db.execute(text(update_sql), {
-                "machine_id": machine_id,
-                "current_time": current_time,
-                "order_id": op_status.order_id,
-                "part_id": op_status.part_id,
-                "operation_id": operation_id
-            })
-        else:
-            # Insert new record with 'off' status
-            insert_sql = """
-            INSERT INTO production_monitoring.machine_live_status 
-            (machine_id, status, last_updated, current_order_id, current_part_id, current_operation_id)
-            VALUES (:machine_id, 'off', :current_time, :order_id, :part_id, :operation_id)
-            """
-            db.execute(text(insert_sql), {
-                "machine_id": machine_id,
-                "current_time": current_time,
-                "order_id": op_status.order_id,
-                "part_id": op_status.part_id,
-                "operation_id": operation_id
-            })
+            existing_result = db.execute(text(check_existing_sql), {"machine_id": machine_id}).fetchone()
+            
+            if existing_result:
+                update_sql = """
+                UPDATE production_monitoring.machine_live_status 
+                SET status = 'off',
+                    last_updated = :current_time,
+                    current_order_id = :order_id,
+                    current_part_id = :part_id,
+                    current_operation_id = :operation_id
+                WHERE machine_id = :machine_id
+                """
+                db.execute(text(update_sql), {
+                    "machine_id": machine_id,
+                    "current_time": current_time,
+                    "order_id": rescheduling_item.order_id,
+                    "part_id": rescheduling_item.part_id,
+                    "operation_id": operation_id
+                })
+            else:
+                insert_sql = """
+                INSERT INTO production_monitoring.machine_live_status 
+                (machine_id, status, last_updated, current_order_id, current_part_id, current_operation_id)
+                VALUES (:machine_id, 'off', :current_time, :order_id, :part_id, :operation_id)
+                """
+                db.execute(text(insert_sql), {
+                    "machine_id": machine_id,
+                    "current_time": current_time,
+                    "order_id": rescheduling_item.order_id,
+                    "part_id": rescheduling_item.part_id,
+                    "operation_id": operation_id
+                })
+        except Exception as e:
+            print(f"[WARNING] Could not update machine_live_status: {e}")
         
         db.commit()
-        db.refresh(op_status)
         
         return {
-            "id": op_status.id,
-            "order_id": op_status.order_id,
-            "part_id": op_status.part_id,
-            "operation_id": op_status.operation_id,
-            "operator_id": op_status.operator_id,
-            "status": op_status.status,
-            "started_at": op_status.started_at,
-            "completed_at": op_status.completed_at,
-            "created_at": op_status.created_at,
-            "updated_at": op_status.updated_at
+            "message": "Job card activated successfully",
+            "order_id": rescheduling_item.order_id,
+            "order_number": rescheduling_item.order_number,
+            "part_id": rescheduling_item.part_id,
+            "part_number": rescheduling_item.part_number,
+            "operation_id": operation_id,
+            "operation_number": rescheduling_item.operation_number,
+            "machine_id": machine_id,
+            "operator_id": operator_id,
+            "status": "inprogress"
         }
         
     except HTTPException:

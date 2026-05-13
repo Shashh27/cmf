@@ -61,7 +61,9 @@ from .production_logs import (
     ProductionLogResponse,
     ProductionLogWithDetails,
     ProductionLogStatusUpdate,
-    ProductionLogStatus
+    ProductionLogStatus,
+    ProductionLogSubmit,
+    OperatorStatus
 )
 # from .inventory import (
 #     RawMaterial,
@@ -132,6 +134,8 @@ __all__ = [
     "ProductionLogWithDetails",
     "ProductionLogStatusUpdate",
     "ProductionLogStatus",
+    "ProductionLogSubmit",
+    "OperatorStatus",
     "RawMaterial",
     "RawMaterialCreate",
     "RawMaterialUpdate",

@@ -1295,7 +1295,6 @@ from DB.models.scheduling import (
     ShiftHoursConfiguration, # date (Date), working_day (Boolean), number_of_shifts (Integer)
     MachineStatus,           # machine_id, status_id (1=ON / 2=OFF), available_from, available_to
     EfficiencyFactor,        # efficiency_factor (Float)
-    OperationStatus,         # operation status tracking
     Rescheduling,
     ProductionLog
 )
@@ -2099,105 +2098,19 @@ class SchedulerEngine:
     def _clear_existing_schedule(self) -> None:
         """
         Delete PlannedScheduleItem rows first (FK → ScheduleHistory),
-        then ScheduleHistory rows, then clean up orphaned OperationStatus entries.
+        then ScheduleHistory rows.
         """
         try:
-            # Get operation IDs that will be orphaned before deleting planned items
-            orphaned_operations = self.db.execute(text("""
-                SELECT DISTINCT os.operation_id
-                FROM scheduling.operation_status os
-                LEFT JOIN scheduling.planned_schedule_items psi ON os.operation_id = psi.operation_id
-                WHERE psi.operation_id IS NOT NULL
-            """)).fetchall()
-            
             # Delete planned schedule items and history
             self.db.query(PlannedScheduleItem).delete()
             self.db.query(ScheduleHistory).delete()
-            
-            # Clean up operation status entries for operations that no longer have planned items
-            if orphaned_operations:
-                # Find operations that are now orphaned after planned items deletion
-                newly_orphaned = self.db.execute(text("""
-                    SELECT DISTINCT os.operation_id
-                    FROM scheduling.operation_status os
-                    LEFT JOIN scheduling.planned_schedule_items psi ON os.operation_id = psi.operation_id
-                    WHERE psi.operation_id IS NULL
-                """)).fetchall()
-                
-                if newly_orphaned:
-                    operation_ids_to_delete = [op[0] for op in newly_orphaned]
-                    deleted_count = self.db.query(OperationStatus).filter(
-                        OperationStatus.operation_id.in_(operation_ids_to_delete)
-                    ).delete(synchronize_session=False)
-                    
-                    print(f"[DEBUG] Cleaned up {deleted_count} orphaned operation status entries during schedule clear")
-            
             self.db.commit()
         except Exception as e:
             print(f"[ERROR] _clear_existing_schedule: {e}")
             self.db.rollback()
             raise
 
-    def _create_operation_status_entries(self, operation_ids: set[int]) -> None:
-        """
-        Create OperationStatus entries for operations that don't already have one.
-        This ensures each operation has exactly one status tracking record.
-        """
-        try:
-            # Find operations that already have status entries
-            existing_ops = (
-                self.db.query(OperationStatus.operation_id)
-                .filter(OperationStatus.operation_id.in_(operation_ids))
-                .all()
-            )
-            existing_op_ids = {op[0] for op in existing_ops}
-            
-            # Create status entries only for operations that don't have one yet
-            new_operations = operation_ids - existing_op_ids
-            
-            if new_operations:
-                # Get operation details in the same order as planned_schedule_items
-                # Use a subquery to get the first occurrence of each operation_id in order
-                operations_to_create = (
-                    self.db.query(
-                        PlannedScheduleItem.operation_id,
-                        PlannedScheduleItem.part_id,
-                        PlannedScheduleItem.sale_order_id
-                    )
-                    .filter(PlannedScheduleItem.operation_id.in_(new_operations))
-                    .order_by(PlannedScheduleItem.id)
-                    .all()
-                )
-                
-                # Remove duplicates while preserving order (keep first occurrence)
-                seen_operations = set()
-                unique_operations = []
-                for operation_id, part_id, order_id in operations_to_create:
-                    if operation_id not in seen_operations:
-                        seen_operations.add(operation_id)
-                        unique_operations.append((operation_id, part_id, order_id))
-                
-                # Create OperationStatus entries in the same order as planned items
-                status_entries = []
-                for operation_id, part_id, order_id in unique_operations:
-                    status_entries.append(
-                        OperationStatus(
-                            order_id=order_id,
-                            part_id=part_id,
-                            operation_id=operation_id,
-                            status="pending"
-                        )
-                    )
-                
-                if status_entries:
-                    self.db.add_all(status_entries)
-                    self.db.commit()
-                    print(f"[DEBUG] Created {len(status_entries)} OperationStatus entries in planned order")
-            
-        except Exception as e:
-            print(f"[ERROR] _create_operation_status_entries: {e}")
-            self.db.rollback()
-            raise
+
 
     # ------------------------------------------------------------------ #
     #  Main entry-point                                                    #
@@ -2227,11 +2140,13 @@ class SchedulerEngine:
             # ── Phase A1 + A2 ─────────────────────────────────────────── #
             active_orders = self._load_active_orders()
 
+            # Always clear existing schedule, even if no active orders
+            self._clear_existing_schedule()
+
             if not active_orders:
-                # Do NOT clear existing schedule when nothing replaces it
                 return {
-                    'success':             False,
-                    'message':             'No active orders with a valid activation time found.',
+                    'success':             True,
+                    'message':             'No active orders with a valid activation time found. Schedule cleared.',
                     'schedule_history_id': None,
                     'operations_scheduled': 0,
                     'parts_processed':     0,
@@ -2243,8 +2158,7 @@ class SchedulerEngine:
                     'parts_without_operations':   [],
                 }
 
-            # Clear only after confirming there is new work
-            self._clear_existing_schedule()
+
 
             # Create ScheduleHistory row
             history = ScheduleHistory(
@@ -2289,9 +2203,6 @@ class SchedulerEngine:
                 for wc_machines in machines_by_wc.values()
                 for m in wc_machines
             }
-
-            # Track operations to create OperationStatus entries
-            scheduled_operations: set[int] = set()
 
             # ── Phase C: Global Operation Queue for Maximum Machine Utilization ── #
             # STRATEGY: Instead of processing parts sequentially, create a global
@@ -2447,9 +2358,6 @@ class SchedulerEngine:
                         )
                     )
                     
-                    # Track operation for OperationStatus creation
-                    scheduled_operations.add(operation.id)
-                    
                     # Update part completion time
                     part_last_end_time[part_id] = os_end
                     continue
@@ -2510,9 +2418,6 @@ class SchedulerEngine:
                 )
                 all_items.extend(blocks)
                 
-                # Track operation for OperationStatus creation
-                scheduled_operations.add(operation.id)
-                
                 print(f"[DEBUG]   Scheduled on {machine.make if machine else 'None'} from {cand_start} to {op_end}")
                 
                 # Update machine availability and part completion time
@@ -2534,10 +2439,6 @@ class SchedulerEngine:
             if all_items:
                 self.db.add_all(all_items)
             self.db.commit()
-            
-            # Create OperationStatus entries for newly scheduled operations
-            if scheduled_operations:
-                self._create_operation_status_entries(scheduled_operations)
             
 
             # ── Phase E: seed rescheduling_items (status='scheduled') ──── #
@@ -2736,16 +2637,7 @@ class DynamicSchedulerEngine(SchedulerEngine):
             print(f"[ERROR] _has_any_log op={operation_id}: {e}")
             return False
  
-    def _op_status(self, operation_id: int) -> str:
-        """Returns operation_status.status or 'pending' when no row exists."""
-        try:
-            row = self.db.query(OperationStatus).filter(
-                OperationStatus.operation_id == operation_id
-            ).first()
-            return row.status if row else 'pending'
-        except Exception as e:
-            print(f"[ERROR] _op_status op={operation_id}: {e}")
-            return 'pending'
+
  
     def _baseline_end(self, operation_id: int) -> Optional[datetime]:
         """Latest end_time from rescheduling_items for this op (any status)."""
@@ -2914,7 +2806,16 @@ class DynamicSchedulerEngine(SchedulerEngine):
             # ── 1. Load orders + parts ────────────────────────────────── #
             active_orders = self._load_active_orders()
             if not active_orders:
-                result['message'] = 'No active orders.'
+                # Clear rescheduling_items when there are no active orders
+                self.db.query(Rescheduling).delete()
+                self.db.commit()
+                result.update({
+                    'success': True,
+                    'message': 'No active orders. Rescheduling items cleared.',
+                    'reschedule_version': None,
+                    'parts_rescheduled': 0,
+                    'operations_inserted': 0,
+                })
                 return result
  
             order_parts_map: Dict[int, List[Dict]] = {}
@@ -2940,7 +2841,16 @@ class DynamicSchedulerEngine(SchedulerEngine):
                 ]
  
             if not scope:
-                result['message'] = 'No parts in scope.'
+                # Clear rescheduling_items when there are no parts in scope
+                self.db.query(Rescheduling).delete()
+                self.db.commit()
+                result.update({
+                    'success': True,
+                    'message': 'No parts in scope. Rescheduling items cleared.',
+                    'reschedule_version': None,
+                    'parts_rescheduled': 0,
+                    'operations_inserted': 0,
+                })
                 return result
  
             # ── 3. Load ops + machines ────────────────────────────────── #
@@ -2953,30 +2863,59 @@ class DynamicSchedulerEngine(SchedulerEngine):
             }
  
             # ── 4. Pre-block machines occupied by inprogress ops ──────── #
-            # Read latest baseline end-time for each inprogress operation
-            # so we don't double-book machines that are physically in use.
+            # Read latest actual end time from production logs for each inprogress operation
+            # An operation is in-progress if approved_so_far > 0 and < total_qty
             try:
-                inprogress_ops = self.db.query(OperationStatus).filter(
-                    OperationStatus.status == 'inprogress'
-                ).all()
-                for os_row in inprogress_ops:
-                    b_end = self._baseline_end(os_row.operation_id)
-                    if b_end is None:
+                # Get all operations that have production logs
+                ops_with_logs = (
+                    self.db.query(ProductionLog.operation_id)
+                    .distinct()
+                    .all()
+                )
+                
+                for (op_id,) in ops_with_logs:
+                    approved = self._approved_so_far(op_id)
+                    
+                    # Get total_qty for this operation's part from rescheduling_items
+                    ri = (
+                        self.db.query(Rescheduling)
+                        .filter(Rescheduling.operation_id == op_id)
+                        .first()
+                    )
+                    
+                    if not ri:
                         continue
+                        
+                    total_qty = ri.total_qty
+                    
+                    # Only pre-block if we have work in progress
+                    if approved <= 0 or approved >= total_qty:
+                        continue
+                        
+                    # First check actual end time from production logs
+                    actual_end = self._actual_end(op_id)
+                    if actual_end is not None:
+                        end_time = actual_end
+                    else:
+                        # Fallback to baseline if no actual logs
+                        end_time = self._baseline_end(op_id)
+                        if end_time is None:
+                            continue
+                            
                     # Find which machine this op is on from rescheduling_items
                     ri = (
                         self.db.query(Rescheduling)
-                        .filter(Rescheduling.operation_id == os_row.operation_id)
+                        .filter(Rescheduling.operation_id == op_id)
                         .order_by(Rescheduling.end_time.desc())
                         .first()
                     )
                     if ri and ri.machine_id:
                         existing = self.machine_end_time.get(ri.machine_id)
-                        if existing is None or b_end > existing:
-                            self.machine_end_time[ri.machine_id] = b_end
+                        if existing is None or end_time > existing:
+                            self.machine_end_time[ri.machine_id] = end_time
                             print(
                                 f"[DYNAMIC] Pre-blocked machine {ri.machine_id} "
-                                f"until {b_end} (inprogress op {os_row.operation_id})"
+                                f"until {end_time} (inprogress op {op_id})"
                             )
             except Exception as e:
                 print(f"[ERROR] pre-block machines: {e}")
@@ -3007,12 +2946,12 @@ class DynamicSchedulerEngine(SchedulerEngine):
                 cascade_active         = False  # True once we start inserting rows
  
                 for operation in operations:
-                    op_id     = operation.id
-                    status    = self._op_status(op_id)
-                    has_logs  = self._has_any_log(op_id)
+                    op_id       = operation.id
+                    approved    = self._approved_so_far(op_id)
+                    has_logs    = self._has_any_log(op_id)
  
                     # ── completed: use actual_end, skip insertion ──────── #
-                    if status == 'completed':
+                    if approved >= total_qty:
                         actual = self._actual_end(op_id)
                         if actual:
                             cascade_cursor = self.adjust_to_shift(actual)
@@ -3035,20 +2974,20 @@ class DynamicSchedulerEngine(SchedulerEngine):
                                 )
                         continue
  
-                    # ── inprogress, no log: operator mid-job, leave alone ─ #
-                    if status == 'inprogress' and not has_logs:
-                        b = self._baseline_end(op_id)
-                        if b:
-                            cascade_cursor = self.adjust_to_shift(b)
-                        print(
-                            f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
-                            f"INPROGRESS (no log) — untouched."
-                        )
-                        continue
- 
-                    # ── inprogress with logs: schedule remaining qty ────── #
-                    if status == 'inprogress' and has_logs:
-                        approved      = self._approved_so_far(op_id)
+                    # ── inprogress ──────────────────────────────────── #
+                    elif approved > 0:
+                        # inprogress, no log: operator mid-job, leave alone ─ #
+                        if not has_logs:
+                            b = self._baseline_end(op_id)
+                            if b:
+                                cascade_cursor = self.adjust_to_shift(b)
+                            print(
+                                f"[DYNAMIC] Op {op_id} ({operation.operation_number}) "
+                                f"INPROGRESS (no log) — untouched."
+                            )
+                            continue
+
+                        # inprogress with logs: schedule remaining qty ────── #
                         remaining_qty = max(0, total_qty - approved)
  
                         if remaining_qty == 0:

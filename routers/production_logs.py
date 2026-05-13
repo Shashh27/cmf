@@ -13,147 +13,14 @@ from DB.schemas import (
     ProductionLogResponse,
     ProductionLogWithDetails,
     ProductionLogStatusUpdate,
-    ProductionLogStatus
+    ProductionLogStatus,
+    ProductionLogSubmit
 )
-
-# Try to import OperationStatus, but make it optional for environments without scheduling models
-try:
-    from DB.models.scheduling import OperationStatus
-    OPERATION_STATUS_AVAILABLE = True
-except ImportError:
-    OPERATION_STATUS_AVAILABLE = False
-    OperationStatus = None
 
 router = APIRouter(
     prefix="/production-logs",
     tags=["production-logs"]
 )
-
-
-def update_operation_status_if_completed(operation_id: int, db: Session) -> None:
-    """
-    Update operation status to 'completed' if total approved quantity meets part requirement.
-    This function is called after production log status updates.
-    Only works if OperationStatus model is available (scheduling models present).
-    """
-    # Skip if OperationStatus model is not available
-    if not OPERATION_STATUS_AVAILABLE:
-        return
-    
-    try:
-        # Get operation and part details
-        operation = db.query(Operation).filter(Operation.id == operation_id).first()
-        if not operation:
-            return
-        
-        part = operation.part
-        if not part:
-            return
-        
-        required_quantity = part.qty or 0
-        if required_quantity <= 0:
-            return
-        
-        # Calculate total approved quantity for this operation
-        from sqlalchemy import text
-        total_approved = db.execute(text("""
-            SELECT COALESCE(SUM(approved_quantity), 0)
-            FROM scheduling.production_logs
-            WHERE operation_id = :op_id AND approved_quantity IS NOT NULL
-        """), {"op_id": operation_id}).scalar()
-        
-        # Check if operation should be marked as completed
-        if total_approved >= required_quantity:
-            # Update operation status to completed
-            operation_status = db.query(OperationStatus).filter(
-                OperationStatus.operation_id == operation_id
-            ).first()
-            
-            if operation_status and operation_status.status != "completed":
-                operation_status.status = "completed"
-                operation_status.completed_at = datetime.now()
-                db.commit()
-        
-    except Exception as e:
-        db.rollback()
-
-
-def update_operation_status_after_deletion(operation_id: int, db: Session) -> None:
-    """
-    Update operation status based on current production logs after deletion.
-    This ensures operation status reflects the actual state of production logs.
-    Only works if OperationStatus model is available (scheduling models present).
-    """
-    # Skip if OperationStatus model is not available
-    if not OPERATION_STATUS_AVAILABLE:
-        return
-    
-    try:
-        # Get current production logs for this operation
-        from sqlalchemy import text
-        logs_summary = db.execute(text("""
-            SELECT 
-                COUNT(*) as total_logs,
-                COALESCE(SUM(produced_quantity), 0) as total_produced,
-                COALESCE(SUM(approved_quantity), 0) as total_approved
-            FROM scheduling.production_logs
-            WHERE operation_id = :op_id
-        """), {"op_id": operation_id}).fetchone()
-        
-        # Get required quantity from part
-        operation = db.query(Operation).filter(Operation.id == operation_id).first()
-        if not operation:
-            return
-        
-        required_quantity = operation.part.qty or 0 if operation.part else 0
-        
-        # Determine correct status based on remaining production logs
-        if logs_summary.total_logs == 0:
-            # No production logs - should be pending with null timestamps
-            correct_status = "pending"
-            correct_completed_at = None
-            correct_started_at = None
-        elif logs_summary.total_approved >= required_quantity:
-            # Enough approved quantity - should be completed
-            correct_status = "completed"
-            correct_completed_at = datetime.now()
-            # Keep existing started_at if it exists
-            correct_started_at = operation_status.started_at if operation_status else None
-        elif logs_summary.total_approved > 0:
-            # Some approved quantity but not enough - should be inprogress
-            correct_status = "inprogress"
-            correct_completed_at = None
-            # Keep existing started_at if it exists, or set it now if this is first production
-            correct_started_at = operation_status.started_at if operation_status and operation_status.started_at else datetime.now()
-        else:
-            # Has production logs but no approvals - should be inprogress
-            correct_status = "inprogress"
-            correct_completed_at = None
-            # Keep existing started_at if it exists, or set it now if this is first production
-            correct_started_at = operation_status.started_at if operation_status and operation_status.started_at else datetime.now()
-        
-        # Update operation status
-        operation_status = db.query(OperationStatus).filter(
-            OperationStatus.operation_id == operation_id
-        ).first()
-        
-        if operation_status:
-            # Always update if status is changing
-            if operation_status.status != correct_status:
-                operation_status.status = correct_status
-                operation_status.completed_at = correct_completed_at
-                operation_status.started_at = correct_started_at
-                operation_status.updated_at = datetime.now()
-                db.commit()
-            # Also update timestamps if they should be null (when no logs remain)
-            elif logs_summary.total_logs == 0 and (operation_status.started_at is not None or operation_status.completed_at is not None):
-                operation_status.started_at = None
-                operation_status.completed_at = None
-                operation_status.updated_at = datetime.now()
-                db.commit()
-        
-    except Exception as e:
-        db.rollback()
 
 
 # CRUD endpoints
@@ -266,11 +133,6 @@ def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db
     db.add(db_log)
     db.commit()
     db.refresh(db_log)
-
-    # NEW: Check if operation should be marked as completed after creating this log
-    # This handles cases where the created log immediately completes the operation
-    if db_log.approved_quantity is not None:
-        update_operation_status_if_completed(db_log.operation_id, db)
 
     # Calculate rework_quantity for response
     if db_log.produced_quantity and db_log.approved_quantity:
@@ -644,10 +506,6 @@ def delete_production_log(log_id: int, db: Session = Depends(get_db)):
     db.delete(db_log)
     db.commit()
     
-    # AUTOMATIC: Update operation status after deletion
-    # This ensures operation status reflects current production log state
-    update_operation_status_after_deletion(operation_id, db)
-    
     return None
 
 @router.put("/{log_id}/status", response_model=ProductionLogResponse)
@@ -745,46 +603,37 @@ def update_production_log_status(
     else:
         db_log.rework_quantity = 0
 
-    # NEW LOGIC: Check if operation should be marked as completed
-    # This is triggered after any production log status update that includes approved_quantity
-    # For "completed" status, we check after the automatic approved_quantity is set
-    if status_update.status in ["completed", "rework"] and db_log.approved_quantity is not None:
-        update_operation_status_if_completed(db_log.operation_id, db)
-    # Also check for completed status (where approved_quantity is auto-set)
-    elif status_update.status == "completed":
-        update_operation_status_if_completed(db_log.operation_id, db)
-
 
     # ── TRIGGER DYNAMIC RESCHEDULE ──────────────────────────────────────── #
     # After supervisor approves (completed) or marks rework, re-plan remaining
     # quantity for this part's entire operation chain in rescheduling_items.
-    #
-    # This is the key wiring:
-    #   supervisor approves 2 out of 3 → approved_so_far = 2 → remaining = 1
-    #   dynamic_reschedule writes a new 'rescheduled' row for 1 unit
-    #   All downstream operations cascade from the actual end time of this op
     if status_update.status in ["completed", "rework"]:
         try:
             from algorithm import dynamic_reschedule
-            from DB.models.scheduling import OperationStatus
-            os_row = db.query(OperationStatus).filter(
-                OperationStatus.operation_id == db_log.operation_id
+            from DB.models.scheduling import Rescheduling
+            # Get part_id from Rescheduling or Operation (backward compatibility)
+            rescheduling_row = db.query(Rescheduling).filter(
+                Rescheduling.operation_id == db_log.operation_id,
+                Rescheduling.status.in_(['scheduled', 'rescheduled'])
             ).first()
-            if os_row:
-                dynamic_reschedule(
-                    db,
-                    triggered_by_part_id = None,              # full reschedule — re-plans ALL active parts
-                    triggered_by_op_id   = db_log.operation_id,
-                    # Why None instead of os_row.part_id:
-                    # When a part's last operation completes, downstream parts
-                    # need to be re-planned starting from this part's actual end time.
-                    # Scoping to one part misses that cascade to subsequent parts.
-                )
-                print(
-                    f"[DYNAMIC] Triggered after supervisor action on log {log_id} "
-                    f"(op={db_log.operation_id}, part={os_row.part_id}, "
-                    f"status={status_update.status})"
-                )
+            part_id = None
+            if rescheduling_row:
+                part_id = rescheduling_row.part_id
+            else:
+                operation = db.query(Operation).filter(Operation.id == db_log.operation_id).first()
+                if operation:
+                    part_id = operation.part_id
+            
+            dynamic_reschedule(
+                db,
+                triggered_by_part_id = None,              # full reschedule — re-plans ALL active parts
+                triggered_by_op_id   = db_log.operation_id
+            )
+            print(
+                f"[DYNAMIC] Triggered after supervisor action on log {log_id} "
+                f"(op={db_log.operation_id}, part={part_id}, "
+                f"status={status_update.status})"
+            )
         except Exception as e:
             # Non-fatal: log the error but don't fail the approval
             print(f"[WARN] dynamic_reschedule after supervisor approval failed: {e}")
@@ -858,6 +707,96 @@ def get_production_logs_by_operation(
 
     return logs
 
+@router.post("/operation/{operation_id}/submit", response_model=ProductionLogResponse)
+def submit_production_log(
+    operation_id: int,
+    submit_data: ProductionLogSubmit,
+    db: Session = Depends(get_db)
+):
+    """
+    Submit production log - updates the inprogress production log with produced_quantity,
+    sets operator_status to completed, and automatically sets to_date/to_time.
+    """
+    from sqlalchemy import text
+    from DB.models.oms import Part, Operation
+    
+    # Find the inprogress production log for this operation
+    db_log = db.query(ProductionLog).filter(
+        ProductionLog.operation_id == operation_id,
+        ProductionLog.operator_status == "inprogress"
+    ).first()
+    
+    if not db_log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No active production log found for operation {operation_id}. Please activate the job card first."
+        )
+    
+    # Verify operation exists and get required quantity
+    operation = db.query(Operation).filter(Operation.id == operation_id).first()
+    if not operation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation with id {operation_id} not found"
+        )
+    
+    part = db.query(Part).filter(Part.id == operation.part_id).first()
+    if not part:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Part associated with operation {operation_id} not found"
+        )
+    
+    total_quantity = part.qty or 0
+    
+    # Calculate total approved quantity
+    total_approved = db.execute(text("""
+        SELECT COALESCE(SUM(approved_quantity), 0)
+        FROM scheduling.production_logs
+        WHERE operation_id = :op_id AND approved_quantity IS NOT NULL
+    """), {"op_id": operation_id}).scalar()
+    
+    # Check if production is already complete
+    if total_approved >= total_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Production already completed. Total approved: {total_approved}, Total quantity: {total_quantity}."
+        )
+    
+    # Calculate remaining quantity
+    remaining_quantity = total_quantity - total_approved
+    
+    # Validate that produced quantity doesn't exceed remaining quantity
+    if submit_data.produced_quantity > remaining_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot produce {submit_data.produced_quantity} items. Only {remaining_quantity} items remaining to reach total quantity of {total_quantity}. Total approved: {total_approved}."
+        )
+    
+    # Get current time for to_date/to_time
+    current_time = datetime.now()
+    
+    # Update production log
+    db_log.produced_quantity = submit_data.produced_quantity
+    db_log.notes = submit_data.notes
+    db_log.to_date = current_time.date()
+    db_log.to_time = current_time.time()
+    db_log.operator_status = "completed"
+    
+    db.commit()
+    db.refresh(db_log)
+    
+    # Calculate rework_quantity for response
+    if db_log.produced_quantity and db_log.approved_quantity:
+        db_log.rework_quantity = db_log.produced_quantity - db_log.approved_quantity
+    elif db_log.produced_quantity and not db_log.approved_quantity:
+        db_log.rework_quantity = db_log.produced_quantity
+    else:
+        db_log.rework_quantity = 0
+    
+    return db_log
+
+
 @router.get("/operation/{operation_id}/status-summary")
 def get_operation_production_status(operation_id: int, db: Session = Depends(get_db)):
     """
@@ -888,13 +827,6 @@ def get_operation_production_status(operation_id: int, db: Session = Depends(get
         FROM scheduling.production_logs
         WHERE operation_id = :op_id
     """), {"op_id": operation_id}).fetchone()
-    
-    # Get operation status (only if OperationStatus model is available)
-    operation_status = None
-    if OPERATION_STATUS_AVAILABLE:
-        operation_status = db.query(OperationStatus).filter(
-            OperationStatus.operation_id == operation_id
-        ).first()
     
     completion_percentage = 0
     if required_quantity > 0:
