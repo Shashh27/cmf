@@ -207,7 +207,7 @@ class EfficiencyFactor(Base):
     __table_args__ = {'schema': 'scheduling'}
 
     id = Column(Integer, primary_key=True, index=True)
-    efficiency_factor = Column(Float, nullable=False, default=0.85)
+    efficiency_factor = Column(Float, nullable=False, default=1.0)
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 

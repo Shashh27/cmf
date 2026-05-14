@@ -73,9 +73,9 @@ def get_machine_utilization(
     for sc in shift_configs:
         total_shift_hours += _configured_shift_hours(sc)
 
-    # efficiency = 0.85
+    # efficiency = 1.0
     settings = db.query(EfficiencyFactor).first()
-    efficiency = settings.efficiency_factor if settings else 0.85
+    efficiency = settings.efficiency_factor if settings else 1.0
     base_available_hours = total_shift_hours * efficiency
 
     # 🔧 convert date → datetime for status filtering
@@ -234,9 +234,9 @@ def get_machine_utilization_by_range(
     for sc in shift_configs:
         total_shift_hours += _configured_shift_hours(sc)
 
-    # efficiency = 0.85
+    # efficiency = 1.0
     settings = db.query(EfficiencyFactor).first()
-    efficiency = settings.efficiency_factor if settings else 0.85
+    efficiency = settings.efficiency_factor if settings else 1.0
     base_available_hours = total_shift_hours * efficiency
 
     # ------------------------------------
@@ -392,7 +392,7 @@ def get_efficiency(db: Session = Depends(get_db)):
     record = db.query(EfficiencyFactor).first()
 
     if not record:
-        record = EfficiencyFactor(efficiency_factor=0.85)
+        record = EfficiencyFactor(efficiency_factor=1.0)
         db.add(record)
         db.commit()
         db.refresh(record)
