@@ -12,6 +12,7 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 
 const { Content } = Layout;
 const { Option } = Select;
+const { TabPane } = Tabs;
 
 // ─────────────────────────────────────────────────────────────
 //  COLOUR HELPERS
@@ -141,6 +142,8 @@ const MachineScheduling = () => {
   const [helpOpen, setHelpOpen] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateScheduleLoading, setUpdateScheduleLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('machine-scheduling');
+  const [actualRefreshKey, setActualRefreshKey] = useState(0);
   const [skippedData, setSkippedData] = useState({
     skipped_orders: [],
     skipped_parts: [],
@@ -526,22 +529,25 @@ const MachineScheduling = () => {
   return (
     <Layout className="min-h-screen bg-gray-50 p-4">
       <Content>
-        <Tabs 
+        <Tabs
           defaultActiveKey="machine-scheduling"
-          items={[
-            {
-              label: 'Planned Schedule',
-              key: 'machine-scheduling',
-              children: (
-                <div style={{ paddingBottom: 16 }}>
-                  {/* Controls */}
-                  <div style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                    <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
-                      <Option value="day">Daily</Option>
-                      <Option value="week">Weekly</Option>
-                      <Option value="month">Monthly</Option>
-                      <Option value="year">Yearly</Option>
-                    </Select>
+          activeKey={activeTab}
+          onChange={(key) => {
+            if (key === 'actual-scheduling') {
+              setActualRefreshKey(prev => prev + 1);
+            }
+            setActiveTab(key);
+          }}
+        >
+          <TabPane tab="Planned Schedule" key="machine-scheduling">
+            {/* Controls */}
+            <div style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
+                <Option value="day">Daily</Option>
+                <Option value="week">Weekly</Option>
+                <Option value="month">Monthly</Option>
+                <Option value="year">Yearly</Option>
+              </Select>
 
                     <DatePicker.RangePicker
                       size="small"
@@ -720,41 +726,37 @@ const MachineScheduling = () => {
                     </div>
                   </Modal>
 
-                  {/* Update Modal */}
-                  <Modal
-                    title={
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <WarningOutlined style={{ color: '#faad14', fontSize: 22 }} />
-                        Update Schedule
-                      </span>
-                    }
-                    open={updateModalOpen}
-                    onCancel={() => !updateScheduleLoading && setUpdateModalOpen(false)}
-                    footer={[
-                      <Button key="cancel" onClick={() => setUpdateModalOpen(false)} disabled={updateScheduleLoading}>
-                        Cancel
-                      </Button>,
-                      <Button key="ok" type="primary" loading={updateScheduleLoading} onClick={handleUpdateSchedule}>
-                        OK
-                      </Button>,
-                    ]}
-                    closable={!updateScheduleLoading}
-                    maskClosable={!updateScheduleLoading}
-                  >
-                    <p style={{ margin: 0 }}>
-                      Do you want to generate a new schedule? Please wait while we generate the new schedule.
-                    </p>
-                  </Modal>
-                </div>
-              )
-            },
-            {
-              label: 'Actual Schedule',
-              key: 'actual-scheduling',
-              children: <ActualScheduling />
-            }
-          ]}
-        />
+                {/* Update Modal */}
+                <Modal
+                  title={
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <WarningOutlined style={{ color: '#faad14', fontSize: 22 }} />
+                      Update Schedule
+                    </span>
+                  }
+                  open={updateModalOpen}
+                  onCancel={() => !updateScheduleLoading && setUpdateModalOpen(false)}
+                  footer={[
+                    <Button key="cancel" onClick={() => setUpdateModalOpen(false)} disabled={updateScheduleLoading}>
+                      Cancel
+                    </Button>,
+                    <Button key="ok" type="primary" loading={updateScheduleLoading} onClick={handleUpdateSchedule}>
+                      OK
+                    </Button>,
+                  ]}
+                  closable={!updateScheduleLoading}
+                  maskClosable={!updateScheduleLoading}
+                >
+                  <p style={{ margin: 0 }}>
+                    Do you want to generate a new schedule? Please wait while we generate the new schedule.
+                  </p>
+                </Modal>
+          </TabPane>
+          
+          <TabPane tab="Actual Schedule" key="actual-scheduling">
+            <ActualScheduling key={actualRefreshKey} />
+          </TabPane>
+        </Tabs>
       </Content>
     </Layout>
   );

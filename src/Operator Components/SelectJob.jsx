@@ -63,22 +63,30 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
     const results = await Promise.allSettled(
       ops.map(async (job) => {
         const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-        if (!opId) return { opId: null, totalApproved: 0 };
+        if (!opId) return { opId: null, totalApproved: 0, operatorStatus: null };
         try {
           const res = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${opId}?skip=0`);
-          if (!res.ok) return { opId, totalApproved: 0 };
+          if (!res.ok) return { opId, totalApproved: 0, operatorStatus: null };
           const logs = await res.json();
           const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
-          return { opId, totalApproved };
+          
+          // Get operator_status from latest log
+          const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          const operatorStatus = sortedLogs.length > 0 ? sortedLogs[0].operator_status : null;
+
+          return { opId, totalApproved, operatorStatus };
         } catch {
-          return { opId, totalApproved: 0 };
+          return { opId, totalApproved: 0, operatorStatus: null };
         }
       })
     );
     const map = {};
     results.forEach((r) => {
       if (r.status === 'fulfilled' && r.value.opId != null) {
-        map[r.value.opId] = r.value.totalApproved;
+        map[r.value.opId] = {
+          totalApproved: r.value.totalApproved,
+          operatorStatus: r.value.operatorStatus
+        };
       }
     });
     setJobStatsMap(map);
@@ -91,15 +99,23 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
     // Check if completed by production quota
     const totalQuantity = job.total_quantity || job.quantity || 0;
     const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-    const approvedQuantity = jobStatsMap[opId] || 0;
+    const stats = jobStatsMap[opId] || {};
+    const approvedQuantity = stats.totalApproved || 0;
     const isCompletedByQuota = totalQuantity > 0 && approvedQuantity >= totalQuantity;
     
     return isCompletedByStatus || isCompletedByQuota;
   };
 
   const isJobInProgress = (job) => {
+    const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
+    const stats = jobStatsMap[opId] || {};
+    const logStatus = (stats.operatorStatus || '').toUpperCase();
+    const isLogInProgress = logStatus === 'INPROGRESS' || logStatus === 'IN-PROGRESS' || logStatus === 'IN PROGRESS';
+
     const status = (job.operation_status || job.status || '').toUpperCase();
-    return status === 'INPROGRESS' || status === 'IN-PROGRESS' || status === 'IN PROGRESS';
+    const isBasicInProgress = status === 'INPROGRESS' || status === 'IN-PROGRESS' || status === 'IN PROGRESS';
+
+    return isLogInProgress || isBasicInProgress;
   };
 
   // ─── Sort ALL jobs by priority first (source of truth for lock order) ───────
@@ -311,7 +327,8 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
                         <Text strong>
                           {(() => {
                             const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-                            const approved = jobStatsMap[opId] ?? 0;
+                            const stats = jobStatsMap[opId] || {};
+                            const approved = stats.totalApproved ?? 0;
                             const total = job.total_quantity || 0;
                             return `${Math.max(0, total - approved)}`;
                           })()}

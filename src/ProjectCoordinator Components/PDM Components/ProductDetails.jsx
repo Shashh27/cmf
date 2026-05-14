@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, UpOutlined, DownOutlined, LeftOutlined, RightOutlined, ExpandOutlined } from "@ant-design/icons";
-import { Card, Tag, Typography, Empty, Tabs, Table, Select, Spin, Modal, Tooltip, Button, message, Space, Input, Form } from "antd";
+import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
+import { Card, Tag, Typography, Empty, Table, Select, Spin, Modal, Tooltip, Button, message, Input, Form } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -38,32 +38,20 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
 
   const handleSaveExtractedMaterial = async () => {
     if (!selectedExtractedMaterial) return;
-    
     try {
-      // Show loading state
-      const saveButton = document.querySelector('[data-save-button="true"]');
-      if (saveButton) {
-        saveButton.disabled = true;
-        saveButton.textContent = 'Saving...';
-      }
-      
-      // Make API call to update extracted material data
       const response = await axios.put(
         `${API_BASE_URL}/documents/extracted-data/${selectedExtractedMaterial.id}`,
         editedMaterial,
         { headers: { 'Content-Type': 'application/json' } }
       );
-      
       if (response.status >= 200 && response.status < 300) {
-        // Update local state with the response data
-        setExtractedMaterials(prev => 
-          prev.map(item => 
-            item.id === selectedExtractedMaterial.id 
+        setExtractedMaterials(prev =>
+          prev.map(item =>
+            item.id === selectedExtractedMaterial.id
               ? { ...item, ...editedMaterial, ...response.data }
               : item
           )
         );
-        
         message.success('Material data updated successfully!');
         setEditModalVisible(false);
         setSelectedExtractedMaterial(null);
@@ -73,27 +61,17 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       }
     } catch (error) {
       console.error('Error updating extracted material:', error);
-      
-      // If API call fails, still update local state as fallback
-      setExtractedMaterials(prev => 
-        prev.map(item => 
-          item.id === selectedExtractedMaterial.id 
+      setExtractedMaterials(prev =>
+        prev.map(item =>
+          item.id === selectedExtractedMaterial.id
             ? { ...item, ...editedMaterial }
             : item
         )
       );
-      
       message.warning('Material data updated locally. Changes may not persist after refresh.');
       setEditModalVisible(false);
       setSelectedExtractedMaterial(null);
       setEditedMaterial({});
-    } finally {
-      // Reset button state
-      const saveButton = document.querySelector('[data-save-button="true"]');
-      if (saveButton) {
-        saveButton.disabled = false;
-        saveButton.textContent = 'Save';
-      }
     }
   };
 
@@ -117,25 +95,14 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
 
   useEffect(() => {
     if (selectedItem) {
-      // 1. Extract Raw Materials
       let materials = [];
-      
-      // Check for array format (existing logic)
       if (selectedItem.raw_materials && Array.isArray(selectedItem.raw_materials) && selectedItem.raw_materials.length > 0) {
-          materials = [...selectedItem.raw_materials];
-      } 
-      // Check for single raw material field (from user snippet)
-      else if (selectedItem.raw_material_name) {
-          materials = [{
-              id: selectedItem.raw_material_id || 'N/A',
-              material_name: selectedItem.raw_material_name,
-              
-          }];
+        materials = [...selectedItem.raw_materials];
+      } else if (selectedItem.raw_material_name) {
+        materials = [{ id: selectedItem.raw_material_id || 'N/A', material_name: selectedItem.raw_material_name }];
       }
-
       setRawMaterials(materials);
 
-      // 2. Extracted raw materials from 2D files (refresh from backend so ADD reflects immediately)
       if (selectedItem.itemType !== "part") {
         setExtractedMaterials([]);
       } else {
@@ -160,7 +127,6 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
             grouped.set(rootId, entry);
           });
           return Array.from(grouped.values()).map(({ rootId, variants }) => {
-            // FIFO by document id (oldest first)
             const sorted = [...variants].sort((a, b) => (a.doc?.id || 0) - (b.doc?.id || 0));
             const chosen = sorted[0];
             return {
@@ -213,7 +179,6 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       setSelectedThreeDDocumentId(null);
       return;
     }
-
     setLoadingThreeD(true);
     const source = Array.isArray(partDocuments) ? partDocuments : [];
     const filtered = source.filter(doc => {
@@ -222,10 +187,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       const target = url || name;
       return [".stl", ".step", ".stp"].some(ext => target.endsWith(ext));
     });
-    const sorted = [...filtered].sort((a, b) => {
-      // Sort by ID in FIFO order (ascending)
-      return (a.id || 0) - (b.id || 0);
-    });
+    const sorted = [...filtered].sort((a, b) => (a.id || 0) - (b.id || 0));
     setThreeDDocuments(sorted);
     setSelectedThreeDDocumentId(sorted[0]?.id || null);
     setLoadingThreeD(false);
@@ -234,10 +196,10 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   if (!selectedItem) {
     return (
       <div className="flex-1 flex flex-col bg-gray-50 h-full">
-        <Card 
-            variant="borderless"
-            className="h-full flex items-center justify-center shadow-none rounded-none bg-transparent"
-            styles={{ body: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' } }}
+        <Card
+          variant="borderless"
+          className="h-full flex items-center justify-center shadow-none rounded-none bg-transparent"
+          styles={{ body: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' } }}
         >
           <Empty description="Select an item to view details" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         </Card>
@@ -253,20 +215,18 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
   const isInHouse = inHouseTypes.includes(typeNameKey);
   const isOutSource = outSourceTypes.includes(typeNameKey);
-  const typeTagColor = isInHouse ? "green" : isOutSource ? "orange" : "default";
-  const typeTagLabel = typeNameRaw ? typeNameRaw.toUpperCase() : "";
-  
+
   const getItemNumber = () => {
-    switch(itemType) {
+    switch (itemType) {
       case 'product': return item?.id;
       case 'assembly': return item?.assembly_number || item?.id;
       case 'part': return item?.part_number || item?.id;
       default: return item?.id;
-    };
+    }
   };
-  
+
   const getItemName = () => {
-    switch(itemType) {
+    switch (itemType) {
       case 'product': return item?.product_name || item?.name;
       case 'assembly': return item?.assembly_name || item?.name;
       case 'part': return item?.part_name || item?.name;
@@ -282,7 +242,6 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
 
   const handleClearRawMaterial = (material) => {
     if (itemType !== "part" || !item?.id || !material) return;
-
     Modal.confirm({
       title: "Remove Raw Material",
       content: `Are you sure you want to remove raw material "${material.material_name}" from this part?`,
@@ -355,28 +314,26 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   const openViewModal = (viewType) => {
     setViewerModalOpen(true);
     if (viewType === selectedView) {
-      setSelectedView('reset'); // Temporarily set to a different value to force re-render
-      setTimeout(() => setSelectedView(viewType), 0); // Then set back to trigger view change
+      setSelectedView('reset');
+      setTimeout(() => setSelectedView(viewType), 0);
     } else {
-      setSelectedView(viewType);
+      setSelectedView(viewType || 'default');
     }
   };
 
   const ViewControls = ({ onOpenModal, size = 'small' }) => {
     const buttonSize = size === 'small' ? 'small' : 'middle';
     const spacing = size === 'small' ? 'compact' : 'default';
-    
     const viewButtons = [
       { key: 'front', label: 'Front' },
       { key: 'isometric', label: 'Isometric' },
       { key: 'top', label: 'Top' },
       { key: 'bottom', label: 'Bottom' }
     ];
-    
     return (
-      <Space size={spacing} className="bg-white/90 backdrop-blur-sm rounded-lg p-2 shadow-md">
+      <div className="flex gap-2 bg-white/90 backdrop-blur-sm rounded-lg p-2 shadow-md">
         {viewButtons.map(({ key, label }) => (
-          <Button 
+          <Button
             key={key}
             size={buttonSize}
             type={selectedView === key ? 'primary' : 'default'}
@@ -386,9 +343,10 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
             {label}
           </Button>
         ))}
-      </Space>
+      </div>
     );
   };
+
   const extractedMaterialColumns = [
     {
       title: 'Document',
@@ -400,25 +358,24 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       render: (text) => cellWithTooltip(text, 'N/A')
     },
     {
-      title: 'Revision',
+      title: 'Version',
       dataIndex: 'document_version',
       key: 'document_version',
-      width: 70,
+      width: 90,
       align: 'center',
       onHeaderCell: headerNoWrap,
       render: (text, row) => {
         const variants = Array.isArray(row?._variants) ? row._variants : [];
         const v = text || '1.0';
         if (variants.length <= 1) {
-          const label = String(v);
           return (
             <Select
               size="small"
               value={row.document_id}
               disabled
               suffixIcon={null}
-              style={{ width: 74 }}
-              options={[{ value: row.document_id, label }]}
+              style={{ width: 82 }}
+              options={[{ value: row.document_id, label: String(v) }]}
             />
           );
         }
@@ -426,7 +383,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
           <Select
             size="small"
             value={row.document_id}
-            style={{ width: 74 }}
+            style={{ width: 82 }}
             onChange={(nextDocId) => {
               setExtractedMaterials((prev) =>
                 prev.map((r) => {
@@ -443,11 +400,10 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                 })
               );
             }}
-            options={variants.map((vv) => {
-              const raw = vv.document_version || '1.0';
-              const label = String(raw);
-              return { value: vv.document_id, label };
-            })}
+            options={variants.map((vv) => ({
+              value: vv.document_id,
+              label: String(vv.document_version || '1.0'),
+            }))}
           />
         );
       }
@@ -471,10 +427,10 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       render: (text) => cellWithTooltip(text, 'N/A')
     },
     {
-      title: 'Stocksize KG',
+      title: 'Stock Size KG',
       dataIndex: 'stocksize_kg',
       key: 'stocksize_kg',
-      width: 95,
+      width: 100,
       onHeaderCell: headerNoWrap,
       render: (text) => cellWithTooltip(text, 'N/A')
     },
@@ -493,7 +449,10 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       width: 130,
       ellipsis: { showTitle: false },
       onHeaderCell: headerNoWrap,
-      render: (text) => text ? <Tooltip title={text}><span className="text-xs block truncate">{text}</span></Tooltip> : <Text type="secondary" italic>N/A</Text>
+      render: (text) =>
+        text
+          ? <Tooltip title={text}><span className="text-xs block truncate">{text}</span></Tooltip>
+          : <Text type="secondary" italic>N/A</Text>
     },
     {
       title: 'Title',
@@ -504,147 +463,140 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       onHeaderCell: headerNoWrap,
       render: (text) => cellWithTooltip(text, 'N/A')
     },
-  ];
-
-  const items = [
     {
-      key: 'materials',
-      label: <span className="text-sm">Raw Materials ({rawMaterials.length})</span>,
-      children: (
-        <div className="space-y-3">
-          {rawMaterials.length > 0 ? (
-            <div>
-              <Text type="secondary" className="text-xs mb-1 block">Assigned Materials</Text>
-              <Table 
-                dataSource={rawMaterials} 
-                columns={materialColumns} 
-                rowKey="id" 
-                size="small" 
-                pagination={false} 
-                scroll={{ y: 120 }} 
-                bordered 
-              />
-            </div>
-          ) : (
-            <div className="py-6 text-center border border-dashed border-gray-300 rounded-md bg-gray-50">
-              <Text className="text-sm font-medium text-gray-500">No raw materials assigned to this part</Text>
-            </div>
-          )}
-          
-          {itemType === 'part' && (
-            <div>
-              <div className="flex items-center gap-1 mb-1 flex-wrap">
-                <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
-                <Text type="secondary" className="text-xs">Extracted from 2D Files</Text>
-                <Text type="secondary" className="text-xs text-blue-600 ml-2">
-                  <InfoCircleOutlined className="mr-1" />
-                  Click on row to edit Extracted Data
-                </Text>
-                <span className="text-[10px] text-slate-400 ml-1 sm:hidden">— scroll →</span>
-              </div>
-              {extractedMaterials.length > 0 ? (
-                <div className="w-full overflow-x-auto overflow-y-hidden -mx-px">
-                  <Table 
-                    dataSource={extractedMaterials} 
-                    columns={extractedMaterialColumns} 
-                    rowKey="_rootId" 
-                    size="small" 
-                    pagination={false} 
-                    scroll={{ x: 'max-content', y: 120 }} 
-                    bordered 
-                    className="extracted-materials-table hover:bg-blue-50"
-                    onRow={(record) => ({
-                      onClick: () => handleExtractedMaterialClick(record),
-                      style: { cursor: 'pointer' },
-                      title: 'Click to edit this material data'
-                    })}
-                  />
-                </div>
-              ) : (
-                <div className="py-6 text-center border border-dashed border-gray-300 rounded-md bg-gray-50">
-                  <Text className="text-sm font-medium text-gray-500">No material data extracted from 2D files</Text>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )
-    }
+      title: 'Actions',
+      key: 'actions',
+      width: 70,
+      align: 'center',
+      onHeaderCell: headerNoWrap,
+      render: (_, record) => (
+        <Tooltip title="Edit extracted data">
+          <Button
+            type="text"
+            size="small"
+            icon={<span style={{ fontSize: 13 }}>✏️</span>}
+            onClick={(e) => { e.stopPropagation(); handleExtractedMaterialClick(record); }}
+          />
+        </Tooltip>
+      ),
+    },
   ];
 
   return (
-    <div className="flex flex-col bg-white border-b border-slate-200 h-full overflow-hidden">
-      <Card variant="borderless" className="shadow-none rounded-none flex flex-col" styles={{ body: { padding: 'clamp(6px, 1.5vw, 12px)', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } }}>
-        <div className="flex items-baseline gap-2 shrink-0 mb-1 flex-wrap">
-          <span className="font-semibold text-slate-800 truncate" style={{ fontSize: 'clamp(12px, 2.5vw, 14px)' }}>{itemName || 'Unknown Item'}</span>
-          <span className="font-mono text-xs text-slate-500 truncate">({itemNumber || 'N/A'})</span>
-          {itemType === 'part' && item?.size && (
-            <Tag color="cyan" className="text-xs m-0">{item.size}</Tag>
-          )}
-          {itemType === 'part' && item?.qty != null && (
-            <Tag color="blue" className="text-xs m-0">Qty: {item.qty}</Tag>
-          )}
-          {partDetailLabel != null && <Tag color="blue" className="text-xs m-0">{partDetailLabel}</Tag>}
-        </div>
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 min-h-0">
-            <div className="overflow-auto pr-1 min-h-0">
-              <Tabs defaultActiveKey="info" items={items} size="small" className="product-details-tabs" />
+    <div className="flex flex-col bg-white border-b border-slate-200 overflow-hidden" style={{ height: '100%' }}>
+      {/* ── Header bar ── */}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 shrink-0 flex-wrap bg-white">
+        <span className="font-semibold text-slate-800 truncate" style={{ fontSize: 'clamp(12px, 2.5vw, 14px)' }}>
+          {itemName || 'Unknown Item'}
+        </span>
+        <span className="font-mono text-xs text-slate-500 truncate">({itemNumber || 'N/A'})</span>
+        {itemType === 'part' && item?.size && (
+          <Tag color="cyan" className="text-xs m-0">{item.size}</Tag>
+        )}
+        {itemType === 'part' && item?.qty != null && (
+          <Tag color="blue" className="text-xs m-0">Qty: {item.qty}</Tag>
+        )}
+        {partDetailLabel != null && <Tag color="blue" className="text-xs m-0">{partDetailLabel}</Tag>}
+
+        {/* 3D Viewer button — top-right, matches admin style */}
+        {itemType === 'part' && (
+          <div className="ml-auto flex items-center gap-2">
+            {threeDDocuments.length > 0 && (
+              <Select
+                size="small"
+                value={selectedThreeDDocumentId}
+                onChange={setSelectedThreeDDocumentId}
+                style={{ minWidth: 'clamp(100px, 18vw, 150px)', fontSize: '11px' }}
+                options={threeDDocuments.map(doc => {
+                  const v = doc.document_version;
+                  const vStr = v ? String(v) : "";
+                  return {
+                    value: doc.id,
+                    label: `${doc.document_name || "3D Model"}${vStr ? ` (${vStr})` : ""}`,
+                  };
+                })}
+              />
+            )}
+            <Tooltip title="Open 3D Viewer">
+              <Button
+                size="small"
+                type="primary"
+                icon={<EyeOutlined />}
+                onClick={() => openViewModal('default')}
+                disabled={threeDDocuments.length === 0}
+                style={{ background: '#2563eb', border: 'none' }}
+              >
+                <span className="hidden sm:inline ml-1">3D Viewer</span>
+              </Button>
+            </Tooltip>
+          </div>
+        )}
+      </div>
+
+      {/* ── Raw Materials + Extracted from 2D Files (bottom panel) ── */}
+      {itemType === 'part' && (
+        <div className="px-3 py-2 border-t border-slate-100 bg-slate-50/60 shrink-0 overflow-auto" style={{ maxHeight: 280 }}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Assigned Raw Materials */}
+            <div>
+              <Text type="secondary" className="text-xs mb-1 block font-medium">
+                Raw Materials ({rawMaterials.length})
+              </Text>
+              {rawMaterials.length > 0 ? (
+                <Table
+                  dataSource={rawMaterials}
+                  columns={materialColumns}
+                  rowKey="id"
+                  size="small"
+                  pagination={false}
+                  scroll={{ y: 100 }}
+                  bordered
+                />
+              ) : (
+                <div className="py-4 text-center border border-dashed border-gray-300 rounded-md bg-white">
+                  <Text className="text-xs text-gray-400">No raw materials assigned</Text>
+                </div>
+              )}
             </div>
-            <div className="bg-slate-50/80 rounded-lg p-1.5 flex flex-col border border-slate-200 min-h-[100px] sm:min-h-[120px]">
-              <div className="flex items-center justify-between shrink-0 mb-1 flex-wrap gap-1">
-                <span className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
-                  <CodepenOutlined className="text-slate-500" />
-                  <span className="hidden sm:inline">3D Model Viewer</span>
-                  <span className="sm:hidden">3D</span>
-                </span>
-                {threeDDocuments.length > 0 && (
-                  <div className="flex items-center gap-1 sm:gap-2">
-                    <Tooltip title="Open 3D viewer">
-                      <Button
-                        type="text"
-                        size="small"
-                        icon={<EyeOutlined />}
-                        onClick={() => openViewModal()}
-                      />
-                    </Tooltip>
-                    <Select
-                      size="small"
-                      value={selectedThreeDDocumentId}
-                      onChange={setSelectedThreeDDocumentId}
-                      style={{ minWidth: 'clamp(100px, 20vw, 140px)', fontSize: '11px' }}
-                      options={threeDDocuments.map(doc => {
-                        const v = doc.document_version;
-                        const vStr = v ? String(v) : "";
-                        return {
-                          value: doc.id,
-                          label: `${doc.document_name || "3D Model"}${vStr ? ` (${vStr})` : ""}`,
-                        };
-                      })}
-                    />
-                  </div>
-                )}
+
+            {/* Extracted from 2D Files */}
+            <div>
+              <div className="flex items-center gap-1 mb-1 flex-wrap">
+                <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
+                <Text type="secondary" className="text-xs font-medium">
+                  Extracted from 2D Files ({extractedMaterials.length})
+                </Text>
+                <Text type="secondary" className="text-xs text-blue-600 ml-1">
+                  <InfoCircleOutlined className="mr-0.5" />
+                  Click ✏️ to edit
+                </Text>
               </div>
-              <div className="flex-1 min-h-0">
-                {loadingThreeD ? (
-                  <Spin size="small" tip="Loading...">
-                    <div className="w-full min-h-[100px]" />
-                  </Spin>
-                ) : threeDDocuments.length === 0 || !selectedThreeDDocumentId ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-[10px]">
-                    <span>No 3D models</span>
-                    <span className="font-mono mt-0.5">{itemNumber || "N/A"}</span>
-                  </div>
-                ) : (
-                  <ModelViewer3D documentId={selectedThreeDDocumentId} showEdgeButton={false} />
-                )}
-              </div>
+              {extractedMaterials.length > 0 ? (
+                <div className="w-full overflow-x-auto">
+                  <Table
+                    dataSource={extractedMaterials}
+                    columns={extractedMaterialColumns}
+                    rowKey="_rootId"
+                    size="small"
+                    pagination={false}
+                    scroll={{ x: 'max-content', y: 100 }}
+                    bordered
+                    className="extracted-materials-table"
+                  />
+                </div>
+              ) : (
+                <div className="py-4 text-center border border-dashed border-gray-300 rounded-md bg-white">
+                  <Text className="text-xs text-gray-400">No material data extracted from 2D files</Text>
+                </div>
+              )}
             </div>
           </div>
         </div>
-      </Card>
+      )}
+
+      {/* ── 3D Viewer Modal ── */}
       <Modal
-        title={`3D Model Viewer${selectedView && selectedView !== 'default' ? ` - ${selectedView.charAt(0).toUpperCase() + selectedView.slice(1)} View` : ''}`}
+        title={`3D Model Viewer${selectedView && selectedView !== 'default' ? ` — ${selectedView.charAt(0).toUpperCase() + selectedView.slice(1)} View` : ''}`}
         open={viewerModalOpen}
         onCancel={() => setViewerModalOpen(false)}
         footer={null}
@@ -664,86 +616,55 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
               <ViewControls onOpenModal={openViewModal} size="middle" />
             </div>
             <div style={{ height: 'clamp(280px, 50vh, 420px)' }}>
-              <ModelViewer3D documentId={selectedThreeDDocumentId} height={400} showControls initialView={selectedView} showEdgeButton={true} restrictZoom={false} />
+              <ModelViewer3D
+                documentId={selectedThreeDDocumentId}
+                height={400}
+                showControls
+                initialView={selectedView}
+                showEdgeButton={true}
+                restrictZoom={false}
+              />
             </div>
           </div>
         )}
       </Modal>
-      
+
+      {/* ── Edit Extracted Material Modal ── */}
       <Modal
         title="Edit Extracted Material"
         open={editModalVisible}
         onCancel={handleCancelEdit}
         footer={[
-          <Button key="cancel" onClick={handleCancelEdit}>
-            Cancel
-          </Button>,
-          <Button key="save" type="primary" onClick={handleSaveExtractedMaterial} data-save-button="true">
-            Save
-          </Button>
+          <Button key="cancel" onClick={handleCancelEdit}>Cancel</Button>,
+          <Button key="save" type="primary" onClick={handleSaveExtractedMaterial}>Save</Button>
         ]}
         width={600}
       >
         <Form layout="vertical">
           <div className="grid grid-cols-2 gap-4">
             <Form.Item label="Document Name">
-              <Input
-                value={editedMaterial.document_name}
-                disabled
-                className="bg-gray-50"
-                placeholder="Document name"
-              />
+              <Input value={editedMaterial.document_name} disabled className="bg-gray-50" placeholder="Document name" />
             </Form.Item>
             <Form.Item label="Revision">
-              <Input
-                value={editedMaterial.document_version}
-                disabled
-                className="bg-gray-50"
-                placeholder="Revision"
-              />
+              <Input value={editedMaterial.document_version} disabled className="bg-gray-50" placeholder="Revision" />
             </Form.Item>
             <Form.Item label="Material">
-              <Input
-                value={editedMaterial.material}
-                onChange={(e) => setEditedMaterial(prev => ({ ...prev, material: e.target.value }))}
-                placeholder="Enter material"
-              />
+              <Input value={editedMaterial.material} onChange={(e) => setEditedMaterial(prev => ({ ...prev, material: e.target.value }))} placeholder="Enter material" />
             </Form.Item>
             <Form.Item label="Stock Size">
-              <Input
-                value={editedMaterial.stock_size}
-                onChange={(e) => setEditedMaterial(prev => ({ ...prev, stock_size: e.target.value }))}
-                placeholder="Enter stock size"
-              />
+              <Input value={editedMaterial.stock_size} onChange={(e) => setEditedMaterial(prev => ({ ...prev, stock_size: e.target.value }))} placeholder="Enter stock size" />
             </Form.Item>
             <Form.Item label="Stock Size KG">
-              <Input
-                value={editedMaterial.stocksize_kg}
-                onChange={(e) => setEditedMaterial(prev => ({ ...prev, stocksize_kg: e.target.value }))}
-                placeholder="Enter stock size kg"
-              />
+              <Input value={editedMaterial.stocksize_kg} onChange={(e) => setEditedMaterial(prev => ({ ...prev, stocksize_kg: e.target.value }))} placeholder="Enter stock size kg" />
             </Form.Item>
             <Form.Item label="Net WT KG">
-              <Input
-                value={editedMaterial.net_wt_kg}
-                onChange={(e) => setEditedMaterial(prev => ({ ...prev, net_wt_kg: e.target.value }))}
-                placeholder="Enter net weight kg"
-              />
+              <Input value={editedMaterial.net_wt_kg} onChange={(e) => setEditedMaterial(prev => ({ ...prev, net_wt_kg: e.target.value }))} placeholder="Enter net weight kg" />
             </Form.Item>
             <Form.Item label="Title" className="col-span-2">
-              <Input
-                value={editedMaterial.title}
-                onChange={(e) => setEditedMaterial(prev => ({ ...prev, title: e.target.value }))}
-                placeholder="Enter title"
-              />
+              <Input value={editedMaterial.title} onChange={(e) => setEditedMaterial(prev => ({ ...prev, title: e.target.value }))} placeholder="Enter title" />
             </Form.Item>
             <Form.Item label="Note" className="col-span-2">
-              <Input.TextArea
-                value={editedMaterial.note}
-                onChange={(e) => setEditedMaterial(prev => ({ ...prev, note: e.target.value }))}
-                placeholder="Enter note"
-                rows={3}
-              />
+              <Input.TextArea value={editedMaterial.note} onChange={(e) => setEditedMaterial(prev => ({ ...prev, note: e.target.value }))} placeholder="Enter note" rows={3} />
             </Form.Item>
           </div>
         </Form>

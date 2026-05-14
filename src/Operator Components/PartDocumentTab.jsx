@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select } from 'antd';
-import { FileTextOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message } from 'antd';
+import { FileTextOutlined, EyeOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
+import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import ModelViewer3D from './ModelViewer3D';
@@ -26,6 +27,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   // True only when THIS job's status is IN-PROGRESS (from API) or just activated
 
   const [justActivated, setJustActivated] = useState(false);
+  const [sessionActivationTime, setSessionActivationTime] = useState(null);
 
   // Preview Modal State
 
@@ -38,6 +40,13 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const [selectedToolForRequest, setSelectedToolForRequest] = useState(null);
   const [requestLoading, setRequestLoading] = useState(false);
   const [requestForm] = Form.useForm();
+  
+  // Complete Modal State
+  const [isCompleteModalVisible, setIsCompleteModalVisible] = useState(false);
+  const [completingOp, setCompletingOp] = useState(null);
+  const [completeLoading, setCompleteLoading] = useState(false);
+  const [completeForm] = Form.useForm();
+
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
   const [productionStats, setProductionStats] = useState({
@@ -45,7 +54,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     totalRework: 0,
     totalApproved: 0,
     hasRework: false,
-    reworkRemarks: ''
+    reworkRemarks: '',
+    operatorStatus: null
   });
 
   // Dashboard is the single source of truth for production-logs.
@@ -56,7 +66,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   useEffect(() => {
     setJustActivated(false);
-    setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
+    setSessionActivationTime(null);
+    setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '', operatorStatus: null });
   }, [selectedJob?.schedule_id]);
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -67,7 +78,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const effectivelyActivated =
     isActivated ||
     justActivated ||
-    [selectedJob?.status, selectedJob?.operation_status].some(s => {
+    [selectedJob?.status, selectedJob?.operation_status, effectiveStats?.operatorStatus].some(s => {
       const up = s?.toString().toUpperCase();
       return up === 'INPROGRESS' || up === 'IN-PROGRESS' || up === 'IN PROGRESS';
     });
@@ -283,6 +294,45 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       render: (record) => record.part_type_name || record.operation_type || record.type || record.op_type || '-'
     },
     {
+      title: 'Activation Time', key: 'activation_time',
+      render: (record) => {
+        const opId = record.operation_id || record.id || record.operation_number || record.number;
+        const stats = effectiveStats;
+        
+        // If the record matches the currently selected job's operation, use the dashboard's productionStats
+        const isCurrentOp = (
+            (record.operation_number && record.operation_number.toString() === selectedJob?.operation_number?.toString()) ||
+            (record.number && record.number.toString() === selectedJob?.operation_number?.toString())
+          );
+  
+          // Only show activation time if:
+          // 1. It was just activated in this session
+          // 2. The backend says it's currently INPROGRESS
+          const opStatus = isCurrentOp ? (stats.operatorStatus?.toString().toUpperCase()) : null;
+          const isInProgress = opStatus === 'INPROGRESS' || opStatus === 'IN-PROGRESS' || opStatus === 'IN PROGRESS';
+          
+          const activationTime = (justActivated && isCurrentOp) ? sessionActivationTime : (isInProgress ? stats.activationTime : null);
+          
+          if (!activationTime) return '-';
+        
+        // Format the date/time string "YYYY-MM-DD HH:mm:ss.SSSSSS" to something more readable
+        try {
+          const [datePart, timePart] = activationTime.split(' ');
+          const [h, m, s] = timePart.split(':');
+          const [day, month, year] = datePart.split('-'); // Assuming YYYY-MM-DD format based on your input
+          
+          // Re-format nicely
+          const d = dayjs(activationTime);
+          if (d.isValid()) {
+            return d.format('DD-MM-YYYY HH:mm:ss');
+          }
+          return activationTime; // Fallback to raw string if dayjs fails
+        } catch (e) {
+          return activationTime;
+        }
+      }
+    },
+    {
       title: 'Action', key: 'action',
       render: (record) => {
         // Check if operation is completed by status OR by production quota
@@ -290,23 +340,48 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         const totalQuantity = selectedJob?.total_quantity || selectedJob?.quantity || 0;
         const isCompletedByQuota = totalQuantity > 0 && effectiveStats.totalApproved >= totalQuantity;
         const isCompleted = isCompletedByStatus || isCompletedByQuota;
+        
+        // This specific operation's activation status
+        const isThisOpActivated = effectivelyActivated && (
+          (record.operation_number && record.operation_number.toString() === selectedJob?.operation_number?.toString()) ||
+          (record.number && record.number.toString() === selectedJob?.operation_number?.toString())
+        );
+
         const isDisabled = effectivelyActivated || activating || isCompleted;
 
         return (
-          <Button
-            type="primary"
-            size="small"
-            disabled={isDisabled}
-            loading={activating}
-            onClick={(e) => { e.stopPropagation(); handleActivate(record); }}
-            style={effectivelyActivated ? {
-              background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
-            } : isCompleted ? {
-              background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
-            } : {}}
-          >
-            {isCompleted ? 'Completed' : effectivelyActivated ? 'In Progress' : 'Activate'}
-          </Button>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Button
+              type="primary"
+              size="small"
+              block
+              disabled={isDisabled}
+              loading={activating}
+              onClick={(e) => { e.stopPropagation(); handleActivate(record); }}
+              style={effectivelyActivated ? {
+                background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
+              } : isCompleted ? {
+                background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
+              } : {}}
+            >
+              {isCompleted ? 'Completed' : effectivelyActivated ? 'In Progress' : 'Activate'}
+            </Button>
+            
+            <Button
+              type="default"
+              size="small"
+              block
+              icon={<CheckCircleOutlined />}
+              disabled={!isThisOpActivated || isCompleted}
+              onClick={(e) => { e.stopPropagation(); handleOpenCompleteModal(record); }}
+              style={isThisOpActivated && !isCompleted ? {
+                borderColor: '#52c41a',
+                color: '#52c41a'
+              } : {}}
+            >
+              Complete
+            </Button>
+          </Space>
         );
       }
     }
@@ -406,6 +481,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       if (response.status === 200 || response.status === 201) {
         // Mark in-session so button flips immediately without waiting for re-fetch
         setJustActivated(true);
+        setSessionActivationTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
 
         notification.success({
           message: 'Operation Activated',
@@ -422,6 +498,85 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       });
     } finally {
       setActivating(false);
+    }
+  };
+
+  const handleOpenCompleteModal = (operation) => {
+    setCompletingOp(operation);
+    setIsCompleteModalVisible(true);
+    completeForm.setFieldsValue({
+      produced_quantity: 1,
+      notes: ''
+    });
+  };
+
+  const handleCompleteSubmit = async (values) => {
+    if (!selectedJob || !completingOp) return;
+
+    let operationId = selectedJob.id || selectedJob.operation_id || selectedJob.job_id || selectedJob.schedule_id;
+    let operatorId = null;
+    
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const user = JSON.parse(storedUser);
+        operatorId = user.id;
+      } catch (e) {
+        console.error("Error parsing user from local storage", e);
+      }
+    }
+    if (!operatorId) operatorId = localStorage.getItem('operator_id');
+    
+    if (!operatorId) {
+      message.error('Operator not found in session. Please log in again.');
+      return;
+    }
+
+    setCompleteLoading(true);
+    try {
+      const now = dayjs();
+      // For simplicity, we assume the work was done in the last hour if no specific time is provided,
+      // but the API requires from/to dates and times. We'll use the current time for both for completion logging.
+      const payload = {
+        operation_id: parseInt(operationId),
+        operator_id: parseInt(operatorId),
+        supervisor_id: 0,
+        notes: values.notes || '',
+        remarks: '',
+        produced_quantity: parseInt(values.produced_quantity) || 0,
+        approved_quantity: 0,
+        from_date: now.format('YYYY-MM-DD'),
+        from_time: now.format('HH:mm:ss') + '.000Z',
+        to_date: now.format('YYYY-MM-DD'),
+        to_time: now.format('HH:mm:ss') + '.000Z',
+        status: 'pending'
+      };
+
+      const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        message.success('Production log submitted successfully!');
+        setIsCompleteModalVisible(false);
+        completeForm.resetFields();
+        
+        // Refresh page or trigger dashboard update if needed
+        // Since we don't have direct access to dashboard's fetchReworkData here, 
+        // we rely on the user seeing the update next time stats are fetched or 
+        // if we have a callback.
+        window.location.reload(); // Quickest way to ensure all stats refresh across components
+      } else {
+        const errorData = await response.json();
+        message.error(`Failed to submit production log: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error submitting production log:', error);
+      message.error('Failed to submit production log. Please try again.');
+    } finally {
+      setCompleteLoading(false);
     }
   };
 
@@ -659,6 +814,53 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           ) : (
             <Empty description="No preview available for this file type. Please download to view." />
          )}
+      </Modal>
+
+      {/* Complete Operation Modal */}
+      <Modal
+        title={
+          <Space>
+            <CheckCircleOutlined style={{ color: '#52c41a' }} />
+            <span>Complete Operation: {completingOp?.operation_name || completingOp?.name}</span>
+          </Space>
+        }
+        open={isCompleteModalVisible}
+        onCancel={() => setIsCompleteModalVisible(false)}
+        footer={null}
+        destroyOnClose
+      >
+        <Form
+          form={completeForm}
+          layout="vertical"
+          onFinish={handleCompleteSubmit}
+          initialValues={{ produced_quantity: 1 }}
+        >
+          <Form.Item
+            name="produced_quantity"
+            label="Produced Quantity"
+            rules={[{ required: true, message: 'Please enter produced quantity' }]}
+          >
+            <InputNumber min={1} style={{ width: '100%' }} placeholder="Enter quantity" />
+          </Form.Item>
+
+          <Form.Item
+            name="notes"
+            label="Notes (optional)"
+          >
+            <TextArea rows={4} placeholder="Enter any notes or observations" />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setIsCompleteModalVisible(false)}>
+                Back
+              </Button>
+              <Button type="primary" htmlType="submit" loading={completeLoading}>
+                Submit
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
       </Modal>
     </Card>
   );

@@ -1015,12 +1015,26 @@ const ProcessPlanning = ({ initialOrderId }) => {
                       {
                         title: "Start Time",
                         dataIndex: "planned_start_time",
-                        render: (v) => v ? dayjs(v).format("DD-MM-YYYY, HH:mm") : "-"
+                        render: (_, record) => {
+                          const statusData = operationStatus[record.operation_id];
+                          if (operationStatusLoading[record.operation_id]) {
+                            return <Spin size="small" />;
+                          }
+                          const time = statusData?.start_time;
+                          return time ? dayjs(time).format("DD-MM-YYYY, HH:mm") : "-";
+                        }
                       },
                       {
                         title: "End Time",
                         dataIndex: "planned_end_time",
-                        render: (v) => v ? dayjs(v).format("DD-MM-YYYY, HH:mm") : "-"
+                        render: (_, record) => {
+                          const statusData = operationStatus[record.operation_id];
+                          if (operationStatusLoading[record.operation_id]) {
+                            return <Spin size="small" />;
+                          }
+                          const time = statusData?.end_time;
+                          return time ? dayjs(time).format("DD-MM-YYYY, HH:mm") : "-";
+                        }
                       },
                        {
                         title: "Operation Status",
@@ -1033,7 +1047,8 @@ const ProcessPlanning = ({ initialOrderId }) => {
                           if (!statusData) {
                             return "-";
                           }
-                          const status = statusData.operation_status;
+                          // Use status from the API response (or fallback to operation_status)
+                          const status = statusData.status || statusData.operation_status;
                           const color = status === "completed" ? "green" : 
                                        status === "inprogress" ? "blue" : 
                                        status === "pending" ? "orange" : "default";
