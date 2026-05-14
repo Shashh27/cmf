@@ -142,6 +142,8 @@ const MachineScheduling = () => {
   const [helpOpen, setHelpOpen] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateScheduleLoading, setUpdateScheduleLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('machine-scheduling');
+  const [actualRefreshKey, setActualRefreshKey] = useState(0);
   const [skippedData, setSkippedData] = useState({
     skipped_orders: [],
     skipped_parts: [],
@@ -527,7 +529,16 @@ const MachineScheduling = () => {
   return (
     <Layout className="min-h-screen bg-gray-50 p-4">
       <Content>
-        <Tabs defaultActiveKey="machine-scheduling">
+        <Tabs
+          defaultActiveKey="machine-scheduling"
+          activeKey={activeTab}
+          onChange={(key) => {
+            if (key === 'actual-scheduling') {
+              setActualRefreshKey(prev => prev + 1);
+            }
+            setActiveTab(key);
+          }}
+        >
           <TabPane tab="Planned Schedule" key="machine-scheduling">
             {/* Controls */}
             <div style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -743,7 +754,7 @@ const MachineScheduling = () => {
           </TabPane>
           
           <TabPane tab="Actual Schedule" key="actual-scheduling">
-            <ActualScheduling />
+            <ActualScheduling key={actualRefreshKey} />
           </TabPane>
         </Tabs>
       </Content>

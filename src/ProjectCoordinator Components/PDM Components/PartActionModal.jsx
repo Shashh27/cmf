@@ -38,6 +38,168 @@ const OutSourceDates = ({ form, index, itemsWatch }) => {
   );
 };
 
+// ── DocTypeCards ─────────────────────────────────────────────────────────────
+// Visual 2D / 3D / Other drag-and-drop cards for document type selection
+const CARD_TYPES = [
+  { key: '2D',    label: '2D',    sub: '2D Drawing',     color: '#2563eb', bg: '#eff6ff', dragBg: '#dbeafe' },
+  { key: '3D',    label: '3D',    sub: '3D Model',       color: '#7c3aed', bg: '#f5f3ff', dragBg: '#ede9fe' },
+  { key: 'Other', label: '···',   sub: 'Custom Type',    color: '#d97706', bg: '#fffbeb', dragBg: '#fef3c7' },
+];
+
+const DocTypeCards = ({ name, form, itemsWatch }) => {
+  const [dragOver, setDragOver] = useState(null);
+  const docType = itemsWatch?.[name]?.document_type || '2D';
+  const fileList = itemsWatch?.[name]?.file || [];
+  const droppedFile = fileList?.[0]?.originFileObj || fileList?.[0];
+  const isOther = docType === 'Other';
+
+  const applyFile = (type, file) => {
+    const syntheticFile = { uid: `-${Date.now()}`, name: file.name, originFileObj: file, status: 'done' };
+    const items = form.getFieldValue('items') || [];
+    const updated = [...items];
+    if (updated[name]) {
+      updated[name].file = [syntheticFile];
+      updated[name].document_type = type;
+      if (!updated[name].document_name) updated[name].document_name = file.name?.replace(/\.[^/.]+$/, '') || '';
+    }
+    form.setFieldsValue({ items: updated });
+  };
+
+  const selectType = (type) => {
+    const items = form.getFieldValue('items') || [];
+    const updated = [...items];
+    if (updated[name]) {
+      updated[name].document_type = type;
+      if (type !== 'Other') updated[name].document_type_other = '';
+    }
+    form.setFieldsValue({ items: updated });
+  };
+
+  return (
+    <div>
+      {/* 2D / 3D / Other Cards — 3-column grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+        {CARD_TYPES.map(({ key, label, sub, color, bg, dragBg }) => {
+          const isSelected = docType === key;
+          const hasFile = isSelected && droppedFile && key !== 'Other';
+          const isDragTarget = dragOver === key;
+
+          return (
+            <div
+              key={key}
+              onDragOver={e => { e.preventDefault(); setDragOver(key); }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={e => {
+                e.preventDefault();
+                setDragOver(null);
+                const file = e.dataTransfer.files?.[0];
+                if (file) applyFile(key, file);
+              }}
+              onClick={() => selectType(key)}
+              style={{
+                border: `2px dashed ${isDragTarget ? color : isSelected ? color : '#d9d9d9'}`,
+                borderRadius: 10,
+                padding: '18px 8px',
+                textAlign: 'center',
+                cursor: 'pointer',
+                background: isDragTarget ? dragBg : isSelected ? bg : '#fafafa',
+                transition: 'all 0.18s',
+                minHeight: 90,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 3,
+              }}
+            >
+              {hasFile ? (
+                <>
+                  <span style={{ fontSize: 22 }}>📄</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color, wordBreak: 'break-all', maxWidth: '100%', padding: '0 2px' }}>{droppedFile.name}</span>
+                  <span style={{ fontSize: 9, color: '#9ca3af' }}>{key} Document</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: key === 'Other' ? 22 : 26, fontWeight: 800, color: isSelected ? color : '#9ca3af', lineHeight: 1 }}>{label}</span>
+                  <span style={{ fontSize: 10, color: isSelected ? color : '#9ca3af', fontWeight: isSelected ? 600 : 400 }}>{sub}</span>
+                  {key !== 'Other' && <span style={{ fontSize: 9, color: '#d1d5db' }}>drop file here</span>}
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Custom type input — only shown when Other is selected */}
+      {isOther && (
+        <Form.Item
+          name={[name, 'document_type_other']}
+          rules={[{ required: true, message: 'Please enter custom document type' }]}
+          style={{ marginBottom: 12 }}
+        >
+          <Input placeholder="Enter custom document type (e.g. IPID, CNC Program...)" autoComplete="off" />
+        </Form.Item>
+      )}
+
+      {/* Hidden document_type field — driven by card clicks */}
+      <Form.Item name={[name, 'document_type']} hidden initialValue="2D"><Input /></Form.Item>
+
+      {/* File picker */}
+      <Form.Item
+        name={[name, 'file']}
+        valuePropName="fileList"
+        getValueFromEvent={e => Array.isArray(e) ? e : e?.fileList}
+        rules={[{ required: true, message: 'Please select or drop a file' }]}
+        style={{ marginBottom: 12 }}
+      >
+        <Upload
+          maxCount={1}
+          beforeUpload={() => false}
+          onChange={({ fileList }) => {
+            const f = fileList?.[0]?.originFileObj;
+            if (f) {
+              const items = form.getFieldValue('items') || [];
+              const updated = [...items];
+              if (updated[name] && !updated[name].document_name) {
+                updated[name].document_name = f.name?.replace(/\.[^/.]+$/, '') || '';
+                form.setFieldsValue({ items: updated });
+              }
+            }
+          }}
+        >
+          <Button icon={<UploadOutlined />} style={{ width: '100%', textAlign: 'left' }}>
+            Select File {isOther ? '(Custom)' : `(uploads as ${docType})`}
+          </Button>
+        </Upload>
+      </Form.Item>
+
+      {/* Document Name + Revision */}
+      <Row gutter={[12, 12]}>
+        <Col xs={24} sm={14}>
+          <Form.Item
+            name={[name, 'document_name']}
+            label={<span style={{ fontSize: 12, fontWeight: 500, color: '#6b7280' }}>Document Name</span>}
+            rules={[{ required: true, message: 'Required' }]}
+            style={{ marginBottom: 0 }}
+          >
+            <Input placeholder={docType === '2D' ? 'Tech Drawing' : '3D Model Name'} autoComplete="off" />
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={10}>
+          <Form.Item
+            name={[name, 'document_version']}
+            label={<span style={{ fontSize: 12, fontWeight: 500, color: '#6b7280' }}>Revision</span>}
+            rules={[{ required: true, message: 'Required' }]}
+            style={{ marginBottom: 0 }}
+          >
+            <Input placeholder="eg, 00" />
+          </Form.Item>
+        </Col>
+      </Row>
+    </div>
+  );
+};
+
 const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCreated, initialOperations = [], existingOperations = [] }) => {
   const [form] = Form.useForm();
   const [loading, setLoading]           = useState(false);
@@ -52,25 +214,17 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
 
   const itemsWatch = Form.useWatch('items', form);
   
-  // Calculate next operation number based on existing operations
   const calculateNextOpNumber = (index) => {
     if (actionType === 'operation' && existingOperations?.length > 0) {
-      // Extract existing operation numbers and find the max
       const existingNumbers = existingOperations
-        .map(op => {
-          const num = parseInt(String(op.operation_number).trim());
-          return isNaN(num) ? 0 : num;
-        })
+        .map(op => { const num = parseInt(String(op.operation_number).trim()); return isNaN(num) ? 0 : num; })
         .filter(num => num > 0);
-      
       const maxNumber = Math.max(...existingNumbers, 0);
       return maxNumber + (index + 1) * 10;
     }
-    // Default for new parts without existing operations
     return (index + 1) * 10;
   };
 
-  // ── fetch helpers ──────────────────────────────────────────────────────────
   const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,     setAllMachines, setMachinesLoading,    allMachines.length > 0);
@@ -83,21 +237,17 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
       const u = JSON.parse(stored);
       if (u?.id == null) return null;
       return u.id;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   };
 
   const partTypeOptions = partTypes.length
     ? partTypes.map(pt => ({ label: pt.type_name, value: pt.id }))
     : [{ label: 'IN-House', value: 1 }, { label: 'Out-Source', value: 2 }];
 
-  // ── effects ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!open) return;
     form.resetFields();
     if (actionType === 'operation') {
-      // Use initialOperations for pre-filling (imported operations), but existingOperations for sequencing
       const items = initialOperations?.length > 0
         ? initialOperations.map(op => ({
             operation_name:    op.operation_name,
@@ -115,11 +265,10 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
         : [{ part_type_id: 1, documents: [] }];
       form.setFieldsValue({ items });
     } else {
-      form.setFieldsValue({ items: [{ document_version: 'v1.0', document_type: '2D' }] });
+      form.setFieldsValue({ items: [{ document_version: '', document_type: '2D' }] });
     }
   }, [open, actionType, initialOperations]);
 
-  // Auto-clear invalid to_date when from_date changes
   useEffect(() => {
     if (!itemsWatch) return;
     const current = form.getFieldValue('items');
@@ -133,17 +282,12 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     if (changed) form.setFieldsValue({ items: next });
   }, [itemsWatch]);
 
-  // ── submit ─────────────────────────────────────────────────────────────────
   const handleFinish = async (values) => {
     setLoading(true);
     const items = values.items || [];
 
-    // Validate custom "Other" types
     const hasBlankCustom = (check) => items.some(check);
     if (actionType === 'operation' && hasBlankCustom(item => item.documents?.some(d => d.document_type === 'Other' && !d.document_type_other?.trim()))) {
-      message.error("Please enter custom document type for all 'Other' documents"); setLoading(false); return;
-    }
-    if (actionType === 'document' && hasBlankCustom(item => item.document_type === 'Other' && !item.document_type_other?.trim())) {
       message.error("Please enter custom document type for all 'Other' documents"); setLoading(false); return;
     }
 
@@ -153,7 +297,6 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     const resolveType = (type, other) => (type === 'Other' && other?.trim()) ? other.trim() : type;
     let bulkDocFormData = null;
 
-    // Bulk create operations + reduce tool/doc upload calls
     if (actionType === 'operation') {
       const uid = getCurrentUserId();
       const opPayloads = items.map((item) => {
@@ -176,19 +319,13 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
       });
 
       try {
-        const opRes = await axios.post(
-          `${API_BASE_URL}/operations/bulk`,
-          opPayloads,
-          { headers: { 'Content-Type': 'application/json' } }
-        );
+        const opRes = await axios.post(`${API_BASE_URL}/operations/bulk`, opPayloads, { headers: { 'Content-Type': 'application/json' } });
         const createdOps = Array.isArray(opRes.data) ? opRes.data : [];
         createdOps.forEach((o) => results.push(o));
 
-        // Build ONE operation-documents bulk request (across all operations)
         try {
           const fd = new FormData();
           if (uid != null) fd.append('user_id', String(uid));
-
           for (let i = 0; i < createdOps.length; i++) {
             const newOp = createdOps[i];
             const item = items[i];
@@ -205,7 +342,6 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
               fd.append('parent_id', '');
             }
           }
-
           if (fd.getAll('files')?.length) {
             await axios.post(`${API_BASE_URL}/operation-documents/upload-bulk-multi/`, fd);
           }
@@ -218,22 +354,20 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
       for (const item of items) {
         try {
           if (actionType === 'document') {
-          if (!bulkDocFormData) {
-            const fd = new FormData();
-            fd.append('part_id', selectedPart.id.toString());
-            const uid = getCurrentUserId();
-            if (uid != null) fd.append('user_id', String(uid));
-            bulkDocFormData = fd;
-          }
-
-          const file = item.file?.[0]?.originFileObj;
-          if (!file) continue;
-
-          bulkDocFormData.append('files', file);
-          bulkDocFormData.append('document_name', item.document_name || file.name?.replace(/\.[^/.]+$/, '') || 'Document');
-          bulkDocFormData.append('document_type', resolveType(item.document_type, item.document_type_other));
-          bulkDocFormData.append('document_version', item.document_version || 'v1.0');
-          if (item.parent_id) bulkDocFormData.append('parent_id', String(item.parent_id));
+            if (!bulkDocFormData) {
+              const fd = new FormData();
+              fd.append('part_id', selectedPart.id.toString());
+              const uid = getCurrentUserId();
+              if (uid != null) fd.append('user_id', String(uid));
+              bulkDocFormData = fd;
+            }
+            const file = item.file?.[0]?.originFileObj;
+            if (!file) continue;
+            bulkDocFormData.append('files', file);
+            bulkDocFormData.append('document_name', item.document_name || file.name?.replace(/\.[^/.]+$/, '') || 'Document');
+            bulkDocFormData.append('document_type', resolveType(item.document_type, item.document_type_other) || item.document_type);
+            bulkDocFormData.append('document_version', item.document_version || 'v1.0');
+            if (item.parent_id) bulkDocFormData.append('parent_id', String(item.parent_id));
           }
         } catch (e) { console.error(e); message.error('Failed to create item'); }
       }
@@ -278,7 +412,6 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                   >
                     {actionType === 'operation' && (
                       <>
-                        {/* Row 1: Name + Type + Setup/Cycle */}
                         <Form.Item noStyle shouldUpdate={(prev, curr) => prev.items?.[index]?.part_type_id !== curr.items?.[index]?.part_type_id || prev.items?.[index]?.from_date !== curr.items?.[index]?.from_date}>
                           {({ getFieldValue }) => {
                             const isOutSource = getFieldValue(['items', index, 'part_type_id']) === 2;
@@ -329,7 +462,6 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                   </Col>
                                   <Col xs={24} sm={8} md={4}>
                                     <Form.Item {...restField} name={[name, 'part_type_id']} label="Operation Type" initialValue={1} rules={[{ required: true }]}>
-
                                       <Select placeholder="Type" loading={partTypesLoading} onOpenChange={o => { if (o) fetchPartTypes(); }} options={partTypeOptions} />
                                     </Form.Item>
                                   </Col>
@@ -349,77 +481,37 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                   )}
                                 </Row>
                                 
-                                {/* Out-Source Dates - only show when Out-Source is selected */}
                                 {isOutSource && (
                                   <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
                                     <Col xs={24} sm={12} md={12}>
-                                      <Form.Item
-                                        {...restField}
-                                        name={[name, 'from_date']}
-                                        label="From Date"
-                                        rules={[{ required: true, message: 'Required for Out-Source' }]}
-                                      >
+                                      <Form.Item {...restField} name={[name, 'from_date']} label="From Date" rules={[{ required: true, message: 'Required for Out-Source' }]}>
                                         <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} inputReadOnly />
                                       </Form.Item>
                                     </Col>
                                     <Col xs={24} sm={12} md={12}>
-                                      <Form.Item
-                                        {...restField}
-                                        name={[name, 'to_date']}
-                                        label="To Date"
-                                        rules={[
-                                          { required: true, message: 'Required for Out-Source' },
-                                          {
-                                            validator: (_, value) => {
-                                              const fd = getFieldValue(['items', index, 'from_date']);
-                                              if (!value) return Promise.resolve();
-                                              if (!fd) return Promise.reject(new Error('Select From Date first'));
-                                              return dayjs(value).isAfter(dayjs(fd), 'day')
-                                                ? Promise.resolve()
-                                                : Promise.reject(new Error('To Date must be after From Date'));
-                                            }
-                                          }
-                                        ]}
-                                      >
-                                        <DatePicker 
-                                          format="DD-MM-YYYY" 
-                                          style={{ width: '100%' }} 
-                                          inputReadOnly 
+                                      <Form.Item {...restField} name={[name, 'to_date']} label="To Date" rules={[
+                                        { required: true, message: 'Required for Out-Source' },
+                                        { validator: (_, value) => {
+                                          const fd = getFieldValue(['items', index, 'from_date']);
+                                          if (!value) return Promise.resolve();
+                                          if (!fd) return Promise.reject(new Error('Select From Date first'));
+                                          return dayjs(value).isAfter(dayjs(fd), 'day') ? Promise.resolve() : Promise.reject(new Error('To Date must be after From Date'));
+                                        }}
+                                      ]}>
+                                        <DatePicker format="DD-MM-YYYY" style={{ width: '100%' }} inputReadOnly
                                           disabled={!getFieldValue(['items', index, 'from_date'])}
-                                          disabledDate={(current) => {
-                                            const fd = getFieldValue(['items', index, 'from_date']);
-                                            if (!fd) return true;
-                                            return current && !current.isAfter(dayjs(fd), 'day');
-                                          }}
-                                        />
+                                          disabledDate={(current) => { const fd = getFieldValue(['items', index, 'from_date']); if (!fd) return true; return current && !current.isAfter(dayjs(fd), 'day'); }} />
                                       </Form.Item>
                                     </Col>
                                   </Row>
                                 )}
                                 
-                                {/* Vendor Selection for Out-Source Operations */}
                                 {isOutSource && (
                                   <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
                                     <Col xs={24}>
-                                      <Form.Item
-                                        {...restField}
-                                        name={[name, 'vendor_id']}
-                                        label="Vendor"
-                                        rules={[{ required: true, message: 'Please select a vendor for outsourced operations!' }]}
-                                      >
-                                        <Select 
-                                          placeholder="Select vendor" 
-                                          allowClear 
-                                          showSearch 
-                                          optionFilterProp="children" 
-                                          loading={vendorsLoading} 
-                                          onOpenChange={o => { if (o) fetchVendors(); }}
-                                        >
-                                          {vendors.map(vendor => (
-                                            <Select.Option key={vendor.id} value={vendor.id}>
-                                              {vendor.company_name}
-                                            </Select.Option>
-                                          ))}
+                                      <Form.Item {...restField} name={[name, 'vendor_id']} label="Vendor" rules={[{ required: true, message: 'Please select a vendor for outsourced operations!' }]}>
+                                        <Select placeholder="Select vendor" allowClear showSearch optionFilterProp="children" loading={vendorsLoading} onOpenChange={o => { if (o) fetchVendors(); }}>
+                                          {vendors.map(vendor => <Select.Option key={vendor.id} value={vendor.id}>{vendor.company_name}</Select.Option>)}
                                         </Select>
                                       </Form.Item>
                                     </Col>
@@ -430,7 +522,6 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                           }}
                         </Form.Item>
 
-                        {/* IN-House: WC, Machine, Tools, Instructions, Notes */}
                         <Form.Item noStyle shouldUpdate={(p, c) => p.items?.[index]?.part_type_id !== c.items?.[index]?.part_type_id}>
                           {({ getFieldValue }) => {
                             if ((getFieldValue(['items', index, 'part_type_id']) ?? 1) !== 1) return null;
@@ -537,58 +628,16 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                       </>
                     )}
 
+                    {/* ── Document Cards (2D / 3D drag-drop) ── */}
                     {actionType === 'document' && (
-                      <Row gutter={[16, 12]} align="bottom">
-                        <Col xs={24} sm={12} lg={6}>
-                          <Form.Item {...restField} name={[name, 'file']} label={<span className="text-xs font-medium text-gray-600">Upload File</span>} valuePropName="fileList" getValueFromEvent={e => Array.isArray(e) ? e : e?.fileList} rules={[{ required: true, message: 'Required' }]} className="mb-0">
-                            <Upload maxCount={1} beforeUpload={() => false} className="w-full"
-                              onChange={({ fileList }) => {
-                                const f = fileList?.[0]?.originFileObj;
-                                if (f) { const items = form.getFieldValue('items') || []; const u = [...items]; if (u[name] && !u[name].document_name) { u[name].document_name = f.name?.replace(/\.[^/.]+$/, '') || ''; form.setFieldsValue({ items: u }); } }
-                              }}>
-                              <Button icon={<UploadOutlined />} className="w-full text-left flex items-center justify-start">Select File</Button>
-                            </Upload>
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} sm={12} lg={6}>
-                          <Form.Item {...restField} name={[name, 'document_name']} label={<span className="text-xs font-medium text-gray-600">Document Name</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
-                            <Input placeholder="Tech Drawing" autoComplete="off" />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} sm={12} lg={6}>
-                          <Form.Item noStyle shouldUpdate={(p, c) => p.items?.[name]?.document_type !== c.items?.[name]?.document_type}>
-                            {({ getFieldValue }) => {
-                              const type = getFieldValue(['items', name, 'document_type']);
-                              return (
-                                <div className="flex flex-col gap-2">
-                                  <Form.Item {...restField} name={[name, 'document_type']} label={<span className="text-xs font-medium text-gray-600">Document Type</span>} className="mb-0" rules={[{ required: true, message: 'Required' }]}>
-                                    <Select placeholder="Select Type">
-                                      {['2D','3D','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
-                                    </Select>
-                                  </Form.Item>
-                                  {type === 'Other' && (
-                                    <Form.Item {...restField} name={[name, 'document_type_other']} className="mb-0" rules={[{ required: true, message: 'Type Required' }]}>
-                                      <Input placeholder="Custom type..." autoComplete="off" />
-                                    </Form.Item>
-                                  )}
-                                </div>
-                              );
-                            }}
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} sm={12} lg={6}>
-                          <Form.Item {...restField} name={[name, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Revision</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
-                            <Input placeholder="Enter revision..." />
-                          </Form.Item>
-                        </Col>
-                      </Row>
+                      <DocTypeCards name={name} form={form} itemsWatch={itemsWatch} />
                     )}
                   </Card>
                 ))}
               </div>
 
               <Form.Item style={{ marginTop: 16 }}>
-                <Button type="dashed" onClick={() => add(actionType === 'operation' ? { part_type_id: 1, documents: [{ document_type: 'IPID', document_version: 'v1.0' }] } : { document_version: 'v1.0', document_type: '2D' })} block icon={<PlusOutlined />}>
+                <Button type="dashed" onClick={() => add(actionType === 'operation' ? { part_type_id: 1, documents: [{ document_type: 'IPID', document_version: 'v1.0' }] } : { document_version: '', document_type: '2D' })} block icon={<PlusOutlined />}>
                   Add Another {actionType === 'operation' ? 'Operation' : 'Document'}
                 </Button>
               </Form.Item>

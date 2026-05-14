@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Layout, Menu, Drawer, Button } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
-  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined
+  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 
@@ -289,6 +289,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/product-monitoring/pokayoke-checklists`,
         label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
         icon: <SafetyCertificateOutlined />,
+      },
+            {
+        key: `${prefix}/create-inspection-plan`,
+        label: <Link to={`${prefix}/create-inspection-plan`} onClick={() => setMobileDrawerOpen(false)}>Create Inspection Plan</Link>,
+        icon: <BuildOutlined />,
       },
     ];
   } else if (prefix === '/inventory_supervisor') {

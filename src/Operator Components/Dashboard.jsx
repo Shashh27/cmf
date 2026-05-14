@@ -6,7 +6,7 @@ import PokaYokeChecklist from './PokaYokeChecklist';
 import ReportIssue from './ReportIssue';
 import SelectJob from './SelectJob';
 import PartDocumentTab from './PartDocumentTab';
-import ProductionLog from './ProductionLog';
+import MCResponseRework from './MCResponseRework';
 import { API_BASE_URL } from '../Config/auth.js';
 import config from '../Config/config.js';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
@@ -95,15 +95,30 @@ const Dashboard = () => {
         const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const latestLog = sortedLogs.length > 0 ? sortedLogs[0] : null;
         
+        // Calculate totals by summing up values from ALL logs
+        const totalProducedSum = logs.reduce((sum, log) => sum + (log.produced_quantity || 0), 0);
+        const totalReworkSum = logs.reduce((sum, log) => sum + (log.rework_quantity || 0), 0);
+        const totalApprovedSum = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
+
         if (latestLog) {
           const stats = {
-            totalProduced: latestLog.produced_quantity || 0,
-            totalRework: latestLog.rework_quantity || 0,
-            totalApproved: latestLog.approved_quantity || 0,
+            totalProduced: totalProducedSum,
+            totalRework: totalReworkSum,
+            totalApproved: totalApprovedSum,
+            latestProduced: latestLog.produced_quantity || 0,
+            latestRework: latestLog.rework_quantity || 0,
             hasRework: latestLog.status === 'rework',
-            reworkRemarks: latestLog.remarks || ''
+            reworkRemarks: latestLog.remarks || '',
+            operatorStatus: latestLog.operator_status,
+            activationTime: latestLog.from_date && latestLog.from_time ? `${latestLog.from_date} ${latestLog.from_time}` : null
           };
           setProductionStats(stats);
+
+          // If the latest log says inprogress, update the dashboard's activation state
+          const opStatus = latestLog.operator_status?.toString().toUpperCase();
+          if (opStatus === 'INPROGRESS' || opStatus === 'IN-PROGRESS' || opStatus === 'IN PROGRESS') {
+            setIsActivated(true);
+          }
         } else {
           setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '' });
         }
@@ -123,22 +138,34 @@ const Dashboard = () => {
     const results = await Promise.allSettled(
       ops.map(async (job) => {
         const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
-        if (!opId) return { opId: null, totalApproved: 0 };
+        if (!opId) return { opId: null, totalApproved: 0, operatorStatus: null };
         try {
           const r = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${opId}?skip=0`);
-          if (!r.ok) return { opId, totalApproved: 0 };
+          if (!r.ok) return { opId, totalApproved: 0, operatorStatus: null };
           const logs = await r.json();
           const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
-          return { opId, totalApproved };
+          
+          // Get operator_status from latest log
+          const sortedLogs = logs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          const operatorStatus = sortedLogs.length > 0 ? sortedLogs[0].operator_status : null;
+          const activationTime = sortedLogs.length > 0 && sortedLogs[0].from_date && sortedLogs[0].from_time 
+            ? `${sortedLogs[0].from_date} ${sortedLogs[0].from_time}` 
+            : null;
+
+          return { opId, totalApproved, operatorStatus, activationTime };
         } catch {
-          return { opId, totalApproved: 0 };
+          return { opId, totalApproved: 0, operatorStatus: null, activationTime: null };
         }
       })
     );
     const map = {};
     results.forEach((r) => {
       if (r.status === 'fulfilled' && r.value.opId != null) {
-        map[r.value.opId] = r.value.totalApproved;
+        map[r.value.opId] = {
+          totalApproved: r.value.totalApproved,
+          operatorStatus: r.value.operatorStatus,
+          activationTime: r.value.activationTime
+        };
       }
     });
     setJobStatsMap(map);
@@ -507,126 +534,14 @@ const Dashboard = () => {
                 <div style={{ marginTop: 6, fontWeight: 700, color: '#52C41A' }}>{productionStats.totalProduced || 0}</div>
               </div>
             </div>
-            
-            {/* Rework Information */}
-            {productionStats.hasRework && (
-              <div style={{ 
-                marginTop: 16, 
-                background: '#FFF2E8', 
-                borderRadius: 12, 
-                padding: 12, 
-                border: '1px solid #FFBB96',
-                minHeight: 'auto'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                  <WarningOutlined style={{ color: '#FA8C16', fontSize: 16, flexShrink: 0 }} />
-                  <Text strong style={{ color: '#FA8C16', fontSize: 14 }}>Rework Required</Text>
-                </div>
-                <div style={{ display: 'flex', gap: 12, flexDirection: window.innerWidth < 768 ? 'column' : 'row' }}>
-                  <div style={{ 
-                    flex: 1, 
-                    minWidth: window.innerWidth < 768 ? '100%' : 'auto',
-                    marginBottom: window.innerWidth < 768 ? 8 : 0
-                  }}>
-                    <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Produced Quantity</Text>
-                    <div style={{ marginTop: 4, fontWeight: 700, color: '#52C41A', fontSize: 16 }}>
-                      {productionStats.totalProduced || 0}
-                    </div>
-                  </div>
-                  <div style={{ 
-                    flex: 1, 
-                    minWidth: window.innerWidth < 768 ? '100%' : 'auto',
-                    marginBottom: window.innerWidth < 768 ? 8 : 0
-                  }}>
-                    <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rework Quantity</Text>
-                    <div style={{ marginTop: 4, fontWeight: 700, color: '#FA8C16', fontSize: 16 }}>
-                      {productionStats.totalRework || 0}
-                    </div>
-                  </div>
-                  <div style={{ 
-                    flex: 2, 
-                    minWidth: window.innerWidth < 768 ? '100%' : 'auto'
-                  }}>
-                    <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Remarks</Text>
-                    <div style={{ 
-                      marginTop: 4, 
-                      fontWeight: 600, 
-                      color: '#8C4A00', 
-                      fontSize: 12,
-                      wordBreak: 'break-word',
-                      maxWidth: '100%'
-                    }}>
-                      {productionStats.reworkRemarks || 'No remarks'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* MC Reply Information */}
-            {latestHelpReply && (
-              <div style={{ 
-                marginTop: 16, 
-                background: '#F6FFED', 
-                borderRadius: 12, 
-                padding: 12, 
-                border: '1px solid #B7EB8F',
-                minHeight: 'auto'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <div style={{ 
-                    width: 24, 
-                    height: 24, 
-                    borderRadius: '50%', 
-                    background: '#52C41A', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center' 
-                  }}>
-                    <SettingOutlined style={{ color: 'white', fontSize: 14 }} />
-                  </div>
-                  <Text strong style={{ color: '#389E0D', fontSize: 14 }}>MC Response</Text>
-                  {latestHelpReply.replied_at && (
-                    <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
-                      {new Date(latestHelpReply.replied_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                  )}
-                </div>
-                <div style={{ 
-                  background: 'white', 
-                  borderRadius: 8, 
-                  padding: '8px 12px', 
-                  border: '1px solid #D9F7BE'
-                }}>
-                  {latestHelpReply.description && (
-                    <div style={{ marginBottom: 8 }}>
-                      <Text style={{ color: '#595959', fontSize: 12, display: 'block' }}>
-                        <strong>Operator:</strong> "{latestHelpReply.description}"
-                      </Text>
-                    </div>
-                  )}
-                  <div style={{ marginBottom: 4 }}>
-                    <Text style={{ color: '#237804', fontSize: 13, display: 'block', fontStyle: 'italic' }}>
-                      <strong>MC Response:</strong> "{latestHelpReply.mc_reply}"
-                    </Text>
-                  </div>
-                  <div style={{ marginTop: 4, textAlign: 'right' }}>
-                    <Text type="secondary" style={{ fontSize: 11 }}>
-                      — {latestHelpReply.replied_by_name || 'Manufacturing Coordinator'}
-                    </Text>
-                  </div>
-                </div>
-              </div>
-            )}
           </Card>
         </Col>
 
         <Col xs={24} lg={8}>
-          <ProductionLog 
-            isActivated={isActivated} 
-            selectedJob={selectedJob} 
-            cardHeight={cardHeight} 
-            onProductionSubmit={handleProductionSubmit}
+          <MCResponseRework 
+            productionStats={productionStats}
+            latestHelpReply={latestHelpReply}
+            cardHeight={cardHeight}
           />
         </Col>
 

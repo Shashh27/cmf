@@ -47,6 +47,9 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
 
 import SupervisorDashboard from "./Pages/SupervisorDashboard";
+import CreateInspectionPlan from "./Supervisor Components/CreateInspectionPlan";
+
+import QMSInspector from "./Quality Management Components/QMSInspector";
 
 
 
@@ -129,6 +132,7 @@ function App() {
           <Route path="/admin/maintenance-management/preventive-maintenance" element={<MaintenanceManagement />} />
 
           <Route path="/admin/quality-management" element={<QualityManagement />} />
+          <Route path="/admin/qms-inspector" element={<QMSInspector />} />
 
 
 
@@ -235,7 +239,10 @@ function App() {
           <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
           <Route path="/supervisor/pps/assets-availability" element={<SupervisorDashboard />} />
           <Route path="/supervisor/product-monitoring/pokayoke-checklists" element={<SupervisorDashboard />} />
-
+          <Route path="/supervisor/create-inspection-plan" element={<CreateInspectionPlan />} />
+          <Route path="/supervisor/quality-management" element={<QualityManagement />} />
+          <Route path="/supervisor/qms-inspector" element={<QMSInspector />} />
+          
           {/* Inventory Supervisor */}
 
           <Route path="/inventory_supervisor" element={<Navigate to="/inventory_supervisor/inventory-management/inventory-master" replace />} />
@@ -255,11 +262,11 @@ function App() {
           <Route path="/operator" element={<Navigate to="/operator/dashboard" replace />} />
 
           <Route path="/operator/dashboard" element={<OperatorDashboard />} />
-
+          <Route path="/operator/qms-inspector" element={<QMSInspector />} />
           <Route path="/operator/inspection-results" element={<OperatorDashboard />} />
 
           <Route path="/operator/inventory-data" element={<OperatorDashboard />} />
-
+          <Route path="/operator/inspection-results" element={<OperatorDashboard />} />
           <Route path="/operator/documents" element={<OperatorDashboard />} />
           <Route path="/operator/leave-log" element={<OperatorDashboard />} />
           </Route>
