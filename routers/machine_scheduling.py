@@ -2649,6 +2649,22 @@ def activate_job_card(
                     f"Cannot activate — prior operations not completed: {', '.join(blocking_ops)}"
                 )
         
+        # Check for any pending production logs that need supervisor approval
+        from sqlalchemy import text
+        pending_count = db.execute(text("""
+            SELECT COUNT(*) FROM scheduling.production_logs
+            WHERE operation_id = :op_id AND (
+                operator_status = 'inprogress' OR
+                (operator_status = 'completed' AND status = 'pending')
+            )
+        """), {"op_id": operation_id}).scalar()
+        
+        if pending_count > 0:
+            raise HTTPException(
+                400,
+                f"Cannot activate job card. There are {pending_count} pending production log(s) waiting for supervisor approval. Please wait for supervisor to approve existing logs before activating again."
+            )
+        
         # Create or update production log
         current_time = datetime.now()
         current_date = current_time.date()

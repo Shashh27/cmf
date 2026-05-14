@@ -828,19 +828,97 @@ def get_operation_production_status(operation_id: int, db: Session = Depends(get
         WHERE operation_id = :op_id
     """), {"op_id": operation_id}).fetchone()
     
+    # Get all production logs for this operation
+    logs = db.query(ProductionLog).filter(
+        ProductionLog.operation_id == operation_id
+    ).order_by(ProductionLog.created_at.asc()).all()
+    
+    start_time = None
+    end_time = None
+    
+    if logs:
+        # Find earliest from_date + from_time
+        for log in logs:
+            if log.from_date and log.from_time:
+                candidate = datetime.combine(log.from_date, log.from_time)
+                if not start_time or candidate < start_time:
+                    start_time = candidate
+        
+        # Find latest to_date + to_time
+        for log in logs:
+            if log.to_date and log.to_time:
+                candidate = datetime.combine(log.to_date, log.to_time)
+                if not end_time or candidate > end_time:
+                    end_time = candidate
+    
+    # Check for inprogress logs
+    has_inprogress = db.execute(text("""
+        SELECT COUNT(*) 
+        FROM scheduling.production_logs
+        WHERE operation_id = :op_id
+        AND operator_status = 'inprogress'
+    """), {"op_id": operation_id}).scalar() > 0
+    
+    # Determine status
+    if stats.total_approved >= required_quantity:
+        current_status = "completed"
+    elif has_inprogress or stats.total_logs > 0:
+        current_status = "inprogress"
+    else:
+        current_status = "pending"
+    
+    # If status is inprogress or pending, set end_time to null
+    if current_status in ["inprogress", "pending"]:
+        end_time = None
+    
     completion_percentage = 0
     if required_quantity > 0:
         completion_percentage = (stats.total_approved / required_quantity) * 100
     
+    # Get machine details
+    machine_make = None
+    machine_model = None
+    machine_id = None
+    
+    # First check if operation has machine_id
+    if hasattr(operation, 'machine_id') and operation.machine_id:
+        machine_id = operation.machine_id
+    else:
+        # If not, get from rescheduling_items
+        try:
+            from DB.models.scheduling import Rescheduling
+            rescheduling_item = db.query(Rescheduling).filter(
+                Rescheduling.operation_id == operation_id,
+                Rescheduling.status.in_(['scheduled', 'rescheduled'])
+            ).order_by(Rescheduling.start_time.desc()).first()
+            if rescheduling_item and rescheduling_item.machine_id:
+                machine_id = rescheduling_item.machine_id
+        except:
+            pass
+    
+    if machine_id:
+        machine = db.query(Machine).filter(Machine.id == machine_id).first()
+        if machine:
+            machine_make = machine.make
+            machine_model = machine.model
+    
+    # Get operation name and number
+    operation_name = getattr(operation, 'operation_name', None)
+    operation_number = getattr(operation, 'operation_number', None)
+    
     return {
         "operation_id": operation_id,
+        "operation_number": operation_number,
+        "operation_name": operation_name,
         "required_quantity": required_quantity,
         "total_produced": stats.total_produced,
         "total_approved": stats.total_approved,
         "total_rework": stats.total_rework,
         "completion_percentage": round(completion_percentage, 2),
         "is_completed": stats.total_approved >= required_quantity,
-        "operation_status": operation_status.status if operation_status else None,
-        "operation_completed_at": operation_status.completed_at if operation_status else None,
-        "operation_status_tracking_enabled": OPERATION_STATUS_AVAILABLE
+        "status": current_status,
+        "start_time": start_time,
+        "end_time": end_time,
+        "machine_make": machine_make,
+        "machine_model": machine_model
     }
