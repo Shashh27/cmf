@@ -99,23 +99,22 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
   );
 };
 
-// ── FitTable ────────────────────────────────────────────────────────────────
-const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) => {
-  const ref = useRef(null);
-  const [scrollY, setScrollY] = useState(400);
-
-  useEffect(() => {
-    const update = () => { if (ref.current) setScrollY(Math.max(window.innerHeight - ref.current.getBoundingClientRect().top - 40, 300)); };
-    const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
-    if (ref.current) ro.observe(ref.current);
-    update();
-    window.addEventListener('resize', update);
-    return () => { ro.disconnect(); window.removeEventListener('resize', update); };
-  }, []);
-
+// ── ScrollTable ─────────────────────────────────────────────────────────────
+const ScrollTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) => {
   return (
-    <div className="flex-1 min-h-0 overflow-hidden w-full relative" ref={ref} style={{ height: '100%' }}>
-      <Table columns={columns} dataSource={dataSource} pagination={false} scroll={{ y: scrollY, x: scrollX }} size="small" {...props} className={`${props.className || ''} custom-fit-table`} />
+    <div className="flex-1 min-h-0 w-full bg-white rounded-lg border border-slate-100 shadow-sm overflow-hidden flex flex-col">
+      <div className="overflow-auto flex-1">
+        <Table
+          columns={columns}
+          dataSource={dataSource}
+          pagination={false}
+          scroll={{ x: scrollX, y: '100%' }}
+          size="small"
+          {...props}
+          className={`${props.className || ''} custom-scroll-table`}
+          style={{ height: '100%' }}
+        />
+      </div>
     </div>
   );
 };
@@ -461,7 +460,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             </div>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
-            <FitTable 
+            <ScrollTable 
               dataSource={operations} 
               columns={operationsColumns} 
               rowKey="id" 
@@ -491,7 +490,15 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden w-full">
-            <FitTable dataSource={latestPartDocs} rowKey="id" size="small" pagination={false} className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden" scrollX={600} columns={eBomColumns} />
+            <ScrollTable 
+              dataSource={latestPartDocs} 
+              rowKey="id" 
+              size="small" 
+              pagination={false} 
+              className="docs-ebom-table" 
+              scrollX={600} 
+              columns={eBomColumns} 
+            />
           </div>
 
           {/* Upload Modal */}

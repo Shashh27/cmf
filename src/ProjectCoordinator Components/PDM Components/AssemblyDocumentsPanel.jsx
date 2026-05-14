@@ -630,7 +630,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         size="small"
         pagination={false}
         columns={columns}
-        className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden"
+        className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden h-full"
         locale={{
           emptyText: (
             <Empty
@@ -639,7 +639,8 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             />
           ),
         }}
-        scroll={{ x: true, y: "calc(100vh - 260px)" }}
+        scroll={{ x: true, y: "100%" }}
+        style={{ height: '100%' }}
       />
     </div>
 

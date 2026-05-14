@@ -3,8 +3,10 @@ import { useNavigate, useParams, Link } from "react-router-dom";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
-import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
-  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined } from "@ant-design/icons";
+import {
+  ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined, UserOutlined, CalendarOutlined,
+  SearchOutlined, ClockCircleOutlined, CheckCircleOutlined, FilterOutlined
+} from "@ant-design/icons";
 import OrderModal from "./OMS Components/OrderModal";
 import DocumentModal from "./OMS Components/DocumentModal";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
@@ -45,7 +47,7 @@ const OMS = () => {
 
   useEffect(() => {
     if (hasFetchedData.current) return;
-    
+
     const fetchData = async () => {
       hasFetchedData.current = true;
       setLoading(true);
@@ -73,7 +75,7 @@ const OMS = () => {
     }
   };
 
-  
+
   const fetchOrders = async () => {
     try {
       const coordinatorId = getCurrentProjectCoordinatorId();
@@ -218,49 +220,49 @@ const OMS = () => {
       // If it's "beyond" (before start or after end), hide the row.
       if (orderDate && (orderDate.isBefore(start) || orderDate.isAfter(end))) return false;
       if (dueDate && (dueDate.isBefore(start) || dueDate.isAfter(end))) return false;
-      
+
       // If no date exists at all, hide it when filtering
       if (!orderDate && !dueDate) return false;
     }
 
     // 2. Global Search Filter (Table Headers)
     if (!searchText) return true;
-    
+
     const searchLower = searchText.toLowerCase();
-    
+
     // SL NO (index + 1)
     const slNo = String(index + 1);
-    
+
     // Project Number
     const saleOrderNumber = String(order.sale_order_number || "").toLowerCase();
-    
+
     // Customer
     const customerName = String(getCustomerName(order.customer_id, order) || "").toLowerCase();
-    
+
     // Project Name (from product)
     const productName = String(getProductName(order.product_id, order) || "").toLowerCase();
-    
+
     // Qty
     const quantity = String(order.quantity || "");
-    
+
     // Dates (formatted)
     const formattedOrderDate = formatDate(order.order_date).toLowerCase();
     const formattedDueDate = formatDate(order.due_date).toLowerCase();
-    
+
     // Status
     const status = String(order.status || "").toLowerCase();
-    
+
     // Project Coordinator (with admin fallback)
     const projectCoordinatorName = String(
-      order.project_coordinator_name || 
-      order.project_coordinator_id || 
-      order.admin_name || 
+      order.project_coordinator_name ||
+      order.project_coordinator_id ||
+      order.admin_name ||
       order.admin_id || ""
     ).toLowerCase();
-    
+
     // Admin
     const adminName = String(order.admin_name || order.admin_id || "").toLowerCase();
-    
+
     return (
       slNo.includes(searchLower) ||
       saleOrderNumber.includes(searchLower) ||
@@ -279,8 +281,8 @@ const OMS = () => {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="flex flex-col items-center">
-            <Spin size="large" />
-            <p className="mt-4 text-gray-500 font-medium">Loading orders...</p>
+          <Spin size="large" />
+          <p className="mt-4 text-gray-500 font-medium">Loading orders...</p>
         </div>
       </div>
     );
@@ -304,17 +306,6 @@ const OMS = () => {
       render: (text) => <span className="font-medium text-gray-800">{text}</span>,
     },
     {
-      title: <span className="font-semibold text-gray-700">Customer</span>,
-      dataIndex: "customer_id",
-      key: "customer_id",
-      render: (customerId, record) => (
-        <Space>
-            <UserOutlined className="text-gray-400" />
-            <span className="text-gray-700">{getCustomerName(customerId, record)}</span>
-        </Space>
-      ),
-    },
-    {
       title: <span className="font-semibold text-gray-700">Project Name</span>,
       dataIndex: "product_id",
       key: "product_id",
@@ -324,6 +315,10 @@ const OMS = () => {
           {pid != null ? (
             <Link
               to={`/project_coordinator/oms/product/${pid}`}
+              state={{ 
+                projectName: getProductName(pid, record), 
+                projectNumber: record.sale_order_number 
+              }}
               className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
             >
               {getProductName(pid, record)}
@@ -342,13 +337,24 @@ const OMS = () => {
       render: (text) => <span className="font-mono text-gray-700">{text}</span>,
     },
     {
+      title: <span className="font-semibold text-gray-700">Customer</span>,
+      dataIndex: "customer_id",
+      key: "customer_id",
+      render: (customerId, record) => (
+        <Space>
+          <UserOutlined className="text-gray-400" />
+          <span className="text-gray-700">{getCustomerName(customerId, record)}</span>
+        </Space>
+      ),
+    },
+    {
       title: <span className="font-semibold text-gray-700">Order Date</span>,
       dataIndex: "order_date",
       key: "order_date",
       render: (date) => (
         <Space className="text-gray-500">
-            <CalendarOutlined />
-            {formatDate(date)}
+          <CalendarOutlined />
+          {formatDate(date)}
         </Space>
       ),
     },
@@ -358,8 +364,8 @@ const OMS = () => {
       key: "due_date",
       render: (date) => (
         <Space className="text-gray-500">
-            <CalendarOutlined />
-            {formatDate(date)}
+          <CalendarOutlined />
+          {formatDate(date)}
         </Space>
       ),
     },
@@ -416,32 +422,32 @@ const OMS = () => {
         <Space size="small">
           <Tooltip title="Edit Order">
             <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined />}
-                className="text-blue-500 hover:bg-blue-50"
-                onClick={() => handleEditOrder(record)}
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              className="text-blue-500 hover:bg-blue-50"
+              onClick={() => handleEditOrder(record)}
             />
           </Tooltip>
           <Tooltip title="Documents">
-            <Button 
-                type="text"
-                size="small" 
-                icon={<FileTextOutlined />}
-                className="text-purple-500 hover:bg-purple-50"
-                onClick={() => {
+            <Button
+              type="text"
+              size="small"
+              icon={<FileTextOutlined />}
+              className="text-purple-500 hover:bg-purple-50"
+              onClick={() => {
                 setSelectedOrderId(record.id);
                 setDocumentModalOpen(true);
-                }}
+              }}
             />
           </Tooltip>
           <Tooltip title="Delete Order">
             <Button
-                type="text"
-                size="small"
-                icon={<DeleteOutlined />}
-                className="text-red-500 hover:bg-red-50"
-                onClick={() => handleDeleteOrder(record)}
+              type="text"
+              size="small"
+              icon={<DeleteOutlined />}
+              className="text-red-500 hover:bg-red-50"
+              onClick={() => handleDeleteOrder(record)}
             />
           </Tooltip>
         </Space>
@@ -513,133 +519,133 @@ const OMS = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-4 lg:mb-6">
-          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs sm:text-sm text-gray-600">Total Orders</div>
-                <div className="text-xl sm:text-2xl font-bold text-blue-700">{totalOrders}</div>
-              </div>
-              <ShoppingOutlined className="text-blue-600 text-xl sm:text-2xl" />
+        <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs sm:text-sm text-gray-600">Total Orders</div>
+              <div className="text-xl sm:text-2xl font-bold text-blue-700">{totalOrders}</div>
             </div>
-          </div>
-          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs sm:text-sm text-gray-600">Pending</div>
-                <div className="text-xl sm:text-2xl font-bold text-orange-600">{inProgressCount}</div>
-              </div>
-              <AppstoreOutlined className="text-orange-500 text-xl sm:text-2xl" />
-            </div>
-          </div>
-          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs sm:text-sm text-gray-600">Scheduled</div>
-                <div className="text-xl sm:text-2xl font-bold text-purple-600">{scheduledCount}</div>
-              </div>
-              <ClockCircleOutlined className="text-purple-500 text-xl sm:text-2xl" />
-            </div>
-          </div>
-          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs sm:text-sm text-gray-600">Completed</div>
-                <div className="text-xl sm:text-2xl font-bold text-green-600">{completedCount}</div>
-              </div>
-              <CheckCircleOutlined className="text-green-500 text-xl sm:text-2xl" />
-            </div>
+            <ShoppingOutlined className="text-blue-600 text-xl sm:text-2xl" />
           </div>
         </div>
+        <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs sm:text-sm text-gray-600">Pending</div>
+              <div className="text-xl sm:text-2xl font-bold text-orange-600">{inProgressCount}</div>
+            </div>
+            <AppstoreOutlined className="text-orange-500 text-xl sm:text-2xl" />
+          </div>
+        </div>
+        <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs sm:text-sm text-gray-600">Scheduled</div>
+              <div className="text-xl sm:text-2xl font-bold text-purple-600">{scheduledCount}</div>
+            </div>
+            <ClockCircleOutlined className="text-purple-500 text-xl sm:text-2xl" />
+          </div>
+        </div>
+        <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs sm:text-sm text-gray-600">Completed</div>
+              <div className="text-xl sm:text-2xl font-bold text-green-600">{completedCount}</div>
+            </div>
+            <CheckCircleOutlined className="text-green-500 text-xl sm:text-2xl" />
+          </div>
+        </div>
+      </div>
 
       {/* Header */}
       <div className="bg-white rounded-lg lg:rounded-xl shadow-sm border border-gray-100 p-3 sm:p-4 mb-4 lg:mb-6">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4">
-            <div className="w-full lg:w-auto">
-                <Typography.Title 
-                  level={2} 
-                  style={{ margin: 0, fontSize: 'clamp(18px, 4vw, 24px)' }} 
-                  className="flex items-center gap-2 sm:gap-3 text-gray-800"
-                >
-                    <ShoppingOutlined className="text-blue-600" />
-                    <span className="hidden sm:inline">Order Management</span>
-                    <span className="sm:hidden">Orders</span>
-                </Typography.Title>
-                <Typography.Text className="text-gray-500 mt-1 block text-xs sm:text-sm">
-                    Manage sales orders, track status, and handle documents
-                </Typography.Text>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
-              <RangePicker
-                onChange={handleDateRangeChange}
-                disabledDate={disabledDate}
-                className="w-full sm:w-64"
-                format="DD/MM/YYYY"
-                placeholder={["Start Date", "End Date"]}
-                inputReadOnly
+          <div className="w-full lg:w-auto">
+            <Typography.Title
+              level={2}
+              style={{ margin: 0, fontSize: 'clamp(18px, 4vw, 24px)' }}
+              className="flex items-center gap-2 sm:gap-3 text-gray-800"
+            >
+              <ShoppingOutlined className="text-blue-600" />
+              <span className="hidden sm:inline">Order Management</span>
+              <span className="sm:hidden">Orders</span>
+            </Typography.Title>
+            <Typography.Text className="text-gray-500 mt-1 block text-xs sm:text-sm">
+              Manage sales orders, track status, and handle documents
+            </Typography.Text>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+            <RangePicker
+              onChange={handleDateRangeChange}
+              disabledDate={disabledDate}
+              className="w-full sm:w-64"
+              format="DD/MM/YYYY"
+              placeholder={["Start Date", "End Date"]}
+              inputReadOnly
+            />
+            <Input.Search
+              placeholder="Search by any field..."
+              allowClear
+              onSearch={handleSearch}
+              onChange={(e) => handleSearch(e.target.value)}
+              value={searchText}
+              maxLength={20}
+              className="w-full sm:w-64 lg:w-80"
+              size="middle"
+            />
+            <div className="flex gap-2">
+              <OMSOrdersPdfDownload
+                orders={ordersForPdf}
+                formatDate={formatDate}
               />
-              <Input.Search
-                placeholder="Search by any field..."
-                allowClear
-                onSearch={handleSearch}
-                onChange={(e) => handleSearch(e.target.value)}
-                value={searchText}
-                maxLength={20}
-                className="w-full sm:w-64 lg:w-80"
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={handleCreateOrder}
                 size="middle"
-              />
-              <div className="flex gap-2">
-                <OMSOrdersPdfDownload
-                  orders={ordersForPdf}
-                  formatDate={formatDate}
-                />
-                <Button 
-                    type="primary" 
-                    icon={<PlusOutlined />}
-                    onClick={handleCreateOrder}
-                    size="middle"
-                    style={{ backgroundColor: '#2563eb' }}
-                    className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
-                >
-                    <span className="hidden sm:inline">New Order</span>
-                    <span className="sm:hidden">New</span>
-                </Button>
-              </div>
+                style={{ backgroundColor: '#2563eb' }}
+                className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
+              >
+                <span className="hidden sm:inline">New Order</span>
+                <span className="sm:hidden">New</span>
+              </Button>
             </div>
+          </div>
         </div>
       </div>
-      <Card 
-        className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" 
+      <Card
+        className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100"
         styles={{ body: { padding: 0 } }}
       >
         <Table
-            columns={columns}
-            dataSource={filteredOrders}
-            rowKey="id"
-            pagination={{
-                current: ordersPagination.current,
-                pageSize: ordersPagination.pageSize,
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-                pageSizeOptions: ['10', '20', '50', '100'],
-                placement: 'bottom',
-                responsive: true,
-            }}
-            onChange={(paginationConfig) => {
-                setOrdersPagination({
-                    current: paginationConfig.current,
-                    pageSize: paginationConfig.pageSize,
-                });
-            }}
-            size="small"
-            bordered
-            className="modern-table"
-            locale={{ emptyText: <Empty description={searchText ? "No orders found matching your search" : "No orders found"} /> }}
-            scroll={{ x: 1200 }}
+          columns={columns}
+          dataSource={filteredOrders}
+          rowKey="id"
+          pagination={{
+            current: ordersPagination.current,
+            pageSize: ordersPagination.pageSize,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            placement: 'bottom',
+            responsive: true,
+          }}
+          onChange={(paginationConfig) => {
+            setOrdersPagination({
+              current: paginationConfig.current,
+              pageSize: paginationConfig.pageSize,
+            });
+          }}
+          size="small"
+          bordered
+          className="modern-table"
+          locale={{ emptyText: <Empty description={searchText ? "No orders found matching your search" : "No orders found"} /> }}
+          scroll={{ x: 1200 }}
         />
       </Card>
 
-      
+
       {/* Modals */}
       <OrderModal
         isOpen={orderModalOpen}
@@ -649,7 +655,7 @@ const OMS = () => {
         customers={customers}
         fetchCustomers={fetchCustomers}
       />
-      
+
       <DocumentModal
         isOpen={documentModalOpen}
         onClose={() => setDocumentModalOpen(false)}

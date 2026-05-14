@@ -41,7 +41,15 @@ const highlightText = (text, query) => {
   );
 };
 
-const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null, singleProductId = null }) => {
+const BillOfMaterials = ({ 
+  onItemSelected, 
+  onHierarchyLoaded, 
+  disableProductCreate = false, 
+  initialProductId = null, 
+  singleProductId = null,
+  projectName,
+  projectNumber
+}) => {
   const { message, modal } = App.useApp();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
@@ -774,6 +782,18 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                 <span className="sm:hidden">BOM</span>
               </h2>
             </div>
+
+            {(projectName || projectNumber) && (
+              <div className="text-right min-w-0 flex-1 ml-4">
+                <div className="text-[11px] font-bold text-slate-700 truncate leading-tight">
+                  {projectName}
+                </div>
+                <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                  {projectNumber}
+                </div>
+              </div>
+            )}
+
             {!singleProductId && (
               <Button
                 type="primary"
