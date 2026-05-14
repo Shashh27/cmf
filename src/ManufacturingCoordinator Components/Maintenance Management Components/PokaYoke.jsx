@@ -60,8 +60,8 @@ const PokaYoke = () => {
       activeKey={activeTab}
       onChange={setActiveTab}
       items={tabItems}
-      size="large"
-      style={{ marginBottom: 0 }}
+      size="middle"
+      style={{ marginBottom: 0, marginTop: 0 }}
     />
   );
 };

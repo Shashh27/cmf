@@ -49,8 +49,28 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   const [workCentersLoading, setWorkCentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
   const [vendorsLoading, setVendorsLoading]         = useState(false);
+  const [existingOperationNames, setExistingOperationNames] = useState([]);
+  const [opsLoading, setOpsLoading]                 = useState(false);
 
   const itemsWatch = Form.useWatch('items', form);
+  
+  // Helper to find In-House and Out-Source IDs
+  const getPartTypeIds = () => {
+    const inHouse = partTypes.find(pt => {
+      const name = pt.type_name.toLowerCase().replace(/[^a-z]/g, '');
+      return name === 'inhouse';
+    });
+    const outsource = partTypes.find(pt => {
+      const name = pt.type_name.toLowerCase().replace(/[^a-z]/g, '');
+      return name === 'outsource';
+    });
+    return {
+      inHouseId: inHouse?.id || 1,
+      outsourceId: outsource?.id || 2
+    };
+  };
+
+  const { inHouseId, outsourceId } = getPartTypeIds();
   
   // Calculate next operation number based on existing operations
   const calculateNextOpNumber = (index) => {
@@ -76,6 +96,28 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,     setAllMachines, setMachinesLoading,    allMachines.length > 0);
   const fetchVendors     = () => fetchInto(`${API_BASE_URL}/rawmaterials/vendors`,     setVendors,     setVendorsLoading,     vendors.length > 0);
 
+  const fetchExistingOperations = async () => {
+    setOpsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/operations/`);
+      const ops = Array.isArray(res.data) ? res.data : [];
+      const uniqueNamesMap = new Map();
+      ops.forEach(op => {
+        if (op.operation_name) {
+          const lower = op.operation_name.toLowerCase().trim();
+          if (!uniqueNamesMap.has(lower)) {
+            uniqueNamesMap.set(lower, op.operation_name.trim());
+          }
+        }
+      });
+      setExistingOperationNames(Array.from(uniqueNamesMap.values()).sort());
+    } catch (e) {
+      console.error('Failed to fetch operations:', e);
+    } finally {
+      setOpsLoading(false);
+    }
+  };
+
   const getCurrentUserId = () => {
     try {
       const stored = localStorage.getItem('user');
@@ -89,19 +131,26 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
   };
 
   const partTypeOptions = partTypes.length
-    ? partTypes.map(pt => ({ label: pt.type_name, value: pt.id }))
-    : [{ label: 'IN-House', value: 1 }, { label: 'Out-Source', value: 2 }];
+    ? partTypes
+        .filter(pt => {
+          const name = pt.type_name.toLowerCase().replace(/[^a-z]/g, '');
+          return name === 'inhouse' || name === 'outsource';
+        })
+        .map(pt => ({ label: pt.type_name, value: pt.id }))
+    : [{ label: 'IN-House', value: inHouseId }, { label: 'Out-Source', value: outsourceId }];
 
   // ── effects ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!open) return;
     form.resetFields();
+    fetchPartTypes();
     if (actionType === 'operation') {
+      fetchExistingOperations();
       // Use initialOperations for pre-filling (imported operations), but existingOperations for sequencing
       const items = initialOperations?.length > 0
         ? initialOperations.map(op => ({
             operation_name:    op.operation_name,
-            part_type_id:      op.part_type_id ?? 1,
+            part_type_id:      op.part_type_id ?? inHouseId,
             from_date: op.from_date ? dayjs(op.from_date) : null, 
             to_date: op.to_date ? dayjs(op.to_date) : null,
             setup_time:        op.setup_time ? dayjs(op.setup_time, 'HH:mm:ss') : null,
@@ -112,12 +161,12 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
             notes:             op.notes || '',
             documents: [],
           }))
-        : [{ part_type_id: 1, documents: [] }];
+        : [{ part_type_id: inHouseId, documents: [] }];
       form.setFieldsValue({ items });
     } else {
       form.setFieldsValue({ items: [{ document_version: 'v1.0', document_type: '2D' }] });
     }
-  }, [open, actionType, initialOperations]);
+  }, [open, actionType, initialOperations, inHouseId]);
 
   // Auto-clear invalid to_date when from_date changes
   useEffect(() => {
@@ -158,10 +207,10 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
     if (actionType === 'operation') {
       const uid = getCurrentUserId();
       const opPayloads = items.map((item) => {
-        const out = item.part_type_id === 2;
+        const out = item.part_type_id === outsourceId;
         return {
-          operation_name: item.operation_name,
-          part_type_id: item.part_type_id ?? 1,
+          operation_name: item.operation_name === 'New' ? item.custom_operation_name : item.operation_name,
+          part_type_id: item.part_type_id ?? inHouseId,
           from_date: ts(item.from_date),
           to_date: ts(item.to_date),
           setup_time: out ? null : (item.setup_time?.format('HH:mm:ss') ?? null),
@@ -298,7 +347,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                         {/* Row 1: Name + Type + Setup/Cycle */}
                         <Form.Item noStyle shouldUpdate={(prev, curr) => prev.items?.[index]?.part_type_id !== curr.items?.[index]?.part_type_id || prev.items?.[index]?.from_date !== curr.items?.[index]?.from_date}>
                           {({ getFieldValue }) => {
-                            const isOutSource = getFieldValue(['items', index, 'part_type_id']) === 2;
+                            const isOutSource = getFieldValue(['items', index, 'part_type_id']) === outsourceId;
                             return (
                               <>
                                 <Row gutter={[12, 12]}>
@@ -315,22 +364,10 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                         return (
                                           <>
                                             <Form.Item {...restField} name={[name, 'operation_name']} label="Operation Name" rules={[{ required: true, message: 'Operation Name is required' }]}>
-                                              <Select placeholder="Select Operation" allowClear>
-                                                <Select.Option value="Heat Treatment">Heat Treatment</Select.Option>
-                                                <Select.Option value="Cutting">Cutting</Select.Option>
-                                                <Select.Option value="Drilling">Drilling</Select.Option>
-                                                <Select.Option value="Milling">Milling</Select.Option>
-                                                <Select.Option value="Turning">Turning</Select.Option>
-                                                <Select.Option value="Gear Hobbing">Gear Hobbing</Select.Option>
-                                                <Select.Option value="Gear Cutting">Gear Cutting</Select.Option>
-                                                <Select.Option value="Gear grinding">Gear grinding</Select.Option>
-                                                <Select.Option value="Surface Grinding">Surface Grinding</Select.Option>
-                                                <Select.Option value="Grooving">Grooving</Select.Option>
-                                                <Select.Option value="Threading">Threading</Select.Option>
-                                                <Select.Option value="Inspection">Inspection</Select.Option>
-                                                <Select.Option value="Die Siking">Die Siking</Select.Option>
-                                                <Select.Option value="EDM">EDM</Select.Option>
-                                                <Select.Option value="Laser cutting">Laser cutting</Select.Option>
+                                              <Select placeholder="Select Operation" allowClear loading={opsLoading} showSearch optionFilterProp="children">
+                                                {existingOperationNames.map(name => (
+                                                  <Select.Option key={name} value={name}>{name}</Select.Option>
+                                                ))}
                                                 <Select.Option value="New">New (Custom)</Select.Option>
                                               </Select>
                                             </Form.Item>
@@ -345,7 +382,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                     </Form.Item>
                                   </Col>
                                   <Col xs={24} sm={8} md={4}>
-                                    <Form.Item {...restField} name={[name, 'part_type_id']} label="Operation Type" initialValue={1} rules={[{ required: true }]}>
+                                    <Form.Item {...restField} name={[name, 'part_type_id']} label="Operation Type" initialValue={inHouseId} rules={[{ required: true }]}>
                                       <Select placeholder="Type" loading={partTypesLoading} onOpenChange={o => { if (o) fetchPartTypes(); }} options={partTypeOptions} />
                                     </Form.Item>
                                   </Col>
@@ -420,7 +457,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                         {/* Vendor Selection for Out-Source Operations */}
                         <Form.Item noStyle shouldUpdate={(p, c) => p.items?.[index]?.part_type_id !== c.items?.[index]?.part_type_id}>
                           {({ getFieldValue }) => {
-                            const isOutSource = getFieldValue(['items', index, 'part_type_id']) === 2;
+                            const isOutSource = getFieldValue(['items', index, 'part_type_id']) === outsourceId;
                             if (!isOutSource) return null;
                             return (
                               <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
@@ -455,7 +492,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                         {/* IN-House: WC, Machine, Tools, Instructions, Notes */}
                         <Form.Item noStyle shouldUpdate={(p, c) => p.items?.[index]?.part_type_id !== c.items?.[index]?.part_type_id}>
                           {({ getFieldValue }) => {
-                            if ((getFieldValue(['items', index, 'part_type_id']) ?? 1) !== 1) return null;
+                            if ((getFieldValue(['items', index, 'part_type_id']) ?? inHouseId) !== inHouseId) return null;
                             return (
                               <>
                                 <Row gutter={[12, 12]}>
@@ -610,7 +647,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
               </div>
 
               <Form.Item style={{ marginTop: 16 }}>
-                <Button type="dashed" onClick={() => add(actionType === 'operation' ? { part_type_id: 1, documents: [{ document_type: 'IPID', document_version: 'v1.0' }] } : { document_version: 'v1.0', document_type: '2D' })} block icon={<PlusOutlined />}>
+                <Button type="dashed" onClick={() => add(actionType === 'operation' ? { part_type_id: inHouseId, documents: [] } : { document_version: 'v1.0', document_type: '2D' })} block icon={<PlusOutlined />}>
                   Add Another {actionType === 'operation' ? 'Operation' : 'Document'}
                 </Button>
               </Form.Item>

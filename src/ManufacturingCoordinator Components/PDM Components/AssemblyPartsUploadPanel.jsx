@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Button,
   Modal,
@@ -110,6 +110,30 @@ const AssemblyPartsUploadPanel = ({
 
   // New state for delete parts functionality
   const [deletingParts, setDeletingParts] = useState(false);
+
+  // Internal part types state - fetched from API if not provided via props
+  const [internalPartTypes, setInternalPartTypes] = useState([]);
+
+  // Use provided partTypes or internal ones
+  const effectivePartTypes = partTypes.length > 0 ? partTypes : internalPartTypes;
+
+  // Fetch part types on mount if not provided via props
+  useEffect(() => {
+    if (partTypes.length === 0) {
+      fetchPartTypes();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fetchPartTypes = async () => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/part-types/`);
+      setInternalPartTypes(res.data || []);
+    } catch (e) {
+      console.error("Error fetching part types:", e);
+      // Keep default empty array on error
+    }
+  };
 
   // ── helpers ───────────────────────────────────────────────────────────────
   const getCurrentUserId = () => {
@@ -250,8 +274,8 @@ const AssemblyPartsUploadPanel = ({
         type_id:         row.type_id || 1,
         raw_material_id: row.raw_material_id ?? null,
         part_detail:     row.part_detail ?? null,
-        assembly_id:     selectedItem?.id ?? null,
-        product_id:      selectedItem?.product_id ?? null,
+        assembly_id:     selectedItem?.itemType === "product" ? null : (selectedItem?.id ?? null),
+        product_id:      selectedItem?.itemType === "product" ? selectedItem?.id : (selectedItem?.product_id ?? null),
         user_id:         uid,
         size:            row.size || null,
         qty:             row.qty || 1,
@@ -449,8 +473,8 @@ const AssemblyPartsUploadPanel = ({
           onChange={(v) => updateRow(record._key, "type_id", v)}
           style={{ width: 130 }}
           options={
-            partTypes.length > 0
-              ? partTypes.map((pt) => ({ value: pt.id, label: pt.type_name }))
+            effectivePartTypes.length > 0
+              ? effectivePartTypes.map((pt) => ({ value: pt.id, label: pt.type_name }))
               : [{ value: 1, label: "In-house (default)" }]
           }
         />

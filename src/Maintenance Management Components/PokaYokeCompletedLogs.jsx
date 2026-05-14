@@ -155,6 +155,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       key: 'checklist',
       width: 200,
       className: 'table-header-styled',
+      sorter: (a, b) => (a.checklist?.name || '').localeCompare(b.checklist?.name || ''),
       render: (checklist) => <Text strong>{checklist?.name || '-'}</Text>,
     },
     {
@@ -163,6 +164,11 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       key: 'machine',
       width: 260,
       className: 'table-header-styled',
+      sorter: (a, b) => {
+        const machineA = a.machine ? `${a.machine.make} ${a.machine.model || ''}` : '';
+        const machineB = b.machine ? `${b.machine.make} ${b.machine.model || ''}` : '';
+        return machineA.localeCompare(machineB);
+      },
       render: (machine) => (
         <div style={{ whiteSpace: 'normal' }}>
           <Text>{machine ? `${machine.make} ${machine.model || ''}` : '-'}</Text>
@@ -175,6 +181,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       key: 'frequency',
       width: 120,
       className: 'table-header-styled',
+      sorter: (a, b) => (a.frequency || '').localeCompare(b.frequency || ''),
       render: (frequency, record) => {
         const shift = record?.shift;
         return (
@@ -196,6 +203,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       key: 'operator',
       width: 160,
       className: 'table-header-styled',
+      sorter: (a, b) => (a.operator?.user_name || '').localeCompare(b.operator?.user_name || ''),
       render: (operator) => operator?.user_name || '-',
     },
     {
@@ -204,6 +212,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       key: 'production_order',
       width: 160,
       className: 'table-header-styled',
+      sorter: (a, b) => (a.order?.sale_order_number || '').localeCompare(b.order?.sale_order_number || ''),
       render: (order) => order?.sale_order_number || '-',
     },
     {
@@ -223,6 +232,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       width: 140,
       align: 'center',
       className: 'table-header-styled',
+      sorter: (a, b) => a.all_items_passed - b.all_items_passed,
       render: (value) => getStatusTag(value),
     },
     {
@@ -326,6 +336,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
         rowKey="id"
         size="small"
         scroll={{ x: 1100 }}
+        bordered
         pagination={{
           current: pagination.current,
           pageSize: pagination.pageSize,

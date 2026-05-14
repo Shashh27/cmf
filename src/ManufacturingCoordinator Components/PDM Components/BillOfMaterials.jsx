@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
@@ -9,12 +9,12 @@ import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
 import ProductToolsViewer from "./ProductToolsViewer";
+import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 
 const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
   const { message, modal } = App.useApp();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
-  const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [hierarchicalData, setHierarchicalData] = useState({});
   const [originalHierarchicalData, setOriginalHierarchicalData] = useState({});
@@ -262,6 +262,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           parts: (data.direct_parts || [])
             .map(item => ({
               ...item.part,
+              raw_material_status: item.part?.raw_material_status || item.raw_material_status,
               extracted_data: item.extracted_data || [],
               documents: item.documents || []
             })),
@@ -271,6 +272,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               parts: (assembly.parts || [])
                 .map(part => ({
                   ...part.part,
+                  raw_material_status: part.part?.raw_material_status || part.raw_material_status,
                   extracted_data: part.extracted_data || [],
                   documents: part.documents || []
                 })),
@@ -302,6 +304,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         parts: (sub.parts || [])
           .map(part => ({
             ...part.part,
+            raw_material_status: part.part?.raw_material_status || part.raw_material_status,
             extracted_data: part.extracted_data || [],
             documents: part.documents || []
           })),
@@ -685,6 +688,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
   const renderPartInTree = (part, level = 0, productId = null) => {
     const isSelected = activeItemId === part.id && activeItemType === 'part';
+    
     return (
       <div
         key={`part-${part.id}`}
@@ -694,7 +698,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
-          <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{part.part_name}</Text>
+          <div className="flex flex-col min-w-0">
+            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
+              {part.part_name}
+            </Text>
+            <Text className="text-[10px] text-slate-400 truncate">
+              {part.part_number}
+            </Text>
+          </div>
         </div>
         <ActionButtons 
           item={part} 
@@ -717,6 +728,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
       return timeA - timeB || (a.id || 0) - (b.id || 0);
     });
+
     const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
     const hasChildren = combinedChildren.length > 0;
     const isSelected = activeItemId === assembly.id && activeItemType === 'assembly';
@@ -737,7 +749,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               ) : <div className="w-5" />}
             </div>
             <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly', level)}</span>
-            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{assembly.assembly_name}</Text>
+            <div className="flex flex-col min-w-0">
+              <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
+                {assembly.assembly_name}
+              </Text>
+              <Text className="text-[10px] text-slate-400 truncate">
+                {assembly.assembly_number}
+              </Text>
+            </div>
           </div>
           <ActionButtons 
             item={assembly} 
@@ -814,9 +833,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
-  const filteredProductsBase = products.filter(product =>
-    (product.product_name || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProductsBase = products.sort((a, b) => (b.id || 0) - (a.id || 0));
 
   const initialPid = initialProductId != null ? Number(initialProductId) : null;
   const filteredProducts = initialPid
@@ -854,15 +871,24 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {filteredProducts.length === 1 && (
-                <Button
-                  type="default"
-                  size="small"
-                  icon={<ToolOutlined />}
-                  onClick={() => handleViewAllTools(filteredProducts[0])}
-                  className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
-                >
-                  View Tools
-                </Button>
+                <>
+                  <AssemblyPartsUploadPanel
+                    selectedItem={{ ...filteredProducts[0], itemType: 'product' }}
+                    onPartsCreated={() => {
+                      // Refresh the product hierarchy after parts are uploaded
+                      fetchProductHierarchy(filteredProducts[0].id, true);
+                    }}
+                  />
+                  <Button
+                    type="default"
+                    size="small"
+                    icon={<ToolOutlined />}
+                    onClick={() => handleViewAllTools(filteredProducts[0])}
+                    className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 hover:text-blue-800 hover:border-blue-300 text-xs font-medium px-3 py-1 rounded-md shadow-sm"
+                  >
+                    View Tools
+                  </Button>
+                </>
               )}
               {!disableProductCreate && (
                 <Button
@@ -878,25 +904,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               )}
             </div>
           </div>
-          {!initialPid && (
-            <Input 
-              prefix={<SearchOutlined className="text-slate-400" />} 
-              placeholder="Search products..." 
-              value={searchTerm}
-              onChange={(e) => {
-                const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
-                setSearchTerm(filteredValue);
-              }} 
-              maxLength={30}
-              className="rounded-md text-sm border-slate-200" 
-              allowClear 
-            />
-          )}
         </div>
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 bom-scroll min-h-0">
           {filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
             <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
-              <Empty description={searchTerm ? 'No matches' : 'No products'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           )}
         </div>

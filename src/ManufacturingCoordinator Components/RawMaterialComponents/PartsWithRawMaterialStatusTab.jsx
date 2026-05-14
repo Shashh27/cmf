@@ -115,9 +115,9 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
 
   const getStatusColor = (status) => {
     const colors = {
-      enquiry: 'blue',
-      purchase_request: 'orange', 
-      purchase_order: 'processing',
+      enquiry: 'cyan',
+      purchase_request: 'orange',
+      purchase_order: 'warning',
       received: 'success',
       available: 'success',
       exhausted: 'error'
@@ -247,7 +247,8 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
             params: {
               unit_id: unitId,
               part_id: partId,
-              required_length: parseFloat(requiredLength)
+              required_length: parseFloat(requiredLength),
+              user_id: getCurrentUserId()
             }
           });
         }
@@ -420,13 +421,9 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       cancelText: 'Cancel',
       onOk: async () => {
         try {
-          await Promise.all(
-            record.linkage_ids.map((id) =>
-              axios.delete(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${id}`, {
-                params: { user_id: getCurrentUserId() ?? undefined },
-              })
-            )
-          );
+          await axios.delete(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${record.id}`, {
+            params: { user_id: getCurrentUserId() ?? undefined },
+          });
       await fetchLinkedMaterials();
       if (typeof onDataChanged === "function") {
         onDataChanged();
@@ -809,52 +806,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     );
   });
 
-  const groupedMap = {};
-  filtered.forEach((item) => {
-    const key = `${item.raw_material_id}-${item.linkage_group_id || 'no-group'}-${item.order_id}`;
-    if (!groupedMap[key]) {
-      groupedMap[key] = { 
-        ...item, 
-        _items: [], // Store all items in this group to sort parts later
-        linkage_ids: [], 
-        min_id: item.id 
-      };
-    }
-    groupedMap[key]._items.push(item);
-    groupedMap[key].linkage_ids.push(item.id);
-    if (item.id < groupedMap[key].min_id) {
-      groupedMap[key].min_id = item.id;
-    }
-    groupedMap[key].quantity = item.quantity;
-    groupedMap[key].mass = item.mass;
-  });
-
-  const groupedData = Object.values(groupedMap).map(group => {
-    // Sort items within group by id
-    const sortedItems = [...group._items].sort((a, b) => (a.id || 0) - (b.id || 0));
-    
-    // Extract part numbers and names from the first item (they should be the same for all items in the group)
-    const firstItem = sortedItems[0];
-    const part_numbers = firstItem.part_numbers || [];
-    const part_names = firstItem.part_names || [];
-
-    return {
-      ...group,
-      part_numbers,
-      part_names
-    };
-  }).sort((a, b) => (a.min_id || 0) - (b.min_id || 0)); // Sort table by FIFO (min linkage id)
-
-  const getMaterialRowSpan = (record, index) => {
-    const prev = groupedData[index - 1];
-    if (prev && prev.raw_material_id === record.raw_material_id && prev.linkage_group_id === record.linkage_group_id) return 0;
-    let rowSpan = 1;
-    for (let i = index + 1; i < groupedData.length; i++) {
-      if (groupedData[i].raw_material_id === record.raw_material_id && groupedData[i].linkage_group_id === record.linkage_group_id) rowSpan++;
-      else break;
-    }
-    return rowSpan;
-  };
 
   const columns = [
     {
@@ -898,7 +849,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       key: 'material_name',
       ellipsis: true,
       render: (text) => <span className="font-medium text-gray-800">{text}</span>,
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     {
       title: <span className="font-semibold text-gray-700">Form Type</span>,
@@ -912,7 +862,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         
         return <Tag color={color}>{formType || '-'}</Tag>;
       },
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     {
       title: <span className="font-semibold text-gray-700">Quantity</span>,
@@ -931,7 +880,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         const color = value > 0 ? 'text-green-600' : 'text-red-600';
         return <span className={`font-medium ${color}`}>{value}</span>;
       },
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     
     {
@@ -939,21 +887,18 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       dataIndex: 'mass',
       key: 'mass',
       render: (value) => value != null ? value?.toFixed(3) : <span className="text-gray-400">-</span>,
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     {
       title: <span className="font-semibold text-gray-700">Weight (N)</span>,
       dataIndex: 'weight',
       key: 'weight',
       render: (value) => value != null ? value?.toFixed(3) : <span className="text-gray-400">-</span>,
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     {
       title: <span className="font-semibold text-gray-700">Cost (₹)</span>,
       dataIndex: 'cost',
       key: 'cost',
       render: (value) => value != null ? `₹${value?.toFixed(2)}` : <span className="text-gray-400">-</span>,
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     {
       title: <span className="font-semibold text-gray-700">Vendor</span>,
@@ -980,7 +925,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         }
         return <span className="text-gray-400">-</span>;
       },
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     {
       title: <span className="font-semibold text-gray-700">Status</span>,
@@ -994,12 +938,11 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         
         let color = 'default';
         if (status === 'available') color = 'success';
-        if (status === 'not available') color = 'error';
+        if (status === 'not_available') color = 'error';
         if (status === 'exhausted') color = 'warning';
         
         return <Tag color={color}>{status}</Tag>;
       },
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     {
       title: <span className="font-semibold text-gray-700">Order Status</span>,
@@ -1017,31 +960,37 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         }
         
         let color = 'default';
-        if (orderStatus === 'enquiry') color = 'blue';
+        let displayStatus = orderStatus;
 
-        if (orderStatus === 'purchase_order') color = 'processing';
-        if (orderStatus === 'received') color = 'success';
+        if (orderStatus === 'enquiry') {
+          color = 'cyan';
+          displayStatus = 'Purchase Request';
+        } else if (orderStatus === 'purchase_request') {
+          color = 'orange';
+          displayStatus = 'Purchase Request';
+        } else if (orderStatus === 'purchase_order') {
+          color = 'warning';
+        } else if (orderStatus === 'received') {
+          color = 'success';
+        }
         
-        return <Tag color={color}>{orderStatus}</Tag>;
+        return <Tag color={color}>{displayStatus}</Tag>;
       },
-      onCell: (record, index) => ({ rowSpan: getMaterialRowSpan(record, index) }),
     },
     {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: 'status_actions',
       render: (_, record, index) => (
         <Space>
-          {getMaterialRowSpan(record, index) > 0 && (
-            <Tooltip title="Quick Status Change">
-              <Button 
-                type="text" 
-                size="small" 
-                icon={<CheckCircleOutlined />} 
-                className="text-green-600 hover:bg-green-50" 
-                onClick={() => handleQuickStatusChange(record, 'purchase_request')} 
-              />
-            </Tooltip>
-          )}
+          <Tooltip title="Quick Status Change">
+            <Button 
+              type="text" 
+              size="small" 
+              icon={<CheckCircleOutlined />} 
+              className="text-green-600 hover:bg-green-50" 
+              onClick={() => handleQuickStatusChange(record, 'purchase_request')} 
+            />
+          </Tooltip>
           <Tooltip title="Edit Link"><Button type="text" size="small" icon={<EditOutlined />} className="text-blue-600 hover:bg-blue-50" onClick={() => openStatusEditModal(record)} /></Tooltip>
           <Tooltip title="Delete Link"><Button type="text" size="small" icon={<DeleteOutlined />} className="text-red-500 hover:bg-red-50" onClick={() => handleDeleteLinkGroup(record)} /></Tooltip>
         </Space>
@@ -1052,7 +1001,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   return (
     <div className="mt-4">
       <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procurement Status</span></div><Space className="w-full sm:w-auto flex-col sm:flex-row gap-2"><Input.Search placeholder="Search all columns..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-64" size="middle" /><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /></Space></div>}>
-        <Table columns={columns} dataSource={groupedData} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table responsive-table" scroll={{ x: 'max-content' }} loading={loading} />
+        <Table columns={columns} dataSource={filtered} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table responsive-table" scroll={{ x: 'max-content' }} loading={loading} />
       </Card>
 
       {/* Quick Status Modal - for dropdown status changes */}

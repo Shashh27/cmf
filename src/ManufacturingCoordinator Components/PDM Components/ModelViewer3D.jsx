@@ -427,9 +427,18 @@ dracoLoader.setDecoderPath('/static/draco/');
       style={{ minHeight: height, maxWidth: '100%' }}
     >
       <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block", maxWidth: '100%' }} />
+      <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
+        <button onClick={() => setCameraView('front', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Front</button>
+        <button onClick={() => setCameraView('back', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Back</button>
+        <button onClick={() => setCameraView('left', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Left</button>
+        <button onClick={() => setCameraView('right', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Right</button>
+        <button onClick={() => setCameraView('top', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Top</button>
+        <button onClick={() => setCameraView('bottom', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Bottom</button>
+        <button onClick={() => setCameraView('isometric', cameraRef.current, controlsRef.current, baseDistanceRef.current)} className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300">Iso</button>
+      </div>
       {showEdgeButton && (
         <div className="absolute top-2 right-2">
-          <button 
+          <button
             onClick={() => setShowEdges(!showEdges)}
             className="px-2 py-1 bg-gray-200 text-gray-800 rounded text-xs hover:bg-gray-300"
           >

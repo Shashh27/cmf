@@ -6,6 +6,7 @@ import { EditOutlined, DeleteOutlined, PlusOutlined, EyeOutlined } from "@ant-de
 import WorkCenterModal from "../Configuration Components/WorkCenterModal";
 import Machines from "../Configuration Components/Machines";
 import CustomersTable from "../Configuration Components/CustomersTable";
+import VendorsTable from "../Configuration Components/VendorsTable";
 
 const Configuration = () => {
   const [workCenters, setWorkCenters] = useState([]);
@@ -258,7 +259,7 @@ const Configuration = () => {
       label: 'Work Center',
       children: (
         <Card 
-          title="Work Center" 
+         
           extra={
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
               <Input.Search
@@ -309,6 +310,11 @@ const Configuration = () => {
       key: 'customers',
       label: 'Customers',
       children: <CustomersTable userId={userId} />,
+    },
+    {
+      key: 'vendors',
+      label: 'Vendors',
+      children: <VendorsTable userId={userId} />,
     },
   ];
 
