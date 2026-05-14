@@ -478,25 +478,7 @@ const ProductionCompletion = () => {
         </Space>
       ),
     },
-    {
-      title: 'Submitted At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      sorter: (a, b) => new Date(a.created_at) - new Date(b.created_at),
-      sortDirections: ['descend', 'ascend'],
-      defaultSortOrder: 'descend',
-      render: (date) => {
-        if (!date) return 'N/A';
-        const formattedDate = dayjs(date).format('DD-MM-YYYY');
-        const formattedTime = dayjs(date).format('HH:mm:ss');
-        return (
-          <Space direction="vertical" size={0}>
-            <Text style={{ fontSize: '12px' }}>{formattedDate},</Text>
-            <Text style={{ fontSize: '12px' }}>{formattedTime}</Text>
-          </Space>
-        );
-      },
-    },
+    
     {
       title: 'Remarks',
       dataIndex: 'remarks',

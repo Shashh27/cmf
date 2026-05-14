@@ -9,7 +9,7 @@ import dayjs from "dayjs";
 const { Title } = Typography;
 const { Option } = Select;
 
-const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, products, fetchCustomers, fetchProducts }) => {
+const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
   const [form] = Form.useForm();
   const [createProductForm] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -21,6 +21,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   const [projectCoordinators, setProjectCoordinators] = useState([]);
   const [manufacturingCoordinators, setManufacturingCoordinators] = useState([]);
   const [decimalWarnings, setDecimalWarnings] = useState({});
+  const [products, setProducts] = useState([]);
   const orderDateWatch = Form.useWatch('order_date', form);
 
   const limitDecimals = (value, fieldName, precision = 3) => {
@@ -118,12 +119,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
     }
   };
 
-  // Fetch data on demand
-  const handleCustomerDropdown = (open) => {
-    if (open && customers.length === 0) {
-      fetchCustomers?.();
-    }
-  };
+
 
   const handleProductDropdown = (open) => {
     setProductSelectOpen(open);
@@ -561,40 +557,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 </Select>
               </Form.Item>
             </Col>
-            <Col xs={24} sm={24} md={9}>
-              <Form.Item
-                name="customer_id"
-                label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Customer</span>}
-                rules={[{ required: true, message: 'Required' }]}
-                className="mb-4"
-              >
-                <Select 
-                  placeholder="Select customer" 
-                  className="h-10 custom-select-v2"
-                  onOpenChange={handleCustomerDropdown}
-                  showSearch
-                  optionFilterProp="children"
-                >
-                  {customers.map((customer) => {
-                    const label = customer.branch
-                      ? `${customer.company_name} (${customer.branch})`
-                      : customer.company_name;
-                    return (
-                      <Option key={customer.id} value={customer.id.toString()}>
-                        {label}
-                      </Option>
-                    );
-                  })}
-                  {editingOrder && editingOrder.customer_id && !customers.find(c => c.id === editingOrder.customer_id) && (
-                    <Option key={editingOrder.customer_id} value={editingOrder.customer_id.toString()}>
-                      {editingOrder.customer_branch
-                        ? `${editingOrder.company_name || editingOrder.customer_name || `Customer ${editingOrder.customer_id}`} (${editingOrder.customer_branch})`
-                        : (editingOrder.company_name || editingOrder.customer_name || `Customer ${editingOrder.customer_id}`)}
-                    </Option>
-                  )}
-                </Select>
-              </Form.Item>
-            </Col>
+
           </Row>
 
           <Row gutter={[12, 0]}>

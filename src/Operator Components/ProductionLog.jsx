@@ -53,6 +53,25 @@ const ProductionLog = ({ isActivated, selectedJob, cardHeight, onProductionSubmi
       return;
     }
 
+    // Check if production quota is already met
+    const totalQuantity = selectedJob.total_quantity || selectedJob.quantity || 0;
+    if (totalQuantity > 0) {
+      try {
+        const response = await fetch(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}?skip=0`);
+        if (response.ok) {
+          const logs = await response.json();
+          const totalApproved = logs.reduce((sum, log) => sum + (log.approved_quantity || 0), 0);
+          
+          if (totalApproved >= totalQuantity) {
+            message.error(`Production quota already met. Approved quantity (${totalApproved}) has reached total quantity (${totalQuantity}). No more production logs can be submitted.`);
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking production quota:', error);
+      }
+    }
+
     let operatorId = null;
     const storedUser = localStorage.getItem('user');
     if (storedUser) {

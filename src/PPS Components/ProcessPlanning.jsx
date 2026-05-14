@@ -435,13 +435,67 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
       if (res.status !== 200) throw new Error();
 
-      message.success(`Order status changed to ${next}`);
+      const data = res.data;
+      const isActivation = String(next).toLowerCase() === "active";
+      
+      if (data && data.message) {
+        const msg = data.message.toLowerCase();
+        // Check if it's a failure message even with 200 OK
+        if (msg.includes("no parts") || msg.includes("cannot") || msg.includes("failed") || (isActivation && data.activated_parts_count === 0)) {
+          Modal.error({
+            title: "Order Activation Issues",
+            content: (
+              <div>
+                <div style={{ marginBottom: 12 }}>{data.message}</div>
+                {data.skipped_parts && data.skipped_parts.length > 0 && (
+                  <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #f0f0f0', padding: '8px', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: 4 }}>Skipped Parts:</div>
+                    {data.skipped_parts.map((p, idx) => (
+                      <div key={idx} style={{ fontSize: '12px', marginBottom: 2 }}>
+                        • {p.part_number} ({p.part_name}): {p.reason || "Unknown reason"}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ),
+            width: 500,
+          });
+        } else if (msg.includes("partially") || (isActivation && data.activated_parts_count < data.inhouse_parts_count)) {
+          Modal.warning({
+            title: "Order Partially Activated",
+            content: (
+              <div>
+                <div style={{ marginBottom: 12 }}>{data.message}</div>
+                <div style={{ color: '#52c41a', marginBottom: 4 }}>Activated: {data.activated_parts_count}</div>
+                <div style={{ color: '#faad14', marginBottom: 8 }}>Skipped: {data.skipped_parts_count}</div>
+                {data.skipped_parts && data.skipped_parts.length > 0 && (
+                  <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid #f0f0f0', padding: '8px', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: 4 }}>Reasons for Skipping:</div>
+                    {data.skipped_parts.map((p, idx) => (
+                      <div key={idx} style={{ fontSize: '12px', marginBottom: 2 }}>
+                        • {p.part_number}: {p.reason}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ),
+            width: 500,
+          });
+        } else {
+          message.success(data.message || `Order status changed to ${next}`);
+        }
+      } else {
+        message.success(`Order status changed to ${next}`);
+      }
 
       await fetchOrderSummary(selectedOrderId);
       await fetchActiveParts(selectedOrderId);
       await fetchOrderPartsMetadata(selectedOrderId);
 
-    } catch {
+    } catch (error) {
+      console.error("Error updating order status:", error);
       message.error("Failed to update order status");
     }
   };
@@ -485,35 +539,59 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
       // Check for specific error messages in responses
       const errorMessages = [];
-      const successCount = responses.filter(res => res.data && !res.data.message).length;
+      const successMessages = [];
       
       responses.forEach((response, index) => {
-        if (response.data && response.data.message) {
-          errorMessages.push(`Part ${selectedInIds[index]}: ${response.data.message}`);
+        const data = response.data;
+        const partId = selectedInIds[index];
+        if (data && data.message) {
+          const msg = data.message.toLowerCase();
+          // Check if message is an error (contains "cannot", "failed", "error", etc.)
+          if (msg.includes("cannot") || msg.includes("failed") || msg.includes("error") || msg.includes("already")) {
+            errorMessages.push(`Part ${partId}: ${data.message}`);
+          } else {
+            successMessages.push(`Part ${partId}: ${data.message}`);
+          }
+        } else {
+          // No message usually means success
+          successMessages.push(`Part ${partId}: Status updated`);
         }
       });
 
       if (errorMessages.length > 0) {
-        // Show specific error messages
+        // Show specific error messages with red cross
         Modal.error({
           title: "Part Status Update Issues",
           content: (
             <div>
               {errorMessages.map((msg, idx) => (
-                <div key={idx} style={{ marginBottom: 8 }}>{msg}</div>
+                <div key={idx} style={{ marginBottom: 8, color: '#ff4d4f' }}>{msg}</div>
               ))}
-              {successCount > 0 && (
-                <div style={{ marginTop: 12, color: '#52c41a' }}>
-                  {successCount} part(s) updated successfully.
+              {successMessages.length > 0 && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f0f0f0' }}>
+                  <div style={{ marginBottom: 8, fontWeight: 'bold', color: '#52c41a' }}>Successfully Updated:</div>
+                  {successMessages.map((msg, idx) => (
+                    <div key={idx} style={{ marginBottom: 4, color: '#52c41a' }}>{msg}</div>
+                  ))}
                 </div>
               )}
             </div>
           ),
           width: 600,
         });
-      } else {
-        // All parts updated successfully
-        message.success("Parts updated successfully");
+      } else if (successMessages.length > 0) {
+        // All parts updated successfully with green tick
+        Modal.success({
+          title: "Parts Updated Successfully",
+          content: (
+            <div>
+              {successMessages.map((msg, idx) => (
+                <div key={idx} style={{ marginBottom: 8 }}>{msg}</div>
+              ))}
+            </div>
+          ),
+          width: 600,
+        });
       }
 
       await fetchActiveParts(selectedOrderId);

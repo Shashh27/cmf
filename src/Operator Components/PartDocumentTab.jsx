@@ -285,7 +285,11 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     {
       title: 'Action', key: 'action',
       render: (record) => {
-        const isCompleted = [selectedJob?.status, selectedJob?.operation_status].some(s => s?.toString().toUpperCase() === 'COMPLETED');
+        // Check if operation is completed by status OR by production quota
+        const isCompletedByStatus = [selectedJob?.status, selectedJob?.operation_status].some(s => s?.toString().toUpperCase() === 'COMPLETED');
+        const totalQuantity = selectedJob?.total_quantity || selectedJob?.quantity || 0;
+        const isCompletedByQuota = totalQuantity > 0 && effectiveStats.totalApproved >= totalQuantity;
+        const isCompleted = isCompletedByStatus || isCompletedByQuota;
         const isDisabled = effectivelyActivated || activating || isCompleted;
 
         return (
@@ -298,7 +302,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             style={effectivelyActivated ? {
               background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
             } : isCompleted ? {
-              background: '#d9d9d9', borderColor: '#d9d9d9', color: '#8c8c8c', cursor: 'not-allowed'
+              background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
             } : {}}
           >
             {isCompleted ? 'Completed' : effectivelyActivated ? 'In Progress' : 'Activate'}

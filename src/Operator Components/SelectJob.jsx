@@ -84,9 +84,17 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
     setJobStatsMap(map);
   };
 
-  const isJobCompleted = (job) => {
+  const isJobCompleted = (job, jobStatsMap) => {
     const status = (job.operation_status || job.status || '').toUpperCase();
-    return status === 'COMPLETED';
+    const isCompletedByStatus = status === 'COMPLETED';
+    
+    // Check if completed by production quota
+    const totalQuantity = job.total_quantity || job.quantity || 0;
+    const opId = job.id || job.operation_id || job.job_id || job.schedule_id;
+    const approvedQuantity = jobStatsMap[opId] || 0;
+    const isCompletedByQuota = totalQuantity > 0 && approvedQuantity >= totalQuantity;
+    
+    return isCompletedByStatus || isCompletedByQuota;
   };
 
   const isJobInProgress = (job) => {
@@ -103,13 +111,13 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
 
   // The ONE job that is currently unlocked — determined from the full list,
   // completely independent of any active filters.
-  const firstAvailableJob = allJobsSorted.find(job => !isJobCompleted(job));
+  const firstAvailableJob = allJobsSorted.find(job => !isJobCompleted(job, jobStatsMap));
   const firstAvailableScheduleId = firstAvailableJob?.schedule_id ?? null;
 
   // A job is enabled only if it is THE first non-completed job in the full list AND not blocked by prior operations.
   // Filters never change this — they only hide/show cards.
   const isJobCardEnabled = (job) => {
-    if (isJobCompleted(job)) return false;
+    if (isJobCompleted(job, jobStatsMap)) return false;
     if (firstAvailableScheduleId == null) return false;
     // Check if job is blocked by prior operations
     if (job.blocked_by && job.blocked_by.length > 0) return false;
@@ -233,7 +241,7 @@ const SelectJob = ({ open, onClose, onSelectJob }) => {
             {filteredJobs.map((job) => {
               const isSelected  = selectedJob?.schedule_id === job.schedule_id;
               const isEnabled   = isJobCardEnabled(job);
-              const isCompleted = isJobCompleted(job);
+              const isCompleted = isJobCompleted(job, jobStatsMap);
               const isBlocked   = !isCompleted && !isEnabled;
               const hasBlockReason = job.blocked_by && job.blocked_by.length > 0;
 

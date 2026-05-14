@@ -65,13 +65,14 @@ const OrderTracking = () => {
     const trackingMap = {};
     tracking?.parts?.forEach(p => { trackingMap[p.part_id] = p; });
 
-    details.product_hierarchy.assemblies?.forEach(assembly => {
+    const extractPartsFromAssembly = (assembly) => {
+      // Add parts from this assembly
       assembly.parts?.forEach(pd => {
         const tp = trackingMap[pd.part.id];
         parts.push({
           key: pd.part.id, part_id: pd.part.id,
           part_name: pd.part.part_name, part_number: pd.part.part_number,
-          assembly_name: assembly.assembly.assembly_name,
+          assembly_name: assembly.assembly?.assembly_name || 'Assembly',
           type_name: pd.part.type_name, qty: pd.part.qty,
           status: tp?.status || 'Not Started',
           completion_percentage: tp?.completion_percentage || 0,
@@ -80,6 +81,15 @@ const OrderTracking = () => {
           operations: pd.operations || [],
         });
       });
+
+      // Recursively add parts from subassemblies
+      assembly.subassemblies?.forEach(sub => {
+        extractPartsFromAssembly(sub);
+      });
+    };
+
+    details.product_hierarchy.assemblies?.forEach(assembly => {
+      extractPartsFromAssembly(assembly);
     });
 
     details.product_hierarchy.direct_parts?.forEach(pd => {

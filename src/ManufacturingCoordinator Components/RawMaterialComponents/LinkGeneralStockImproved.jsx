@@ -368,7 +368,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
         <Row gutter={[isMobile ? 4 : 8, 0]} align="middle">
           
           {/* Part Number & Name */}
-          <Col xs={24} sm={6} md={5}>
+          <Col xs={24} sm={5} md={4}>
             <Text strong style={{ fontSize: isMobile ? '12px' : '13px', color: '#000', fontWeight: '600' }}>
               {part.part.part_number}
             </Text>
@@ -380,7 +380,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           
           {/* Assembly Path - Hidden on mobile */}
           {!isMobile && (
-            <Col xs={24} sm={5} md={4}>
+            <Col xs={24} sm={4} md={3}>
               <Text style={{ fontSize: '11px', color: '#595959', fontWeight: '500' }}>
                 {part.path.length > 22 ? part.path.substring(0, 22) + '...' : part.path}
               </Text>
@@ -388,7 +388,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           )}
           
           {/* Part Type */}
-          <Col xs={24} sm={3} md={2}>
+          <Col xs={24} sm={2} md={2}>
             <div>
               <Tag 
                 color={isInHouse ? 'blue' : isStandard ? 'green' : 'orange'} 
@@ -410,16 +410,44 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           </Col>
           
           {/* Quantity */}
-          <Col xs={24} sm={2} md={1}>
+          <Col xs={24} sm={1} md={1}>
             <div style={{ textAlign: 'center' }}>
               <Text style={{ fontSize: isMobile ? '12px' : '13px', fontWeight: '600', color: '#000' }}>
                 {part.part.qty}
               </Text>
             </div>
           </Col>
+
+          {/* Extracted Raw Materials */}
+          <Col xs={24} sm={4} md={5}>
+            {part.extracted_data && part.extracted_data.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {part.extracted_data.map((item, index) => (
+                  <div key={index}>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <Text style={{ fontSize: '11px', color: '#595959', fontWeight: '500' }}>Material:</Text>
+                      <Text strong style={{ fontSize: '11px', color: '#000', lineHeight: '1.2' }}>
+                        {item.material || 'N/A'}
+                      </Text>
+                    </div>
+                    {item.stock_size && (
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <Text style={{ fontSize: '10px', color: '#8c8c8c' }}>Stock Size:</Text>
+                        <Text style={{ fontSize: '10px', color: '#595959', lineHeight: '1.2' }}>
+                          {item.stock_size}
+                        </Text>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Text style={{ fontSize: '11px', color: '#bfbfbf' }}>N/A</Text>
+            )}
+          </Col>
           
           {/* Material Details */}
-          <Col xs={24} sm={6} md={6}>
+          <Col xs={24} sm={5} md={6}>
             {isLinked ? (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
@@ -713,6 +741,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                             <th style={{ padding: '8px 4px', textAlign: 'left', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Part</th>
                             <th style={{ padding: '8px 4px', textAlign: 'left', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Type</th>
                             <th style={{ padding: '8px 4px', textAlign: 'center', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Qty</th>
+                            <th style={{ padding: '8px 4px', textAlign: 'left', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Extracted RM</th>
                             <th style={{ padding: '8px 4px', textAlign: 'left', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Material</th>
                             <th style={{ padding: '8px 4px', textAlign: 'center', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Actions</th>
                           </tr>
@@ -763,6 +792,20 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                 </td>
                                 <td style={{ padding: '8px 4px', textAlign: 'center', verticalAlign: 'top' }}>
                                   <span style={{ fontSize: '11px', fontWeight: '600', color: '#000' }}>{part.part.qty}</span>
+                                </td>
+                                <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
+                                  {part.extracted_data && part.extracted_data.length > 0 ? (
+                                    <div style={{ fontSize: '9px', lineHeight: '1.3' }}>
+                                      {part.extracted_data.map((item, index) => (
+                                        <div key={index} style={{ marginBottom: index < part.extracted_data.length - 1 ? '4px' : 0 }}>
+                                          <div style={{ color: '#000', fontWeight: '600' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Material: </span>{item.material || 'N/A'}</div>
+                                          {item.stock_size && <div style={{ color: '#595959' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Stock Size: </span>{item.stock_size}</div>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span style={{ fontSize: '9px', color: '#bfbfbf' }}>N/A</span>
+                                  )}
                                 </td>
                                 <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
                                   {isLinked ? (
@@ -877,14 +920,15 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                           zIndex: 10
                         }}>
                           <Row gutter={[4, 0]} align="middle">
-                            <Col xs={24} sm={6} md={5} style={{ fontSize: '10px', fontWeight: 'bold' }}>
+                            <Col xs={24} sm={5} md={4} style={{ fontSize: '10px', fontWeight: 'bold' }}>
                               {window.innerWidth <= 768 ? 'Part' : 'Part / Name'}
                             </Col>
-                            {window.innerWidth > 768 && <Col xs={24} sm={5} md={4} style={{ fontSize: '10px', fontWeight: 'bold' }}>Assembly</Col>}
-                            <Col xs={24} sm={3} md={2} style={{ fontSize: '10px', fontWeight: 'bold' }}>Type</Col>
-                            <Col xs={24} sm={2} md={1} style={{ fontSize: '10px', fontWeight: 'bold' }}>Qty</Col>
-                            <Col xs={24} sm={6} md={6} style={{ fontSize: '10px', fontWeight: 'bold' }}>
-                              {window.innerWidth <= 768 ? 'Material' : 'Material Details'}
+                            {window.innerWidth > 768 && <Col xs={24} sm={4} md={3} style={{ fontSize: '10px', fontWeight: 'bold' }}>Assembly</Col>}
+                            <Col xs={24} sm={2} md={2} style={{ fontSize: '10px', fontWeight: 'bold' }}>Type</Col>
+                            <Col xs={24} sm={1} md={1} style={{ fontSize: '10px', fontWeight: 'bold' }}>Qty</Col>
+                            <Col xs={24} sm={4} md={5} style={{ fontSize: '10px', fontWeight: 'bold' }}>Extracted Raw materials</Col>
+                            <Col xs={24} sm={5} md={6} style={{ fontSize: '10px', fontWeight: 'bold' }}>
+                              {window.innerWidth <= 768 ? 'Material' : 'Assigned Material Details'}
                             </Col>
                             <Col xs={24} sm={3} md={3} style={{ fontSize: '10px', fontWeight: 'bold' }}>Actions</Col>
                           </Row>
