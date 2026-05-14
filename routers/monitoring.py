@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 from typing import List
 from datetime import datetime
 from DB.database import get_db
 from DB.models.configuration import Machine
 from DB.models.monitoring import MachineLiveStatus, MachineLiveHistory
 from DB.models.oms import Order, Part, Operation
-from DB.models.scheduling import ProductionLog
 from DB.schemas.monitoring import LiveMonitoringDisplay, MachineLiveStatusCreate, MachineLiveHistory
 
 router = APIRouter(
@@ -39,7 +38,6 @@ def get_live_monitoring(db: Session = Depends(get_db)):
         }
 
         if live_status:
-            display_data["status"] = live_status.status.upper() if live_status.status else "OFF"
             display_data["last_updated"] = live_status.last_updated
             
             if live_status.order:
@@ -55,10 +53,31 @@ def get_live_monitoring(db: Session = Depends(get_db)):
                 display_data["operation_number"] = live_status.operation.operation_number
                 
                 # Calculate part count from approved quantity in production logs
-                completed = db.query(func.sum(ProductionLog.approved_quantity)).filter(
-                    ProductionLog.operation_id == live_status.current_operation_id
-                ).scalar()
+                # Get completed quantity using raw SQL
+                completed_query = text("""
+                    SELECT COALESCE(SUM(approved_quantity), 0)
+                    FROM scheduling.production_logs
+                    WHERE operation_id = :op_id
+                """)
+                completed = db.execute(completed_query, {"op_id": live_status.current_operation_id}).scalar() or 0
                 display_data["completed_qty"] = int(completed) if completed else 0
+
+            # Dynamic status logic:
+            # OFF: No order, part, or operation (any is null)
+            # ON: Order, part, and operation have data, and completed_qty is 0
+            # PRODUCTION: Order, part, and operation have data, and completed_qty > 0
+            has_job_data = (
+                live_status.current_order_id is not None and 
+                live_status.current_part_id is not None and 
+                live_status.current_operation_id is not None
+            )
+
+            if not has_job_data:
+                display_data["status"] = "OFF"
+            elif display_data["completed_qty"] > 0:
+                display_data["status"] = "PRODUCTION"
+            else:
+                display_data["status"] = "ON"
 
         results.append(display_data)
 
@@ -68,8 +87,28 @@ def get_live_monitoring(db: Session = Depends(get_db)):
 def update_machine_status(status_data: MachineLiveStatusCreate, db: Session = Depends(get_db)):
     db_status = db.query(MachineLiveStatus).filter(MachineLiveStatus.machine_id == status_data.machine_id).first()
     
-    # Ensure status is always uppercase for frontend consistency
-    normalized_status = status_data.status.upper()
+    # Determine status based on data rules:
+    # OFF: No order, part, or operation (any is null)
+    # ON: Order, part, and operation have data, and completed_qty is 0
+    # PRODUCTION: Order, part, and operation have data, and completed_qty > 0
+    
+    has_job_data = (
+        status_data.current_order_id is not None and 
+        status_data.current_part_id is not None and 
+        status_data.current_operation_id is not None
+    )
+    
+    if not has_job_data:
+        normalized_status = "OFF"
+    else:
+        # Check completed qty for this operation
+        completed_query = text("""
+            SELECT COALESCE(SUM(approved_quantity), 0)
+            FROM scheduling.production_logs
+            WHERE operation_id = :op_id
+        """)
+        completed = db.execute(completed_query, {"op_id": status_data.current_operation_id}).scalar() or 0
+        normalized_status = "PRODUCTION" if completed > 0 else "ON"
     
     if db_status:
         # Save current state to history BEFORE updating

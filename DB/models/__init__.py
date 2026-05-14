@@ -36,9 +36,6 @@ from .documents import (
     CommonFolder,
     CommonDocument
 )
-from .scheduling import (
-    ProductionLog
-)
 from .monitoring import MachineLiveStatus
 from .production import ShiftSummary, OEEIssue as ProductionOEEIssue
 
@@ -70,7 +67,6 @@ __all__ = [
     "MachineDocument",
     "CommonFolder",
     "CommonDocument",
-    "ProductionLog",
     "MachineLiveStatus",
     "ShiftSummary",
     "ProductionOEEIssue",

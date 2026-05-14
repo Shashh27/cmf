@@ -5,7 +5,6 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from DB.database import get_db
 from DB.models.production import ShiftSummary, OEEIssue
-from DB.models.scheduling import ProductionLog
 from DB.models.monitoring import MachineLiveStatus
 from DB.models.configuration import Machine, WorkCenter
 from DB.models.oms import Operation, Part
@@ -301,30 +300,30 @@ def get_detailed_shift_summary(
         else:
             analysis_date = datetime.utcnow()
 
-        # Build query from ProductionLog
-        query = db.query(ProductionLog).filter(
-            ProductionLog.from_date == analysis_date.date()
-        )
+        # Build query using raw SQL
+        query = """
+            SELECT pl.operation_id, pl.produced_quantity, pl.approved_quantity, mls.machine_id
+            FROM scheduling.production_logs pl
+            JOIN production_monitoring.machine_live_status mls ON pl.operation_id = mls.current_operation_id
+            WHERE pl.from_date = :analysis_date
+        """
+        params = {'analysis_date': analysis_date.date()}
         
         if machine_id:
-            query = query.filter(ProductionLog.operation_id.in_(
-                db.query(MachineLiveStatus.current_operation_id).filter(MachineLiveStatus.machine_id == machine_id)
-            ))
+            query += " AND mls.machine_id = :machine_id"
+            params['machine_id'] = machine_id
 
-        logs = query.all()
+        logs = db.execute(text(query), params).fetchall()
         
         # Group logs by machine
         machine_logs = {}
         for log in logs:
-            live_status = db.query(MachineLiveStatus).filter(MachineLiveStatus.current_operation_id == log.operation_id).first()
-            if not live_status: continue
-            
-            m_id = live_status.machine_id
+            m_id = log.machine_id
             if m_id not in machine_logs:
                 machine_logs[m_id] = {"produced": 0, "approved": 0}
             
-            machine_logs[m_id]["produced"] += log.produced_quantity or 0
-            machine_logs[m_id]["approved"] += log.approved_quantity or 0
+            machine_logs[m_id]["produced"] += (log.produced_quantity or 0)
+            machine_logs[m_id]["approved"] += (log.approved_quantity or 0)
 
         results = []
         for m_id, stats in machine_logs.items():
@@ -373,15 +372,18 @@ def get_machine_oee_analysis(
         else:
             analysis_date = datetime.utcnow()
 
-        # Find operations for this machine
-        ops_query = db.query(MachineLiveStatus.current_operation_id).filter(MachineLiveStatus.machine_id == machine_id)
-        
-        query = db.query(ProductionLog).filter(
-            ProductionLog.from_date == analysis_date.date(),
-            ProductionLog.operation_id.in_(ops_query)
-        )
+        # Build query using raw SQL
+        query = """
+            SELECT pl.produced_quantity, pl.approved_quantity
+            FROM scheduling.production_logs pl
+            JOIN production_monitoring.machine_live_status mls ON pl.operation_id = mls.current_operation_id
+            WHERE pl.from_date = :analysis_date AND mls.machine_id = :machine_id
+        """
+        logs = db.execute(text(query), {
+            'analysis_date': analysis_date.date(),
+            'machine_id': machine_id
+        }).fetchall()
 
-        logs = query.all()
         machine = db.query(Machine).filter(Machine.id == machine_id).first()
         m_name = f"{machine.work_center.work_center_name}-{machine.type}" if machine and machine.work_center else (machine.type if machine else f"Machine {machine_id}")
 
@@ -484,7 +486,6 @@ def get_combined_schedule_production(
         ]
 
         # Get planned schedule items using raw SQL since table is in another microservice
-        # Note: We don't filter by machine_id here to get all data, then filter later
         planned_query = """
             SELECT id, part_id, part_number, sale_order_id, sale_order_number, 
                    operation_id, machine_id, planned_start_time, planned_end_time,
@@ -493,12 +494,14 @@ def get_combined_schedule_production(
             FROM scheduling.planned_schedule_items
             WHERE (:start_date IS NULL OR planned_start_time >= :start_date)
             AND (:end_date IS NULL OR planned_end_time <= :end_date)
+            AND (:machine_id IS NULL OR machine_id = :machine_id)
             ORDER BY planned_start_time
         """
         
         planned_result = db.execute(text(planned_query), {
             'start_date': start_date,
-            'end_date': end_date
+            'end_date': end_date,
+            'machine_id': machine_id
         }).fetchall()
 
         # Build planned operations response
@@ -528,94 +531,75 @@ def get_combined_schedule_production(
                 sale_order_number=item.sale_order_number
             ))
 
-        # Get production logs (actual)
-        logs_query = db.query(ProductionLog)
+        # Get production logs (actual) using raw SQL as requested
+        logs_query = """
+            SELECT pl.id, pl.operation_id, pl.operator_id, pl.from_date, pl.from_time, pl.to_date, pl.to_time, 
+                   pl.status, pl.produced_quantity, pl.approved_quantity,
+                   o.operation_name, o.operation_number, o.machine_id,
+                   p.part_number, p.qty as total_part_qty,
+                   u.user_name as operator_name,
+                   psi.sale_order_number
+            FROM scheduling.production_logs pl
+            LEFT JOIN oms.operations o ON pl.operation_id = o.id
+            LEFT JOIN oms.parts p ON o.part_id = p.id
+            LEFT JOIN accesscontrol.access_users u ON pl.operator_id = u.id
+            LEFT JOIN (
+                SELECT DISTINCT ON (operation_id) operation_id, sale_order_number 
+                FROM scheduling.planned_schedule_items
+            ) psi ON pl.operation_id = psi.operation_id
+            WHERE (:start_date IS NULL OR (COALESCE(pl.from_date, '1900-01-01'::date) + COALESCE(pl.from_time, '00:00:00'::time) >= :start_date))
+            AND (:end_date IS NULL OR (COALESCE(pl.to_date, pl.from_date, '2099-12-31'::date) + COALESCE(pl.to_time, pl.from_time, '23:59:59'::time) <= :end_date))
+            AND (:machine_id IS NULL OR o.machine_id = :machine_id)
+            ORDER BY pl.from_date DESC, pl.from_time DESC
+        """
 
-        if start_date:
-            logs_query = logs_query.filter(
-                cast(func.concat(ProductionLog.from_date, ' ', ProductionLog.from_time), SQLAlchemyDateTime) >= start_date
-            )
-        if end_date:
-            logs_query = logs_query.filter(
-                cast(func.concat(
-                    func.coalesce(ProductionLog.to_date, ProductionLog.from_date), ' ',
-                    func.coalesce(ProductionLog.to_time, ProductionLog.from_time)
-                ), SQLAlchemyDateTime) <= end_date
-            )
-        # Note: We don't filter by machine_id here to get all data, then filter later
-
-        logs = logs_query.order_by(ProductionLog.from_date.desc(), ProductionLog.from_time.desc()).all()
+        logs = db.execute(text(logs_query), {
+            'start_date': start_date,
+            'end_date': end_date,
+            'machine_id': machine_id
+        }).fetchall()
 
         # Build actual production logs response
         actual_production_logs = []
         for log in logs:
-            # Get operation details
-            operation = db.query(Operation).filter(Operation.id == log.operation_id).first()
+            try:
+                machine_name = machine_details.get(log.machine_id, f"Machine-{log.machine_id}") if log.machine_id else None
 
-            part_number = None
-            machine_name = None
-
-            if operation:
-                if operation.part:
-                    part_number = operation.part.part_number
-                if operation.machine_id:
-                    machine = db.query(Machine).filter(Machine.id == operation.machine_id).first()
-                    if machine:
-                        machine_name = machine_details.get(machine.id, f"Machine-{machine.id}")
-
-            # Get operator name
-            from DB.models.access_control import AccessUser
-            operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
-            operator_name = operator.user_name if operator else None
-
-            # Get sale order number from planned_schedule_items using operation_id
-            sale_order_number = None
-            planned_item = db.execute(text("""
-                SELECT sale_order_number
-                FROM scheduling.planned_schedule_items
-                WHERE operation_id = :op_id
-                LIMIT 1
-            """), {"op_id": log.operation_id}).fetchone()
-            if planned_item:
-                sale_order_number = planned_item[0]
-
-            # Determine if operation is completed
-            # Operation is completed when total approved quantity matches the part's required quantity
-            is_completed = False
-            if operation and operation.part:
-                total_part_qty = operation.part.qty or 0
-                if total_part_qty > 0:
-                    # Calculate total approved quantity for this operation
+                # Determine if operation is completed
+                is_completed = False
+                if log.total_part_qty and log.total_part_qty > 0:
                     total_approved = db.execute(text("""
                         SELECT COALESCE(SUM(approved_quantity), 0)
                         FROM scheduling.production_logs
                         WHERE operation_id = :op_id AND approved_quantity IS NOT NULL
                     """), {"op_id": log.operation_id}).scalar()
-                    is_completed = total_approved >= total_part_qty
+                    
+                    # Ensure total_approved and total_part_qty are valid for comparison
+                    if total_approved is not None and log.total_part_qty is not None:
+                        is_completed = total_approved >= log.total_part_qty
 
-            actual_production_logs.append(ActualProductionLog(
-                id=log.id,
-                operation_id=log.operation_id,
-                operation_name=operation.operation_name if operation else None,
-                operation_number=operation.operation_number if operation else None,
-                part_number=part_number,
-                sale_order_number=sale_order_number,
-                from_date=log.from_date,
-                from_time=str(log.from_time),
-                to_date=log.to_date,
-                to_time=str(log.to_time) if log.to_time else None,
-                status=log.status,
-                produced_quantity=log.produced_quantity,
-                approved_quantity=log.approved_quantity,
-                operator_name=operator_name,
-                machine_name=machine_name,
-                is_completed=is_completed
-            ))
-
-        # Apply machine_id filter at the end if specified
-        if machine_id:
-            planned_operations = [op for op in planned_operations if op.machine_id == machine_id]
-            actual_production_logs = [log for log in actual_production_logs if log.machine_id == machine_id]
+                actual_production_logs.append(ActualProductionLog(
+                    id=log.id,
+                    operation_id=log.operation_id,
+                    operation_name=log.operation_name,
+                    operation_number=log.operation_number,
+                    part_number=log.part_number,
+                    sale_order_number=log.sale_order_number,
+                    from_date=log.from_date,
+                    from_time=str(log.from_time) if log.from_time else None,
+                    to_date=log.to_date,
+                    to_time=str(log.to_time) if log.to_time else None,
+                    status=log.status,
+                    produced_quantity=log.produced_quantity,
+                    approved_quantity=log.approved_quantity,
+                    operator_name=log.operator_name,
+                    machine_id=log.machine_id,
+                    machine_name=machine_name,
+                    is_completed=is_completed
+                ))
+            except Exception as e:
+                print(f"Error processing production log row {log.id}: {e}")
+                continue
 
         return CombinedScheduleProductionResponse(
             planned_operations=planned_operations,
