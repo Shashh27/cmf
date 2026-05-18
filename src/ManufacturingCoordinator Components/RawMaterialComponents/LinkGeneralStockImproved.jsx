@@ -606,11 +606,11 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                             {order.status}
                           </Tag>
                         </div>
-                        <Text style={{ fontSize: '12px', color: '#262626', fontWeight: '500', display: 'block', marginBottom: '1px' }}>
-                          {order.company_name}
-                        </Text>
                         <Text style={{ fontSize: '11px', color: '#595959', fontWeight: '500', display: 'block' }}>
                           {order.product_name?.length > 28 ? order.product_name.substring(0, 28) + '...' : order.product_name}
+                        </Text>
+                        <Text style={{ fontSize: '12px', color: '#262626', fontWeight: '500', display: 'block', marginBottom: '1px' }}>
+                          {order.company_name}
                         </Text>
                       </div>
                     </div>

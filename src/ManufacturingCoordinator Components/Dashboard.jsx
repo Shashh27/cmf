@@ -10,7 +10,8 @@ import {
   FileTextOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
-  SettingOutlined
+  SettingOutlined,
+  SyncOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 import { API_BASE_URL } from '../Config/auth';
@@ -28,7 +29,8 @@ const Dashboard = () => {
   const [dashboardStats, setDashboardStats] = useState({
     totalOrders: 0,
     pendingOrders: 0,
-    ongoingOrders: 0,
+    scheduledOrders: 0,
+    inProgressOrders: 0,
     completedOrders: 0,
     thisMonthOrders: 0,
     lastMonthOrders: 0,
@@ -102,9 +104,9 @@ const Dashboard = () => {
     return {
       totalOrders: ordersData.length,
       pendingOrders: statusCounts['Pending'] || 0,
-      ongoingOrders: (statusCounts['Ongoing'] || 0) + (statusCounts['Scheduled'] || 0),
-      completedOrders: statusCounts['Completed'] || 0,
       scheduledOrders: statusCounts['Scheduled'] || 0,
+      inProgressOrders: statusCounts['In Progress'] || 0,
+      completedOrders: statusCounts['Completed'] || 0,
       thisMonthOrders,
       lastMonthOrders,
       totalCustomers: uniqueCustomers,
@@ -123,14 +125,16 @@ const Dashboard = () => {
       });
 
       const pending = monthOrders.filter(o => o.status === 'Pending').length;
-      const ongoing = monthOrders.filter(o => o.status === 'Ongoing').length;
+      const scheduled = monthOrders.filter(o => o.status === 'Scheduled').length;
+      const inProgress = monthOrders.filter(o => o.status === 'In Progress').length;
       const completed = monthOrders.filter(o => o.status === 'Completed').length;
 
       return {
         month,
         total: monthOrders.length,
         pending,
-        ongoing,
+        scheduled,
+        inProgress,
         completed
       };
     });
@@ -138,9 +142,10 @@ const Dashboard = () => {
 
   const getStatusData = () => {
     const statusColors = {
-      'Pending': '#faad14',
-      'Ongoing': '#1890ff', 
-      'Completed': '#52c41a'
+      'Pending': '#faad14',      // Orange
+      'Scheduled': '#722ed1',    // Purple
+      'In Progress': '#1890ff',  // Blue
+      'Completed': '#52c41a'     // Green
     };
 
     return Object.entries(
@@ -185,13 +190,15 @@ const Dashboard = () => {
       });
 
       const pending = monthOrders.filter(o => o.status === 'Pending').length;
-      const ongoing = monthOrders.filter(o => o.status === 'Ongoing').length;
+      const scheduled = monthOrders.filter(o => o.status === 'Scheduled').length;
+      const inProgress = monthOrders.filter(o => o.status === 'In Progress').length;
       const completed = monthOrders.filter(o => o.status === 'Completed').length;
 
       return {
         month,
         Pending: pending,
-        Ongoing: ongoing,
+        Scheduled: scheduled,
+        'In Progress': inProgress,
         Completed: completed
       };
     });
@@ -229,7 +236,7 @@ const Dashboard = () => {
 
       {/* Light KPI Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        <Col xs={24} sm={12} md={6}>
+        <Col xs={24} sm={12} lg={4} style={{ flex: '0 0 20%', maxWidth: '20%' }}>
           <Card 
             hoverable
             styles={{ 
@@ -250,7 +257,7 @@ const Dashboard = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
+        <Col xs={24} sm={12} lg={4} style={{ flex: '0 0 20%', maxWidth: '20%' }}>
           <Card 
             hoverable
             styles={{ 
@@ -264,7 +271,7 @@ const Dashboard = () => {
             }}
           >
             <Statistic
-              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Pending Orders</span>}
+              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Pending</span>}
               value={dashboardStats.pendingOrders}
               prefix={<ClockCircleOutlined style={{ color: '#f57c00' }} />}
               styles={{ content: { fontSize: '24px', fontWeight: 'bold', color: '#f57c00' } }}
@@ -278,13 +285,13 @@ const Dashboard = () => {
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
+        <Col xs={24} sm={12} lg={4} style={{ flex: '0 0 20%', maxWidth: '20%' }}>
           <Card 
             hoverable
             styles={{ 
               body: { 
-                background: 'linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%)',
-                border: '1px solid #ffd54f',
+                background: 'linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%)',
+                border: '1px solid #ce93d8',
                 borderRadius: '8px',
                 boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
                 padding: '20px'
@@ -292,21 +299,49 @@ const Dashboard = () => {
             }}
           >
             <Statistic
-              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Ongoing Orders</span>}
-              value={dashboardStats.ongoingOrders}
-              prefix={<RiseOutlined style={{ color: '#f57c00' }} />}
-              styles={{ content: { fontSize: '24px', fontWeight: 'bold', color: '#f57c00' } }}
+              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Scheduled</span>}
+              value={dashboardStats.scheduledOrders}
+              prefix={<ClockCircleOutlined style={{ color: '#7b1fa2' }} />}
+              styles={{ content: { fontSize: '24px', fontWeight: 'bold', color: '#7b1fa2' } }}
               suffix={
-                <Tag color="processing" style={{ marginLeft: '8px' }}>
+                <Tag color="purple" style={{ marginLeft: '8px' }}>
                   {dashboardStats.totalOrders > 0 ? 
-                    ((dashboardStats.ongoingOrders / dashboardStats.totalOrders) * 100).toFixed(1) : 0
+                    ((dashboardStats.scheduledOrders / dashboardStats.totalOrders) * 100).toFixed(1) : 0
                   }%
                 </Tag>
               }
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={6}>
+        <Col xs={24} sm={12} lg={4} style={{ flex: '0 0 20%', maxWidth: '20%' }}>
+          <Card 
+            hoverable
+            styles={{ 
+              body: { 
+                background: 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
+                border: '1px solid #90caf9',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                padding: '20px'
+              }
+            }}
+          >
+            <Statistic
+              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>In Progress</span>}
+              value={dashboardStats.inProgressOrders}
+              prefix={<SyncOutlined style={{ color: '#1976d2' }} />}
+              styles={{ content: { fontSize: '24px', fontWeight: 'bold', color: '#1976d2' } }}
+              suffix={
+                <Tag color="processing" style={{ marginLeft: '8px' }}>
+                  {dashboardStats.totalOrders > 0 ? 
+                    ((dashboardStats.inProgressOrders / dashboardStats.totalOrders) * 100).toFixed(1) : 0
+                  }%
+                </Tag>
+              }
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={4} style={{ flex: '0 0 20%', maxWidth: '20%' }}>
           <Card 
             hoverable
             styles={{ 
@@ -320,7 +355,7 @@ const Dashboard = () => {
             }}
           >
             <Statistic
-              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Completed Orders</span>}
+              title={<span style={{ color: '#546e7a', fontSize: '14px', fontWeight: '500' }}>Completed</span>}
               value={dashboardStats.completedOrders}
               prefix={<CheckCircleOutlined style={{ color: '#2e7d32' }} />}
               styles={{ content: { color: '#2e7d32', fontSize: '24px', fontWeight: 'bold' } }}
@@ -396,6 +431,24 @@ const Dashboard = () => {
                 />
                 <Line 
                   type="monotone" 
+                  dataKey="inProgress" 
+                  stroke="#1890ff" 
+                  strokeWidth={2}
+                  dot={{ fill: '#1890ff', r: 3 }}
+                  activeDot={{ r: 5, fill: '#096dd9' }}
+                  name="In Progress"
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="scheduled" 
+                  stroke="#722ed1" 
+                  strokeWidth={2}
+                  dot={{ fill: '#722ed1', r: 3 }}
+                  activeDot={{ r: 5, fill: '#531dab' }}
+                  name="Scheduled"
+                />
+                <Line 
+                  type="monotone" 
                   dataKey="pending" 
                   stroke="#faad14" 
                   strokeWidth={2}
@@ -467,13 +520,14 @@ const Dashboard = () => {
                   key: 'status',
                   render: (status) => {
                     const statusColors = {
-                      'Pending': 'warning',
-                      'Ongoing': 'processing',
-                      'Completed': 'success'
+                      'Pending': 'orange',
+                      'Scheduled': 'purple',
+                      'In Progress': 'blue',
+                      'Completed': 'green'
                     };
                     return (
                       <Tag color={statusColors[status] || 'default'}>
-                        {status}
+                        {status?.toUpperCase()}
                       </Tag>
                     );
                   },
@@ -522,10 +576,20 @@ const Dashboard = () => {
                 />
               </div>
               <div>
-                <Text strong>Ongoing Orders</Text>
+                <Text strong>Scheduled Orders</Text>
                 <Progress 
                   percent={dashboardStats.totalOrders > 0 ? 
-                    Math.round((dashboardStats.ongoingOrders / dashboardStats.totalOrders) * 100) : 0
+                    Math.round((dashboardStats.scheduledOrders / dashboardStats.totalOrders) * 100) : 0
+                  } 
+                  status="active"
+                  strokeColor="#722ed1"
+                />
+              </div>
+              <div>
+                <Text strong>In Progress Orders</Text>
+                <Progress 
+                  percent={dashboardStats.totalOrders > 0 ? 
+                    Math.round((dashboardStats.inProgressOrders / dashboardStats.totalOrders) * 100) : 0
                   } 
                   status="active"
                   strokeColor="#1890ff"
