@@ -468,7 +468,7 @@ def _order_to_response(order, db: Session):
                 completed_parts_count += 1
             elif scheduled_ops_count > 0 or completed_operations_count > 0:
                 scheduled_parts_count += 1
-        
+
         # Check if the order is planned in scheduling
         is_order_planned = db.execute(text("""
             SELECT EXISTS(
@@ -477,10 +477,22 @@ def _order_to_response(order, db: Session):
             )
         """), {"order_id": order.id}).scalar()
 
-        # Calculate order status (Pending, Scheduled, Completed)
+        # Check if any production logs exist for this order's operations
+        has_any_logs = False
+        if total_parts > 0:
+            # We already have production_logs_summary from the loop above
+            # Let's check if any operation has logs
+            has_any_logs = scheduled_parts_count > 0 or completed_parts_count > 0
+
+        # Calculate order status (Pending, Scheduled, In Progress, Completed)
+        # Priority: Completed > In Progress (if logs exist) > Scheduled (planned only) > Pending
         if total_parts > 0 and completed_parts_count == total_parts:
             calculated_status = "Completed"
-        elif is_order_planned or scheduled_parts_count > 0 or completed_parts_count > 0:
+        elif has_any_logs:
+            # If any production logs exist, it's In Progress (even if it's also in the planned table)
+            calculated_status = "In Progress"
+        elif is_order_planned:
+            # If it's in the planned table but has NO logs yet, it's Scheduled
             calculated_status = "Scheduled"
         else:
             calculated_status = "Pending"

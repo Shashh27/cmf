@@ -585,6 +585,16 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             }
             part_operations.append(OperationSchema(**op_dict))
         
+        # part_detail comes from database for out-source parts
+        # For IN-House and standard parts: set to null (not applicable)
+        part_type_name = part_type_map.get(part.type_id, "")
+        if part_type_name and "out-source" in part_type_name.lower():
+            # For out-source parts, use the stored value from database
+            calculated_part_detail = part.part_detail
+        else:
+            # For IN-House and standard parts, part_detail is not applicable
+            calculated_part_detail = None
+
         # Raw material status from raw_materials table only (not order-parts-raw-material-linked)
         if part.raw_material_id is None:
             raw_material_status = "N/A"
@@ -620,7 +630,7 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'raw_material_id': part.raw_material_id,
             'raw_material_unit_id': getattr(part, 'raw_material_unit_id', None),
             'required_length': part.required_length,
-            'part_detail': part.part_detail,
+            'part_detail': calculated_part_detail,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
             'user_id': part.user_id,        
