@@ -1263,6 +1263,7 @@ Return keys used by the /generate-schedule endpoint:
 
 from datetime import datetime, timedelta, time, timezone
 from typing import Dict, List, Optional, Tuple
+from sqlalchemy import cast, Integer
 
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, text
@@ -2052,7 +2053,7 @@ class SchedulerEngine:
             ops = (
                 self.db.query(Operation)
                 .filter(Operation.part_id.in_(part_ids))
-                .order_by(Operation.part_id, Operation.operation_number.asc())
+                .order_by(Operation.part_id, cast(Operation.operation_number, Integer).asc())
                 .all()
             )
             result: Dict[int, List[Operation]] = {}
