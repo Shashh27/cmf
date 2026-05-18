@@ -12,6 +12,7 @@ import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
 
 const { Content } = Layout;
 const { Option } = Select;
+const { TabPane } = Tabs;
 
 // ─────────────────────────────────────────────────────────────
 //  COLOUR HELPERS
