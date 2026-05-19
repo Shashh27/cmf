@@ -6,7 +6,6 @@ from typing_extensions import Self
 
 from pydantic import BaseModel, field_validator
 from .inventory import ToolsList
-from .scheduling import ProductionLogResponse
 
 if TYPE_CHECKING:
     from .configuration import Customer
@@ -684,7 +683,7 @@ class OperationTrackingStatus(BaseModel):
     completed_at: Optional[datetime] = None
     operator_id: Optional[int] = None
     operator_name: Optional[str] = None
-    production_logs: List[ProductionLogResponse] = []
+    production_logs: List[dict] = []
 
     class Config:
         from_attributes = True

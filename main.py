@@ -72,7 +72,7 @@ from routers import (
 
 # Import scheduling router
 
-from scheduling_routers.production_logs import router as production_logs_router
+# from scheduling_routers.production_logs import router as production_logs_router
 
 
 # Import notification routers
@@ -292,7 +292,7 @@ app.include_router(order_tracking_router, prefix="/api/v1")
 app.include_router(monitoring_router, prefix="/api/v1")
 app.include_router(production_analytics_router, prefix="/api/v1")
 
-app.include_router(production_logs_router, prefix="/api/v1")
+# app.include_router(production_logs_router, prefix="/api/v1")
 
 
 

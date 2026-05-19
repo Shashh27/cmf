@@ -9,7 +9,6 @@ from DB.models.oms import (
     Part,
     Operation,
 )
-from DB.models.scheduling import ProductionLog
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import (
     OperationTrackingStatus,
@@ -24,46 +23,6 @@ router = APIRouter(prefix="/order-tracking", tags=["order-tracking"])
 # =======================
 # Helper Functions
 # =======================
-
-def get_operation_status_from_scheduling(db: Session, operation_ids: List[int]) -> dict:
-    """
-    Fetch operation status from scheduling.operation_status table.
-    Returns a dictionary mapping operation_id to status details.
-    """
-    if not operation_ids:
-        return {}
-    
-    try:
-        placeholders = ','.join([str(oid) for oid in operation_ids])
-        result = db.execute(
-            text(f"""
-                SELECT operation_id, status, started_at, completed_at, operator_id
-                FROM scheduling.operation_status
-                WHERE operation_id IN ({placeholders})
-            """)
-        )
-        
-        status_map = {}
-        for row in result:
-            status_map[row[0]] = {
-                "status": row[1] if row[1] else "Pending",
-                "started_at": row[2],
-                "completed_at": row[3],
-                "operator_id": row[4]
-            }
-        db.commit()
-        return status_map
-    except Exception as e:
-        print(f"Error fetching operation status: {e}")
-        db.rollback()
-        # Return default values if query fails
-        return {oid: {
-            "status": "Pending",
-            "started_at": None,
-            "completed_at": None,
-            "operator_id": None
-        } for oid in operation_ids}
-
 
 def calculate_part_status(operations: List[OperationTrackingStatus]) -> str:
     """
@@ -158,17 +117,25 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
         part_operations = db.query(Operation).filter(Operation.part_id == part.id).all()
         all_operations.extend(part_operations)
     
-    # Get operation status from scheduling schema
-    operation_ids = [op.id for op in all_operations]
-    operation_status_map = get_operation_status_from_scheduling(db, operation_ids)
-    
     # Fetch all production logs for these operations
+    operation_ids = [op.id for op in all_operations]
     production_logs_map = {}
+    operation_final_status_map = {}
     if operation_ids:
-        all_logs = db.query(ProductionLog).filter(ProductionLog.operation_id.in_(operation_ids)).all()
+        # Get production logs using raw SQL
+        logs_query = text("""
+            SELECT id, operation_id, operator_id, from_date, from_time, to_date, to_time, 
+                   status, produced_quantity, approved_quantity, operator_status, created_at
+            FROM scheduling.production_logs
+            WHERE operation_id IN :op_ids
+        """)
+        all_logs = db.execute(logs_query, {"op_ids": tuple(operation_ids)}).fetchall()
+        
+        # Pre-process logs to determine operation status
         for log in all_logs:
-            if log.operation_id not in production_logs_map:
-                production_logs_map[log.operation_id] = []
+            op_id = log.operation_id
+            if op_id not in production_logs_map:
+                production_logs_map[op_id] = []
             
             # Calculate rework_quantity for the log
             rework_qty = 0
@@ -177,14 +144,41 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
             elif log.produced_quantity and not log.approved_quantity:
                 rework_qty = log.produced_quantity
             
-            log.rework_quantity = rework_qty
-            production_logs_map[log.operation_id].append(log)
+            # Use a dictionary-like access since it's a Row
+            log_dict = dict(log._mapping)
+            log_dict['rework_quantity'] = rework_qty
+            production_logs_map[op_id].append(log_dict)
+            
+            # Track operation status based on production logs
+            if op_id not in operation_final_status_map:
+                operation_final_status_map[op_id] = {
+                    "has_in_progress": False,
+                    "total_approved": 0,
+                    "first_started": None,
+                    "last_completed": None,
+                    "operator_id": None
+                }
+            
+            status_info = operation_final_status_map[op_id]
+            if log.operator_status == 'In Progress':
+                status_info["has_in_progress"] = True
+            
+            status_info["total_approved"] += (log.approved_quantity or 0)
+            
+            # Track times
+            log_created_at = log.created_at
+            if status_info["first_started"] is None or log_created_at < status_info["first_started"]:
+                status_info["first_started"] = log_created_at
+                status_info["operator_id"] = log.operator_id
+            
+            if status_info["last_completed"] is None or log_created_at > status_info["last_completed"]:
+                status_info["last_completed"] = log_created_at
     
     # Get operator names for operators
     operator_ids = set()
-    for status_data in operation_status_map.values():
-        if status_data["operator_id"]:
-            operator_ids.add(status_data["operator_id"])
+    for status_info in operation_final_status_map.values():
+        if status_info["operator_id"]:
+            operator_ids.add(status_info["operator_id"])
     
     operator_map = {}
     if operator_ids:
@@ -203,27 +197,30 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
         required_qty = part.qty or 0
         
         for op in part_operations:
-            op_status = operation_status_map.get(op.id, {
-                "status": "Pending",
-                "started_at": None,
-                "completed_at": None,
+            status_info = operation_final_status_map.get(op.id, {
+                "has_in_progress": False,
+                "total_approved": 0,
+                "first_started": None,
+                "last_completed": None,
                 "operator_id": None
             })
             
             # Fetch production logs for this operation
             logs = production_logs_map.get(op.id, [])
-            total_approved = sum(log.approved_quantity or 0 for log in logs)
+            total_approved = status_info["total_approved"]
             
-            # Determine if operation is in progress or completed based on production logs
-            status = op_status["status"]
+            # Determine status based on new requirements
+            # 1. Completed if total_approved >= required_qty
+            # 2. In Progress if any log has operator_status == 'In Progress'
+            # 3. Pending otherwise
             
             if required_qty > 0 and total_approved >= required_qty:
                 status = "Completed"
-            elif len(logs) > 0:
+            elif status_info["has_in_progress"]:
                 status = "In Progress"
-            elif op_status["completed_at"]:
-                status = "Completed"
-            elif op_status["started_at"]:
+            elif len(logs) > 0:
+                # If there are logs but not completed or specifically "In Progress",
+                # it might be in progress if there's production but not enough for completion
                 status = "In Progress"
             else:
                 status = "Pending"
@@ -236,10 +233,10 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
                 operation_number=op.operation_number,
                 operation_name=op.operation_name,
                 status=status,
-                started_at=op_status["started_at"] or (logs[0].created_at if logs else None),
-                completed_at=op_status["completed_at"] or (logs[-1].created_at if status == "Completed" and logs else None),
-                operator_id=op_status["operator_id"] or (logs[0].operator_id if logs else None),
-                operator_name=operator_map.get(op_status["operator_id"] or (logs[0].operator_id if logs else None)),
+                started_at=status_info["first_started"],
+                completed_at=status_info["last_completed"] if status == "Completed" else None,
+                operator_id=status_info["operator_id"],
+                operator_name=operator_map.get(status_info["operator_id"]),
                 production_logs=logs
             ))
         
@@ -324,22 +321,55 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
         part_operations = db.query(Operation).filter(Operation.part_id == part.id).all()
         all_operations.extend(part_operations)
     
-    # Get operation status from scheduling schema
+    # Get operation status logic
     operation_ids = [op.id for op in all_operations]
-    operation_status_map = get_operation_status_from_scheduling(db, operation_ids)
     
     # Calculate part statuses
     completed_parts_count = 0
     part_tracking_list = []
     
-    # Get all production logs for these operations
+    # Fetch all production logs for these operations
     production_logs_map = {}
+    operation_final_status_map = {}
     if operation_ids:
-        all_logs = db.query(ProductionLog).filter(ProductionLog.operation_id.in_(operation_ids)).all()
+        # Get production logs using raw SQL
+        logs_query = text("""
+            SELECT id, operation_id, operator_id, from_date, from_time, to_date, to_time, 
+                   status, produced_quantity, approved_quantity, operator_status, created_at
+            FROM scheduling.production_logs
+            WHERE operation_id IN :op_ids
+        """)
+        all_logs = db.execute(logs_query, {"op_ids": tuple(operation_ids)}).fetchall()
         for log in all_logs:
-            if log.operation_id not in production_logs_map:
-                production_logs_map[log.operation_id] = []
-            production_logs_map[log.operation_id].append(log)
+            op_id = log.operation_id
+            if op_id not in production_logs_map:
+                production_logs_map[op_id] = []
+            
+            log_dict = dict(log._mapping)
+            production_logs_map[op_id].append(log_dict)
+            
+            if op_id not in operation_final_status_map:
+                operation_final_status_map[op_id] = {
+                    "has_in_progress": False,
+                    "total_approved": 0,
+                    "first_started": None,
+                    "last_completed": None,
+                    "operator_id": None
+                }
+            
+            status_info = operation_final_status_map[op_id]
+            if log.operator_status == 'In Progress':
+                status_info["has_in_progress"] = True
+            
+            status_info["total_approved"] += (log.approved_quantity or 0)
+            
+            log_created_at = log.created_at
+            if status_info["first_started"] is None or log_created_at < status_info["first_started"]:
+                status_info["first_started"] = log_created_at
+                status_info["operator_id"] = log.operator_id
+            
+            if status_info["last_completed"] is None or log_created_at > status_info["last_completed"]:
+                status_info["last_completed"] = log_created_at
 
     for part in parts:
         part_operations = db.query(Operation).filter(Operation.part_id == part.id).all()
@@ -349,25 +379,23 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
         completed_operations_count = 0
         
         for op in part_operations:
-            op_status = operation_status_map.get(op.id, {
-                "status": "Pending",
-                "started_at": None,
-                "completed_at": None,
+            status_info = operation_final_status_map.get(op.id, {
+                "has_in_progress": False,
+                "total_approved": 0,
+                "first_started": None,
+                "last_completed": None,
                 "operator_id": None
             })
             
             # Fetch production logs for this operation
             logs = production_logs_map.get(op.id, [])
-            total_approved = sum(log.approved_quantity or 0 for log in logs)
+            total_approved = status_info["total_approved"]
             
-            status = op_status["status"]
             if required_qty > 0 and total_approved >= required_qty:
                 status = "Completed"
-            elif len(logs) > 0:
+            elif status_info["has_in_progress"]:
                 status = "In Progress"
-            elif op_status["completed_at"]:
-                status = "Completed"
-            elif op_status["started_at"]:
+            elif len(logs) > 0:
                 status = "In Progress"
             else:
                 status = "Pending"
@@ -380,9 +408,9 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
                 operation_number=op.operation_number,
                 operation_name=op.operation_name,
                 status=status,
-                started_at=op_status["started_at"] or (logs[0].created_at if logs else None),
-                completed_at=op_status["completed_at"] or (logs[-1].created_at if status == "Completed" and logs else None),
-                operator_id=op_status["operator_id"] or (logs[0].operator_id if logs else None),
+                started_at=status_info["first_started"],
+                completed_at=status_info["last_completed"] if status == "Completed" else None,
+                operator_id=status_info["operator_id"],
                 operator_name=None
             ))
         
@@ -474,17 +502,25 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
     # Fetch operations for the part
     operations = db.query(Operation).filter(Operation.part_id == part.id).all()
     
-    # Get operation status from scheduling schema
+    # Get operation status logic
     operation_ids = [op.id for op in operations]
-    operation_status_map = get_operation_status_from_scheduling(db, operation_ids)
     
     # Fetch all production logs for these operations
     production_logs_map = {}
+    operation_final_status_map = {}
     if operation_ids:
-        all_logs = db.query(ProductionLog).filter(ProductionLog.operation_id.in_(operation_ids)).all()
+        # Get production logs using raw SQL
+        logs_query = text("""
+            SELECT id, operation_id, operator_id, from_date, from_time, to_date, to_time, 
+                   status, produced_quantity, approved_quantity, operator_status, created_at
+            FROM scheduling.production_logs
+            WHERE operation_id IN :op_ids
+        """)
+        all_logs = db.execute(logs_query, {"op_ids": tuple(operation_ids)}).fetchall()
         for log in all_logs:
-            if log.operation_id not in production_logs_map:
-                production_logs_map[log.operation_id] = []
+            op_id = log.operation_id
+            if op_id not in production_logs_map:
+                production_logs_map[op_id] = []
             
             # Calculate rework_quantity for the log
             rework_qty = 0
@@ -493,14 +529,38 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
             elif log.produced_quantity and not log.approved_quantity:
                 rework_qty = log.produced_quantity
             
-            log.rework_quantity = rework_qty
-            production_logs_map[log.operation_id].append(log)
+            log_dict = dict(log._mapping)
+            log_dict['rework_quantity'] = rework_qty
+            production_logs_map[op_id].append(log_dict)
+            
+            if op_id not in operation_final_status_map:
+                operation_final_status_map[op_id] = {
+                    "has_in_progress": False,
+                    "total_approved": 0,
+                    "first_started": None,
+                    "last_completed": None,
+                    "operator_id": None
+                }
+            
+            status_info = operation_final_status_map[op_id]
+            if log.operator_status == 'In Progress':
+                status_info["has_in_progress"] = True
+            
+            status_info["total_approved"] += (log.approved_quantity or 0)
+            
+            log_created_at = log.created_at
+            if status_info["first_started"] is None or log_created_at < status_info["first_started"]:
+                status_info["first_started"] = log_created_at
+                status_info["operator_id"] = log.operator_id
+            
+            if status_info["last_completed"] is None or log_created_at > status_info["last_completed"]:
+                status_info["last_completed"] = log_created_at
     
     # Get operator names
     operator_ids = set()
-    for status_data in operation_status_map.values():
-        if status_data["operator_id"]:
-            operator_ids.add(status_data["operator_id"])
+    for status_info in operation_final_status_map.values():
+        if status_info["operator_id"]:
+            operator_ids.add(status_info["operator_id"])
     
     operator_map = {}
     if operator_ids:
@@ -513,27 +573,23 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
     required_qty = part.qty or 0
     
     for op in operations:
-        op_status = operation_status_map.get(op.id, {
-            "status": "Pending",
-            "started_at": None,
-            "completed_at": None,
+        status_info = operation_final_status_map.get(op.id, {
+            "has_in_progress": False,
+            "total_approved": 0,
+            "first_started": None,
+            "last_completed": None,
             "operator_id": None
         })
         
         # Fetch production logs for this operation
         logs = production_logs_map.get(op.id, [])
-        total_approved = sum(log.approved_quantity or 0 for log in logs)
-        
-        # Determine if operation is in progress or completed based on production logs
-        status = op_status["status"]
+        total_approved = status_info["total_approved"]
         
         if required_qty > 0 and total_approved >= required_qty:
             status = "Completed"
-        elif len(logs) > 0:
+        elif status_info["has_in_progress"]:
             status = "In Progress"
-        elif op_status["completed_at"]:
-            status = "Completed"
-        elif op_status["started_at"]:
+        elif len(logs) > 0:
             status = "In Progress"
         else:
             status = "Pending"
@@ -546,10 +602,10 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
             operation_number=op.operation_number,
             operation_name=op.operation_name,
             status=status,
-            started_at=op_status["started_at"] or (logs[0].created_at if logs else None),
-            completed_at=op_status["completed_at"] or (logs[-1].created_at if status == "Completed" and logs else None),
-            operator_id=op_status["operator_id"] or (logs[0].operator_id if logs else None),
-            operator_name=operator_map.get(op_status["operator_id"] or (logs[0].operator_id if logs else None)),
+            started_at=status_info["first_started"],
+            completed_at=status_info["last_completed"] if status == "Completed" else None,
+            operator_id=status_info["operator_id"],
+            operator_name=operator_map.get(status_info["operator_id"]),
             production_logs=logs
         ))
     

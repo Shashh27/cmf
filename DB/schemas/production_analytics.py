@@ -84,7 +84,7 @@ class PlannedOperation(BaseModel):
     total_quantity: int
     remaining_quantity: int
     status: Optional[str]
-    sale_order_number: str
+    sale_order_number: Optional[str] = None
 
 
 class ActualProductionLog(BaseModel):
@@ -94,15 +94,16 @@ class ActualProductionLog(BaseModel):
     operation_number: Optional[str] = None
     part_number: Optional[str]
     sale_order_number: Optional[str] = None
-    from_date: date
-    from_time: str
-    to_date: Optional[date]
-    to_time: Optional[str]
+    from_date: Optional[date] = None
+    from_time: Optional[str] = None
+    to_date: Optional[date] = None
+    to_time: Optional[str] = None
     status: str
-    produced_quantity: int
-    approved_quantity: Optional[int]
-    operator_name: Optional[str]
-    machine_name: Optional[str]
+    produced_quantity: Optional[int] = 0
+    approved_quantity: Optional[int] = 0
+    operator_name: Optional[str] = None
+    machine_id: Optional[int] = None
+    machine_name: Optional[str] = None
     is_completed: bool
 
 

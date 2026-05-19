@@ -369,7 +369,8 @@ def get_shop_floor_hierarchical_data(
 def _order_to_response(order, db: Session):
     """Build order response dict with customer, product, and role user names."""
     # Check if ALL parts in the order have raw materials linked
-    from DB.models.oms import Part
+    from DB.models.oms import Part, Operation
+    # from DB.models.scheduling import ProductionLog removed as requested
     
     # Get all parts for this order's product
     all_parts = db.query(Part).filter(Part.product_id == order.product_id).all()
@@ -377,6 +378,7 @@ def _order_to_response(order, db: Session):
     
     if total_parts == 0:
         has_raw_materials = False
+        calculated_status = "Pending"
     else:
         # Count parts that have raw materials linked (either general stock or order stock)
         parts_with_raw_materials = 0
@@ -397,6 +399,91 @@ def _order_to_response(order, db: Session):
         
         # Only set has_raw_materials = true if ALL parts have raw materials
         has_raw_materials = parts_with_raw_materials >= total_parts
+        
+        # Calculate order status based on part statuses (same logic as order_tracking.py)
+        completed_parts_count = 0
+        scheduled_parts_count = 0
+        
+        for part in all_parts:
+            # Get operations for this part
+            part_operations = db.query(Operation).filter(Operation.part_id == part.id).all()
+            required_qty = part.qty or 0
+            
+            if not part_operations:
+                continue
+            
+            # Get operation ids
+            operation_ids = [op.id for op in part_operations]
+            
+            # Get production logs for these operations
+            production_logs_summary = {}
+            if operation_ids:
+                # Get production logs using raw SQL
+                logs_query = text("""
+                    SELECT operation_id, SUM(approved_quantity) as total_approved,
+                           BOOL_OR(operator_status = 'In Progress') as is_in_progress,
+                           COUNT(*) as log_count
+                    FROM scheduling.production_logs
+                    WHERE operation_id IN :op_ids
+                    GROUP BY operation_id
+                """)
+                logs_result = db.execute(logs_query, {"op_ids": tuple(operation_ids)}).fetchall()
+                for row in logs_result:
+                    production_logs_summary[row.operation_id] = {
+                        "total_approved": row.total_approved or 0,
+                        "is_in_progress": row.is_in_progress,
+                        "has_logs": row.log_count > 0
+                    }
+            
+            # Calculate part status based on operations
+            completed_operations_count = 0
+            scheduled_ops_count = 0
+            
+            for op in part_operations:
+                summary = production_logs_summary.get(op.id, {
+                    "total_approved": 0,
+                    "is_in_progress": False,
+                    "has_logs": False
+                })
+                
+                # Determine operation status
+                # 1. Completed if total_approved >= required_qty
+                # 2. Scheduled if summary says so or has any logs
+                
+                if required_qty > 0 and summary["total_approved"] >= required_qty:
+                    status = "Completed"
+                elif summary["is_in_progress"] or summary["has_logs"]:
+                    status = "Scheduled"
+                else:
+                    status = "Pending"
+                
+                if status == "Completed":
+                    completed_operations_count += 1
+                elif status == "Scheduled":
+                    scheduled_ops_count += 1
+            
+            # Calculate part status
+            total_ops = len(part_operations)
+            if completed_operations_count == total_ops:
+                completed_parts_count += 1
+            elif scheduled_ops_count > 0 or completed_operations_count > 0:
+                scheduled_parts_count += 1
+        
+        # Check if the order is planned in scheduling
+        is_order_planned = db.execute(text("""
+            SELECT EXISTS(
+                SELECT 1 FROM scheduling.planned_schedule_items 
+                WHERE sale_order_id = :order_id
+            )
+        """), {"order_id": order.id}).scalar()
+
+        # Calculate order status (Pending, Scheduled, Completed)
+        if total_parts > 0 and completed_parts_count == total_parts:
+            calculated_status = "Completed"
+        elif is_order_planned or scheduled_parts_count > 0 or completed_parts_count > 0:
+            calculated_status = "Scheduled"
+        else:
+            calculated_status = "Pending"
     
     return {
         "id": order.id,
@@ -411,7 +498,7 @@ def _order_to_response(order, db: Session):
         "manufacturing_coordinator_id": order.manufacturing_coordinator_id,
         "quantity": order.quantity,
         "due_date": order.due_date,
-        "status": order.status,
+        "status": calculated_status,
         "company_name": order.customer.company_name if order.customer else None,
         "product_name": order.product.product_name if order.product else None,
         "user_name": order.user.user_name if order.user else None,
