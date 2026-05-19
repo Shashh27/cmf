@@ -4,7 +4,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
 import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
-  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined } from "@ant-design/icons";
+  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined, SyncOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
@@ -113,9 +113,10 @@ const OMS = () => {
 
   const getStatusBadge = (status) => {
     const statusConfig = {
-      Pending: { color: "warning", text: "Pending" },
-      Ongoing: { color: "processing", text: "Ongoing" },
-      Completed: { color: "success", text: "Completed" },
+      'Pending': { color: "orange", text: "Pending" },
+      'Scheduled': { color: "purple", text: "Scheduled" },
+      'In Progress': { color: "blue", text: "In Progress" },
+      'Completed': { color: "green", text: "Completed" },
     };
 
     const config = statusConfig[status] || { color: "default", text: status };
@@ -433,8 +434,9 @@ const OMS = () => {
 
   // KPI stats
   const totalOrders = filteredOrders.length;
-  const inProgressCount = filteredOrders.filter(o => o.status === 'Pending').length;
+  const pendingCount = filteredOrders.filter(o => o.status === 'Pending').length;
   const scheduledCount = filteredOrders.filter(o => o.status === 'Scheduled').length;
+  const inProgressCount = filteredOrders.filter(o => o.status === 'In Progress').length;
   const completedCount = filteredOrders.filter(o => o.status === 'Completed').length;
 
   const ordersForPdf = filteredOrders.map(order => ({
@@ -494,41 +496,50 @@ const OMS = () => {
       {contextHolder}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4 mb-4 lg:mb-6">
-          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 mb-4 lg:mb-6">
+          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between gap-1">
               <div>
-                <div className="text-xs sm:text-sm text-gray-600">Total Orders</div>
-                <div className="text-xl sm:text-2xl font-bold text-blue-700">{totalOrders}</div>
+                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Total Orders</div>
+                <div className="text-lg sm:text-xl font-bold text-blue-700 leading-tight">{totalOrders}</div>
               </div>
-              <ShoppingOutlined className="text-blue-600 text-xl sm:text-2xl" />
+              <ShoppingOutlined className="text-blue-600 text-lg sm:text-xl" />
             </div>
           </div>
-          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
+          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-orange-50 to-orange-100 border border-orange-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between gap-1">
               <div>
-                <div className="text-xs sm:text-sm text-gray-600">Pending</div>
-                <div className="text-xl sm:text-2xl font-bold text-orange-600">{inProgressCount}</div>
+                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Pending</div>
+                <div className="text-lg sm:text-xl font-bold text-orange-600 leading-tight">{pendingCount}</div>
               </div>
-              <AppstoreOutlined className="text-orange-500 text-xl sm:text-2xl" />
+              <AppstoreOutlined className="text-orange-500 text-lg sm:text-xl" />
             </div>
           </div>
-          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
+          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between gap-1">
               <div>
-                <div className="text-xs sm:text-sm text-gray-600">Scheduled</div>
-                <div className="text-xl sm:text-2xl font-bold text-purple-600">{scheduledCount}</div>
+                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">In Progress</div>
+                <div className="text-lg sm:text-xl font-bold text-blue-600 leading-tight">{inProgressCount}</div>
               </div>
-              <ClockCircleOutlined className="text-purple-500 text-xl sm:text-2xl" />
+              <SyncOutlined className="text-blue-500 text-lg sm:text-xl" />
             </div>
           </div>
-          <div className="rounded-lg lg:rounded-xl p-3 sm:p-4 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between">
+          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between gap-1">
               <div>
-                <div className="text-xs sm:text-sm text-gray-600">Completed</div>
-                <div className="text-xl sm:text-2xl font-bold text-green-600">{completedCount}</div>
+                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Scheduled</div>
+                <div className="text-lg sm:text-xl font-bold text-purple-600 leading-tight">{scheduledCount}</div>
               </div>
-              <CheckCircleOutlined className="text-green-500 text-xl sm:text-2xl" />
+              <ClockCircleOutlined className="text-purple-500 text-lg sm:text-xl" />
+            </div>
+          </div>
+          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center justify-between gap-1">
+              <div>
+                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Completed</div>
+                <div className="text-lg sm:text-xl font-bold text-green-600 leading-tight">{completedCount}</div>
+              </div>
+              <CheckCircleOutlined className="text-green-500 text-lg sm:text-xl" />
             </div>
           </div>
         </div>

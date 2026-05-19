@@ -7,7 +7,7 @@ import {
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import { Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Typography, Upload, Input, Form } from "antd";
-import { normalizeVersion, fetchInto } from "./operationUtils";
+import { normalizeVersion, fetchInto } from "./operationUtils.js";
 import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";

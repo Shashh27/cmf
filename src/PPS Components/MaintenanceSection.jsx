@@ -178,7 +178,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   const fetchLeaveLogs = async () => {
     try {
       setLeaveLoading(true);
-      const res = await fetch('http://172.18.7.85:8989/api/v1/operator-leaves/');
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/operator-leaves/`);
       if (res.ok) {
         const data = await res.json();
         setLeaveLogs(data || []);
@@ -196,7 +196,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   const handleAcknowledgeLeave = async (leaveId) => {
     try {
       setAcknowledgingId(leaveId);
-      const res = await fetch(`http://172.18.7.85:8989/api/v1/operator-leaves/${leaveId}/approve`, {
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/operator-leaves/${leaveId}/approve`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

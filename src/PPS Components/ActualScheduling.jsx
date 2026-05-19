@@ -153,7 +153,7 @@ const ActualScheduling = () => {
 
   const fetchSchedule = async () => {
     try {
-      const res = await fetch('http://172.18.7.85:8989/api/v1/scheduling/view-rescheduling');
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/view-rescheduling`);
       if (!res.ok) return;
       const data = await res.json();
       const ops = [];
@@ -188,7 +188,7 @@ const ActualScheduling = () => {
   const handleUpdateSchedule = async () => {
     setUpdateScheduleLoading(true);
     try {
-      const res = await fetch('http://172.18.7.85:8989/api/v1/scheduling/dynamic-reschedule', {
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/dynamic-reschedule`, {
         method: 'POST',
         headers: { 'accept': 'application/json' },
       });

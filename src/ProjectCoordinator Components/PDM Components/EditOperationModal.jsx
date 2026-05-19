@@ -12,7 +12,7 @@ import {
 import dayjs from 'dayjs';
 import axios from "axios";
 import { API_BASE_URL } from '../../Config/auth';
-import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils';
+import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils.js';
 import OperationToolsSelector from './OperationToolsSelector';
 
 const { TextArea } = Input;
