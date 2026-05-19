@@ -9,6 +9,38 @@ import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
 
+// ── Highlight helper ──────────────────────────────────────────────────────────
+// Wraps every case-insensitive match of `query` inside `text` with a light-blue
+// <mark> span. Returns the original string unchanged when there is no match.
+const highlightText = (text, query) => {
+  if (!query || !text) return text ?? '';
+  const str = String(text);
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = str.split(new RegExp(`(${escaped})`, 'gi'));
+  if (parts.length === 1) return str;
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark
+            key={i}
+            style={{
+              backgroundColor: '#bae0ff',
+              color: 'inherit',
+              padding: '0 1px',
+              borderRadius: 2,
+            }}
+          >
+            {part}
+          </mark>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+};
+
 const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null, singleProductId = null }) => {
   const { message, modal } = App.useApp();
   const [products, setProducts] = useState([]);
@@ -34,31 +66,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
   const getTypeIcon = (type, level = 0) => {
     const normalized = (type || "").toString().toLowerCase();
-    // Product: purple (deployment/root)
-    if (normalized === "product") {
-      return <DeploymentUnitOutlined className="text-purple-600" />;
-    }
-    // Top-level assembly (direct under product): blue – cluster of units
-    if (normalized === "assembly" && level <= 1) {
-      return <ClusterOutlined className="text-blue-500" />;
-    }
-    // Subassembly (nested): indigo – single block to show it's one level down
-    if (normalized === "assembly" && level > 1) {
-      return <BlockOutlined className="text-indigo-600" />;
-    }
+    if (normalized === "product") return <DeploymentUnitOutlined className="text-purple-600" />;
+    if (normalized === "assembly" && level <= 1) return <ClusterOutlined className="text-blue-500" />;
+    if (normalized === "assembly" && level > 1) return <BlockOutlined className="text-indigo-600" />;
     const inHouseTypes = ["make", "in-house", "in house", "inhouse"];
     const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
-    // In-house part: emerald – component/box (made here)
-    if (inHouseTypes.includes(normalized)) {
-      return <CodeSandboxOutlined className="text-emerald-600" />;
-    }
-    // Outsource part: amber – external/supplied
-    if (outSourceTypes.includes(normalized)) {
-      return <CodepenOutlined className="text-amber-600" />;
-    }
-    if (normalized === "part") {
-      return <FileTextOutlined className="text-gray-500" />;
-    }
+    if (inHouseTypes.includes(normalized)) return <CodeSandboxOutlined className="text-emerald-600" />;
+    if (outSourceTypes.includes(normalized)) return <CodepenOutlined className="text-amber-600" />;
+    if (normalized === "part") return <FileTextOutlined className="text-gray-500" />;
     return <FileTextOutlined className="text-gray-500" />;
   };
 
@@ -66,7 +81,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const normalized = (type || "").toString().toLowerCase();
     const inHouseTypes = ["make", "in-house", "in house", "inhouse", "part"];
     const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
-
     if (normalized === "product") return 'purple';
     if (normalized === "assembly") return 'blue';
     if (inHouseTypes.includes(normalized)) return 'green';
@@ -126,7 +140,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       if (!wrapper) return;
       const part = wrapper.part || wrapper;
       if (!part) return;
-
       parts.push({
         id: part.id,
         part_number: part.part_number,
@@ -136,7 +149,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         parent_assembly_number: parentAssembly?.assembly_number || null,
         parent_assembly_name: parentAssembly?.assembly_name || null,
       });
-
       (wrapper.operations || []).forEach((op, index) => {
         operations.push({
           id: op.id || `${part.id}-op-${index}`,
@@ -156,7 +168,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           notes: op.notes || "",
         });
       });
-
       (wrapper.documents || []).forEach((doc, index) => {
         documents.push({
           id: doc.id || `${part.id}-doc-${index}`,
@@ -173,7 +184,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const processAssemblyWrapper = (wrapper, parentAssembly = null) => {
       if (!wrapper) return;
       const assembly = wrapper.assembly || wrapper;
-
       if (assembly) {
         assemblies.push({
           id: assembly.id,
@@ -184,34 +194,23 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           parent_assembly_name: parentAssembly?.assembly_name || null,
         });
       }
-
       (wrapper.parts || []).forEach((p) => addPartNode(p, assembly));
-      (wrapper.subassemblies || []).forEach((sub) =>
-        processAssemblyWrapper(sub, assembly)
-      );
+      (wrapper.subassemblies || []).forEach((sub) => processAssemblyWrapper(sub, assembly));
     };
 
     (data.assemblies || []).forEach((asm) => processAssemblyWrapper(asm, null));
     (data.direct_parts || []).forEach((p) => addPartNode(p, null));
 
-    return {
-      assemblies,
-      parts,
-      operations,
-      documents,
-    };
+    return { assemblies, parts, operations, documents };
   };
 
   const fetchProductHierarchy = async (productId, forceRefresh = false) => {
     if (!forceRefresh && hierarchicalData[productId]) return hierarchicalData[productId];
-    
     try {
       const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical`);
       if (response.status >= 200 && response.status < 300) {
         const data = response.data;
         const bomExport = flattenBOMForExport(data);
-
-        // Transformed view for this component (used to render tree quickly)
         const transformedData = {
           ...data,
           parts: (data.direct_parts || [])
@@ -239,15 +238,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             })),
           bomExport,
         };
-
         setHierarchicalData(prev => ({ ...prev, [productId]: transformedData }));
-
-        // For external consumers (like ProductSummary) that need full PartDetails
-        // including operations, pass the original hierarchy 'data'.
-        if (onHierarchyLoaded) {
-          onHierarchyLoaded(productId, data);
-        }
-
+        if (onHierarchyLoaded) onHierarchyLoaded(productId, data);
         return transformedData;
       }
     } catch (error) {
@@ -279,9 +271,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const handleExpandProduct = async (product) => {
-    if (!hierarchicalData[product.id]) {
-      await fetchProductHierarchy(product.id);
-    }
+    if (!hierarchicalData[product.id]) await fetchProductHierarchy(product.id);
     toggleExpand(getExpandKey('product', product.id));
   };
 
@@ -299,9 +289,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const handleCreatePart = (product, assembly = null) => {
     if (!product) return;
     openModal('part', product, assembly);
-    if (!hierarchicalData[product.id]) {
-      fetchProductHierarchy(product.id);
-    }
+    if (!hierarchicalData[product.id]) fetchProductHierarchy(product.id);
   };
   const handleCreateSubAssembly = (assembly) => openModal('assembly', { id: assembly.product_id }, assembly);
   const handleEditProduct = (product) => openModal('product', product, null, true, product);
@@ -370,7 +358,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const handleDelete = async (item, type) => {
     const endpoints = { product: `/products/${item.id}`, assembly: `/assemblies/${item.id}`, part: `/parts/${item.id}` };
     const names = { product: item.product_name, assembly: item.assembly_name, part: item.part_name };
-    
     modal.confirm({
       title: `Delete ${type}`,
       content: `Are you sure you want to delete ${type} "${names[type]}"? This cannot be undone.`,
@@ -410,43 +397,24 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const handleItemClick = async (item, type, productId = null) => {
-    // Clear previous selection and set new one
     setActiveItemId(item.id);
     setActiveItemType(type);
-
     if (type === 'product') {
-      if (!hierarchicalData[item.id]) {
-        await fetchProductHierarchy(item.id);
-      }
+      if (!hierarchicalData[item.id]) await fetchProductHierarchy(item.id);
     }
-
     toggleExpand(getExpandKey(type, item.id));
-
     const itemWithMeta = { ...item, itemType: type, productId: productId || (type === 'product' ? item.id : null) };
-    if (onItemSelected) {
-      onItemSelected(itemWithMeta);
-    }
+    if (onItemSelected) onItemSelected(itemWithMeta);
   };
 
-  // Helper function to find productId for a part or assembly
   const findProductIdForItem = (itemId) => {
     for (const productId in hierarchicalData) {
       const product = hierarchicalData[productId];
-      
-      // Check if it's a direct part
-      if (product.parts?.some(p => p.id === itemId)) {
-        return productId;
-      }
-      
-      // Check in assemblies recursively
+      if (product.parts?.some(p => p.id === itemId)) return productId;
       const checkAssemblies = (assemblies) => {
         for (const assembly of assemblies) {
-          if (assembly.id === itemId) {
-            return productId;
-          }
-          if (assembly.parts?.some(p => p.id === itemId)) {
-            return productId;
-          }
+          if (assembly.id === itemId) return productId;
+          if (assembly.parts?.some(p => p.id === itemId)) return productId;
           if (assembly.child_assemblies) {
             const found = checkAssemblies(assembly.child_assemblies);
             if (found) return found;
@@ -454,7 +422,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         }
         return null;
       };
-      
       const found = checkAssemblies(product.assemblies || []);
       if (found) return found;
     }
@@ -510,9 +477,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         { icon: PartitionOutlined, onClick: () => handleCreateSubAssembly(item), title: "Add Sub-Assembly" },
         { icon: ToolOutlined, onClick: () => {
             const product = products.find(p => p.id === item.product_id);
-            if (product) {
-              handleCreatePart(product, item);
-            }
+            if (product) handleCreatePart(product, item);
           }, title: "Add Part" },
         { icon: EditOutlined, onClick: () => handleEditAssembly(item), title: "Edit" },
         { icon: DeleteOutlined, onClick: () => handleDelete(item, 'assembly'), danger: true, title: "Delete" }
@@ -536,11 +501,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           )}
           {buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
             <Tooltip key={idx} title={title}>
-              <Button 
-                type="text" 
-                size="small" 
+              <Button
+                type="text"
+                size="small"
                 danger={danger}
-                onClick={(e) => { e.stopPropagation(); onClick(); }} 
+                onClick={(e) => { e.stopPropagation(); onClick(); }}
                 icon={<Icon style={{ fontSize: '14px' }} />}
                 style={{ padding: 4, minWidth: 24, height: 24 }}
               />
@@ -554,6 +519,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
+  // ── Part row ──────────────────────────────────────────────────────────────
   const renderPartInTree = (part, level = 0, productId = null) => {
     const isSelected = activeItemId === part.id && activeItemType === 'part';
     return (
@@ -566,19 +532,30 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
           <Tooltip title={`${part.part_name} (${part.part_number})`}>
-            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{part.part_name} ({part.part_number})</Text>
+            <div className="flex flex-col min-w-0">
+              {/* ── Highlighted part name ── */}
+              <Text className={`text-sm font-medium truncate leading-tight ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
+                {searchTerm ? highlightText(part.part_name, searchTerm) : part.part_name}
+              </Text>
+              {part.part_number && (
+                <Text className={`text-xs truncate ${isSelected ? 'text-indigo-500' : 'text-slate-400'}`}>
+                  {searchTerm ? highlightText(part.part_number, searchTerm) : part.part_number}
+                </Text>
+              )}
+            </div>
           </Tooltip>
         </div>
-        <ActionButtons 
-          item={part} 
-          type="part" 
-          tagName={part.type_name || 'part'} 
-          tagColor={getTypeColor(part.type_name || 'part')} 
+        <ActionButtons
+          item={part}
+          type="part"
+          tagName={part.type_name || 'part'}
+          tagColor={getTypeColor(part.type_name || 'part')}
         />
       </div>
     );
   };
 
+  // ── Assembly row ──────────────────────────────────────────────────────────
   const renderAssemblyTree = (assembly, level = 0, productId = null) => {
     const childAssemblies = getNestedAssemblies(assembly.id);
     const assemblyParts = getPartsForAssembly(assembly.id);
@@ -607,12 +584,22 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             </div>
             <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly', level)}</span>
             <Tooltip title={`${assembly.assembly_name} (${assembly.assembly_number})`}>
-              <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>{assembly.assembly_name} ({assembly.assembly_number})</Text>
+              <div className="flex flex-col min-w-0">
+                {/* ── Highlighted assembly name ── */}
+                <Text className={`text-sm font-medium truncate leading-tight ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
+                  {searchTerm ? highlightText(assembly.assembly_name, searchTerm) : assembly.assembly_name}
+                </Text>
+                {assembly.assembly_number && (
+                  <Text className={`text-xs truncate ${isSelected ? 'text-indigo-500' : 'text-slate-400'}`}>
+                    {searchTerm ? highlightText(assembly.assembly_number, searchTerm) : assembly.assembly_number}
+                  </Text>
+                )}
+              </div>
             </Tooltip>
           </div>
-          <ActionButtons 
-            item={assembly} 
-            type="assembly" 
+          <ActionButtons
+            item={assembly}
+            type="assembly"
             tagName={level > 1 ? 'SUB-ASSEMBLY' : 'ASSEMBLY'}
             tagColor={getTypeColor('assembly')}
           />
@@ -630,6 +617,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
+  // ── Product row ───────────────────────────────────────────────────────────
   const renderProductTree = (product) => {
     const productHierarchy = hierarchicalData[product.id];
     const hasData = !!productHierarchy;
@@ -659,11 +647,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               ) : <div className="w-5" />}
             </div>
             <span className="flex-shrink-0 text-sm">{getTypeIcon('product')}</span>
-            <Text className={`text-sm font-semibold truncate ${isSelected ? 'text-indigo-800' : 'text-slate-800'}`}>{product.product_name}</Text>
+            {/* ── Highlighted product name ── */}
+            <Text className={`text-sm font-semibold truncate ${isSelected ? 'text-indigo-800' : 'text-slate-800'}`}>
+              {searchTerm ? highlightText(product.product_name, searchTerm) : product.product_name}
+            </Text>
           </div>
-          <ActionButtons 
-            item={product} 
-            type="product" 
+          <ActionButtons
+            item={product}
+            type="product"
             tagName="product"
             tagColor={getTypeColor('product')}
           />
@@ -683,14 +674,23 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
   const flattenBOMItemsForSearch = () => {
     const allItems = [];
-    
+    // Track seen keys to prevent duplicates: "part-<id>" or "assembly-<id>"
+    const seen = new Set();
+
+    const pushUnique = (item) => {
+      const key = `${item.itemType}-${item.id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      allItems.push(item);
+    };
+
     products.forEach(product => {
       const productHierarchy = hierarchicalData[product.id];
       if (!productHierarchy) return;
-      
-      // Add direct parts
+
+      // Direct parts (not under any assembly)
       (productHierarchy.parts || []).forEach(part => {
-        allItems.push({
+        pushUnique({
           ...part,
           itemType: 'part',
           productId: product.id,
@@ -698,22 +698,23 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           displayName: `${part.part_name} (${part.part_number})`
         });
       });
-      
-      // Add assemblies and their parts recursively
+
+      // Walk assemblies using the already-embedded parts/child_assemblies
+      // instead of calling getPartsForAssembly / getNestedAssemblies globally,
+      // which caused the same items to be discovered via multiple paths.
       const processAssembly = (assembly, level = 0) => {
-        allItems.push({
+        pushUnique({
           ...assembly,
           itemType: 'assembly',
-          level: level,
+          level,
           productId: product.id,
           productName: product.product_name,
           displayName: `${assembly.assembly_name} (${assembly.assembly_number})`
         });
-        
-        // Add parts for this assembly
-        const assemblyParts = getPartsForAssembly(assembly.id);
-        assemblyParts.forEach(part => {
-          allItems.push({
+
+        // Use parts already on the assembly object (set during transform)
+        (assembly.parts || []).forEach(part => {
+          pushUnique({
             ...part,
             itemType: 'part',
             parentAssembly: assembly,
@@ -722,28 +723,21 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             displayName: `${part.part_name} (${part.part_number})`
           });
         });
-        
-        // Process child assemblies
-        const childAssemblies = getNestedAssemblies(assembly.id);
-        childAssemblies.forEach(childAssembly => {
-          processAssembly(childAssembly, level + 1);
-        });
+
+        // Recurse into child_assemblies already embedded on the object
+        (assembly.child_assemblies || []).forEach(child => processAssembly(child, level + 1));
       };
-      
-      // Process top-level assemblies
-      (productHierarchy.assemblies || []).forEach(assembly => {
-        processAssembly(assembly, 1);
-      });
+
+      (productHierarchy.assemblies || []).forEach(assembly => processAssembly(assembly, 1));
     });
-    
+
     return allItems;
   };
 
   const filteredProducts = products.filter(product =>
-    // product.product_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
     product.product_name.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  
+
   const filteredBOMItems = searchTerm ? flattenBOMItemsForSearch().filter(item =>
     item.displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (item.part_number && item.part_number.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -781,41 +775,39 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               </h2>
             </div>
             {!singleProductId && (
-            <Button
-              type="primary"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={handleCreateProduct}
-              className="bom-primary-btn shrink-0"
-            >
-              <span className="hidden sm:inline">New Product</span>
-              <span className="sm:hidden">New</span>
-            </Button>
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={handleCreateProduct}
+                className="bom-primary-btn shrink-0"
+              >
+                <span className="hidden sm:inline">New Product</span>
+                <span className="sm:hidden">New</span>
+              </Button>
             )}
           </div>
-          <Input 
-            prefix={<SearchOutlined className="text-slate-400" />} 
-            placeholder="Search assemblies, sub-assemblies, and parts..." 
+          <Input
+            prefix={<SearchOutlined className="text-slate-400" />}
+            placeholder="Search assemblies, sub-assemblies, and parts..."
             value={searchTerm}
             onChange={(e) => {
               const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
               setSearchTerm(filteredValue);
-            }} 
+            }}
             maxLength={30}
-            className="rounded-md text-sm border-slate-200" 
-            allowClear 
+            className="rounded-md text-sm border-slate-200"
+            allowClear
           />
         </div>
+
         <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">
           {searchTerm ? (
             filteredBOMItems.length > 0 ? (
               <div>
                 {filteredBOMItems.map(item => {
-                  if (item.itemType === 'part') {
-                    return renderPartInTree(item, item.level || 0, item.productId);
-                  } else if (item.itemType === 'assembly') {
-                    return renderAssemblyTree(item, item.level || 0, item.productId);
-                  }
+                  if (item.itemType === 'part') return renderPartInTree(item, item.level || 0, item.productId);
+                  if (item.itemType === 'assembly') return renderAssemblyTree(item, item.level || 0, item.productId);
                   return null;
                 })}
               </div>
@@ -825,15 +817,17 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               </div>
             )
           ) : (
-            filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
-              <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
-                <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              </div>
-            )
+            filteredProducts.length > 0
+              ? filteredProducts.map(product => renderProductTree(product))
+              : (
+                <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
+                  <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                </div>
+              )
           )}
         </div>
       </div>
-      
+
       <CreateProductModal
         open={showCreateModal}
         onCancel={() => { setShowCreateModal(false); setParentAssembly(null); setEditingItem(null); setEditMode(false); }}
@@ -844,7 +838,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         editingItem={editingItem}
         onProductCreated={handleProductCreated}
       />
-      
+
       <PartActionModal
         open={showPartActionModal}
         onCancel={() => setShowPartActionModal(false)}

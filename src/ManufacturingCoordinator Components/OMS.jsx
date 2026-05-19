@@ -20,8 +20,7 @@ const OMS = () => {
   const { productId } = useParams();
   const [messageApi, contextHolder] = message.useMessage();
   const [orders, setOrders] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [products, setProducts] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [documentModalOpen, setDocumentModalOpen] = useState(false);
@@ -51,11 +50,7 @@ const OMS = () => {
       hasFetchedData.current = true;
       setLoading(true);
       try {
-        await Promise.all([
-          fetchOrders(),
-          fetchCustomers(),
-          fetchProducts()
-        ]);
+        await fetchOrders();
       } catch (error) {
         console.error('Error fetching data:', error);
       } finally {
@@ -66,23 +61,8 @@ const OMS = () => {
     fetchData();
   }, []);
 
-  const fetchCustomers = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/customers/`);
-      setCustomers(response.data);
-    } catch (error) {
-      console.error("Error fetching customers:", error);
-    }
-  };
 
-  const fetchProducts = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/products/`);
-      setProducts(response.data);
-    } catch (error) {
-      console.error("Error fetching products:", error);
-    }
-  };
+
 
   const fetchOrders = async () => {
     try {
@@ -100,23 +80,11 @@ const OMS = () => {
   };
 
   const getCustomerName = (customerId, record) => {
-    const customer = customers.find((c) => c.id === customerId);
-    if (customer) {
-      if (customer.branch) {
-        return `${customer.company_name} (${customer.branch})`;
-      }
-      return customer.company_name;
-    }
     const baseName = record?.company_name ?? record?.customer_name ?? customerId;
     const branch = record?.branch;
     return branch ? `${baseName} (${branch})` : baseName;
   };
 
-  const getProductName = (productId, record) => {
-    const product = products.find((p) => p.id === productId);
-    if (product) return product.product_name || `Project ${productId}`;
-    return record?.product_name ?? `Project ${productId}`;
-  };
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
@@ -250,7 +218,7 @@ const OMS = () => {
     const customerName = String(getCustomerName(order.customer_id, order) || "").toLowerCase();
     
     // Project Name (from product)
-    const productName = String(getProductName(order.product_id, order) || "").toLowerCase();
+    const productName = String(order.product_name || "").toLowerCase();
     
     // Qty
     const quantity = String(order.quantity || "");
@@ -326,7 +294,7 @@ const OMS = () => {
         >
           <Space className="text-gray-700">
             <AppstoreOutlined className="text-blue-500" />
-            <span className="underline">{getProductName(productId, record)}</span>
+            <span className="underline">{record.product_name || `Project ${productId}`}</span>
           </Space>
         </Button>
       ),
@@ -453,7 +421,7 @@ const OMS = () => {
   const ordersForPdf = filteredOrders.map(order => ({
     ...order,
     customer_name: getCustomerName(order.customer_id, order),
-    product_name: getProductName(order.product_id, order),
+    product_name: order.product_name || `Project ${order.product_id}`,
   }));
 
   return (
@@ -648,10 +616,6 @@ const OMS = () => {
         onClose={() => setOrderModalOpen(false)}
         onOrderCreated={handleOrderCreated}
         editingOrder={editingOrder}
-        customers={customers}
-        products={products}
-        fetchCustomers={fetchCustomers}
-        fetchProducts={fetchProducts}
       />
       
       <DocumentModal

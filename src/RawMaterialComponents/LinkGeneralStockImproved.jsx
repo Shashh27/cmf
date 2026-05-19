@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { 
-  Card, Table, Button, Select, message, Spin, Tree, 
+import {
+  Card, Table, Button, Select, message, Spin, Tree,
   Modal, InputNumber, Input, Tag, Typography, Space, Collapse,
   Empty, Row, Col, Alert, App, Divider, Statistic,
   List, Avatar, Tooltip, Badge, Image
 } from "antd";
-import { 
-  ShoppingCartOutlined, 
-  LinkOutlined, 
+import {
+  ShoppingCartOutlined,
+  LinkOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   ReloadOutlined,
@@ -59,7 +59,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     fetchGeneralStock();
   }, []);
 
-  
+
   const fetchOrders = async () => {
     try {
       setLoading(true);
@@ -78,7 +78,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const fetchGeneralStock = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`);
-      const generalStockData = response.data.filter(stock => 
+      const generalStockData = response.data.filter(stock =>
         stock.source_type === 'general' && stock.status === 'available'
       );
       setGeneralStock(generalStockData);
@@ -163,7 +163,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     });
   };
 
-  
+
   const handleViewPartDetails = (part) => {
     // Set selected part and show OrderRequirementsDisplay modal
     setSelectedPart(part);
@@ -193,17 +193,17 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
       message.error('Please select a stock item');
       return;
     }
-    
+
     if (!selectedUnit) {
       message.error('Please select a unit (rod/sheet)');
       return;
     }
-    
+
     if (!requiredLength || requiredLength <= 0) {
       message.error('Please enter a valid required length');
       return;
     }
-    
+
     if (requiredLength > selectedUnit.remaining_length) {
       message.error(`Required length (${requiredLength}) exceeds available length (${selectedUnit.remaining_length})`);
       return;
@@ -218,7 +218,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           user_id: userId
         }
       });
-      
+
       message.success('Material assigned successfully');
       setLinkModalVisible(false);
       setSelectedMaterial(null);
@@ -228,7 +228,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
       setRequiredLength(null);
       setAvailableUnits([]);
       setLengthError(null);
-      
+
       if (selectedOrder) {
         fetchOrderHierarchy(selectedOrder.id);
       }
@@ -274,10 +274,10 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
 
   const getAllParts = (hierarchy) => {
     const parts = [];
-    
+
     const processAssembly = (assembly, path = []) => {
       const currentPath = [...path, assembly.assembly.assembly_name];
-      
+
       if (assembly.parts && assembly.parts.length > 0) {
         assembly.parts.forEach(partDetail => {
           parts.push({
@@ -286,14 +286,14 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           });
         });
       }
-      
+
       if (assembly.subassemblies && assembly.subassemblies.length > 0) {
         assembly.subassemblies.forEach(subassembly => {
           processAssembly(subassembly, currentPath);
         });
       }
     };
-    
+
     if (hierarchy?.direct_parts) {
       hierarchy.direct_parts.forEach(partDetail => {
         parts.push({
@@ -302,29 +302,29 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
         });
       });
     }
-    
+
     if (hierarchy?.assemblies) {
       hierarchy.assemblies.forEach(assembly => {
         processAssembly(assembly);
       });
     }
-    
+
     return parts;
   };
 
   const filteredParts = () => {
     if (!orderHierarchy) return [];
-    
+
     let allParts = getAllParts(orderHierarchy);
-    
+
     if (searchText) {
-      allParts = allParts.filter(part => 
+      allParts = allParts.filter(part =>
         part.part.part_number.toLowerCase().includes(searchText.toLowerCase()) ||
         part.part.part_name.toLowerCase().includes(searchText.toLowerCase()) ||
         part.path.toLowerCase().includes(searchText.toLowerCase())
       );
     }
-    
+
     if (filterStatus !== 'all') {
       allParts = allParts.filter(part => {
         const isLinked = part.part.raw_material_unit_id !== null;
@@ -333,7 +333,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
         return true;
       });
     }
-    
+
     return allParts;
   };
 
@@ -342,7 +342,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     const totalParts = parts.length;
     const linkedParts = parts.filter(part => part.part.raw_material_unit_id !== null).length;
     const unlinkedParts = totalParts - linkedParts;
-    
+
     return { totalParts, linkedParts, unlinkedParts };
   };
 
@@ -363,18 +363,18 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     const isOrderStock = stockSourceType === 'order';
     const canLinkMaterial = (isInHouse || (isOutsource && hasRawMaterial) || isStandard || (isOutsource && !hasRawMaterial) || isOrderStock);
     const isMobile = window.innerWidth <= 768;
-    
+
     return (
-      <div key={part.part.id} style={{ 
+      <div key={part.part.id} style={{
         padding: isMobile ? '8px' : '6px 8px',
         borderBottom: '1px solid #f0f0f0',
         transition: 'all 0.2s ease',
         backgroundColor: isLinked ? '#f6ffed' : '#fff'
       }}>
         <Row gutter={[isMobile ? 4 : 8, 0]} align="middle">
-          
+
           {/* Part Number & Name */}
-          <Col xs={24} sm={6} md={5}>
+          <Col xs={24} sm={5} md={4}>
             <Text strong style={{ fontSize: isMobile ? '12px' : '13px', color: '#000', fontWeight: '600' }}>
               {part.part.part_number}
             </Text>
@@ -383,29 +383,29 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               {part.part.part_name.length > (isMobile ? 15 : 18) ? part.part.part_name.substring(0, (isMobile ? 15 : 18)) + '...' : part.part.part_name}
             </Text>
           </Col>
-          
+
           {/* Assembly Path - Hidden on mobile */}
           {!isMobile && (
-            <Col xs={24} sm={5} md={4}>
+            <Col xs={24} sm={4} md={3}>
               <Text style={{ fontSize: '11px', color: '#595959', fontWeight: '500' }}>
                 {part.path.length > 22 ? part.path.substring(0, 22) + '...' : part.path}
               </Text>
             </Col>
           )}
-          
+
           {/* Part Type */}
-          <Col xs={24} sm={3} md={2}>
+          <Col xs={24} sm={2} md={2}>
             <div>
-              <Tag 
-                color={isInHouse ? 'blue' : isStandard ? 'green' : 'orange'} 
+              <Tag
+                color={isInHouse ? 'blue' : isStandard ? 'green' : 'orange'}
                 style={{ fontSize: isMobile ? '9px' : '10px', padding: isMobile ? '1px 4px' : '2px 5px', fontWeight: '600' }}
               >
                 {isMobile ? (partType.length > 8 ? partType.substring(0, 8) : partType) : partType}
               </Tag>
               {isOutsource && partDetail && (
                 <div style={{ marginTop: '2px' }}>
-                  <Tag 
-                    color={partDetail === 'WITH_RAW_MATERIAL' ? 'green' : 'default'} 
+                  <Tag
+                    color={partDetail === 'WITH_RAW_MATERIAL' ? 'green' : 'default'}
                     style={{ fontSize: isMobile ? '8px' : '9px', padding: isMobile ? '1px 3px' : '1px 4px', fontWeight: '500' }}
                   >
                     {partDetail === 'WITH_RAW_MATERIAL' ? 'RM' : 'No RM'}
@@ -414,18 +414,46 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               )}
             </div>
           </Col>
-          
+
           {/* Quantity */}
-          <Col xs={24} sm={2} md={1}>
+          <Col xs={24} sm={1} md={1}>
             <div style={{ textAlign: 'center' }}>
               <Text style={{ fontSize: isMobile ? '12px' : '13px', fontWeight: '600', color: '#000' }}>
                 {part.part.qty}
               </Text>
             </div>
           </Col>
-          
+
+          {/* Extracted Raw Materials */}
+          <Col xs={24} sm={4} md={5}>
+            {part.extracted_data && part.extracted_data.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {part.extracted_data.map((item, index) => (
+                  <div key={index}>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <Text style={{ fontSize: '11px', color: '#595959', fontWeight: '500' }}>Material:</Text>
+                      <Text strong style={{ fontSize: '11px', color: '#000', lineHeight: '1.2' }}>
+                        {item.material || 'N/A'}
+                      </Text>
+                    </div>
+                    {item.stock_size && (
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <Text style={{ fontSize: '10px', color: '#8c8c8c' }}>Stock Size:</Text>
+                        <Text style={{ fontSize: '10px', color: '#595959', lineHeight: '1.2' }}>
+                          {item.stock_size}
+                        </Text>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Text style={{ fontSize: '11px', color: '#bfbfbf' }}>N/A</Text>
+            )}
+          </Col>
+
           {/* Material Details */}
-          <Col xs={24} sm={6} md={6}>
+          <Col xs={24} sm={5} md={6}>
             {isLinked ? (
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2px' }}>
@@ -458,7 +486,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               </Text>
             )}
           </Col>
-          
+
           {/* Actions */}
           <Col xs={24} sm={3} md={3}>
             <div style={{ display: 'flex', gap: '4px', justifyContent: isMobile ? 'flex-start' : 'center' }}>
@@ -466,7 +494,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                 <>
                   {isLinked ? (
                     <Tooltip title="Change Material">
-                      <Button 
+                      <Button
                         type="primary"
                         size="small"
                         icon={<EditOutlined />}
@@ -477,7 +505,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     </Tooltip>
                   ) : (
                     <Tooltip title="Link Material">
-                      <Button 
+                      <Button
                         type="primary"
                         size="small"
                         icon={<LinkOutlined />}
@@ -489,7 +517,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   )}
                   {isLinked && (
                     <Tooltip title="Unlink Material">
-                      <Button 
+                      <Button
                         danger
                         size="small"
                         icon={<DisconnectOutlined />}
@@ -501,16 +529,16 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   )}
                 </>
               )}
-                  <Tooltip title="View Details">
-                    <Button 
-                      type="primary"
-                      size="small"
-                      icon={<EyeOutlined />}
-                      onClick={() => handleViewPartDetails(part)}
-                      style={{ fontSize: '12px', height: isMobile ? '24px' : '28px', width: isMobile ? '28px' : '32px', padding: '0', backgroundColor: '#52c41a', borderColor: '#52c41a' }}
-                    />
-                  </Tooltip>
-                          </div>
+              <Tooltip title="View Details">
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<EyeOutlined />}
+                  onClick={() => handleViewPartDetails(part)}
+                  style={{ fontSize: '12px', height: isMobile ? '24px' : '28px', width: isMobile ? '28px' : '32px', padding: '0', backgroundColor: '#52c41a', borderColor: '#52c41a' }}
+                />
+              </Tooltip>
+            </div>
           </Col>
         </Row>
       </div>
@@ -536,7 +564,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
       <Row gutter={[16, 16]}>
         {/* Orders Section */}
         <Col xs={24} lg={8}>
-          <Card 
+          <Card
             title={
               <Space style={{ fontSize: '13px' }}>
                 <ShoppingCartOutlined />
@@ -569,9 +597,9 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     onClick={() => handleOrderClick(order)}
                   >
                     <div style={{ width: '100%', display: 'flex', alignItems: 'flex-start' }}>
-                      <ShoppingCartOutlined style={{ 
-                        fontSize: '16px', 
-                        color: selectedOrder?.id === order.id ? '#1890ff' : '#52c41a', 
+                      <ShoppingCartOutlined style={{
+                        fontSize: '16px',
+                        color: selectedOrder?.id === order.id ? '#1890ff' : '#52c41a',
                         marginRight: '8px',
                         marginTop: '2px'
                       }} />
@@ -601,19 +629,19 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
 
         {/* Parts Section */}
         <Col xs={24} lg={16}>
-          <Card 
+          <Card
             title={
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center', 
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
                 width: '100%',
                 flexWrap: 'wrap',
                 gap: '8px'
               }}>
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
                   flexWrap: 'wrap',
                   gap: '8px',
                   fontSize: '13px'
@@ -624,9 +652,9 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     <Tag color="blue" style={{ fontSize: '10px' }}>{selectedOrder.sale_order_number}</Tag>
                   )}
                   {selectedOrder && window.innerWidth > 768 && (
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
                       gap: '8px',
                       marginLeft: '16px'
                     }}>
@@ -640,8 +668,8 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   )}
                 </div>
                 {selectedOrder && (
-                  <div style={{ 
-                    display: 'flex', 
+                  <div style={{
+                    display: 'flex',
                     gap: '4px',
                     alignItems: 'center',
                     flexWrap: 'wrap'
@@ -668,10 +696,10 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                 )}
               </div>
             }
-           
+
           >
             {!selectedOrder ? (
-              <Empty 
+              <Empty
                 description="Please select an order to view parts"
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 style={{ padding: '20px' }}
@@ -680,9 +708,9 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               <>
                 {/* Mobile Statistics */}
                 {window.innerWidth <= 768 && (
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-around', 
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-around',
                     padding: '8px',
                     backgroundColor: '#fafafa',
                     borderRadius: '4px',
@@ -703,7 +731,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     </div>
                   </div>
                 )}
-                
+
                 {/* Parts List - Responsive height with table format for mobile */}
                 {window.innerWidth <= 768 ? (
                   // Mobile Table Format
@@ -719,6 +747,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                             <th style={{ padding: '8px 4px', textAlign: 'left', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Part</th>
                             <th style={{ padding: '8px 4px', textAlign: 'left', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Type</th>
                             <th style={{ padding: '8px 4px', textAlign: 'center', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Qty</th>
+                            <th style={{ padding: '8px 4px', textAlign: 'left', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Extracted RM</th>
                             <th style={{ padding: '8px 4px', textAlign: 'left', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Material</th>
                             <th style={{ padding: '8px 4px', textAlign: 'center', fontSize: '10px', fontWeight: 'bold', color: '#262626' }}>Actions</th>
                           </tr>
@@ -749,16 +778,16 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                   </div>
                                 </td>
                                 <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
-                                  <Tag 
-                                    color={isInHouse ? 'blue' : isStandard ? 'green' : 'orange'} 
+                                  <Tag
+                                    color={isInHouse ? 'blue' : isStandard ? 'green' : 'orange'}
                                     style={{ fontSize: '9px', padding: '1px 4px', fontWeight: '600' }}
                                   >
                                     {partType.length > 8 ? partType.substring(0, 8) : partType}
                                   </Tag>
                                   {isOutsource && partDetail && (
                                     <div style={{ marginTop: '2px' }}>
-                                      <Tag 
-                                        color={partDetail === 'WITH_RAW_MATERIAL' ? 'green' : 'default'} 
+                                      <Tag
+                                        color={partDetail === 'WITH_RAW_MATERIAL' ? 'green' : 'default'}
                                         style={{ fontSize: '8px', padding: '1px 3px', fontWeight: '500' }}
                                       >
                                         {partDetail === 'WITH_RAW_MATERIAL' ? 'RM' : 'No RM'}
@@ -768,6 +797,20 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                 </td>
                                 <td style={{ padding: '8px 4px', textAlign: 'center', verticalAlign: 'top' }}>
                                   <span style={{ fontSize: '11px', fontWeight: '600', color: '#000' }}>{part.part.qty}</span>
+                                </td>
+                                <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
+                                  {part.extracted_data && part.extracted_data.length > 0 ? (
+                                    <div style={{ fontSize: '9px', lineHeight: '1.3' }}>
+                                      {part.extracted_data.map((item, index) => (
+                                        <div key={index} style={{ marginBottom: index < part.extracted_data.length - 1 ? '4px' : 0 }}>
+                                          <div style={{ color: '#000', fontWeight: '600' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Material: </span>{item.material || 'N/A'}</div>
+                                          {item.stock_size && <div style={{ color: '#595959' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Stock Size: </span>{item.stock_size}</div>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span style={{ fontSize: '9px', color: '#bfbfbf' }}>N/A</span>
+                                  )}
                                 </td>
                                 <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
                                   {isLinked ? (
@@ -800,7 +843,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                       <>
                                         {isLinked ? (
                                           <Tooltip title="Change Material">
-                                            <Button 
+                                            <Button
                                               type="primary"
                                               size="small"
                                               icon={<EditOutlined />}
@@ -811,7 +854,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                           </Tooltip>
                                         ) : (
                                           <Tooltip title="Link Material">
-                                            <Button 
+                                            <Button
                                               type="primary"
                                               size="small"
                                               icon={<LinkOutlined />}
@@ -823,7 +866,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                         )}
                                         {isLinked && (
                                           <Tooltip title="Unlink Material">
-                                            <Button 
+                                            <Button
                                               danger
                                               size="small"
                                               icon={<DisconnectOutlined />}
@@ -836,7 +879,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                       </>
                                     )}
                                     <Tooltip title="View Details">
-                                      <Button 
+                                      <Button
                                         type="primary"
                                         size="small"
                                         icon={<EyeOutlined />}
@@ -853,7 +896,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                       </table>
                     ) : (
                       <div style={{ textAlign: 'center', padding: '40px' }}>
-                        <Empty 
+                        <Empty
                           description="No parts found"
                           image={Empty.PRESENTED_IMAGE_SIMPLE}
                         />
@@ -870,9 +913,9 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     ) : filteredParts().length > 0 ? (
                       <div>
                         {/* Table Header */}
-                        <div style={{ 
-                          padding: '6px 12px', 
-                          backgroundColor: '#fafafa', 
+                        <div style={{
+                          padding: '6px 12px',
+                          backgroundColor: '#fafafa',
                           borderBottom: '2px solid #f0f0f0',
                           fontWeight: 'bold',
                           fontSize: '10px',
@@ -882,14 +925,15 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                           zIndex: 10
                         }}>
                           <Row gutter={[4, 0]} align="middle">
-                            <Col xs={24} sm={6} md={5} style={{ fontSize: '10px', fontWeight: 'bold' }}>
+                            <Col xs={24} sm={5} md={4} style={{ fontSize: '10px', fontWeight: 'bold' }}>
                               {window.innerWidth <= 768 ? 'Part' : 'Part / Name'}
                             </Col>
-                            {window.innerWidth > 768 && <Col xs={24} sm={5} md={4} style={{ fontSize: '10px', fontWeight: 'bold' }}>Assembly</Col>}
-                            <Col xs={24} sm={3} md={2} style={{ fontSize: '10px', fontWeight: 'bold' }}>Type</Col>
-                            <Col xs={24} sm={2} md={1} style={{ fontSize: '10px', fontWeight: 'bold' }}>Qty</Col>
-                            <Col xs={24} sm={6} md={6} style={{ fontSize: '10px', fontWeight: 'bold' }}>
-                              {window.innerWidth <= 768 ? 'Material' : 'Material Details'}
+                            {window.innerWidth > 768 && <Col xs={24} sm={4} md={3} style={{ fontSize: '10px', fontWeight: 'bold' }}>Assembly</Col>}
+                            <Col xs={24} sm={2} md={2} style={{ fontSize: '10px', fontWeight: 'bold' }}>Type</Col>
+                            <Col xs={24} sm={1} md={1} style={{ fontSize: '10px', fontWeight: 'bold' }}>Qty</Col>
+                            <Col xs={24} sm={4} md={5} style={{ fontSize: '10px', fontWeight: 'bold' }}>Extracted Raw materials</Col>
+                            <Col xs={24} sm={5} md={6} style={{ fontSize: '10px', fontWeight: 'bold' }}>
+                              {window.innerWidth <= 768 ? 'Material' : 'Assigned Material Details'}
                             </Col>
                             <Col xs={24} sm={3} md={3} style={{ fontSize: '10px', fontWeight: 'bold' }}>Actions</Col>
                           </Row>
@@ -897,16 +941,16 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                         {/* Table Rows */}
                         {filteredParts().map(part => renderPartCard(part))}
                       </div>
-                  ) : (
-                    <div style={{ textAlign: 'center', padding: '40px' }}>
-                      <Empty 
-                        description="No parts found"
-                        image={Empty.PRESENTED_IMAGE_SIMPLE}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '40px' }}>
+                        <Empty
+                          description="No parts found"
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </Card>
@@ -968,7 +1012,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     This part is already assigned to Unit #{selectedPart.part.raw_material_unit_id}.
                     Selecting a new unit will replace the current assignment.
                     <br />
-                   
+
                   </div>
                 }
                 type="warning"
@@ -1082,8 +1126,8 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     }}
                   >
                     {availableUnits.map(unit => (
-                      <Select.Option 
-                        key={unit.id} 
+                      <Select.Option
+                        key={unit.id}
                         value={unit.id}
                         disabled={unit.status === 'exhausted'}
                       >
@@ -1159,7 +1203,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           </Button>
         ]}
       >
-        <OrderRequirementsDisplay 
+        <OrderRequirementsDisplay
           selectedOrder={selectedOrder}
           visible={showOrderRequirements}
           orderHierarchy={orderHierarchy}

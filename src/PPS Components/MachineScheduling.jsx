@@ -142,6 +142,8 @@ const MachineScheduling = () => {
   const [helpOpen, setHelpOpen] = useState(false);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateScheduleLoading, setUpdateScheduleLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('machine-scheduling');
+  const [actualRefreshKey, setActualRefreshKey] = useState(0);
   const [skippedData, setSkippedData] = useState({
     skipped_orders: [],
     skipped_parts: [],
@@ -527,7 +529,16 @@ const MachineScheduling = () => {
   return (
     <Layout className="min-h-screen bg-gray-50 p-4">
       <Content>
-        <Tabs defaultActiveKey="machine-scheduling">
+        <Tabs
+          defaultActiveKey="machine-scheduling"
+          activeKey={activeTab}
+          onChange={(key) => {
+            if (key === 'actual-scheduling') {
+              setActualRefreshKey(prev => prev + 1);
+            }
+            setActiveTab(key);
+          }}
+        >
           <TabPane tab="Planned Schedule" key="machine-scheduling">
             {/* Controls */}
             <div style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -538,182 +549,182 @@ const MachineScheduling = () => {
                 <Option value="year">Yearly</Option>
               </Select>
 
-              <DatePicker.RangePicker
-                size="small"
-                format="DD-MM-YYYY"
-                value={
-                  dateRange
-                    ? [dayjs(dateRange[0].format('YYYY-MM-DD')), dayjs(dateRange[1].format('YYYY-MM-DD'))]
-                    : null
-                }
-                onChange={(vals) =>
-                  setDateRange(vals
-                    ? [moment(vals[0].format('YYYY-MM-DD')), moment(vals[1].format('YYYY-MM-DD'))]
-                    : null
-                  )
-                }
-                placeholder={['Start Date', 'End Date']}
-                style={{ width: 220 }}
-              />
+                    <DatePicker.RangePicker
+                      size="small"
+                      format="DD-MM-YYYY"
+                      value={
+                        dateRange
+                          ? [dayjs(dateRange[0].format('YYYY-MM-DD')), dayjs(dateRange[1].format('YYYY-MM-DD'))]
+                          : null
+                      }
+                      onChange={(vals) =>
+                        setDateRange(vals
+                          ? [moment(vals[0].format('YYYY-MM-DD')), moment(vals[1].format('YYYY-MM-DD'))]
+                          : null
+                        )
+                      }
+                      placeholder={['Start Date', 'End Date']}
+                      style={{ width: 220 }}
+                    />
 
-              <Select
-                mode="multiple"
-                placeholder="Select Machines"
-                showSearch
-                filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-                value={selectedMachines}
-                onChange={setSelectedMachines}
-                style={{ minWidth: 210 }} allowClear size="small" maxTagCount={1}
-              >
-                {availableMachines.map(m => (
-                  <Option key={m.machineId} value={m.machineId} label={m.displayName}>
-                    {m.displayName}
-                  </Option>
-                ))}
-              </Select>
+                    <Select
+                      mode="multiple"
+                      placeholder="Select Machines"
+                      showSearch
+                      filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+                      value={selectedMachines}
+                      onChange={setSelectedMachines}
+                      style={{ minWidth: 210 }} allowClear size="small" maxTagCount={1}
+                    >
+                      {availableMachines.map(m => (
+                        <Option key={m.machineId} value={m.machineId} label={m.displayName}>
+                          {m.displayName}
+                        </Option>
+                      ))}
+                    </Select>
 
-              <Select
-                placeholder="Select Project"
-                showSearch
-                filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-                value={selectedProjectId}
-                onChange={handleProjectChange}
-                style={{ minWidth: 180 }} allowClear size="small"
-              >
-                {orders.map(o => {
-                  const label = o.sale_order_number || `Order ${o.id}`;
-                  return (
-                    <Option key={o.id} value={o.id} label={label}>{label}</Option>
-                  );
-                })}
-              </Select>
+                    <Select
+                      placeholder="Select Project"
+                      showSearch
+                      filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+                      value={selectedProjectId}
+                      onChange={handleProjectChange}
+                      style={{ minWidth: 180 }} allowClear size="small"
+                    >
+                      {orders.map(o => {
+                        const label = o.sale_order_number || `Order ${o.id}`;
+                        return (
+                          <Option key={o.id} value={o.id} label={label}>{label}</Option>
+                        );
+                      })}
+                    </Select>
 
-              <Select
-                mode="multiple"
-                placeholder="Select Parts"
-                showSearch
-                filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
-                value={selectedComponents}
-                onChange={setSelectedComponents}
-                style={{ minWidth: 260 }} allowClear size="small" maxTagCount={1}
-              >
-                {parts.map(p => (
-                  <Option key={p.id} value={p.part_number} label={`${p.part_name || ''} (${p.part_number})`}>
-                    {p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number}
-                  </Option>
-                ))}
-              </Select>
+                    <Select
+                      mode="multiple"
+                      placeholder="Select Parts"
+                      showSearch
+                      filterOption={(input, option) => (option?.label || '').toLowerCase().includes(input.toLowerCase())}
+                      value={selectedComponents}
+                      onChange={setSelectedComponents}
+                      style={{ minWidth: 260 }} allowClear size="small" maxTagCount={1}
+                    >
+                      {parts.map(p => (
+                        <Option key={p.id} value={p.part_number} label={`${p.part_name || ''} (${p.part_number})`}>
+                          {p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number}
+                        </Option>
+                      ))}
+                    </Select>
 
-              <Button.Group size="small">
-                <Tooltip title="Zoom In">
-                  <Button icon={<ZoomInOutlined />} onClick={() => timelineRef.current?.zoomIn(0.5)} />
-                </Tooltip>
-                <Tooltip title="Zoom Out">
-                  <Button icon={<ZoomOutOutlined />} onClick={() => timelineRef.current?.zoomOut(0.5)} />
-                </Tooltip>
-                <Tooltip title="Fit All">
-                  <Button icon={<FullscreenOutlined />} onClick={() => timelineRef.current?.fit()} />
-                </Tooltip>
-                <Button icon={<LeftOutlined />} onClick={() => handleTimelineNavigation('left')} />
-                <Button icon={<RightOutlined />} onClick={() => handleTimelineNavigation('right')} />
-              </Button.Group>
+                    <Button.Group size="small">
+                      <Tooltip title="Zoom In">
+                        <Button icon={<ZoomInOutlined />} onClick={() => timelineRef.current?.zoomIn(0.5)} />
+                      </Tooltip>
+                      <Tooltip title="Zoom Out">
+                        <Button icon={<ZoomOutOutlined />} onClick={() => timelineRef.current?.zoomOut(0.5)} />
+                      </Tooltip>
+                      <Tooltip title="Fit All">
+                        <Button icon={<FullscreenOutlined />} onClick={() => timelineRef.current?.fit()} />
+                      </Tooltip>
+                      <Button icon={<LeftOutlined />} onClick={() => handleTimelineNavigation('left')} />
+                      <Button icon={<RightOutlined />} onClick={() => handleTimelineNavigation('right')} />
+                    </Button.Group>
 
-              <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
-              <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
-              <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
-            </div>
+                    <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
+                    <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
+                    <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
+                  </div>
 
-              {/* Skipped Information Box */}
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ padding: 12, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 6 }}>
-                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Orders:</span>
-                      <span style={{ color: '#666' }}>
-                        {skippedData.skipped_orders.length > 0 ? skippedData.skipped_orders.join(', ') : 'No orders skipped'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Parts:</span>
-                      <span style={{ color: '#666' }}>
-                        {skippedData.skipped_parts.length > 0 ? skippedData.skipped_parts.join(', ') : 'No parts skipped'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontWeight: 600, color: '#1677ff' }}>Parts Without Operations:</span>
-                      <span style={{ color: '#666' }}>
-                        {skippedData.parts_without_operations.length > 0
-                          ? skippedData.parts_without_operations.map(p => p.part_number).join(', ')
-                          : 'No parts without operations'}
-                      </span>
+                  {/* Skipped Information Box */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ padding: 12, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 6 }}>
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Orders:</span>
+                          <span style={{ color: '#666' }}>
+                            {skippedData.skipped_orders.length > 0 ? skippedData.skipped_orders.join(', ') : 'No orders skipped'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Parts:</span>
+                          <span style={{ color: '#666' }}>
+                            {skippedData.skipped_parts.length > 0 ? skippedData.skipped_parts.join(', ') : 'No parts skipped'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontWeight: 600, color: '#1677ff' }}>Parts Without Operations:</span>
+                          <span style={{ color: '#666' }}>
+                            {skippedData.parts_without_operations.length > 0
+                              ? skippedData.parts_without_operations.map(p => p.part_number).join(', ')
+                              : 'No parts without operations'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              {/* Timeline */}
-              <div>
-                <div
-                  style={{
-                     height: availableMachines.length > 24 ? '70vh' : 'auto',
-                    overflowY: availableMachines.length > 24 ? 'auto' : 'hidden',
-                    overflowX: 'hidden',
-                    border: '1px solid #e8e8e8',
-                    borderRadius: 8,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                    background: '#fff',
-                  }}
-                >
-                  <div ref={timelineContainerRef} style={{ minHeight: 300, background: '#fff' }} />
-                </div>
-              </div>
-
-                {Object.keys(componentColors).length > 0 && (
-                  <ComponentLegend
-                    componentColors={componentColors}
-                    title="Production Orders"
-                    active={selectedProductionOrders}
-                    onToggle={(po) =>
-                      setSelectedProductionOrders(prev =>
-                        prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
-                      )
-                    }
-                  />
-                )}
-
-                {/* Help Modal */}
-                <Modal
-                  title="How to Use Timeline"
-                  open={helpOpen}
-                  onCancel={() => setHelpOpen(false)}
-                  footer={[<Button key="close" onClick={() => setHelpOpen(false)}>Close</Button>]}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ fontWeight: 600 }}>Navigation</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <LeftOutlined /> <RightOutlined /> <span>Use arrow buttons or drag to move</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <CalendarOutlined /> <span>Use date picker to jump to dates</span>
-                    </div>
-                    <div style={{ fontWeight: 600, marginTop: 8 }}>Zooming</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ZoomInOutlined /> <span>Click "+" to zoom in</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ZoomOutOutlined /> <span>Click "-" to zoom out</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <FullscreenOutlined /> <span>Click "Fit" to show all</span>
-                    </div>
-                    <div style={{ fontWeight: 600, marginTop: 8 }}>Interaction</div>
-                    <div>Click a task to view details</div>
-                    <div style={{ background: '#f6f7fb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10 }}>
-                      <InfoCircleOutlined style={{ marginRight: 8 }} />
-                      <span>Hold CTRL and use mouse wheel to zoom at cursor position</span>
+                  {/* Timeline */}
+                  <div>
+                    <div
+                      style={{
+                        height: availableMachines.length > 24 ? '70vh' : 'auto',
+                        overflowY: availableMachines.length > 24 ? 'auto' : 'hidden',
+                        overflowX: 'hidden',
+                        border: '1px solid #e8e8e8',
+                        borderRadius: 8,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                        background: '#fff',
+                      }}
+                    >
+                      <div ref={timelineContainerRef} style={{ minHeight: 300, background: '#fff' }} />
                     </div>
                   </div>
-                </Modal>
+
+                  {Object.keys(componentColors).length > 0 && (
+                    <ComponentLegend
+                      componentColors={componentColors}
+                      title="Production Orders"
+                      active={selectedProductionOrders}
+                      onToggle={(po) =>
+                        setSelectedProductionOrders(prev =>
+                          prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
+                        )
+                      }
+                    />
+                  )}
+
+                  {/* Help Modal */}
+                  <Modal
+                    title="How to Use Timeline"
+                    open={helpOpen}
+                    onCancel={() => setHelpOpen(false)}
+                    footer={[<Button key="close" onClick={() => setHelpOpen(false)}>Close</Button>]}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ fontWeight: 600 }}>Navigation</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <LeftOutlined /> <RightOutlined /> <span>Use arrow buttons or drag to move</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <CalendarOutlined /> <span>Use date picker to jump to dates</span>
+                      </div>
+                      <div style={{ fontWeight: 600, marginTop: 8 }}>Zooming</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <ZoomInOutlined /> <span>Click "+" to zoom in</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <ZoomOutOutlined /> <span>Click "-" to zoom out</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <FullscreenOutlined /> <span>Click "Fit" to show all</span>
+                      </div>
+                      <div style={{ fontWeight: 600, marginTop: 8 }}>Interaction</div>
+                      <div>Click a task to view details</div>
+                      <div style={{ background: '#f6f7fb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10 }}>
+                        <InfoCircleOutlined style={{ marginRight: 8 }} />
+                        <span>Hold CTRL and use mouse wheel to zoom at cursor position</span>
+                      </div>
+                    </div>
+                  </Modal>
 
                 {/* Update Modal */}
                 <Modal
@@ -743,7 +754,7 @@ const MachineScheduling = () => {
           </TabPane>
           
           <TabPane tab="Actual Schedule" key="actual-scheduling">
-            <ActualScheduling />
+            <ActualScheduling key={actualRefreshKey} />
           </TabPane>
         </Tabs>
       </Content>

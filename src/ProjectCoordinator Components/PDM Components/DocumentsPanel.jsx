@@ -495,7 +495,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
           </div>
 
           {/* Upload Modal */}
-          <Modal title={<div className="flex items-center gap-2"><PlusOutlined className="text-blue-500" /><span>{uploadParentId ? 'Upload New Version' : 'Add New Document'}</span></div>}
+          <Modal title={<div className="flex items-center gap-2"><PlusOutlined className="text-blue-500" /><span>{uploadParentId ? 'Upload New Revision' : 'Add New Document'}</span></div>}
             open={isUploadModalOpen} onCancel={() => { setIsUploadModalOpen(false); resetUploadState(); }} footer={null} destroyOnHidden width="95%" style={{ maxWidth: 450 }}>
             <div className="space-y-4 mt-4">
               <div>
@@ -506,9 +506,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                 {uploadDocType === 'Other' && <Input className="mt-2" placeholder="Enter custom document type" value={uploadDocTypeOther} onChange={e => setUploadDocTypeOther(e.target.value)} />}
               </div>
               <div>
-                <Text type="secondary" className="text-xs block mb-1">Version</Text>
+                <Text type="secondary" className="text-xs block mb-1">Revision</Text>
                 <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} placeholder="Enter version..." />
-                {uploadParentId && <Text type="warning" className="text-[10px] mt-1 block">Creating a new version for an existing document.</Text>}
+                {uploadParentId && <Text type="warning" className="text-[10px] mt-1 block">Creating a new revision for an existing document.</Text>}
               </div>
               <Dragger multiple={false} fileList={selectedFileList} beforeUpload={f => { setSelectedFileList([f]); return false; }} onRemove={() => setSelectedFileList([])} className="bg-gray-50 border-dashed border-2 py-8">
                 <p className="ant-upload-drag-icon"><InboxOutlined className="text-3xl text-blue-400" /></p>
@@ -518,7 +518,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
                 <Button onClick={() => setIsUploadModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>
                 <Button type="primary" icon={<UploadOutlined />} loading={uploading} disabled={!selectedFileList.length} onClick={handleUpload} className="no-hover-btn w-full sm:w-auto">
-                  {uploadParentId ? 'Upload New Version' : 'Upload Document'}
+                  {uploadParentId ? 'Upload New Revision' : 'Upload Document'}
                 </Button>
               </div>
             </div>

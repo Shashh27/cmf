@@ -9,11 +9,44 @@ const { TextArea } = Input;
 const { useBreakpoint } = Grid;
 const { Option } = Select;
 
+// ── Highlight helper ──────────────────────────────────────────────────────────
+// Splits `text` around every case-insensitive occurrence of `query` and wraps
+// each match in a light-blue <mark> span.
+const highlightText = (text, query) => {
+  if (!query || !text) return text ?? '-';
+  const str = String(text);
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = str.split(new RegExp(`(${escaped})`, 'gi'));
+  if (parts.length === 1) return str;
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark
+            key={i}
+            style={{
+              backgroundColor: '#bae0ff',
+              color: 'inherit',
+              padding: '0 1px',
+              borderRadius: 2,
+            }}
+          >
+            {part}
+          </mark>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+};
+
 const ProductionCompletion = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedMachines, setSelectedMachines] = useState([]);
+  const [searchText, setSearchText] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -59,8 +92,9 @@ const ProductionCompletion = () => {
 
       const supervisorLogs = allLogs.filter(
         (log) =>
-          log.supervisor_id === null ||
-          String(log.supervisor_id) === String(supervisorId)
+          (log.supervisor_id === null ||
+          String(log.supervisor_id) === String(supervisorId)) &&
+          log.operator_status?.toLowerCase() !== 'inprogress'
       );
 
       if (supervisorLogs.length === 0) {
@@ -87,7 +121,13 @@ const ProductionCompletion = () => {
         };
       });
 
-      setLogs(enrichedLogs);
+      const sortedLogs = enrichedLogs.sort((a, b) => {
+        const dateA = a.created_at ? dayjs(a.created_at).valueOf() : 0;
+        const dateB = b.created_at ? dayjs(b.created_at).valueOf() : 0;
+        return dateB - dateA;
+      });
+
+      setLogs(sortedLogs);
     } catch (error) {
       console.error('Error fetching production logs:', error);
       message.error('Failed to load production logs. Please try again.');
@@ -97,7 +137,6 @@ const ProductionCompletion = () => {
     }
   }, [supervisorId]);
 
-  // ── Get unique machine names for dropdown options ────────────────────────
   const machineOptions = useMemo(() => {
     const names = new Set();
     logs.forEach((log) => {
@@ -107,16 +146,50 @@ const ProductionCompletion = () => {
     return Array.from(names).sort().map(name => ({ label: name, value: name }));
   }, [logs]);
 
-  // ── Filter logs by selected machines ─────────────────────────────────────
   const filteredLogs = useMemo(() => {
-    if (selectedMachines.length === 0) return logs;
-    return logs.filter(log => {
-      const machineName = log.planned_schedule_item?.machine_name;
-      return selectedMachines.includes(machineName);
-    });
-  }, [logs, selectedMachines]);
+    let result = logs;
 
-  
+    if (selectedMachines.length > 0) {
+      result = result.filter(log => {
+        const machineName = log.planned_schedule_item?.machine_name;
+        return selectedMachines.includes(machineName);
+      });
+    }
+
+    if (searchText) {
+      const lowercasedSearch = searchText.toLowerCase();
+      result = result.filter(log => {
+        const projectName = String(log.operation?.order?.sale_order_number || '').toLowerCase();
+        const productName = String(log.operation?.product?.product_name || '').toLowerCase();
+        const partName = String(log.operation?.part?.part_name || '').toLowerCase();
+        const partNumber = String(log.operation?.part?.part_number || '').toLowerCase();
+        const operationName = String(log.planned_schedule_item?.operation_name || '').toLowerCase();
+        const operationNumber = String(log.planned_schedule_item?.operation_number || '').toLowerCase();
+        const machineName = String(log.planned_schedule_item?.machine_name || '').toLowerCase();
+        const operatorName = String(log.operator?.user_name || '').toLowerCase();
+        const status = String(log.status || '').toLowerCase();
+        const notes = String(log.notes || '').toLowerCase();
+        const remarks = String(log.remarks || '').toLowerCase();
+
+        return (
+          projectName.includes(lowercasedSearch) ||
+          productName.includes(lowercasedSearch) ||
+          partName.includes(lowercasedSearch) ||
+          partNumber.includes(lowercasedSearch) ||
+          operationName.includes(lowercasedSearch) ||
+          operationNumber.includes(lowercasedSearch) ||
+          machineName.includes(lowercasedSearch) ||
+          operatorName.includes(lowercasedSearch) ||
+          status.includes(lowercasedSearch) ||
+          notes.includes(lowercasedSearch) ||
+          remarks.includes(lowercasedSearch)
+        );
+      });
+    }
+
+    return result;
+  }, [logs, selectedMachines, searchText]);
+
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
@@ -126,7 +199,6 @@ const ProductionCompletion = () => {
     fetchLogs();
   };
 
-  // ── Open the remark modal ─────────────────────────────────────────────────
   const openRemarkModal = (log, newStatus) => {
     setRemarkModal({ visible: true, log, newStatus, remark: '', approvedQuantity: 0 });
   };
@@ -135,7 +207,6 @@ const ProductionCompletion = () => {
     setRemarkModal({ visible: false, log: null, newStatus: '', remark: '', approvedQuantity: 0 });
   };
 
-  // ── Submit status + remark ────────────────────────────────────────────────
   const handleUpdateStatus = async () => {
     const { log, newStatus, remark } = remarkModal;
     setLoading(true);
@@ -153,10 +224,8 @@ const ProductionCompletion = () => {
       status: newStatus,
     };
 
-    // Include approved_quantity for non-completed statuses
     if (newStatus !== 'completed') {
       const approvedQuantity = parseInt(remarkModal.approvedQuantity) || 0;
-      // For 'rework' status, approved_quantity must be less than produced_quantity
       if (newStatus === 'rework' && approvedQuantity >= log.produced_quantity) {
         message.error(`For rework status, approved quantity (${approvedQuantity}) must be less than produced quantity (${log.produced_quantity})`);
         setLoading(false);
@@ -208,16 +277,35 @@ const ProductionCompletion = () => {
     }
   };
 
-  // ── Action buttons (icon-only for desktop) ────────────────────────────────
+  // ── Row highlight: entire row gets light-blue background when any field matches ──
+  const rowClassName = (record) => {
+    if (!searchText) return '';
+    const q = searchText.toLowerCase();
+    const fields = [
+      record.operation?.order?.sale_order_number,
+      record.operation?.product?.product_name,
+      record.operation?.part?.part_name,
+      record.operation?.part?.part_number,
+      record.planned_schedule_item?.operation_name,
+      record.planned_schedule_item?.operation_number,
+      record.planned_schedule_item?.machine_name,
+      record.operator?.user_name,
+      record.status,
+      record.notes,
+      record.remarks,
+    ];
+    const matches = fields.some(f => f && String(f).toLowerCase().includes(q));
+    return matches ? 'search-highlight-row' : '';
+  };
+
   const ActionButtons = ({ record }) => {
     const isDisabled = record.status === 'completed' || record.status === 'rework';
-    
     return (
       <Space>
         <Tooltip title="Mark as Completed">
-          <span 
-            style={{ 
-              color: isDisabled ? '#bfbfbf' : '#52c41a', 
+          <span
+            style={{
+              color: isDisabled ? '#bfbfbf' : '#52c41a',
               cursor: isDisabled ? 'not-allowed' : 'pointer',
               fontSize: '16px'
             }}
@@ -227,9 +315,9 @@ const ProductionCompletion = () => {
           </span>
         </Tooltip>
         <Tooltip title="Mark as Rework">
-          <span 
-            style={{ 
-              color: isDisabled ? '#bfbfbf' : '#ff4d4f', 
+          <span
+            style={{
+              color: isDisabled ? '#bfbfbf' : '#ff4d4f',
               cursor: isDisabled ? 'not-allowed' : 'pointer',
               fontSize: '16px'
             }}
@@ -244,14 +332,32 @@ const ProductionCompletion = () => {
 
   // ── Mobile: stacked cards ─────────────────────────────────────────────────
   const MobileList = () => {
-    // Calculate paginated data for mobile
     const startIndex = (currentPage - 1) * pageSize;
     const endIndex = startIndex + pageSize;
     const paginatedLogs = filteredLogs.slice(startIndex, endIndex);
-    
+
     if (filteredLogs.length === 0) {
       return <Empty description={selectedMachines.length > 0 ? "No production logs found for selected machines" : "No production logs found for this supervisor"} />;
     }
+
+    const isRowMatch = (record) => {
+      if (!searchText) return false;
+      const q = searchText.toLowerCase();
+      const fields = [
+        record.operation?.order?.sale_order_number,
+        record.operation?.product?.product_name,
+        record.operation?.part?.part_name,
+        record.operation?.part?.part_number,
+        record.planned_schedule_item?.operation_name,
+        record.planned_schedule_item?.operation_number,
+        record.planned_schedule_item?.machine_name,
+        record.operator?.user_name,
+        record.status,
+        record.notes,
+        record.remarks,
+      ];
+      return fields.some(f => f && String(f).toLowerCase().includes(q));
+    };
 
     return (
       <>
@@ -260,17 +366,25 @@ const ProductionCompletion = () => {
             <Card
               key={record.id}
               size="small"
-              style={{ borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.08)' }}
+              style={{
+                borderRadius: 8,
+                boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                // Highlight matching cards with a light-blue border + tinted background
+                ...(isRowMatch(record) && {
+                  backgroundColor: '#f0f8ff',
+                  border: '1.5px solid #91caff',
+                }),
+              }}
               bodyStyle={{ padding: '12px 14px' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                 <div>
                   <Text strong style={{ fontSize: 14 }}>
-                    {record.operation?.product?.product_name || 'N/A'}
+                    {highlightText(record.operation?.product?.product_name, searchText)}
                   </Text>
                   <br />
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    Project #{record.operation?.order?.sale_order_number || 'N/A'}
+                    Project #{highlightText(record.operation?.order?.sale_order_number, searchText)}
                   </Text>
                 </div>
                 {getStatusTag(record.status)}
@@ -280,12 +394,26 @@ const ProductionCompletion = () => {
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Part Name</Text>
                   <br />
-                  <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_name || 'N/A'}</Text>
+                  <Text style={{ fontSize: 13 }}>{highlightText(record.operation?.part?.part_name, searchText)}</Text>
                 </div>
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Part Number</Text>
                   <br />
-                  <Text style={{ fontSize: 13 }}>{record.operation?.part?.part_number || 'N/A'}</Text>
+                  <Text style={{ fontSize: 13 }}>{highlightText(record.operation?.part?.part_number, searchText)}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Operation</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {highlightText(record.planned_schedule_item?.operation_name, searchText)}
+                  </Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Op. Number</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    #{highlightText(record.planned_schedule_item?.operation_number, searchText)}
+                  </Text>
                 </div>
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Total Quantity</Text>
@@ -304,14 +432,14 @@ const ProductionCompletion = () => {
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
                   <br />
-                  <Text style={{ fontSize: 13 }}>{record.operator?.user_name || 'N/A'}</Text>
+                  <Text style={{ fontSize: 13 }}>{highlightText(record.operator?.user_name, searchText)}</Text>
                 </div>
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>From</Text>
                   <br />
                   <Text style={{ fontSize: 13 }}>
                     {record.from_date ? dayjs(record.from_date).format('DD-MM-YYYY') : 'N/A'}
-                    <br />{record.from_time || ''}
+                    <br />{record.from_time ? record.from_time.substring(0, 8) : ''}
                   </Text>
                 </div>
                 <div>
@@ -319,7 +447,7 @@ const ProductionCompletion = () => {
                   <br />
                   <Text style={{ fontSize: 13 }}>
                     {record.to_date ? dayjs(record.to_date).format('DD-MM-YYYY') : 'N/A'}
-                    <br />{record.to_time || ''}
+                    <br />{record.to_time ? record.to_time.substring(0, 8) : ''}
                   </Text>
                 </div>
                 <div style={{ gridColumn: '1 / -1' }}>
@@ -334,7 +462,7 @@ const ProductionCompletion = () => {
                   <br />
                   <Tooltip title={record.notes || ''}>
                     <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {record.notes || 'N/A'}
+                      {highlightText(record.notes, searchText) || 'N/A'}
                     </Text>
                   </Tooltip>
                 </div>
@@ -346,8 +474,7 @@ const ProductionCompletion = () => {
             </Card>
           ))}
         </div>
-        
-        {/* Mobile Pagination */}
+
         {filteredLogs.length > pageSize && (
           <div style={{ marginTop: 16, textAlign: 'center' }}>
             <Pagination
@@ -383,9 +510,9 @@ const ProductionCompletion = () => {
       fixed: 'left',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{record.operation?.order?.sale_order_number || 'N/A'}</Text>
+          <Text strong>{highlightText(record.operation?.order?.sale_order_number, searchText)}</Text>
           <Text type="secondary" style={{ fontSize: '12px' }}>
-            {record.operation?.product?.product_name || 'N/A'}
+            {highlightText(record.operation?.product?.product_name, searchText)}
           </Text>
         </Space>
       ),
@@ -395,9 +522,21 @@ const ProductionCompletion = () => {
       key: 'part_details',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{record.operation?.part?.part_name || 'N/A'}</Text>
+          <Text strong>{highlightText(record.operation?.part?.part_name, searchText)}</Text>
           <Text type="secondary" style={{ fontSize: '12px' }}>
-            {record.operation?.part?.part_number || 'N/A'}
+            {highlightText(record.operation?.part?.part_number, searchText)}
+          </Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'Operation Details',
+      key: 'operation_details',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{highlightText(record.planned_schedule_item?.operation_name, searchText)}</Text>
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            #{highlightText(record.planned_schedule_item?.operation_number, searchText)}
           </Text>
         </Space>
       ),
@@ -407,7 +546,7 @@ const ProductionCompletion = () => {
       key: 'machine',
       render: (_, record) => (
         <Text style={{ fontSize: '12px' }}>
-          {record.planned_schedule_item?.machine_name || 'N/A'}
+          {highlightText(record.planned_schedule_item?.machine_name, searchText)}
         </Text>
       ),
     },
@@ -446,69 +585,84 @@ const ProductionCompletion = () => {
       dataIndex: 'notes',
       key: 'notes',
       width: 120,
-      render: (notes) => (
-        <Tooltip title={notes || ''}>
-          <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {notes ? (notes.length > 20 ? `${notes.substring(0, 20)}...` : notes) : '-'}
-          </Text>
-        </Tooltip>
-      ),
+      render: (notes) => {
+        const display = notes
+          ? notes.length > 20
+            ? `${notes.substring(0, 20)}...`
+            : notes
+          : '-';
+        return (
+          <Tooltip title={notes || ''}>
+            <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {highlightText(display, searchText)}
+            </Text>
+          </Tooltip>
+        );
+      },
     },
     {
       title: 'From Time',
       key: 'from',
+      sorter: (a, b) => {
+        const dateTimeA = a.from_date && a.from_time
+          ? dayjs(`${a.from_date} ${a.from_time}`).valueOf()
+          : a.from_date ? dayjs(a.from_date).valueOf() : 0;
+        const dateTimeB = b.from_date && b.from_time
+          ? dayjs(`${b.from_date} ${b.from_time}`).valueOf()
+          : b.from_date ? dayjs(b.from_date).valueOf() : 0;
+        return dateTimeA - dateTimeB;
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (_, record) => (
         <Space direction="vertical" size={0}>
           <Text style={{ fontSize: '12px' }}>
             {record.from_date ? dayjs(record.from_date).format('DD-MM-YYYY,') : 'N/A'}
           </Text>
-          <Text style={{ fontSize: '12px' }}>{record.from_time || 'N/A'}</Text>
+          <Text style={{ fontSize: '12px' }}>{record.from_time ? record.from_time.substring(0, 8) : 'N/A'}</Text>
         </Space>
       ),
     },
     {
       title: 'To Time',
       key: 'to',
+      sorter: (a, b) => {
+        const dateTimeA = a.to_date && a.to_time
+          ? dayjs(`${a.to_date} ${a.to_time}`).valueOf()
+          : a.to_date ? dayjs(a.to_date).valueOf() : 0;
+        const dateTimeB = b.to_date && b.to_time
+          ? dayjs(`${b.to_date} ${b.to_time}`).valueOf()
+          : b.to_date ? dayjs(b.to_date).valueOf() : 0;
+        return dateTimeA - dateTimeB;
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (_, record) => (
         <Space direction="vertical" size={0}>
           <Text style={{ fontSize: '12px' }}>
             {record.to_date ? dayjs(record.to_date).format('DD-MM-YYYY,') : 'N/A'}
           </Text>
-          <Text style={{ fontSize: '12px' }}>{record.to_time || 'N/A'}</Text>
+          <Text style={{ fontSize: '12px' }}>{record.to_time ? record.to_time.substring(0, 8) : 'N/A'}</Text>
         </Space>
       ),
-    },
-    {
-      title: 'Submitted At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      sorter: (a, b) => new Date(a.created_at) - new Date(b.created_at),
-      sortDirections: ['descend', 'ascend'],
-      defaultSortOrder: 'descend',
-      render: (date) => {
-        if (!date) return 'N/A';
-        const formattedDate = dayjs(date).format('DD-MM-YYYY');
-        const formattedTime = dayjs(date).format('HH:mm:ss');
-        return (
-          <Space direction="vertical" size={0}>
-            <Text style={{ fontSize: '12px' }}>{formattedDate},</Text>
-            <Text style={{ fontSize: '12px' }}>{formattedTime}</Text>
-          </Space>
-        );
-      },
     },
     {
       title: 'Remarks',
       dataIndex: 'remarks',
       key: 'remarks',
       width: 120,
-      render: (remarks) => (
-        <Tooltip title={remarks || ''}>
-          <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {remarks ? (remarks.length > 20 ? `${remarks.substring(0, 20)}...` : remarks) : '-'}
-          </Text>
-        </Tooltip>
-      ),
+      render: (remarks) => {
+        const display = remarks
+          ? remarks.length > 20
+            ? `${remarks.substring(0, 20)}...`
+            : remarks
+          : '-';
+        return (
+          <Tooltip title={remarks || ''}>
+            <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {highlightText(display, searchText)}
+            </Text>
+          </Tooltip>
+        );
+      },
     },
     {
       title: 'Status',
@@ -530,7 +684,6 @@ const ProductionCompletion = () => {
     },
   ];
 
-  // ── Derived modal config based on action type ─────────────────────────────
   const isComplete = remarkModal.newStatus === 'completed';
   const modalTitle = isComplete ? 'Confirm Completion' : 'Confirm Rework';
   const modalOkText = isComplete ? 'Yes, Complete' : 'Yes, Rework';
@@ -546,6 +699,16 @@ const ProductionCompletion = () => {
 
   return (
     <div style={{ padding: isMobile ? '12px' : '24px' }}>
+      {/* Inject row highlight CSS */}
+      <style>{`
+        .search-highlight-row > td {
+          background-color: #e6f4ff !important;
+        }
+        .search-highlight-row:hover > td {
+          background-color: #bae0ff !important;
+        }
+      `}</style>
+
       <Card
         title={
           <Space>
@@ -558,33 +721,43 @@ const ProductionCompletion = () => {
         className="shadow-sm"
         bodyStyle={{ padding: isMobile ? '8px' : '24px' }}
       >
-        {/* Machine Filter Dropdown */}
-        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Select
-            mode="multiple"
-            allowClear
-            showSearch
-            placeholder="Filter by machines..."
-            style={{ width: '100%', maxWidth: 400 }}
-            value={selectedMachines}
-            onChange={setSelectedMachines}
-            options={machineOptions}
-            filterOption={(input, option) =>
-              option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-            }
-            size={isMobile ? 'small' : 'middle'}
-          />
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+          <Space wrap style={{ flex: 1 }}>
+            <Select
+              mode="multiple"
+              allowClear
+              showSearch
+              placeholder="Filter by machines..."
+              style={{ minWidth: 250, maxWidth: 400 }}
+              value={selectedMachines}
+              onChange={setSelectedMachines}
+              options={machineOptions}
+              filterOption={(input, option) =>
+                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
+              }
+              size={isMobile ? 'small' : 'middle'}
+            />
+            <Input
+              placeholder="Search any field..."
+              allowClear
+              prefix={<SearchOutlined />}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              style={{ minWidth: 200, maxWidth: 300 }}
+              size={isMobile ? 'small' : 'middle'}
+            />
+          </Space>
           <Button
             type="default"
             icon={<ReloadOutlined />}
             onClick={handleRefresh}
             loading={refreshing}
             size={isMobile ? 'small' : 'middle'}
-            style={{ marginLeft: 16 }}
           >
             {!isMobile && 'Refresh'}
           </Button>
         </div>
+
         {isMobile ? (
           loading ? (
             <div style={{ textAlign: 'center', padding: 32 }}>
@@ -599,14 +772,12 @@ const ProductionCompletion = () => {
             dataSource={filteredLogs}
             rowKey="id"
             loading={loading}
+            rowClassName={rowClassName}
             locale={{
               emptyText: (
                 <Empty description={selectedMachines.length > 0 ? "No production logs found for selected machines" : "No production logs found for this supervisor"} />
               ),
             }}
-            sortDirections={['descend', 'ascend']}
-            defaultSortField="created_at"
-            defaultSortOrder="descend"
             pagination={{
               current: currentPage,
               pageSize: pageSize,
@@ -629,7 +800,6 @@ const ProductionCompletion = () => {
         )}
       </Card>
 
-      {/* ── Remark Modal ───────────────────────────────────────────────────── */}
       <Modal
         open={remarkModal.visible}
         onCancel={closeRemarkModal}
@@ -661,9 +831,16 @@ const ProductionCompletion = () => {
                 type="number"
                 placeholder="Enter approved quantity"
                 value={remarkModal.approvedQuantity}
-                onChange={(e) =>
-                  setRemarkModal((prev) => ({ ...prev, approvedQuantity: e.target.value }))
-                }
+                onChange={(e) => {
+                  let val = e.target.value;
+                  if (val.length > 6) val = val.slice(0, 6);
+                  setRemarkModal((prev) => ({ ...prev, approvedQuantity: val }));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === '-' || e.key === '+' || e.key === 'e' || e.key === 'E') {
+                    e.preventDefault();
+                  }
+                }}
                 min={0}
                 style={{ marginBottom: 8 }}
               />
@@ -682,7 +859,6 @@ const ProductionCompletion = () => {
             maxLength={500}
             showCount
           />
-          
         </div>
       </Modal>
     </div>
