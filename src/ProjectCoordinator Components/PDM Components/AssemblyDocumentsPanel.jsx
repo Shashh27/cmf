@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {PlusOutlined,DownloadOutlined,EyeOutlined,SyncOutlined,InboxOutlined,FilePdfOutlined,DeleteOutlined,UploadOutlined,ApiOutlined,} from "@ant-design/icons";
-import {Badge,Button,Empty,Input,Modal,Popconfirm,Select,Space,Table,Tag,Typography,Upload,message,} from "antd";
+import { PlusOutlined, DownloadOutlined, EyeOutlined, SyncOutlined, InboxOutlined, FilePdfOutlined, DeleteOutlined, UploadOutlined, ApiOutlined, } from "@ant-design/icons";
+import { Badge, Button, Empty, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, Upload, message, } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -31,7 +31,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     docName: "",
     docType: "2D",
     docTypeOther: "",
-    version: "v1.0"
+    version: ""
   };
   const [uploadRows, setUploadRows] = useState([initialUploadRow]);
 
@@ -61,53 +61,14 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
   };
 
   const updateUploadRow = (id, field, value) => {
-    setUploadRows(prev => prev.map(row => 
+    setUploadRows(prev => prev.map(row =>
       row.id === id ? { ...row, [field]: value } : row
     ));
   };
 
   const handleVersionChangeInRow = (id, value) => {
-    // Always start with 'v' if not present
-    if (value && !value.startsWith('v')) {
-      value = 'v' + value;
-    }
-    
-    // Remove invalid characters but keep v, digits, dots, and alphanumeric
-    value = value.replace(/[^v0-9.a-zA-Z]/g, '');
-    
-    // Ensure only one 'v' at the beginning
-    if (value.startsWith('v')) {
-      value = 'v' + value.substring(1).replace(/v/g, '');
-    }
-    
-    // Ensure only one dot
-    const parts = value.split('.');
-    if (parts.length > 2) {
-      value = parts[0] + '.' + parts.slice(1).join('');
-    }
-    
-    // Limit to exactly 3 characters before decimal (including 'v'), and max 3 characters after decimal
-    const match = value.match(/^(v\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
-    if (match) {
-      let major = match[1] || 'v';
-      let afterDecimal = match[2] || '';
-
-      value = major;
-      // Always include decimal point
-      value += '.';
-      // Add after decimal content (max 3 characters)
-      if (afterDecimal) {
-        afterDecimal = afterDecimal.substring(0, 3);
-        value += afterDecimal;
-      }
-    } else {
-      // Fallback for initial 'v' or 'v12' (max 3 chars total)
-      const initialMatch = value.match(/^(v\d{0,2})/);
-      if (initialMatch) {
-        value = initialMatch[1] + '.';
-      }
-    }
-    
+    // Allow alphanumeric characters, dots, and dashes
+    value = value.replace(/[^a-zA-Z0-9.-]/g, '');
     updateUploadRow(id, 'version', value);
   };
 
@@ -142,11 +103,11 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
   const latestDocs = useMemo(() => {
     return Object.values(groupedDocs).map((group) =>
-      [...group].sort(
-        (a, b) =>
-          parseFloat(String(b.document_version).replace(/^v/i, "")) -
-          parseFloat(String(a.document_version).replace(/^v/i, ""))
-      )[0]
+      [...group].sort((a, b) => {
+        const vA = String(a.document_version || "");
+        const vB = String(b.document_version || "");
+        return vB.localeCompare(vA, undefined, { numeric: true });
+      })[0]
     );
   }, [groupedDocs]);
 
@@ -189,15 +150,15 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
   const is3DFile = (doc) => {
     if (!doc) return false;
-    
+
     // Check document_name first
     const name = doc.document_name || "";
     const nameExt = name.split(".").pop().toLowerCase();
-    
+
     // Also check document_url as fallback
     const url = doc.document_url || "";
     const urlExt = url.split(".").pop().toLowerCase();
-    
+
     const extensions = ["step", "stp", "stl", "obj", "gltf", "glb"];
     return extensions.includes(nameExt) || extensions.includes(urlExt);
   };
@@ -231,12 +192,12 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
       message.info('No 3D documents found. Please upload 3D files (.step, .stl, .obj, etc.) first.');
       return;
     }
-    
+
     // Set selected document if not already set
     if (!selectedThreeDDocumentId) {
       setSelectedThreeDDocumentId(threeDDocs[0].id);
     }
-    
+
     setIs3DModalOpen(true);
     if (viewType === selectedView) {
       setSelectedView('reset'); // Temporarily set to a different value to force re-render
@@ -249,20 +210,20 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
   const ViewControls = ({ onOpenModal, size = 'small' }) => {
     const buttonSize = size === 'small' ? 'small' : 'middle';
     const spacing = size === 'small' ? 'compact' : 'default';
-    
+
     const viewButtons = [
       { key: 'front', label: 'Front' },
       { key: 'isometric', label: 'Isometric' },
       { key: 'top', label: 'Top' },
       { key: 'bottom', label: 'Bottom' }
     ];
-    
+
     return (
       <Space size={spacing} className="bg-white/90 backdrop-blur-sm rounded-lg p-2 shadow-md">
         {viewButtons.map(({ key, label }) => (
-          <Button 
+          <Button
             key={key}
-            size={buttonSize} 
+            size={buttonSize}
             type={selectedView === key ? 'primary' : 'default'}
             onClick={() => onOpenModal(key)}
           >
@@ -294,9 +255,17 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
   };
 
   const initiateNewVersion = (doc, latestVer) => {
-    const nextVer =
-      "v" + (parseFloat(String(latestVer).replace(/^v/i, "")) + 1.0).toFixed(1);
-    
+    let nextVer = String(latestVer || "");
+    const match = nextVer.match(/(\d+)$/);
+    if (match) {
+      const numStr = match[1];
+      const num = parseInt(numStr, 10);
+      const nextNumStr = String(num + 1).padStart(numStr.length, '0');
+      nextVer = nextVer.substring(0, match.index) + nextNumStr;
+    } else {
+      nextVer = nextVer ? nextVer + "-01" : "01";
+    }
+
     setUploadParentId(doc.parent_id || doc.id);
     setUploadRows([{
       id: Date.now(),
@@ -323,7 +292,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 
   const handleUpload = async () => {
     if (!selectedItem || selectedItem.itemType !== "assembly") return;
-    
+
     for (const row of uploadRows) {
       if (row.fileList.length === 0) {
         message.warning(`Please select a file for document: ${row.docName || 'New'}`);
@@ -337,6 +306,10 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         message.warning(`Please enter custom document type for ${row.docName}`);
         return;
       }
+      if (!row.version || !row.version.trim()) {
+        message.warning(`Please enter a revision for ${row.docName || 'the document'}`);
+        return;
+      }
     }
 
     setUploading(true);
@@ -347,12 +320,12 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         const formData = new FormData();
         formData.append("file", row.fileList[0]);
         formData.append("document_name", row.docName.trim());
-        
+
         const effectiveType = row.docType === "Other" ? row.docTypeOther.trim() : row.docType;
         formData.append("document_type", effectiveType);
-        formData.append("document_version", row.version || "v1.0");
+        formData.append("document_version", row.version.trim());
         formData.append("assembly_id", String(selectedItem.id));
-        
+
         if (uploadParentId) {
           formData.append("parent_id", String(uploadParentId));
         }
@@ -427,7 +400,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
       },
     },
     {
-      title: <span className="text-xs font-semibold whitespace-nowrap">VERSION</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap">REVISION</span>,
       key: "version",
       width: "20%",
       render: (_, record) => {
@@ -451,16 +424,14 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             }}
           >
             {group
-              .sort(
-                (a, b) =>
-                  parseFloat(String(b.document_version).replace(/^v/i, "")) -
-                  parseFloat(String(a.document_version).replace(/^v/i, ""))
-              )
+              .sort((a, b) => {
+                const vA = String(a.document_version || "");
+                const vB = String(b.document_version || "");
+                return vB.localeCompare(vA, undefined, { numeric: true });
+              })
               .map((ver) => {
-                const verLabel = ver.document_version?.startsWith("v")
-                  ? ver.document_version
-                  : `v${ver.document_version || "1.0"}`;
-                
+                const verLabel = ver.document_version || "00";
+
                 return (
                   <Select.Option key={ver.id} value={ver.id} label={verLabel}>
                     <div className="flex justify-between items-center w-full py-1">
@@ -469,11 +440,10 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
                           status={ver.id === latestDoc.id ? "success" : "default"}
                         />
                         <span
-                          className={`font-bold ${
-                            ver.id === currentDoc.id
-                              ? "text-blue-600"
-                              : "text-gray-600"
-                          }`}
+                          className={`font-bold ${ver.id === currentDoc.id
+                            ? "text-blue-600"
+                            : "text-gray-600"
+                            }`}
                         >
                           {verLabel}
                         </span>
@@ -502,57 +472,66 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         const latestDoc = record;
         return (
           <div className="flex gap-1 justify-center">
-            <Button
-              size="small"
-              type="text"
-              icon={<EyeOutlined />}
-              onClick={() => handlePreview(currentDoc)}
-              className="hover:text-blue-500 hover:bg-blue-50"
-            />
+            <Tooltip title="View">
+              <Button
+                size="small"
+                type="text"
+                icon={<EyeOutlined />}
+                onClick={() => handlePreview(currentDoc)}
+                className="hover:text-blue-500 hover:bg-blue-50"
+              />
+            </Tooltip>
             {is3DFile(currentDoc) && (
-              <Button
-                size="small"
-                type="text"
-                icon={<ApiOutlined />}
-                onClick={() => {
-                  setSelectedThreeDDocumentId(currentDoc.id);
-                  openViewModal();
-                }}
-                className="hover:text-purple-500 hover:bg-purple-50"
-                title="3D View"
-              />
+              <Tooltip title="3D View">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ApiOutlined />}
+                  onClick={() => {
+                    setSelectedThreeDDocumentId(currentDoc.id);
+                    openViewModal();
+                  }}
+                  className="hover:text-purple-500 hover:bg-purple-50"
+                />
+              </Tooltip>
             )}
-            <Button
-              size="small"
-              type="text"
-              icon={<DownloadOutlined />}
-              onClick={() => handleDownload(currentDoc.id)}
-              className="hover:text-green-500 hover:bg-green-50"
-            />
-            <Button
-              size="small"
-              type="text"
-              icon={<SyncOutlined />}
-              className="text-orange-500 hover:bg-orange-50"
-              onClick={() =>
-                initiateNewVersion(latestDoc, latestDoc.document_version)
-              }
-            />
-            <Popconfirm
-              title="Delete Document"
-              description="Delete this version? This cannot be undone."
-              onConfirm={() => handleDelete(currentDoc.id)}
-              okText="Yes"
-              cancelText="No"
-            >
+            <Tooltip title="Download">
               <Button
                 size="small"
                 type="text"
-                danger
-                icon={<DeleteOutlined />}
-                className="hover:bg-red-50"
+                icon={<DownloadOutlined />}
+                onClick={() => handleDownload(currentDoc.id)}
+                className="hover:text-green-500 hover:bg-green-50"
               />
-            </Popconfirm>
+            </Tooltip>
+            <Tooltip title="Update Revision">
+              <Button
+                size="small"
+                type="text"
+                icon={<SyncOutlined />}
+                className="text-orange-500 hover:bg-orange-50"
+                onClick={() =>
+                  initiateNewVersion(latestDoc, latestDoc.document_version)
+                }
+              />
+            </Tooltip>
+            <Tooltip title="Delete">
+              <Popconfirm
+                title="Delete Document"
+                description="Delete this version? This cannot be undone."
+                onConfirm={() => handleDelete(currentDoc.id)}
+                okText="Yes"
+                cancelText="No"
+              >
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  className="hover:bg-red-50"
+                />
+              </Popconfirm>
+            </Tooltip>
           </div>
         );
       },
@@ -613,221 +592,221 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             size="small"
             icon={<PlusOutlined />}
             onClick={() => {
-            resetUploadState();
-            setIsUploadModalOpen(true);
-          }}
+              resetUploadState();
+              setIsUploadModalOpen(true);
+            }}
           >
             Add Document
           </Button>
         </div>
-    </div>
+      </div>
 
-    <div className="flex-1 min-h-0 overflow-hidden px-3 pb-3">
-      <Table
-        loading={loading}
-        dataSource={latestDocs}
-        rowKey="id"
-        size="small"
-        pagination={false}
-        columns={columns}
-        className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden h-full"
-        locale={{
-          emptyText: (
-            <Empty
-              description="No documents added for this assembly"
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-            />
-          ),
-        }}
-        scroll={{ x: true, y: "100%" }}
-        style={{ height: '100%' }}
-      />
-    </div>
+      <div className="flex-1 min-h-0 overflow-hidden px-3 pb-3">
+        <Table
+          loading={loading}
+          dataSource={latestDocs}
+          rowKey="id"
+          size="small"
+          pagination={false}
+          columns={columns}
+          className="docs-ebom-table border border-slate-100 rounded-lg overflow-hidden h-full"
+          locale={{
+            emptyText: (
+              <Empty
+                description="No documents added for this assembly"
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+              />
+            ),
+          }}
+          scroll={{ x: true, y: "100%" }}
+          style={{ height: '100%' }}
+        />
+      </div>
 
-    <Modal
-      className="assembly-upload-modal"
-      title={
-        <div className="flex items-center gap-2">
-          <PlusOutlined className="text-blue-500" />
-          <span>{uploadParentId ? "Upload New Version" : "Add New Document(s)"}</span>
-        </div>
-      }
-      open={isUploadModalOpen}
-      onCancel={() => {
-        setIsUploadModalOpen(false);
-        resetUploadState();
-      }}
-      footer={null}
-      destroyOnHidden
-      width="95%"
-      style={{ maxWidth: 1000 }}
-    >
-      <div className="mt-1 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
-        {/* Header chip with assembly name */}
-        <div className="flex items-center justify-between mb-4">
+      <Modal
+        className="assembly-upload-modal"
+        title={
           <div className="flex items-center gap-2">
-            <span className="text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-600 border border-blue-100">
-              For Assembly: <span className="font-semibold">{selectedItem?.label || selectedItem?.name}</span>
-            </span>
+            <PlusOutlined className="text-blue-500" />
+            <span>{uploadParentId ? "Upload New Version" : "Add New Document(s)"}</span>
           </div>
-          <Text type="secondary" className="text-[10px]">
-            {uploadRows.length} Document(s) to upload
-          </Text>
-        </div>
+        }
+        open={isUploadModalOpen}
+        onCancel={() => {
+          setIsUploadModalOpen(false);
+          resetUploadState();
+        }}
+        footer={null}
+        destroyOnHidden
+        width="95%"
+        style={{ maxWidth: 1000 }}
+      >
+        <div className="mt-1 max-h-[70vh] overflow-y-auto pr-2 custom-scrollbar">
+          {/* Header chip with assembly name */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] px-2 py-1 rounded-full bg-blue-50 text-blue-600 border border-blue-100">
+                For Assembly: <span className="font-semibold">{selectedItem?.label || selectedItem?.name}</span>
+              </span>
+            </div>
+            <Text type="secondary" className="text-[10px]">
+              {uploadRows.length} Document(s) to upload
+            </Text>
+          </div>
 
-        <div className="space-y-4">
-          {uploadRows.map((row, index) => (
-            <div key={row.id} className="relative border border-slate-100 rounded-lg bg-slate-50/60 p-4 shadow-sm transition-all hover:border-blue-200">
-              {uploadRows.length > 1 && !uploadParentId && (
-                <Button 
-                  type="text" 
-                  danger 
-                  size="small"
-                  icon={<DeleteOutlined />}
-                  onClick={() => removeUploadRow(row.id)}
-                  className="absolute -top-2 -right-2 bg-white shadow-sm border border-red-100 rounded-full hover:bg-red-50"
-                />
-              )}
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-                {/* Upload file */}
-                <div className="flex flex-col gap-1">
-                  <Text type="secondary" className="text-[11px] block font-medium">
-                    * Select File
-                  </Text>
-                  <Upload
-                    multiple={false}
-                    fileList={row.fileList}
-                    beforeUpload={(file) => {
-                      updateUploadRow(row.id, 'fileList', [file]);
-                      if (!row.docName) {
-                        const base = file.name.includes(".")
-                          ? file.name.slice(0, file.name.lastIndexOf("."))
-                          : file.name;
-                        updateUploadRow(row.id, 'docName', base);
-                      }
-                      return false;
-                    }}
-                    onRemove={() => updateUploadRow(row.id, 'fileList', [])}
-                    maxCount={1}
-                    showUploadList={{ showRemoveIcon: true }}
-                  >
-                    <Button 
-                      icon={<InboxOutlined />} 
-                      size="middle" 
-                      className={`w-full justify-center ${row.fileList.length > 0 ? 'border-green-500 text-green-600 bg-green-50' : 'border-blue-400 text-blue-500'}`}
-                    >
-                      {row.fileList.length > 0 ? 'File Selected' : 'Choose File'}
-                    </Button>
-                  </Upload>
-                </div>
-
-                {/* Document name */}
-                <div className="flex flex-col gap-1">
-                  <Text type="secondary" className="text-[11px] block font-medium">
-                    * Document Name
-                  </Text>
-                  <Input
-                    placeholder="Enter document name"
-                    value={row.docName}
-                    onChange={(e) => updateUploadRow(row.id, 'docName', e.target.value)}
-                    className="bg-white"
+          <div className="space-y-4">
+            {uploadRows.map((row, index) => (
+              <div key={row.id} className="relative border border-slate-100 rounded-lg bg-slate-50/60 p-4 shadow-sm transition-all hover:border-blue-200">
+                {uploadRows.length > 1 && !uploadParentId && (
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    onClick={() => removeUploadRow(row.id)}
+                    className="absolute -top-2 -right-2 bg-white shadow-sm border border-red-100 rounded-full hover:bg-red-50"
                   />
-                </div>
+                )}
 
-                {/* Document type */}
-                <div className="flex flex-col gap-1">
-                  <Text type="secondary" className="text-[11px] block font-medium">
-                    * Document Type
-                  </Text>
-                  <div className="flex flex-col gap-2">
-                    <Select
-                      className="w-full bg-white"
-                      value={row.docType}
-                      onChange={(val) => updateUploadRow(row.id, 'docType', val)}
-                      size="middle"
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+                  {/* Upload file */}
+                  <div className="flex flex-col gap-1">
+                    <Text type="secondary" className="text-[11px] block font-medium">
+                      * Select File
+                    </Text>
+                    <Upload
+                      multiple={false}
+                      fileList={row.fileList}
+                      beforeUpload={(file) => {
+                        updateUploadRow(row.id, 'fileList', [file]);
+                        if (!row.docName) {
+                          const base = file.name.includes(".")
+                            ? file.name.slice(0, file.name.lastIndexOf("."))
+                            : file.name;
+                          updateUploadRow(row.id, 'docName', base);
+                        }
+                        return false;
+                      }}
+                      onRemove={() => updateUploadRow(row.id, 'fileList', [])}
+                      maxCount={1}
+                      showUploadList={{ showRemoveIcon: true }}
                     >
-                      <Select.Option value="2D">2D Drawing</Select.Option>
-                      <Select.Option value="3D">3D Model (STL/STEP)</Select.Option>
-                      <Select.Option value="Other">Other</Select.Option>
-                    </Select>
-                    {row.docType === "Other" && (
-                      <Input
-                        size="small"
-                        placeholder="Enter custom type"
-                        value={row.docTypeOther}
-                        onChange={(e) => updateUploadRow(row.id, 'docTypeOther', e.target.value)}
-                        className="bg-white border-blue-200"
-                      />
-                    )}
+                      <Button
+                        icon={<InboxOutlined />}
+                        size="middle"
+                        className={`w-full justify-center ${row.fileList.length > 0 ? 'border-green-500 text-green-600 bg-green-50' : 'border-blue-400 text-blue-500'}`}
+                      >
+                        {row.fileList.length > 0 ? 'File Selected' : 'Choose File'}
+                      </Button>
+                    </Upload>
+                  </div>
+
+                  {/* Document name */}
+                  <div className="flex flex-col gap-1">
+                    <Text type="secondary" className="text-[11px] block font-medium">
+                      * Document Name
+                    </Text>
+                    <Input
+                      placeholder="Enter document name"
+                      value={row.docName}
+                      onChange={(e) => updateUploadRow(row.id, 'docName', e.target.value)}
+                      className="bg-white"
+                    />
+                  </div>
+
+                  {/* Document type */}
+                  <div className="flex flex-col gap-1">
+                    <Text type="secondary" className="text-[11px] block font-medium">
+                      * Document Type
+                    </Text>
+                    <div className="flex flex-col gap-2">
+                      <Select
+                        className="w-full bg-white"
+                        value={row.docType}
+                        onChange={(val) => updateUploadRow(row.id, 'docType', val)}
+                        size="middle"
+                      >
+                        <Select.Option value="2D">2D Drawing</Select.Option>
+                        <Select.Option value="3D">3D Model (STL/STEP)</Select.Option>
+                        <Select.Option value="Other">Other</Select.Option>
+                      </Select>
+                      {row.docType === "Other" && (
+                        <Input
+                          size="small"
+                          placeholder="Enter custom type"
+                          value={row.docTypeOther}
+                          onChange={(e) => updateUploadRow(row.id, 'docTypeOther', e.target.value)}
+                          className="bg-white border-blue-200"
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Version */}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <Text type="secondary" className="text-[11px] block font-medium">
+                        * Revision
+                      </Text>
+                    </div>
+                    <Input
+                      placeholder="e.g. 00, 01"
+                      value={row.version}
+                      onChange={(e) => handleVersionChangeInRow(row.id, e.target.value)}
+                      className="bg-white font-mono"
+                      title="Enter revision number/code"
+                    />
                   </div>
                 </div>
 
-                {/* Version */}
-                <div className="flex flex-col gap-1">
-                  <div className="flex justify-between items-center">
-                    <Text type="secondary" className="text-[11px] block font-medium">
-                      * Version
+                {uploadParentId && (
+                  <div className="mt-3 p-2 bg-amber-50 border border-amber-100 rounded">
+                    <Text type="warning" className="text-[11px] flex items-center gap-1">
+                      <SyncOutlined spin={uploading} /> Creating a new version for an existing document.
                     </Text>
                   </div>
-                  <Input
-                    value={row.version}
-                    onChange={(e) => handleVersionChangeInRow(row.id, e.target.value)}
-                    className="bg-gray-50 font-mono"
-                    disabled={!uploadParentId}
-                    title={!uploadParentId ? "Initial version is fixed at v1.0" : "Edit version format (e.g. v1.1, v2.0)"}
-                  />
-                </div>
+                )}
               </div>
+            ))}
+          </div>
 
-              {uploadParentId && (
-                <div className="mt-3 p-2 bg-amber-50 border border-amber-100 rounded">
-                  <Text type="warning" className="text-[11px] flex items-center gap-1">
-                    <SyncOutlined spin={uploading} /> Creating a new version for an existing document.
-                  </Text>
-                </div>
-              )}
+          {!uploadParentId && (
+            <div className="mt-4 flex justify-center">
+              <Button
+                type="dashed"
+                size="middle"
+                icon={<PlusOutlined />}
+                onClick={addUploadRow}
+                className="text-blue-600 border-blue-200 hover:border-blue-400 w-full max-w-xs bg-blue-50/30"
+              >
+                Add Another Document
+              </Button>
             </div>
-          ))}
-        </div>
+          )}
 
-        {!uploadParentId && (
-          <div className="mt-4 flex justify-center">
-            <Button 
-              type="dashed" 
-              size="middle" 
-              icon={<PlusOutlined />}
-              onClick={addUploadRow}
-              className="text-blue-600 border-blue-200 hover:border-blue-400 w-full max-w-xs bg-blue-50/30"
+          <div className="flex flex-col sm:flex-row justify-end gap-2 pt-6 sticky bottom-0 bg-white py-3 border-t border-slate-100 mt-4">
+            <Button
+              onClick={() => {
+                setIsUploadModalOpen(false);
+                resetUploadState();
+              }}
+              className="w-full sm:w-auto"
             >
-              Add Another Document
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              icon={<UploadOutlined />}
+              loading={uploading}
+              disabled={uploadRows.some(r => r.fileList.length === 0)}
+              onClick={handleUpload}
+              className="w-full sm:w-auto min-w-[140px]"
+            >
+              {uploadParentId ? "Upload New Version" : `Upload ${uploadRows.length} Document(s)`}
             </Button>
           </div>
-        )}
-
-        <div className="flex flex-col sm:flex-row justify-end gap-2 pt-6 sticky bottom-0 bg-white py-3 border-t border-slate-100 mt-4">
-          <Button
-            onClick={() => {
-              setIsUploadModalOpen(false);
-              resetUploadState();
-            }}
-            className="w-full sm:w-auto"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="primary"
-            icon={<UploadOutlined />}
-            loading={uploading}
-            disabled={uploadRows.some(r => r.fileList.length === 0)}
-            onClick={handleUpload}
-            className="w-full sm:w-auto min-w-[140px]"
-          >
-            {uploadParentId ? "Upload New Version" : `Upload ${uploadRows.length} Document(s)`}
-          </Button>
         </div>
-      </div>
-    </Modal>
+      </Modal>
 
       <Modal
         title={previewDocument?.document_name || "Document Preview"}
@@ -874,21 +853,21 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         destroyOnHidden
         styles={{ body: { padding: 8 } }}
         footer={[
-          <Button key="dl" icon={<DownloadOutlined />} onClick={() => { 
+          <Button key="dl" icon={<DownloadOutlined />} onClick={() => {
             const selectedDoc = get3DDocuments().find(doc => doc.id === selectedThreeDDocumentId);
-            if (selectedDoc?.id) { 
-              const a = document.createElement("a"); 
-              a.href = `${API_BASE_URL}/documents/${selectedDoc.id}/download`; 
-              a.setAttribute("download", selectedDoc.document_name); 
-              document.body.appendChild(a); 
-              a.click(); 
-              a.remove(); 
-            } 
+            if (selectedDoc?.id) {
+              const a = document.createElement("a");
+              a.href = `${API_BASE_URL}/documents/${selectedDoc.id}/download`;
+              a.setAttribute("download", selectedDoc.document_name);
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+            }
           }}>Download</Button>,
-          <Button key="cl" type="primary" onClick={() => { 
-            setIs3DModalOpen(false); 
-            setSelected3DDocument(null); 
-            setSelectedThreeDDocumentId(null); 
+          <Button key="cl" type="primary" onClick={() => {
+            setIs3DModalOpen(false);
+            setSelected3DDocument(null);
+            setSelectedThreeDDocumentId(null);
           }}>Close</Button>
         ]}
       >
@@ -920,13 +899,13 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
               <ViewControls onOpenModal={openViewModal} size="middle" />
             </div>
             <div style={{ height: 'clamp(280px, 50vh, 420px)' }}>
-              <ModelViewer3D 
-                documentId={selectedThreeDDocumentId} 
-                height={400} 
-                showControls 
-                initialView={selectedView} 
-                showEdgeButton={true} 
-                restrictZoom={false} 
+              <ModelViewer3D
+                documentId={selectedThreeDDocumentId}
+                height={400}
+                showControls
+                initialView={selectedView}
+                showEdgeButton={true}
+                restrictZoom={false}
               />
             </div>
           </div>
@@ -937,4 +916,3 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
 };
 
 export default AssemblyDocumentsPanel;
-

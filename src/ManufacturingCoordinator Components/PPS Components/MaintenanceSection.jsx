@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from "react";
 import dayjs from "dayjs";
 import Lottie from "lottie-react";
-import warningAnimation from "../assets/warning.json";
+import warningAnimation from "../../assets/warning.json";
 import isSameOrAfter from "dayjs/plugin/isSameOrAfter";
 import isSameOrBefore from "dayjs/plugin/isSameOrBefore";
 
 dayjs.extend(isSameOrAfter);
 dayjs.extend(isSameOrBefore);
 
-import { SCHEDULING_API_BASE_URL } from "../Config/schedulingconfig.js";
-import config from "../Config/config.js";
+import { SCHEDULING_API_BASE_URL } from "../../Config/schedulingconfig.js";
+import config from "../../Config/config.js";
 import {
   Card, Row, Col, message, Spin, Button, Modal, Form, Radio, Space, Alert,
   Checkbox, Calendar, Tag, Table, Select, List, Upload, DatePicker,
@@ -25,17 +25,17 @@ const { Dragger } = Upload;
 
 // Shift option definitions — drives rendering via .map(), no repetition
 const WORKING_DAY_SHIFTS = [
-  { code: "GENERAL", label: "General (8:30 AM - 5:00 PM)",    desc: "Standard working hours",                color: "#1890ff", bg: "#e6f7ff", border: "#1890ff" },
-  { code: "NEXT",    label: "5:00 PM - 9:00 PM",              desc: "Extended hours",                       color: "#fa8c16", bg: "#fff7e6", border: "#fa8c16" },
-  { code: "HALF",    label: "Half Shift (8:30 AM - 1:00 PM)", desc: "Shortened hours (cannot combine)",     color: "#52c41a", bg: "#f6ffed", border: "#52c41a" },
-  { code: "CUSTOM",  label: "Custom Shift",                    desc: "Define your own shift timings",        color: "#722ed1", bg: "#f9f0ff", border: "#722ed1" },
+  { code: "GENERAL", label: "General (8:30 AM - 5:00 PM)", desc: "Standard working hours", color: "#1890ff", bg: "#e6f7ff", border: "#1890ff" },
+  { code: "NEXT", label: "5:00 PM - 9:00 PM", desc: "Extended hours", color: "#fa8c16", bg: "#fff7e6", border: "#fa8c16" },
+  { code: "HALF", label: "Half Shift (8:30 AM - 1:00 PM)", desc: "Shortened hours (cannot combine)", color: "#52c41a", bg: "#f6ffed", border: "#52c41a" },
+  { code: "CUSTOM", label: "Custom Shift", desc: "Define your own shift timings", color: "#722ed1", bg: "#f9f0ff", border: "#722ed1" },
 ];
 
 const NON_WORKING_DAY_SHIFTS = [
-  { code: "GENERAL",     label: "General (8:30 AM - 5:00 PM)",         desc: "Full day option",                     color: "#1890ff", bg: "#e6f7ff", border: "#1890ff" },
-  { code: "NEXT",        label: "5:00 PM - 9:00 PM",                   desc: "Extended hours",                      color: "#fa8c16", bg: "#fff7e6", border: "#fa8c16" },
+  { code: "GENERAL", label: "General (8:30 AM - 5:00 PM)", desc: "Full day option", color: "#1890ff", bg: "#e6f7ff", border: "#1890ff" },
+  { code: "NEXT", label: "5:00 PM - 9:00 PM", desc: "Extended hours", color: "#fa8c16", bg: "#fff7e6", border: "#fa8c16" },
   { code: "NON_WORKING", label: "Non-Working Day (8:30 AM - 1:00 PM)", desc: "Shortened hours for non-working days", color: "#52c41a", bg: "#f6ffed", border: "#52c41a" },
-  { code: "CUSTOM",      label: "Custom Shift",                         desc: "Define your own shift timings",        color: "#722ed1", bg: "#f9f0ff", border: "#722ed1" },
+  { code: "CUSTOM", label: "Custom Shift", desc: "Define your own shift timings", color: "#722ed1", bg: "#f9f0ff", border: "#722ed1" },
 ];
 
 const ShiftOption = ({ option, selected, onChange }) => (
@@ -230,14 +230,14 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
 
   const getFilteredLeaveLogs = () => {
     let filtered = leaveLogs;
-    
+
     // Filter by operator name
     if (searchText) {
-      filtered = filtered.filter(log => 
+      filtered = filtered.filter(log =>
         log.operator_name?.toLowerCase().includes(searchText.toLowerCase())
       );
     }
-    
+
     // Filter by date range
     if (dateRange && dateRange.length === 2) {
       const [startDate, endDate] = dateRange;
@@ -246,7 +246,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
         return logDate.isAfter(startDate.startOf('day')) && logDate.isBefore(endDate.endOf('day'));
       });
     }
-    
+
     return filtered;
   };
 
@@ -278,15 +278,15 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   ];
 
   const leaveLogsColumns = [
-    { 
-      title: "Operator Name", 
-      dataIndex: "operator_name", 
+    {
+      title: "Operator Name",
+      dataIndex: "operator_name",
       key: "operator_name",
       sorter: (a, b) => a.operator_name?.localeCompare(b.operator_name || '')
     },
-    { 
-      title: "From Date", 
-      dataIndex: "from_date", 
+    {
+      title: "From Date",
+      dataIndex: "from_date",
       key: "from_date",
       render: (date) => {
         if (!date) return "N/A";
@@ -295,9 +295,9 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
       },
       sorter: (a, b) => new Date(a.from_date) - new Date(b.from_date)
     },
-    { 
-      title: "To Date", 
-      dataIndex: "to_date", 
+    {
+      title: "To Date",
+      dataIndex: "to_date",
       key: "to_date",
       render: (date) => {
         if (!date) return "N/A";
@@ -306,9 +306,9 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
       },
       sorter: (a, b) => new Date(a.to_date) - new Date(b.to_date)
     },
-    { 
-      title: "Days", 
-      dataIndex: "days", 
+    {
+      title: "Days",
+      dataIndex: "days",
       key: "days",
       render: (_, record) => {
         if (!record.from_date || !record.to_date) return "N/A";
@@ -329,16 +329,16 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
         return getDays(a) - getDays(b);
       }
     },
-    { 
-      title: "Reason", 
-      dataIndex: "reason", 
+    {
+      title: "Reason",
+      dataIndex: "reason",
       key: "reason",
       render: (text) => text || '-',
       ellipsis: true
     },
-    { 
-      title: "Status", 
-      dataIndex: "status", 
+    {
+      title: "Status",
+      dataIndex: "status",
       key: "status",
       render: (status) => {
         let color = "default";
@@ -538,7 +538,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
                 (i.status_name?.toLowerCase() === "off" || i.status_id === 2)
               )}
               rowKey="tempId" scroll={{ x: 800 }}
-              pagination={{ pageSize: logPageSize, showSizeChanger: true, showQuickJumper: true, pageSizeOptions: ["10","20","50","100"], onShowSizeChange: (_, size) => setLogPageSize(size), showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
+              pagination={{ pageSize: logPageSize, showSizeChanger: true, showQuickJumper: true, pageSizeOptions: ["10", "20", "50", "100"], onShowSizeChange: (_, size) => setLogPageSize(size), showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items` }}
               className="custom-table"
             />
 
@@ -706,9 +706,9 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
         <div style={{ marginBottom: "24px" }}>
           <Row justify="space-between" align="middle">
             <Col>
-              <h2 style={{ 
-                margin: 0, 
-                fontSize: "24px", 
+              <h2 style={{
+                margin: 0,
+                fontSize: "24px",
                 fontWeight: "bold",
                 textTransform: "uppercase"
               }}>

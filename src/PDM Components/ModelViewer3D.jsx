@@ -93,19 +93,19 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       controls.enablePan = false;
-      
+
       // Controls are now always enabled for rotation and zoom
       controls.enableRotate = true;
       controls.enableZoom = true;
-      
+
       controlsRef.current = controls;
 
       const loader = new GLTFLoader();
-      
+
       // Add DRACOLoader for much faster loading of compressed meshes
       const dracoLoader = new DRACOLoader();
       // Using Google's hosted draco decoder for convenience and speed
-     dracoLoader.setDecoderPath('/static/draco/');
+      dracoLoader.setDecoderPath('/static/draco/');
       loader.setDRACOLoader(dracoLoader);
 
       const loadModel = async () => {
@@ -176,7 +176,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
               }
 
               const model = gltf.scene;
-              
+
               // Enhance material appearance and add edges for better visibility
               model.traverse(node => {
                 if (node.isMesh) {
@@ -186,7 +186,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
                     node.material.polygonOffset = true;
                     node.material.polygonOffsetFactor = 1;
                     node.material.polygonOffsetUnits = 1;
-                    
+
                     if (node.material.metalness !== undefined) {
                       node.material.metalness = Math.min(node.material.metalness, 0.7);
                     }
@@ -194,11 +194,11 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
                       node.material.roughness = Math.max(node.material.roughness, 0.3);
                     }
                   }
-                  
+
                   // Add edges for better visibility (Visible edges by default)
                   // Use a threshold angle of 20 degrees to hide internal triangulation lines
                   const edges = new THREE.EdgesGeometry(node.geometry, 20);
-                  const edgeMaterial = new THREE.LineBasicMaterial({ 
+                  const edgeMaterial = new THREE.LineBasicMaterial({
                     color: 0x333333, // Dark gray/black for professional look
                     depthTest: true,
                     transparent: true,
@@ -225,14 +225,14 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
 
               const maxDim = Math.max(size.x, size.y, size.z) || 1;
               const fov = (cameraLocal.fov * Math.PI) / 180;
-              
+
               let cameraZ = maxDim / (2 * Math.tan(fov / 2));
               cameraZ *= 1.5;
 
               cameraLocal.near = maxDim / 100;
               cameraLocal.far = maxDim * 100;
               cameraLocal.updateProjectionMatrix();
-              
+
               cameraLocal.position.set(0, 0, cameraZ);
               cameraLocal.lookAt(0, 0, 0);
 
@@ -249,12 +249,12 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
               }
 
               baseDistanceRef.current = cameraZ;
-              
+
               // Set initial view if specified
               if (initialView !== 'default') {
                 setCameraView(initialView, cameraLocal, controlsRef.current, cameraZ);
               }
-              
+
               setLoading(false);
               URL.revokeObjectURL(objectUrl);
 
@@ -266,7 +266,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
                 const currentRenderer = rendererRef.current;
                 const currentControls = controlsRef.current;
                 if (!currentCamera || !currentScene || !currentRenderer) return;
-                
+
                 if (currentControls) {
                   currentControls.update();
                 }
@@ -381,13 +381,13 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
   // View presets for different camera positions
   const setCameraView = (viewType, camera, controls, distance) => {
     if (!camera || !controls) return;
-  
+
     const dist = distance || baseDistanceRef.current;
-  
+
     // Reset camera up vector before setting new position
     camera.up.set(0, 1, 0);
-  
-    switch(viewType) {
+
+    switch (viewType) {
       case 'front':
         camera.position.set(0, 0, dist);
         break;
@@ -414,7 +414,7 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
       default:
         camera.position.set(0, 0, dist);
     }
-  
+
     camera.lookAt(0, 0, 0);
     controls.target.set(0, 0, 0);
     controls.update();
@@ -465,4 +465,3 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
 };
 
 export default ModelViewer3D;
-

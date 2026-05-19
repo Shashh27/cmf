@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { Modal, Form, Input, Select, Button, message } from 'antd';
-import { API_BASE_URL } from '../Config/auth.js';
+import { API_BASE_URL } from '../../Config/auth.js';
 
 const { Option } = Select;
 
@@ -42,17 +42,17 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
       if (response.ok) {
         message.success(editingUser ? 'User updated successfully' : 'User registered successfully');
         onSuccess();
-        onCancel(); 
+        onCancel();
       } else {
         const errorData = await response.json().catch(() => ({}));
         const errorMsg = errorData.message || errorData.detail || errorData.error || '';
-        
+
         if (errorMsg.toLowerCase().includes('gmail') && errorMsg.toLowerCase().includes('exist')) {
-           message.error('User with this email already exists');
+          message.error('User with this email already exists');
         } else if (errorMsg.toLowerCase().includes('username') && errorMsg.toLowerCase().includes('exist')) {
-           message.error('Username already exists');
+          message.error('Username already exists');
         } else {
-           message.error(errorMsg || (editingUser ? 'Failed to update user' : 'Failed to register user'));
+          message.error(errorMsg || (editingUser ? 'Failed to update user' : 'Failed to register user'));
         }
       }
     } catch (error) {
@@ -82,12 +82,12 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
               validator: (_, value) => {
                 if (!value) return Promise.resolve();
                 const isDuplicate = existingUsers.some(
-                  (u) => 
-                    u.username?.toLowerCase() === value.toLowerCase() && 
+                  (u) =>
+                    u.username?.toLowerCase() === value.toLowerCase() &&
                     u.id !== editingUser?.id
                 );
-                return isDuplicate 
-                  ? Promise.reject(new Error('Username already exists')) 
+                return isDuplicate
+                  ? Promise.reject(new Error('Username already exists'))
                   : Promise.resolve();
               }
             }
@@ -102,18 +102,18 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
           rules={[
             { required: true, message: 'Please enter email' },
             { type: 'email', message: 'Please enter a valid email' },
-            { 
+            {
               validator: (_, value) => {
                 if (!value) return Promise.resolve();
                 if (/^[A-Z]/.test(value)) return Promise.reject(new Error('please enter valid email'));
                 if (!value.includes('@')) return Promise.reject(new Error('Email must contain @'));
                 const isDuplicate = existingUsers.some(
-                  (u) => 
-                    u.gmail?.toLowerCase() === value.toLowerCase() && 
+                  (u) =>
+                    u.gmail?.toLowerCase() === value.toLowerCase() &&
                     u.id !== editingUser?.id
                 );
-                return isDuplicate 
-                  ? Promise.reject(new Error('Email already exists')) 
+                return isDuplicate
+                  ? Promise.reject(new Error('Email already exists'))
                   : Promise.resolve();
               }
             }

@@ -407,4 +407,3 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 };
 
 export default Sidebar;
-

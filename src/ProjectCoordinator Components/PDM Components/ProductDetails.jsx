@@ -4,6 +4,7 @@ import { Card, Tag, Typography, Empty, Table, Select, Spin, Modal, Tooltip, Butt
 import ModelViewer3D from "./ModelViewer3D";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
+import { getLatestRevision } from "./operationUtils";
 
 const { Text } = Typography;
 
@@ -219,8 +220,16 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
   const getItemNumber = () => {
     switch (itemType) {
       case 'product': return item?.id;
-      case 'assembly': return item?.assembly_number || item?.id;
-      case 'part': return item?.part_number || item?.id;
+      case 'assembly': {
+        const num = item?.assembly_number || item?.id;
+        const rev = getLatestRevision(item?.documents);
+        return rev ? `${num} (${rev})` : num;
+      }
+      case 'part': {
+        const num = item?.part_number || item?.id;
+        const rev = getLatestRevision(partDocuments?.length > 0 ? partDocuments : item?.documents);
+        return rev ? `${num} (${rev})` : num;
+      }
       default: return item?.id;
     }
   };
@@ -501,22 +510,6 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
         {/* 3D Viewer button — top-right, matches admin style */}
         {itemType === 'part' && (
           <div className="ml-auto flex items-center gap-2">
-            {threeDDocuments.length > 0 && (
-              <Select
-                size="small"
-                value={selectedThreeDDocumentId}
-                onChange={setSelectedThreeDDocumentId}
-                style={{ minWidth: 'clamp(100px, 18vw, 150px)', fontSize: '11px' }}
-                options={threeDDocuments.map(doc => {
-                  const v = doc.document_version;
-                  const vStr = v ? String(v) : "";
-                  return {
-                    value: doc.id,
-                    label: `${doc.document_name || "3D Model"}${vStr ? ` (${vStr})` : ""}`,
-                  };
-                })}
-              />
-            )}
             <Tooltip title="Open 3D Viewer">
               <Button
                 size="small"
@@ -524,7 +517,12 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
                 icon={<EyeOutlined />}
                 onClick={() => openViewModal('default')}
                 disabled={threeDDocuments.length === 0}
-                style={{ background: '#2563eb', border: 'none' }}
+                style={{ 
+                  background: '#2563eb', 
+                  border: 'none',
+                  color: 'white',
+                  opacity: threeDDocuments.length === 0 ? 0.6 : 1
+                }}
               >
                 <span className="hidden sm:inline ml-1">3D Viewer</span>
               </Button>
@@ -629,8 +627,23 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
           </div>
         ) : (
           <div>
-            <div className="flex justify-end mb-2">
-              <ViewControls onOpenModal={openViewModal} size="middle" />
+            <div className="flex justify-between items-center mb-2 px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-700">Select 3D Model:</span>
+                <Select
+                  value={selectedThreeDDocumentId}
+                  onChange={setSelectedThreeDDocumentId}
+                  style={{ minWidth: '200px' }}
+                  options={threeDDocuments.map(doc => {
+                    const v = doc.document_version;
+                    const vStr = v ? String(v) : "";
+                    return {
+                      value: doc.id,
+                      label: `${doc.document_name || "3D Model"}${vStr ? ` - v${vStr}` : ""}`,
+                    };
+                  })}
+                />
+              </div>
             </div>
             <div style={{ height: 'clamp(280px, 50vh, 420px)' }}>
               <ModelViewer3D

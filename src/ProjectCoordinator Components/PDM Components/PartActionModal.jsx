@@ -49,30 +49,27 @@ const CARD_TYPES = [
 const DocTypeCards = ({ name, form, itemsWatch }) => {
   const [dragOver, setDragOver] = useState(null);
   const docType = itemsWatch?.[name]?.document_type || '2D';
-  const fileList = itemsWatch?.[name]?.file || [];
-  const droppedFile = fileList?.[0]?.originFileObj || fileList?.[0];
+  const files = itemsWatch?.[name]?.files || {};
   const isOther = docType === 'Other';
 
   const applyFile = (type, file) => {
     const syntheticFile = { uid: `-${Date.now()}`, name: file.name, originFileObj: file, status: 'done' };
-    const items = form.getFieldValue('items') || [];
-    const updated = [...items];
-    if (updated[name]) {
-      updated[name].file = [syntheticFile];
-      updated[name].document_type = type;
-      if (!updated[name].document_name) updated[name].document_name = file.name?.replace(/\.[^/.]+$/, '') || '';
+    form.setFieldValue(['items', name, 'files', type], [syntheticFile]);
+    form.setFieldValue(['items', name, 'document_type'], type);
+    
+    const currentName = form.getFieldValue(['items', name, 'document_name']);
+    if (!currentName) {
+      form.setFieldValue(['items', name, 'document_name'], file.name?.replace(/\.[^/.]+$/, '') || '');
     }
-    form.setFieldsValue({ items: updated });
   };
 
   const selectType = (type) => {
-    const items = form.getFieldValue('items') || [];
-    const updated = [...items];
-    if (updated[name]) {
-      updated[name].document_type = type;
-      if (type !== 'Other') updated[name].document_type_other = '';
-    }
-    form.setFieldsValue({ items: updated });
+    form.setFieldValue(['items', name, 'document_type'], type);
+  };
+
+  const removeFile = (e, type) => {
+    e.stopPropagation();
+    form.setFieldValue(['items', name, 'files', type], []);
   };
 
   return (
@@ -81,7 +78,9 @@ const DocTypeCards = ({ name, form, itemsWatch }) => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
         {CARD_TYPES.map(({ key, label, sub, color, bg, dragBg }) => {
           const isSelected = docType === key;
-          const hasFile = isSelected && droppedFile && key !== 'Other';
+          const fileList = files[key] || [];
+          const fileForThisType = fileList[0]?.originFileObj || fileList[0];
+          const hasFile = !!fileForThisType;
           const isDragTarget = dragOver === key;
 
           return (
@@ -97,6 +96,7 @@ const DocTypeCards = ({ name, form, itemsWatch }) => {
               }}
               onClick={() => selectType(key)}
               style={{
+                position: 'relative',
                 border: `2px dashed ${isDragTarget ? color : isSelected ? color : '#d9d9d9'}`,
                 borderRadius: 10,
                 padding: '18px 8px',
@@ -112,10 +112,32 @@ const DocTypeCards = ({ name, form, itemsWatch }) => {
                 gap: 3,
               }}
             >
+              {hasFile && (
+                <div 
+                  onClick={(e) => removeFile(e, key)}
+                  style={{
+                    position: 'absolute',
+                    top: 5,
+                    right: 5,
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    background: '#ef4444',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 12,
+                    zIndex: 10,
+                  }}
+                >
+                  ×
+                </div>
+              )}
               {hasFile ? (
                 <>
                   <span style={{ fontSize: 22 }}>📄</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color, wordBreak: 'break-all', maxWidth: '100%', padding: '0 2px' }}>{droppedFile.name}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color, wordBreak: 'break-all', maxWidth: '100%', padding: '0 2px' }}>{fileForThisType.name}</span>
                   <span style={{ fontSize: 9, color: '#9ca3af' }}>{key} Document</span>
                 </>
               ) : (
@@ -144,34 +166,44 @@ const DocTypeCards = ({ name, form, itemsWatch }) => {
       {/* Hidden document_type field — driven by card clicks */}
       <Form.Item name={[name, 'document_type']} hidden initialValue="2D"><Input /></Form.Item>
 
-      {/* File picker */}
-      <Form.Item
-        name={[name, 'file']}
-        valuePropName="fileList"
-        getValueFromEvent={e => Array.isArray(e) ? e : e?.fileList}
-        rules={[{ required: true, message: 'Please select or drop a file' }]}
-        style={{ marginBottom: 12 }}
-      >
-        <Upload
-          maxCount={1}
-          beforeUpload={() => false}
-          onChange={({ fileList }) => {
-            const f = fileList?.[0]?.originFileObj;
-            if (f) {
-              const items = form.getFieldValue('items') || [];
-              const updated = [...items];
-              if (updated[name] && !updated[name].document_name) {
-                updated[name].document_name = f.name?.replace(/\.[^/.]+$/, '') || '';
-                form.setFieldsValue({ items: updated });
+      {/* File pickers — one for each type, but only current one is visible */}
+      {CARD_TYPES.map(({ key }) => (
+        <Form.Item
+          key={key}
+          name={[name, 'files', key]}
+          valuePropName="fileList"
+          getValueFromEvent={e => Array.isArray(e) ? e : e?.fileList}
+          rules={[
+            {
+              validator: (_, value) => {
+                const currentFiles = form.getFieldValue(['items', name, 'files']) || {};
+                const hasAnyFile = Object.values(currentFiles).some(list => Array.isArray(list) && list.length > 0);
+                if (hasAnyFile) return Promise.resolve();
+                return Promise.reject(new Error('Please select or drop at least one file'));
               }
             }
-          }}
+          ]}
+          style={{ marginBottom: 12, display: docType === key ? 'block' : 'none' }}
         >
-          <Button icon={<UploadOutlined />} style={{ width: '100%', textAlign: 'left' }}>
-            Select File {isOther ? '(Custom)' : `(uploads as ${docType})`}
-          </Button>
-        </Upload>
-      </Form.Item>
+          <Upload
+            maxCount={1}
+            beforeUpload={() => false}
+            onChange={({ fileList }) => {
+              const f = fileList?.[0]?.originFileObj;
+              if (f) {
+                const currentName = form.getFieldValue(['items', name, 'document_name']);
+                if (!currentName) {
+                  form.setFieldValue(['items', name, 'document_name'], f.name?.replace(/\.[^/.]+$/, '') || '');
+                }
+              }
+            }}
+          >
+            <Button icon={<UploadOutlined />} style={{ width: '100%', textAlign: 'left' }}>
+              Select File {key === 'Other' ? '(Custom)' : `(uploads as ${key})`}
+            </Button>
+          </Upload>
+        </Form.Item>
+      ))}
 
       {/* Document Name + Revision */}
       <Row gutter={[12, 12]}>
@@ -192,7 +224,7 @@ const DocTypeCards = ({ name, form, itemsWatch }) => {
             rules={[{ required: true, message: 'Required' }]}
             style={{ marginBottom: 0 }}
           >
-            <Input placeholder="eg, 00" />
+           <Input placeholder="eg, 00" autoComplete="off" />
           </Form.Item>
         </Col>
       </Row>
@@ -354,20 +386,30 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
       for (const item of items) {
         try {
           if (actionType === 'document') {
-            if (!bulkDocFormData) {
-              const fd = new FormData();
-              fd.append('part_id', selectedPart.id.toString());
-              const uid = getCurrentUserId();
-              if (uid != null) fd.append('user_id', String(uid));
-              bulkDocFormData = fd;
+            const filesMap = item.files || {};
+            const types = Object.keys(filesMap);
+
+            if (types.length === 0) continue;
+
+            for (const type of types) {
+              const fileList = filesMap[type];
+              const file = fileList?.[0]?.originFileObj;
+              if (!file) continue;
+
+              if (!bulkDocFormData) {
+                const fd = new FormData();
+                fd.append('part_id', selectedPart.id.toString());
+                const uid = getCurrentUserId();
+                if (uid != null) fd.append('user_id', String(uid));
+                bulkDocFormData = fd;
+              }
+
+              bulkDocFormData.append('files', file);
+              bulkDocFormData.append('document_name', item.document_name || file.name?.replace(/\.[^/.]+$/, '') || 'Document');
+              bulkDocFormData.append('document_type', resolveType(type, item.document_type_other) || type);
+              bulkDocFormData.append('document_version', item.document_version || 'v1.0');
+              if (item.parent_id) bulkDocFormData.append('parent_id', String(item.parent_id));
             }
-            const file = item.file?.[0]?.originFileObj;
-            if (!file) continue;
-            bulkDocFormData.append('files', file);
-            bulkDocFormData.append('document_name', item.document_name || file.name?.replace(/\.[^/.]+$/, '') || 'Document');
-            bulkDocFormData.append('document_type', resolveType(item.document_type, item.document_type_other) || item.document_type);
-            bulkDocFormData.append('document_version', item.document_version || 'v1.0');
-            if (item.parent_id) bulkDocFormData.append('parent_id', String(item.parent_id));
           }
         } catch (e) { console.error(e); message.error('Failed to create item'); }
       }

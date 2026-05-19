@@ -17,6 +17,8 @@ const Configuration = () => {
   const [showMachines, setShowMachines] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [workCenterMachines, setWorkCenterMachines] = useState({});
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const getCurrentUserId = () => {
     try {
@@ -75,7 +77,6 @@ const Configuration = () => {
     }
   };
 
-  // Fetch machines when there's search text and work centers are loaded
   useEffect(() => {
     if (searchText && workCenters.length > 0 && Object.keys(workCenterMachines).length === 0) {
       fetchMachinesForAllWorkCenters();
@@ -123,7 +124,6 @@ const Configuration = () => {
       workCenter.code?.toLowerCase().includes(searchLower) ||
       workCenter.work_center_name?.toLowerCase().includes(searchLower) ||
       workCenter.description?.toLowerCase().includes(searchLower) ||
-      // Search through machines associated with this work center
       machines.some(machine => 
         machine.type?.toLowerCase().includes(searchLower) ||
         machine.make?.toLowerCase().includes(searchLower) ||
@@ -141,13 +141,11 @@ const Configuration = () => {
     const searchLower = searchText.toLowerCase();
     const machines = workCenterMachines[record.id] || [];
     
-    // Check if work center itself matches
     const workCenterMatches = 
       record.code?.toLowerCase().includes(searchLower) ||
       record.work_center_name?.toLowerCase().includes(searchLower) ||
       record.description?.toLowerCase().includes(searchLower);
     
-    // Check if any machine matches
     const machineMatches = machines.some(machine => 
       machine.type?.toLowerCase().includes(searchLower) ||
       machine.make?.toLowerCase().includes(searchLower) ||
@@ -164,7 +162,7 @@ const Configuration = () => {
     {
       title: 'SL NO',
       key: 'index',
-      render: (text, record, index) => index + 1,
+      render: (text, record, index) => (currentPage - 1) * pageSize + index + 1,
       width: 80,
       align: 'center',
     },
@@ -259,13 +257,15 @@ const Configuration = () => {
       label: 'Work Center',
       children: (
         <Card 
-         
           extra={
             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
               <Input.Search
                 placeholder="Search work centers & machines..."
                 value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
+                onChange={(e) => {
+                  setSearchText(e.target.value);
+                  setCurrentPage(1);
+                }}
                 style={{ width: 250 }}
                 allowClear
               />
@@ -291,12 +291,22 @@ const Configuration = () => {
             rowClassName={getRowClassName}
             loading={loading}
             pagination={{
-              pageSize: 10,
+              pageSize: pageSize,
+              current: currentPage,
               size: "small",
               responsive: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
               showSizeChanger: true,
               showQuickJumper: true,
+              onChange: (page, size) => {
+                setCurrentPage(page);
+                setPageSize(size);
+              },
+              onShowSizeChange: (current, size) => {
+                setCurrentPage(1);
+                setPageSize(size);
+              },
+              pageSizeOptions: ['10', '20', '50', '100'],
             }}
             bordered
             size="middle"

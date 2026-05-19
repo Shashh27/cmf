@@ -94,7 +94,7 @@ const RawMaterialsContent = () => {
 
       key: 'link-general-stock',
 
-      label: <span className="flex items-center gap-2 px-2"><ShoppingOutlined /> Assign Stock</span>,
+      label: <span className="flex items-center gap-2 px-2"><ShoppingOutlined /> Assign General Stock</span>,
 
       children: <LinkGeneralStockImproved rawMaterials={sharedRawMaterials} />
 

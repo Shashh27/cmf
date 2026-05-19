@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
@@ -31,6 +31,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [activeItemType, setActiveItemType] = useState(null);
   const [showToolsModal, setShowToolsModal] = useState(false);
   const [selectedProductForTools, setSelectedProductForTools] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const hasFetchedData = useRef(false);
 
   const getExpandKey = (type, id) => `${type}-${id}`;
@@ -833,6 +834,320 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
+  // Function to highlight search term in text
+  const highlightText = (text, searchTerm) => {
+    if (!text || !searchTerm) return text;
+    
+    const searchLower = searchTerm.toLowerCase().replace(/\s+/g, ' ').trim();
+    const textLower = text.toLowerCase().replace(/\s+/g, ' ').trim();
+    
+    if (!textLower.includes(searchLower)) return text;
+    
+    // Find all occurrences and create highlighted version
+    const parts = [];
+    let lastIndex = 0;
+    let index = textLower.indexOf(searchLower);
+    
+    while (index !== -1) {
+      // Add text before match
+      parts.push(text.substring(lastIndex, index));
+      // Add highlighted match
+      parts.push(
+        <span key={index} className="bg-yellow-200 text-yellow-900 font-medium px-0.5 rounded">
+          {text.substring(index, index + searchLower.length)}
+        </span>
+      );
+      lastIndex = index + searchLower.length;
+      index = textLower.indexOf(searchLower, lastIndex);
+    }
+    
+    // Add remaining text
+    parts.push(text.substring(lastIndex));
+    
+    return <>{parts}</>;
+  };
+
+  // Search filtering functions
+  const searchInHierarchicalData = (productId, searchTerm) => {
+    const data = hierarchicalData[productId];
+    if (!data || !searchTerm) return { filteredAssemblies: [], filteredParts: [], foundItems: [] };
+    
+    const searchLower = searchTerm.toLowerCase().replace(/\s+/g, ' ').trim();
+    const filteredAssemblies = [];
+    const filteredParts = [];
+    const foundItems = [];
+    const matchedAssemblyIds = new Set();
+    
+    // Function to recursively search in assemblies
+    const searchInAssemblies = (assemblies, parentPath = []) => {
+      assemblies.forEach(assembly => {
+        const assemblyName = (assembly.assembly_name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const assemblyNumber = (assembly.assembly_number || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const currentPath = [...parentPath, assembly];
+        
+        const matchesSearch = assemblyName.includes(searchLower) || assemblyNumber.includes(searchLower);
+        
+        if (matchesSearch) {
+          filteredAssemblies.push({
+            ...assembly,
+            __searchMatch: true,
+            __searchPath: currentPath
+          });
+          foundItems.push({
+            type: 'assembly',
+            item: assembly,
+            path: currentPath,
+            productId
+          });
+          matchedAssemblyIds.add(assembly.id);
+          
+          // Include all parts of this assembly when it matches
+          if (assembly.parts) {
+            assembly.parts.forEach(part => {
+              filteredParts.push({
+                ...part,
+                __searchMatch: false, // Don't highlight parts, they're included because assembly matched
+                __searchPath: currentPath,
+                __parentAssembly: assembly,
+                __includedViaAssembly: true
+              });
+              foundItems.push({
+                type: 'part',
+                item: part,
+                path: currentPath,
+                parentAssembly: assembly,
+                productId,
+                includedViaAssembly: true
+              });
+            });
+          }
+        }
+        
+        // Search in parts (even if assembly doesn't match)
+        if (assembly.parts) {
+          assembly.parts.forEach(part => {
+            const partName = (part.part_name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            const partNumber = (part.part_number || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            
+            if (partName.includes(searchLower) || partNumber.includes(searchLower)) {
+              filteredParts.push({
+                ...part,
+                __searchMatch: true,
+                __searchPath: currentPath,
+                __parentAssembly: assembly
+              });
+              foundItems.push({
+                type: 'part',
+                item: part,
+                path: currentPath,
+                parentAssembly: assembly,
+                productId
+              });
+            }
+          });
+        }
+        
+        // Recursively search in child assemblies
+        if (assembly.child_assemblies) {
+          searchInAssemblies(assembly.child_assemblies, currentPath);
+        }
+      });
+    };
+    
+    // Search in direct parts
+    if (data.parts) {
+      data.parts.forEach(part => {
+        const partName = (part.part_name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        const partNumber = (part.part_number || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        
+        if (partName.includes(searchLower) || partNumber.includes(searchLower)) {
+          filteredParts.push({
+            ...part,
+            __searchMatch: true,
+            __searchPath: []
+          });
+          foundItems.push({
+            type: 'part',
+            item: part,
+            path: [],
+            productId
+          });
+        }
+      });
+    }
+    
+    // Search in assemblies
+    if (data.assemblies) {
+      searchInAssemblies(data.assemblies);
+    }
+    
+    return { filteredAssemblies, filteredParts, foundItems };
+  };
+
+  // Function to render search results
+  const renderSearchResults = () => {
+    if (!searchTerm.trim()) return null;
+    
+    // Group results by assembly to show related parts together
+    const groupedResults = {};
+    const directResults = []; // Parts that directly match search
+    
+    filteredProducts.forEach(product => {
+      const { foundItems } = searchInHierarchicalData(product.id, searchTerm);
+      foundItems.forEach(item => {
+        const resultWithProduct = { ...item, productName: product.product_name };
+        
+        if (item.type === 'assembly') {
+          // Initialize group for this assembly
+          const groupKey = `assembly-${item.item.id}-${product.id}`;
+          groupedResults[groupKey] = {
+            assembly: resultWithProduct,
+            parts: []
+          };
+        } else if (item.type === 'part') {
+          if (item.includedViaAssembly && item.parentAssembly) {
+            // Part is included via assembly match
+            const groupKey = `assembly-${item.parentAssembly.id}-${product.id}`;
+            if (!groupedResults[groupKey]) {
+              // Create assembly group if it doesn't exist
+              groupedResults[groupKey] = {
+                assembly: {
+                  type: 'assembly',
+                  item: item.parentAssembly,
+                  path: item.path,
+                  productId: product.id,
+                  productName: product.product_name,
+                  __searchMatch: true
+                },
+                parts: []
+              };
+            }
+            groupedResults[groupKey].parts.push(resultWithProduct);
+          } else {
+            // Direct part match
+            directResults.push(resultWithProduct);
+          }
+        }
+      });
+    });
+    
+    const allResults = [...Object.values(groupedResults), ...directResults];
+    
+    if (allResults.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
+          <Empty description={`No results found for "${searchTerm}"`} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        </div>
+      );
+    }
+    
+    const renderSearchPath = (path) => {
+      return null; // Path display removed as requested
+    };
+    
+    const handleItemClick = (result) => {
+      // Select the item and expand its parent path
+      setActiveItemId(result.item.id);
+      setActiveItemType(result.type);
+      
+      // Expand all parent assemblies in the path
+      const expandKeys = {};
+      result.path.forEach(assembly => {
+        expandKeys[getExpandKey('assembly', assembly.id)] = true;
+      });
+      expandKeys[getExpandKey('product', result.productId)] = true;
+      
+      setExpandedItems(prev => ({ ...prev, ...expandKeys }));
+      
+      if (onItemSelected) {
+        const itemWithMeta = { 
+          ...result.item, 
+          itemType: result.type, 
+          productId: result.productId,
+          parentAssembly: result.parentAssembly
+        };
+        onItemSelected(itemWithMeta);
+      }
+    };
+    
+    const renderResultItem = (result, isIndented = false) => {
+      const isIncludedViaAssembly = result.includedViaAssembly;
+      const isSelected = activeItemId === result.item.id && activeItemType === result.type;
+      
+      return (
+        <div 
+          key={`${result.type}-${result.item.id}-${result.productId}`}
+          className={`py-2 px-3 hover:bg-slate-100 transition-colors cursor-pointer ${isIndented ? 'ml-6 border-l-2 border-l-blue-200' : ''} ${isSelected ? 'bg-indigo-50 border-l-2 border-l-indigo-500' : ''}`}
+          onClick={() => handleItemClick(result)}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="w-5 flex justify-center text-sm">
+                {getTypeIcon(result.type === 'part' ? (result.item.type_name || 'part') : 'assembly', result.path.length)}
+              </span>
+              <div className="flex flex-col min-w-0">
+                <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
+                  {result.type === 'part' 
+                    ? highlightText(result.item.part_name, searchTerm)
+                    : highlightText(result.item.assembly_name, searchTerm)
+                  }
+                </Text>
+                <Text className="text-[10px] text-slate-400 truncate">
+                  {result.type === 'part' 
+                    ? highlightText(result.item.part_number, searchTerm)
+                    : highlightText(result.item.assembly_number, searchTerm)
+                  }
+                </Text>
+                <div className="flex items-center gap-2 mt-1">
+                  <Tag size="small" color={getTypeColor(result.type)}>
+                    {result.type.toUpperCase()}
+                  </Tag>
+                </div>
+              </div>
+            </div>
+            <div onClick={(e) => e.stopPropagation()}>
+              <ActionButtons
+                item={result.item}
+                type={result.type}
+                tagName={result.type === 'part' ? (result.item.type_name || 'part') : (result.path.length > 0 ? 'SUB-ASSEMBLY' : 'ASSEMBLY')}
+                tagColor={getTypeColor(result.type === 'part' ? (result.item.type_name || 'part') : 'assembly')}
+              />
+            </div>
+          </div>
+        </div>
+      );
+    };
+    
+    return (
+      <div className="py-2">
+        <div className="text-xs font-medium text-slate-600 px-3 py-2 mb-2 bg-slate-50 border-b border-slate-200">
+          Found {allResults.reduce((acc, group) => 
+            acc + (group.parts ? group.parts.length + 1 : 1), 0
+          )} result{allResults.reduce((acc, group) => 
+            acc + (group.parts ? group.parts.length + 1 : 1), 0
+          ) !== 1 ? 's' : ''} for "{highlightText(searchTerm, searchTerm)}"
+        </div>
+        
+        <div className="divide-y divide-slate-100">
+          {allResults.map((group, index) => {
+            if (group.parts) {
+              // Render assembly with its related parts
+              return (
+                <div key={`group-${index}`}>
+                  {renderResultItem(group.assembly)}
+                  {group.parts.map(part => renderResultItem(part, true))}
+                </div>
+              );
+            } else {
+              // Render direct part result
+              return renderResultItem(group);
+            }
+          })}
+        </div>
+      </div>
+    );
+  };
+
   const filteredProductsBase = products.sort((a, b) => (b.id || 0) - (a.id || 0));
 
   const initialPid = initialProductId != null ? Number(initialProductId) : null;
@@ -904,9 +1219,26 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               )}
             </div>
           </div>
+        
+        {/* Search Bar */}
+        <div className="px-2 pb-2">
+          <Input
+            placeholder="Search by assembly name/number or part name/number..."
+            prefix={<SearchOutlined className="text-slate-400" />}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            allowClear
+            className="w-full"
+            size="small"
+          />
+        </div>
         </div>
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 bom-scroll min-h-0">
-          {filteredProducts.length > 0 ? filteredProducts.map(product => renderProductTree(product)) : (
+          {searchTerm.trim() ? (
+            renderSearchResults()
+          ) : filteredProducts.length > 0 ? (
+            filteredProducts.map(product => renderProductTree(product))
+          ) : (
             <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
               <Empty description="No products" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>

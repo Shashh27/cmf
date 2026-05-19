@@ -20,6 +20,21 @@ export const normalizeVersion = (raw) => {
   return v;
 };
 
+// Shared utility: get the latest revision from a list of documents
+export const getLatestRevision = (docs) => {
+  if (!docs || !Array.isArray(docs) || docs.length === 0) return null;
+  const parseV = (v) => {
+    const val = parseFloat(String(v || '0').replace(/^v/i, ''));
+    return isNaN(val) ? 0 : val;
+  };
+  const sorted = [...docs].sort((a, b) => parseV(b.document_version) - parseV(a.document_version));
+  const latest = sorted[0]?.document_version;
+  if (!latest) return null;
+  const clean = String(latest).replace(/^v/i, '');
+  // If it's a simple integer, pad to 2 digits (e.g. "1" -> "01")
+  return /^\d+$/.test(clean) ? clean.padStart(2, '0') : clean;
+};
+
 // Shared utility: simple axios → setState helper with loading + guard
 export const fetchInto = async (url, setter, setLoading, guard) => {
   if (guard) return; // already loaded

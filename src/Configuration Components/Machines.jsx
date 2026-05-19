@@ -12,6 +12,8 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
   const [editingMachine, setEditingMachine] = useState(null);
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const [localSearchText, setLocalSearchText] = useState(searchText || '');
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     if (workCenter) {
@@ -118,7 +120,7 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
     {
       title: 'SL NO',
       key: 'index',
-      render: (text, record, index) => index + 1,
+      render: (text, record, index) => (currentPage - 1) * pageSize + index + 1,
       width: 80,
       align: 'center',
     },
@@ -268,7 +270,7 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
           <Input.Search
             placeholder="Search machines..."
             value={localSearchText}
-            onChange={(e) => setLocalSearchText(e.target.value)}
+            onChange={(e) => { setLocalSearchText(e.target.value); setCurrentPage(1); }}
             style={{ width: 250 }}
             allowClear
           />
@@ -317,12 +319,22 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
         rowClassName={getRowClassName}
         loading={loading}
         pagination={{ 
-          pageSize: 10,
+          pageSize: pageSize,
+          current: currentPage,
           size: "small",
           responsive: true,
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
           showSizeChanger: true,
           showQuickJumper: true,
+          onChange: (page, size) => {
+            setCurrentPage(page);
+            setPageSize(size);
+          },
+          onShowSizeChange: (current, size) => {
+            setCurrentPage(1);
+            setPageSize(size);
+          },
+          pageSizeOptions: ['10', '20', '50', '100'],
         }}
         bordered
         size="middle"

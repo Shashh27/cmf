@@ -139,7 +139,7 @@ const ProcessPlanning = ({ initialOrderId }) => {
 
     setOperationStatusLoading(prev => ({ ...prev, [operationId]: true }));
     try {
-      const res = await axios.get(`http://172.18.7.85:8989/api/v1/production-logs/operation/${operationId}/status-summary`);
+      const res = await axios.get(`${SCHEDULING_API_BASE_URL}/production-logs/operation/${operationId}/status-summary`);
       if (res.status === 200) {
         setOperationStatus(prev => ({ ...prev, [operationId]: res.data }));
       }

@@ -99,22 +99,36 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
   );
 };
 
-// ── ScrollTable ─────────────────────────────────────────────────────────────
-const ScrollTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) => {
+// ── FitTable ────────────────────────────────────────────────────────────────
+const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) => {
+  const ref = useRef(null);
+  const [scrollY, setScrollY] = useState(400);
+
+  useEffect(() => {
+    const update = () => {
+      if (!ref.current) return;
+      const h = ref.current.clientHeight || 0;
+      // Subtract header height (approx 40px) to get body height
+      setScrollY(Math.max(h - 40, 150));
+    };
+    const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
+    if (ref.current) ro.observe(ref.current);
+    update();
+    window.addEventListener('resize', update);
+    return () => { ro.disconnect(); window.removeEventListener('resize', update); };
+  }, []);
+
   return (
-    <div className="flex-1 min-h-0 w-full bg-white rounded-lg border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-      <div className="overflow-auto flex-1">
-        <Table
-          columns={columns}
-          dataSource={dataSource}
-          pagination={false}
-          scroll={{ x: scrollX, y: '100%' }}
-          size="small"
-          {...props}
-          className={`${props.className || ''} custom-scroll-table`}
-          style={{ height: '100%' }}
-        />
-      </div>
+    <div className="flex-1 min-h-0 overflow-hidden w-full relative" ref={ref} style={{ height: '100%' }}>
+      <Table 
+        columns={columns} 
+        dataSource={dataSource} 
+        pagination={false} 
+        scroll={{ y: scrollY, x: scrollX }} 
+        size="small" 
+        {...props} 
+        className={`${props.className || ''} custom-fit-table`} 
+      />
     </div>
   );
 };
@@ -452,7 +466,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       children: (
         <div className="h-full flex flex-col min-h-0">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
-            <span className="text-xs text-slate-500">Click row to view or edit</span>
+            <span className="text-xs text-slate-500">Click row to view</span>
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               <Button size="small" icon={<DownloadOutlined />} onClick={() => setShowReportModal(true)} disabled={!isPart || loading} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Download Report</span><span className="sm:hidden">Report</span>
@@ -460,7 +474,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             </div>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
-            <ScrollTable 
+            <FitTable 
               dataSource={operations} 
               columns={operationsColumns} 
               rowKey="id" 
@@ -490,7 +504,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden w-full">
-            <ScrollTable 
+            <FitTable 
               dataSource={latestPartDocs} 
               rowKey="id" 
               size="small" 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Layout, Card, Button, Select, DatePicker, Tooltip, message, Modal } from 'antd';
+
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
 import { Timeline } from "vis-timeline";
 import { DataSet } from "vis-data";
@@ -46,9 +47,7 @@ const getComponentColors = (operations) => {
 //  TIME HELPERS
 // ─────────────────────────────────────────────────────────────
 const getTimeAxisScale = (v) => ({ year: 'month', month: 'day', week: 'hour', day: 'hour' }[v] || 'hour');
-const getTimeAxisStep = (v) => ({ year: 1, month: 1, week: 3, day: 3 }[v] || 1);
-
-const SHIFT_MS = 30 * 60 * 1000;
+const getTimeAxisStep = (v) => ({ year: 1, month: 1, week: 4, day: 4 }[v] || 1);
 
 const getTimeRange = (viewType, dateRange, scheduleData) => {
   const now = moment();
@@ -63,8 +62,8 @@ const getTimeRange = (viewType, dateRange, scheduleData) => {
 
   let start, end;
   if (dateRange && dateRange[0] && dateRange[1]) {
-    start = moment(dateRange[0]).hour(8).minute(30).second(0).toDate();
-    end = moment(dateRange[1]).hour(17).minute(0).second(0).toDate();
+    start = moment(dateRange[0]).hour(0).minute(0).second(0).toDate();
+    end = moment(dateRange[1]).hour(23).minute(59).second(59).toDate();
   } else {
     switch (viewType) {
       case 'year':
@@ -76,18 +75,15 @@ const getTimeRange = (viewType, dateRange, scheduleData) => {
         end = now.clone().endOf('month').toDate();
         break;
       case 'day':
-        start = now.clone().startOf('day').hour(8).minute(30).toDate();
-        end = now.clone().endOf('day').hour(17).minute(0).toDate();
+        start = now.clone().startOf('day').hour(0).minute(0).toDate();
+        end = now.clone().endOf('day').hour(23).minute(59).toDate();
         break;
       case 'week':
       default:
-        start = now.clone().startOf('isoWeek').hour(8).minute(30).toDate();
-        end = now.clone().startOf('isoWeek').add(4, 'days').hour(17).minute(0).toDate();
+        start = now.clone().startOf('isoWeek').hour(0).minute(0).toDate();
+        end = now.clone().startOf('isoWeek').add(5, 'days').hour(23).minute(59).toDate();
     }
   }
-
-  start = new Date(start.getTime() + SHIFT_MS);
-  end = new Date(end.getTime() + SHIFT_MS);
 
   return { start, end, dataMin, dataMax };
 };
@@ -152,7 +148,7 @@ const ActualScheduling = () => {
 
   const fetchSchedule = async () => {
     try {
-      const res = await fetch('http://172.18.7.85:8989/api/v1/scheduling/view-rescheduling');
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/view-rescheduling`);
       if (!res.ok) return;
       const data = await res.json();
       const ops = [];
@@ -170,7 +166,8 @@ const ActualScheduling = () => {
               component: t.part_number || '',
               part_name: t.part_name || '',
               production_order: t.sale_order_number || String(t.sale_order_id ?? t.schedule_item_id ?? ''),
-              description: t.operation_name || String(t.operation_number ?? ''),
+              description: t.operation_name || '',
+              operation_number: t.operation_number ?? '',
               start_time: t.planned_start_time,
               end_time: t.planned_end_time,
               quantity: t.total_quantity ?? 0,
@@ -187,7 +184,7 @@ const ActualScheduling = () => {
   const handleUpdateSchedule = async () => {
     setUpdateScheduleLoading(true);
     try {
-      const res = await fetch('http://172.18.7.85:8989/api/v1/scheduling/dynamic-reschedule', {
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/dynamic-reschedule`, {
         method: 'POST',
         headers: { 'accept': 'application/json' },
       });
@@ -317,8 +314,8 @@ const ActualScheduling = () => {
 
         const items = new DataSet(
           operations.map((op, index) => {
-            const start = new Date(new Date(op.start_time).getTime() + SHIFT_MS);
-            const end = new Date(new Date(op.end_time).getTime() + SHIFT_MS);
+            const start = new Date(op.start_time);
+            const end = new Date(op.end_time);
             return {
               id: index,
               group: op.machineId,
@@ -379,7 +376,9 @@ const ActualScheduling = () => {
           stack: false,
           moveable: true,
           zoomable: true,
-          zoomKey: '',
+          zoomKey: 'ctrlKey',
+          horizontalScroll: true,
+          verticalScroll: true,
           orientation: 'top',
           height: `${timelineHeightPx}px`,
           margin: { item: { horizontal: 10, vertical: 4 }, axis: 5 },
@@ -405,25 +404,27 @@ const ActualScheduling = () => {
                 <div><b>Part Number:</b> ${op.component}</div>
                 <div><b>Part Name:</b> ${op.part_name || 'N/A'}</div>
                 <div><b>Machine:</b> ${op.machineName}</div>
-                <div><b>Operation:</b> ${op.description}</div>
+                <div><b>Operation:</b> ${op.operation_number ? '#' + op.operation_number + ' - ' : ''}${op.description}</div>
                 <div><b>Quantity:</b> ${plannedQty}/${totalQty}</div>
                 <div><b>Remaining Qty:</b> ${remainingQty}</div>
                 <div><b>Start:</b> ${displayStart.format('DD-MM-YYYY, HH:mm')}</div>
-                <div><b>PDC of Operation:</b> ${displayEnd.format('DD-MM-YYYY, HH:mm')}</div>
+                <div><b>End:</b> ${displayEnd.format('DD-MM-YYYY, HH:mm')}</div>
               </div>`;
             },
           },
           timeAxis: { scale: getTimeAxisScale(viewType), step: getTimeAxisStep(viewType) },
           format: {
             minorLabels: (date, scale) => {
-              const d = moment(date).startOf('hour').subtract(30, 'minutes');
-              if (scale === 'hour') return d.format('HH:mm');
+              const d = moment(date);
+              if (scale === 'hour') {
+                return d.format('HH:mm');
+              }
               if (scale === 'day') return d.format('D');
               if (scale === 'month') return d.format('MMM');
               return d.format('HH:mm');
             },
             majorLabels: (date, scale) => {
-              const d = moment(date).startOf('hour').subtract(30, 'minutes');
+              const d = moment(date);
               if (scale === 'hour') return d.format('ddd D MMM');
               if (scale === 'day') return d.format('MMMM YYYY');
               if (scale === 'month') return d.format('YYYY');
@@ -431,9 +432,7 @@ const ActualScheduling = () => {
             },
           },
           hiddenDates: [
-            { start: '1970-01-01 00:00:00', end: '1970-01-01 09:00:00', repeat: 'daily' },
-            { start: '1970-01-01 17:00:00', end: '1970-01-01 23:59:59', repeat: 'daily' },
-            { start: '1970-01-03 00:00:00', end: '1970-01-05 00:00:00', repeat: 'weekly' },
+            { start: '1970-01-04 00:00:00', end: '1970-01-05 00:00:00', repeat: 'weekly' },
           ],
         };
 
@@ -477,10 +476,10 @@ const ActualScheduling = () => {
     const updateCurrentTime = () => {
       if (!timelineRef.current) return;
 
-    // Shift "now" forward by SHIFT_MS to match item display times
-    const shiftedNow = new Date(Date.now() + SHIFT_MS);
-    timelineRef.current.setCurrentTime(shiftedNow);
-   };
+      // Use actual "now"
+      const now = new Date();
+      timelineRef.current.setCurrentTime(now);
+    };
 
     updateCurrentTime(); // run immediately on mount
     const interval = setInterval(updateCurrentTime, 1000); // update every second
@@ -619,123 +618,123 @@ const ActualScheduling = () => {
           <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
         </div>
 
-          {/* Skipped Information Box */}
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ padding: 12, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 6 }}>
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Orders:</span>
-                  <span style={{ color: '#666' }}>
-                    {skippedData.skipped_orders.length > 0 ? skippedData.skipped_orders.join(', ') : 'No orders skipped'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Parts:</span>
-                  <span style={{ color: '#666' }}>
-                    {skippedData.skipped_parts.length > 0 ? skippedData.skipped_parts.join(', ') : 'No parts skipped'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontWeight: 600, color: '#1677ff' }}>Parts Without Operations:</span>
-                  <span style={{ color: '#666' }}>
-                    {skippedData.parts_without_operations.length > 0
-                      ? skippedData.parts_without_operations.map(p => p.part_number).join(', ')
-                      : 'No parts without operations'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Timeline */}
-          <div>
-            <div
-              style={{
-                 height: availableMachines.length > 24 ? '70vh' : 'auto',
-                overflowY: availableMachines.length > 24 ? 'auto' : 'hidden',
-                overflowX: 'hidden',
-                border: '1px solid #e8e8e8',
-                borderRadius: 8,
-                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                background: '#fff',
-              }}
-            >
-              <div ref={timelineContainerRef} style={{ minHeight: 300, background: '#fff' }} />
-            </div>
-          </div>
-
-            {Object.keys(componentColors).length > 0 && (
-              <ComponentLegend
-                componentColors={componentColors}
-                title="Production Orders"
-                active={selectedProductionOrders}
-                onToggle={(po) =>
-                  setSelectedProductionOrders(prev =>
-                    prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
-                  )
-                }
-              />
-            )}
-
-            {/* Help Modal */}
-            <Modal
-              title="How to Use Timeline"
-              open={helpOpen}
-              onCancel={() => setHelpOpen(false)}
-              footer={[<Button key="close" onClick={() => setHelpOpen(false)}>Close</Button>]}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ fontWeight: 600 }}>Navigation</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <LeftOutlined /> <RightOutlined /> <span>Use arrow buttons or drag to move</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <CalendarOutlined /> <span>Use date picker to jump to dates</span>
-                </div>
-                <div style={{ fontWeight: 600, marginTop: 8 }}>Zooming</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ZoomInOutlined /> <span>Click "+" to zoom in</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <ZoomOutOutlined /> <span>Click "-" to zoom out</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <FullscreenOutlined /> <span>Click "Fit" to show all</span>
-                </div>
-                <div style={{ fontWeight: 600, marginTop: 8 }}>Interaction</div>
-                <div>Click a task to view details</div>
-                <div style={{ background: '#f6f7fb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10 }}>
-                  <InfoCircleOutlined style={{ marginRight: 8 }} />
-                  <span>Hold CTRL and use mouse wheel to zoom at cursor position</span>
-                </div>
-              </div>
-            </Modal>
-
-            {/* Update Modal */}
-            <Modal
-              title={
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <WarningOutlined style={{ color: '#faad14', fontSize: 22 }} />
-                  Update Actual Schedule
+        {/* Skipped Information Box */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ padding: 12, background: '#fff', border: '1px solid #e8e8e8', borderRadius: 6 }}>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Orders:</span>
+                <span style={{ color: '#666' }}>
+                  {skippedData.skipped_orders.length > 0 ? skippedData.skipped_orders.join(', ') : 'No orders skipped'}
                 </span>
-              }
-              open={updateModalOpen}
-              onCancel={() => !updateScheduleLoading && setUpdateModalOpen(false)}
-              footer={[
-                <Button key="cancel" onClick={() => setUpdateModalOpen(false)} disabled={updateScheduleLoading}>
-                  Cancel
-                </Button>,
-                <Button key="ok" type="primary" loading={updateScheduleLoading} onClick={handleUpdateSchedule}>
-                  OK
-                </Button>,
-              ]}
-              closable={!updateScheduleLoading}
-              maskClosable={!updateScheduleLoading}
-            >
-              <p style={{ margin: 0 }}>
-                Do you want to update the actual schedule? Please wait while we update the schedule.
-              </p>
-            </Modal>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 600, color: '#1677ff' }}>Skipped Parts:</span>
+                <span style={{ color: '#666' }}>
+                  {skippedData.skipped_parts.length > 0 ? skippedData.skipped_parts.join(', ') : 'No parts skipped'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontWeight: 600, color: '#1677ff' }}>Parts Without Operations:</span>
+                <span style={{ color: '#666' }}>
+                  {skippedData.parts_without_operations.length > 0
+                    ? skippedData.parts_without_operations.map(p => p.part_number).join(', ')
+                    : 'No parts without operations'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Timeline */}
+        <div>
+          <div
+            style={{
+              height: availableMachines.length > 24 ? '70vh' : 'auto',
+              overflowY: availableMachines.length > 24 ? 'auto' : 'hidden',
+              overflowX: 'hidden',
+              border: '1px solid #e8e8e8',
+              borderRadius: 8,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+              background: '#fff',
+            }}
+          >
+            <div ref={timelineContainerRef} style={{ minHeight: 300, background: '#fff' }} />
+          </div>
+        </div>
+
+        {Object.keys(componentColors).length > 0 && (
+          <ComponentLegend
+            componentColors={componentColors}
+            title="Production Orders"
+            active={selectedProductionOrders}
+            onToggle={(po) =>
+              setSelectedProductionOrders(prev =>
+                prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
+              )
+            }
+          />
+        )}
+
+        {/* Help Modal */}
+        <Modal
+          title="How to Use Timeline"
+          open={helpOpen}
+          onCancel={() => setHelpOpen(false)}
+          footer={[<Button key="close" onClick={() => setHelpOpen(false)}>Close</Button>]}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontWeight: 600 }}>Navigation</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <LeftOutlined /> <RightOutlined /> <span>Use arrow buttons or drag to move</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <CalendarOutlined /> <span>Use date picker to jump to dates</span>
+            </div>
+            <div style={{ fontWeight: 600, marginTop: 8 }}>Zooming</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ZoomInOutlined /> <span>Click "+" to zoom in</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ZoomOutOutlined /> <span>Click "-" to zoom out</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <FullscreenOutlined /> <span>Click "Fit" to show all</span>
+            </div>
+            <div style={{ fontWeight: 600, marginTop: 8 }}>Interaction</div>
+            <div>Click a task to view details</div>
+            <div style={{ background: '#f6f7fb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 10 }}>
+              <InfoCircleOutlined style={{ marginRight: 8 }} />
+              <span>Hold CTRL and use mouse wheel to zoom at cursor position</span>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Update Modal */}
+        <Modal
+          title={
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <WarningOutlined style={{ color: '#faad14', fontSize: 22 }} />
+              Update Actual Schedule
+            </span>
+          }
+          open={updateModalOpen}
+          onCancel={() => !updateScheduleLoading && setUpdateModalOpen(false)}
+          footer={[
+            <Button key="cancel" onClick={() => setUpdateModalOpen(false)} disabled={updateScheduleLoading}>
+              Cancel
+            </Button>,
+            <Button key="ok" type="primary" loading={updateScheduleLoading} onClick={handleUpdateSchedule}>
+              OK
+            </Button>,
+          ]}
+          closable={!updateScheduleLoading}
+          maskClosable={!updateScheduleLoading}
+        >
+          <p style={{ margin: 0 }}>
+            Do you want to update the actual schedule? Please wait while we update the schedule.
+          </p>
+        </Modal>
       </Content>
     </Layout>
   );

@@ -408,6 +408,18 @@ const ProductionCompletion = () => {
                   </Text>
                 </div>
                 <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>{highlightText(record.operator?.user_name, searchText)}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Machine</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {highlightText(record.planned_schedule_item?.machine_name, searchText)}
+                  </Text>
+                </div>
+                <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Op. Number</Text>
                   <br />
                   <Text style={{ fontSize: 13 }}>
@@ -427,11 +439,6 @@ const ProductionCompletion = () => {
                   <Text style={{ fontSize: 13 }}>
                     {record.approved_quantity !== null && record.approved_quantity !== undefined ? record.approved_quantity : '-'}
                   </Text>
-                </div>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
-                  <br />
-                  <Text style={{ fontSize: 13 }}>{highlightText(record.operator?.user_name, searchText)}</Text>
                 </div>
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>From</Text>
@@ -538,6 +545,15 @@ const ProductionCompletion = () => {
             #{highlightText(record.planned_schedule_item?.operation_number, searchText)}
           </Text>
         </Space>
+      ),
+    },
+    {
+      title: 'Operator',
+      key: 'operator',
+      render: (_, record) => (
+        <Text style={{ fontSize: '12px' }}>
+          {highlightText(record.operator?.user_name, searchText)}
+        </Text>
       ),
     },
     {

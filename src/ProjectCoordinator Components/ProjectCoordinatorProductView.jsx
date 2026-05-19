@@ -4,7 +4,6 @@ import { Layout, Drawer, Button } from "antd";
 import { MenuOutlined, ArrowLeftOutlined } from "@ant-design/icons";
 import BillOfMaterials from "./PDM Components/BillOfMaterials";
 import ProductDetails from "./PDM Components/ProductDetails";
-import ProductSummary from "./PDM Components/ProductSummary";
 import DocumentsPanel from "./PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
 
@@ -52,13 +51,7 @@ const ProjectCoordinatorProductView = () => {
 
   const handleHierarchyLoaded = (pid, hierarchy) => {
     setProductHierarchies((prev) => ({ ...prev, [pid]: hierarchy }));
-    // Auto-select product when opening from OMS link so ProductSummary shows
-    if (String(pid) === String(productId)) {
-      setSelectedItem({ itemType: "product", id: parseInt(productId, 10) });
-    }
   };
-
-  const isProductSelected = selectedItem?.itemType === "product";
 
   const bomSidebar = (
     <div className="flex flex-col h-full overflow-hidden">
@@ -177,40 +170,32 @@ const ProjectCoordinatorProductView = () => {
               marginLeft: isMobile ? 0 : undefined,
             }}
           >
-            {isProductSelected ? (
+            {selectedItem?.itemType === "part" && (
               <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                <ProductSummary
-                  productId={selectedItem?.id}
-                  initialHierarchy={productHierarchies[selectedItem?.id]}
-                />
+                <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
+                  <DocumentsPanel
+                    selectedItem={selectedItem}
+                    onDocumentsLoaded={setPartDocuments}
+                  />
+                </ProductDetails>
               </div>
-            ) : (
-              <>
-                {selectedItem?.itemType === "part" && (
-                  <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                    <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
-                      <DocumentsPanel
-                        selectedItem={selectedItem}
-                        onDocumentsLoaded={setPartDocuments}
-                      />
-                    </ProductDetails>
-                  </div>
-                )}
-                {selectedItem?.itemType === "assembly" && (
-                  <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                    <AssemblyDocumentsPanel selectedItem={selectedItem} />
-                  </div>
-                )}
-                {selectedItem?.itemType !== "part" && selectedItem?.itemType !== "assembly" && (
-                  <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                    <DocumentsPanel
-                      selectedItem={selectedItem}
-                      onDocumentsLoaded={setPartDocuments}
-                    />
-                  </div>
-                )}
-              </>
             )}
+            {selectedItem?.itemType === "assembly" && (
+              <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                <AssemblyDocumentsPanel selectedItem={selectedItem} />
+              </div>
+            )}
+            {selectedItem &&
+              selectedItem.itemType !== "part" &&
+              selectedItem.itemType !== "assembly" &&
+              selectedItem.itemType !== "product" && (
+                <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                  <DocumentsPanel
+                    selectedItem={selectedItem}
+                    onDocumentsLoaded={setPartDocuments}
+                  />
+                </div>
+              )}
           </Content>
         </Layout>
       </div>

@@ -1,9 +1,9 @@
 import React from "react";
 import { useLocation } from "react-router-dom";
-import AssetsAvailability from "../PPS Components/AssetsAvailability";
-import CapacityPlanning from "../PPS Components/CapacityPlanning";
-import MachineScheduling from "../PPS Components/MachineScheduling";
-import ProcessPlanning from "../PPS Components/ProcessPlanning";
+import AssetsAvailability from "./PPS Components/AssetsAvailability";
+import CapacityPlanning from "./PPS Components/CapacityPlanning";
+import MachineScheduling from "./PPS Components/MachineScheduling";
+import ProcessPlanning from "./PPS Components/ProcessPlanning";
 
 const PPS = () => {
   const location = useLocation();
@@ -20,12 +20,12 @@ const PPS = () => {
   const titleText = path.includes("/pps/assets-availability")
     ? "Assets Availability"
     : path.includes("/pps/capacity-planning")
-    ? "Capacity Planning"
-    : path.includes("/pps/machine-scheduling")
-    ? "Machine Scheduling"
-    : path.includes("/pps/process-planning")
-    ? "Process Planning"
-    : "Production Planning System";
+      ? "Capacity Planning"
+      : path.includes("/pps/machine-scheduling")
+        ? "Machine Scheduling"
+        : path.includes("/pps/process-planning")
+          ? "Process Planning"
+          : "Production Planning System";
 
   return (
     <div style={{ padding: '24px', background: "#f5f5f5", minHeight: "100vh" }}>
