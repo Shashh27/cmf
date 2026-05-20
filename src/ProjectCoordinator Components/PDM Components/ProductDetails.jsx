@@ -367,7 +367,7 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
       render: (text) => cellWithTooltip(text, 'N/A')
     },
     {
-      title: 'Version',
+      title: 'Revision',
       dataIndex: 'document_version',
       key: 'document_version',
       width: 90,

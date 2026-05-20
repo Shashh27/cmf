@@ -4,7 +4,7 @@ import axios from "axios";
 import { API_BASE_URL } from '../Config/auth';
 import { Modal, Form, Input, Select, Button, message, Upload, Card, Badge, TimePicker, Row, Col, DatePicker } from 'antd';
 import dayjs from 'dayjs';
-import { fetchInto, timePickerRules } from './operationUtils';
+import { fetchInto, timePickerRules } from './operationUtils.js';
 
 const { TextArea } = Input;
 

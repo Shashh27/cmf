@@ -1,4 +1,3 @@
-// operationUtils.js
 import axios from "axios";
 
 // Shared utility: normalise a version string as the user types
@@ -40,6 +39,7 @@ export const fetchInto = async (url, setter, setLoading, guard) => {
   if (guard) return; // already loaded
   if (setLoading) setLoading(true);
   try {
+    // Do not pass user_id: config (workcenters, machines, part-types, tools) and product data are shared for all roles
     const res = await axios.get(url);
     setter(res.data);
   } catch (e) {
@@ -48,16 +48,15 @@ export const fetchInto = async (url, setter, setLoading, guard) => {
     if (setLoading) setLoading(false);
   }
 };
-
-// Shared rule: TimePicker must not be 00:00:00
-export const timePickerRules = (label) => [
-  { required: true, message: `${label} is required` },
-  {
-    validator: (_, value) => {
-      if (!value) return Promise.reject(new Error(`${label} is required`));
-      return value.format('HH:mm:ss') === '00:00:00'
-        ? Promise.reject(new Error(`${label} cannot be 00:00:00`))
-        : Promise.resolve();
+  
+  // Shared rule: TimePicker must not be 00:00:00
+  export const timePickerRules = (label) => [
+    {
+      validator: (_, value) => {
+        if (!value) return Promise.reject(new Error(`${label} is required`));
+        return value.format('HH:mm:ss') === '00:00:00'
+          ? Promise.reject(new Error(`${label} cannot be 00:00:00`))
+          : Promise.resolve();
+      },
     },
-  },
-];
+  ];

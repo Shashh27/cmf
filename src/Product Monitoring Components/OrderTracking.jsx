@@ -482,7 +482,7 @@ const OrderTracking = () => {
                                   <span style={{ color: '#52c41a', fontWeight: 'bold' }}>{log.approved_quantity || 0}</span>
                                 </div>
                                 <div>
-                                  <span style={{ color: '#666' }}>Rejected: </span>
+                                  <span style={{ color: '#666' }}>Rework: </span>
                                   <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}>{log.rework_quantity || 0}</span>
                                 </div>
                               </div>
@@ -563,12 +563,12 @@ const OrderTracking = () => {
                     },
                     {
                       title: 'Produced',
-                      key: 'produced',
+                      key: 'approved',
                       width: 50,
                       align: 'center',
                       render: (_, op) => {
                         const logs = productionLogsData[op.id] || [];
-                        return <Text style={{ color: '#1677ff', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.produced_quantity || 0), 0)}</Text>;
+                        return <Text style={{ color: '#52c41a', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.approved_quantity || 0), 0)}</Text>;
                       }
                     },
                     {
@@ -582,7 +582,7 @@ const OrderTracking = () => {
                       }
                     },
                     {
-                      title: 'Rejected',
+                      title: 'Rework',
                       key: 'rejected',
                       width: 50,
                       align: 'center',

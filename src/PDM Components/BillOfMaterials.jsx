@@ -10,6 +10,7 @@ import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../DownloadReports/ProductBOMPdfDownload";
 import ProductToolsViewer from "./ProductToolsViewer";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
+import BOMFilters from "./BOMFilters";
 
 const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
   const { message, modal } = App.useApp();
@@ -32,6 +33,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [showToolsModal, setShowToolsModal] = useState(false);
   const [selectedProductForTools, setSelectedProductForTools] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeFilter, setActiveFilter] = useState('all');
   const hasFetchedData = useRef(false);
 
   const getExpandKey = (type, id) => `${type}-${id}`;
@@ -128,38 +130,12 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       onItemSelected({ ...product, itemType: 'product', productId: pid });
     }
     
-    // Auto-expand complete BOM tree when opened from OMS
+    // Auto-expand only the product itself when opened from OMS (keep sub-items collapsed)
     if (hierarchicalData[pid]) {
-      const expandedKeys = {};
-      const expandAllItems = (data, prefix = '') => {
-        // Expand product
-        expandedKeys[getExpandKey('product', pid)] = true;
-        
-        // Expand all assemblies and their parts
-        if (data.assemblies) {
-          data.assemblies.forEach(assembly => {
-            expandedKeys[getExpandKey('assembly', assembly.id)] = true;
-            // Recursively expand nested assemblies and their parts
-            expandAssembly(assembly);
-          });
-        }
-      };
-      
-      const expandAssembly = (assembly) => {
-        // Expand this assembly (already done above, but keeping for completeness)
-        expandedKeys[getExpandKey('assembly', assembly.id)] = true;
-        
-        // Expand child assemblies recursively
-        if (assembly.child_assemblies) {
-          assembly.child_assemblies.forEach(childAssembly => {
-            expandedKeys[getExpandKey('assembly', childAssembly.id)] = true;
-            expandAssembly(childAssembly);
-          });
-        }
-      };
-      
-      expandAllItems(hierarchicalData[pid]);
-      setExpandedItems(prev => ({ ...prev, ...expandedKeys }));
+      setExpandedItems(prev => ({ 
+        ...prev, 
+        [getExpandKey('product', pid)]: true 
+      }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProductId, loading, products, hierarchicalData]);
@@ -183,6 +159,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         parent_assembly_id: parentAssembly?.id || null,
         parent_assembly_number: parentAssembly?.assembly_number || null,
         parent_assembly_name: parentAssembly?.assembly_name || null,
+        raw_material_id: part.raw_material_id,
+        part_detail: part.part_detail,
       });
 
       (wrapper.operations || []).forEach((op, index) => {
@@ -582,6 +560,95 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     return [];
   };
 
+  const getBOMStats = () => {
+    const targetProducts = initialProductId 
+      ? products.filter(p => Number(p.id) === Number(initialProductId))
+      : products;
+      
+    const stats = { total: 0, inhouse: 0, outsource: 0, standard: 0, linked: 0, unlinked: 0 };
+    
+    targetProducts.forEach(product => {
+      const data = hierarchicalData[product.id];
+      if (!data || !data.bomExport) return;
+      
+      const parts = data.bomExport.parts || [];
+      stats.total += parts.length;
+      
+      parts.forEach(p => {
+        const type = (p.type_name || p.type || '').toLowerCase().trim();
+        const isInhouse = type.includes('in') && type.includes('house') || type === 'inhouse' || type === 'in-house' || type === 'make';
+        const isOutsource = type.includes('out') || type === 'buy' || type === 'outsource' || type === 'out-source' || type === 'outsourced';
+        const isStandard = type.includes('standard') || type.includes('std') || type.includes('catalogue');
+        
+        if (isInhouse) stats.inhouse++;
+        else if (isOutsource) stats.outsource++;
+        else if (isStandard) stats.standard++;
+        
+        const isLinked = p.raw_material_id != null && p.part_detail !== 'WITHOUT_RAW_MATERIAL';
+        if (isLinked) stats.linked++;
+        else stats.unlinked++;
+      });
+    });
+    
+    return stats;
+  };
+
+  const matchesFilter = (part, filter) => {
+    if (!part || filter === 'all') return true;
+    const typeName = (part.type_name || part.type || '').toLowerCase().trim();
+    
+    const inHouseTypes = ["make", "in-house", "in house", "inhouse", "part"];
+    const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
+    const standardTypes = ["standard", "std", "catalogue"];
+
+    const isInhouse = inHouseTypes.includes(typeName) || (typeName.includes('in') && typeName.includes('house'));
+    const isOutsource = outSourceTypes.includes(typeName) || typeName.includes('out');
+    const isStandard = standardTypes.some(t => typeName.includes(t));
+    const isLinked = part.raw_material_id != null && part.part_detail !== 'WITHOUT_RAW_MATERIAL';
+
+    switch (filter) {
+      case 'inhouse': return isInhouse;
+      case 'outsource': return isOutsource;
+      case 'standard': return isStandard;
+      case 'linked': return isLinked;
+      case 'unlinked': return !isLinked;
+      default: return true;
+    }
+  };
+
+  const hasMatchingItems = (item, type, filter, productId) => {
+    if (filter === 'all') return true;
+    
+    if (type === 'part') return matchesFilter(item, filter);
+    
+    if (type === 'assembly') {
+      // Check parts of this assembly
+      const parts = getPartsForAssembly(item.id);
+      if (parts.some(p => matchesFilter(p, filter))) return true;
+      
+      // Check child assemblies
+      const children = getNestedAssemblies(item.id);
+      if (children.some(child => hasMatchingItems(child, 'assembly', filter, productId))) return true;
+      
+      return false;
+    }
+    
+    if (type === 'product') {
+      const data = hierarchicalData[item.id];
+      if (!data) return true; // Show product if data not yet loaded (it will load on expand)
+      
+      const directParts = data.parts || [];
+      if (directParts.some(p => matchesFilter(p, filter))) return true;
+      
+      const assemblies = data.assemblies || [];
+      if (assemblies.some(asm => hasMatchingItems(asm, 'assembly', filter, item.id))) return true;
+      
+      return false;
+    }
+    
+    return true;
+  };
+
   const ActionButtons = ({ item, type, tagName, tagColor }) => {
     const productHierarchy = type === 'product' ? hierarchicalData[item.id] : null;
     const bomExport = productHierarchy?.bomExport;
@@ -693,6 +760,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const renderPartInTree = (part, level = 0, productId = null) => {
+    if (!matchesFilter(part, activeFilter)) return null;
     const isSelected = activeItemId === part.id && activeItemType === 'part';
     
     return (
@@ -710,6 +778,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             </Text>
             <Text className="text-[10px] text-slate-400 truncate">
               {part.part_number}
+              {part.raw_material_name && (
+                <span className="ml-1 text-[9px] text-indigo-500">({part.raw_material_name})</span>
+              )}
             </Text>
           </div>
         </div>
@@ -724,6 +795,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const renderAssemblyTree = (assembly, level = 0, productId = null) => {
+    if (!hasMatchingItems(assembly, 'assembly', activeFilter, productId)) return null;
+    
     const childAssemblies = getNestedAssemblies(assembly.id);
     const assemblyParts = getPartsForAssembly(assembly.id);
     const combinedChildren = [
@@ -785,6 +858,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const renderProductTree = (product) => {
+    if (!hasMatchingItems(product, 'product', activeFilter, product.id)) return null;
+    
     const productHierarchy = hierarchicalData[product.id];
     const hasData = !!productHierarchy;
     const childAssemblies = productHierarchy?.assemblies || [];
@@ -1225,17 +1300,30 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             </div>
           </div>
         
-        {/* Search Bar */}
-        <div className="px-2 pb-2">
-          <Input
-            placeholder="Search by assembly name/number or part name/number..."
-            prefix={<SearchOutlined className="text-slate-400" />}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            allowClear
-            className="w-full"
-            size="small"
-          />
+        {/* Search Bar & Filters */}
+        <div className="px-2 pb-2 flex items-center gap-2 w-full max-w-3xl">
+          <div className="flex-1 min-w-0">
+            <Input
+              placeholder="Search by assembly name/number or part name/number..."
+              prefix={<SearchOutlined className="text-slate-400" />}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              allowClear
+              className="w-full"
+              size="small"
+            />
+          </div>
+          <div className="w-44 sm:w-52 shrink-0">
+            <BOMFilters 
+              stats={getBOMStats()} 
+              activeFilter={activeFilter} 
+              onFilterChange={(filter) => {
+                setActiveFilter(filter);
+                setActiveItemId(null);
+                setActiveItemType(null);
+              }} 
+            />
+          </div>
         </div>
         </div>
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 bom-scroll min-h-0">

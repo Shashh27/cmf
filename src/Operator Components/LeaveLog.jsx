@@ -25,7 +25,7 @@ const LeaveLog = () => {
   const fetchLeaves = async () => {
     try {
       const operatorId = getOperatorId();
-      const response = await fetch(`${SCHEDULING_API_BASE_URL}/operator-leaves?operator_id=${operatorId}`);
+      const response = await fetch(`${SCHEDULING_API_BASE_URL}/operator-leaves/?operator_id=${operatorId}`);
       if (response.ok) {
         const data = await response.json();
         setLeaves(data);

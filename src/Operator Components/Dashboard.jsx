@@ -106,8 +106,11 @@ const Dashboard = () => {
             totalRework: totalReworkSum,
             totalApproved: totalApprovedSum,
             latestProduced: latestLog.produced_quantity || 0,
+            latestApproved: latestLog.approved_quantity || 0,
             latestRework: latestLog.rework_quantity || 0,
-            hasRework: latestLog.status === 'rework',
+            latestRejected: latestLog.rejected_quantity || 0,
+            latestRemarks: latestLog.remarks || '',
+            hasRework: (latestLog.rework_quantity || 0) > 0 || (latestLog.rejected_quantity || 0) > 0,
             reworkRemarks: latestLog.remarks || '',
             operatorStatus: latestLog.operator_status,
             activationTime: latestLog.from_date && latestLog.from_time ? `${latestLog.from_date} ${latestLog.from_time}` : null

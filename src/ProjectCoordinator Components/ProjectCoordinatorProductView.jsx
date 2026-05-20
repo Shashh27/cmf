@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useParams, Link, useLocation } from "react-router-dom";
-import { Layout, Drawer, Button } from "antd";
+import { Layout, Drawer, Button, Tabs } from "antd";
 import { MenuOutlined, ArrowLeftOutlined } from "@ant-design/icons";
 import BillOfMaterials from "./PDM Components/BillOfMaterials";
 import ProductDetails from "./PDM Components/ProductDetails";
 import DocumentsPanel from "./PDM Components/DocumentsPanel";
+import OrderTracking from "./Product Monitoring Components/OrderTracking";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
+import PPS from "./PPS";
+import ProductionMonitoring from "./ProductionMonitoring";
 
 const { Sider, Content } = Layout;
 
@@ -22,6 +25,22 @@ const ProjectCoordinatorProductView = () => {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [productHierarchies, setProductHierarchies] = useState({});
+  const [activeTab, setActiveTab] = useState('bom');
+
+  const path = location.pathname;
+
+  // Render content based on path
+  const renderContent = () => {
+    if (path.includes('/pps/')) {
+      return <PPS />;
+    }
+    if (path.includes('/product-monitoring/')) {
+      return <ProductionMonitoring />;
+    }
+    return null; // Default to tabbed view
+  };
+
+  const isModuleView = path.includes('/pps/') || path.includes('/product-monitoring/');
 
   React.useEffect(() => {
     const handleResize = () => {
@@ -65,7 +84,7 @@ const ProjectCoordinatorProductView = () => {
     </div>
   );
 
-  if (!productId) {
+  if (!productId && !isModuleView) {
     return (
       <div className="p-4">
         <Link to="/project_coordinator/oms/orders" className="text-blue-600 hover:underline">
@@ -76,131 +95,155 @@ const ProjectCoordinatorProductView = () => {
     );
   }
 
+  // If it's a module view (PPS or Production Monitoring), render the module directly
+  if (isModuleView) {
+    return renderContent();
+  }
+
   return (
     <>
       <style>{`
-        * {
-          box-sizing: border-box;
+      * {
+        box-sizing: border-box;
+      }
+      @media (max-width: 768px) {
+        .pdm-mobile-toggle {
+          position: fixed;
+          top: 80px;
+          left: 16px;
+          z-index: 1001;
+          background: white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+          border-radius: 8px;
         }
-        @media (max-width: 768px) {
-          .pdm-mobile-toggle {
-            position: fixed;
-            top: 80px;
-            left: 16px;
-            z-index: 1001;
-            background: white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            border-radius: 8px;
-          }
-        }
-        /* Custom scrollbar for better UX within containers */
-        ::-webkit-scrollbar {
-          width: 6px;
-          height: 6px;
-        }
-        ::-webkit-scrollbar-track {
-          background: #f1f5f9;
-        }
-        ::-webkit-scrollbar-thumb {
-          background: #cbd5e1;
-          border-radius: 3px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-          background: #94a3b8;
-        }
-      `}</style>
-
-      <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
-          <Link
-            to="/project_coordinator/oms/orders"
-            className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
-          >
-            <ArrowLeftOutlined />
-            Back to Orders
-          </Link>
-        </div>
-        <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex' }}>
-          {isMobile && (
-            <Button
-              type="text"
-              icon={<MenuOutlined />}
-              onClick={() => setMobileDrawerOpen(true)}
-              className="pdm-mobile-toggle"
-            />
-          )}
-
-          {!isMobile && (
-            <Sider
-              width="33%"
-              theme="light"
-              style={{
-                borderRight: "1px solid #f0f0f0",
-                overflow: "hidden",
-                display: "flex",
-                flexDirection: "column",
-                minWidth: 300,
-                maxWidth: 500,
-                height: '100%'
-              }}
-            >
-              {bomSidebar}
-            </Sider>
-          )}
-
-          {isMobile && (
-            <Drawer
-              placement="left"
-              onClose={() => setMobileDrawerOpen(false)}
-              open={mobileDrawerOpen}
-              style={{ width: "85%" }}
-              styles={{ body: { padding: 0 } }}
-            >
-              {bomSidebar}
-            </Drawer>
-          )}
-
-          <Content
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
-              backgroundColor: "#f8fafc",
-              height: "100%",
-              marginLeft: isMobile ? 0 : undefined,
-            }}
-          >
-            {selectedItem?.itemType === "part" && (
-              <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
-                  <DocumentsPanel
-                    selectedItem={selectedItem}
-                    onDocumentsLoaded={setPartDocuments}
-                  />
-                </ProductDetails>
-              </div>
-            )}
-            {selectedItem?.itemType === "assembly" && (
-              <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                <AssemblyDocumentsPanel selectedItem={selectedItem} />
-              </div>
-            )}
-            {selectedItem &&
-              selectedItem.itemType !== "part" &&
-              selectedItem.itemType !== "assembly" &&
-              selectedItem.itemType !== "product" && (
-                <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                  <DocumentsPanel
-                    selectedItem={selectedItem}
-                    onDocumentsLoaded={setPartDocuments}
-                  />
-                </div>
+      }
+      /* Custom scrollbar for better UX within containers */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #f1f5f9;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+    `}</style>
+      <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }}>
+        <Tabs.TabPane tab="PDM" key="bom">
+          <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
+              <Link
+                to="/project_coordinator/oms/orders"
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
+              >
+                <ArrowLeftOutlined />
+                Back to Orders
+              </Link>
+            </div>
+            <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex' }}>
+              {isMobile && (
+                <Button
+                  type="text"
+                  icon={<MenuOutlined />}
+                  onClick={() => setMobileDrawerOpen(true)}
+                  className="pdm-mobile-toggle"
+                />
               )}
-          </Content>
-        </Layout>
-      </div>
+
+              {!isMobile && (
+                <Sider
+                  width="33%"
+                  theme="light"
+                  style={{
+                    borderRight: "1px solid #f0f0f0",
+                    overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                    minWidth: 300,
+                    maxWidth: 500,
+                    height: '100%'
+                  }}
+                >
+                  {bomSidebar}
+                </Sider>
+              )}
+
+              {isMobile && (
+                <Drawer
+                  placement="left"
+                  onClose={() => setMobileDrawerOpen(false)}
+                  open={mobileDrawerOpen}
+                  style={{ width: "85%" }}
+                  styles={{ body: { padding: 0 } }}
+                >
+                  {bomSidebar}
+                </Drawer>
+              )}
+
+              <Content
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "hidden",
+                  backgroundColor: "#f8fafc",
+                  height: "100%",
+                  marginLeft: isMobile ? 0 : undefined,
+                }}
+              >
+                {selectedItem?.itemType === "part" && (
+                  <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                    <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
+                      <DocumentsPanel
+                        selectedItem={selectedItem}
+                        onDocumentsLoaded={setPartDocuments}
+                      />
+                    </ProductDetails>
+                  </div>
+                )}
+                {selectedItem?.itemType === "assembly" && (
+                  <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                    <AssemblyDocumentsPanel selectedItem={selectedItem} />
+                  </div>
+                )}
+                {selectedItem &&
+                  selectedItem.itemType !== "part" &&
+                  selectedItem.itemType !== "assembly" &&
+                  selectedItem.itemType !== "product" && (
+                    <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                      <DocumentsPanel
+                        selectedItem={selectedItem}
+                        onDocumentsLoaded={setPartDocuments}
+                      />
+                    </div>
+                  )}
+              </Content>
+            </Layout>
+          </div>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab="Order Tracking" key="order">
+          <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
+              <Link
+                to="/project_coordinator/oms/orders"
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
+              >
+                <ArrowLeftOutlined />
+                Back to Orders
+              </Link>
+            </div>
+            <OrderTracking />
+          </div>
+        </Tabs.TabPane>
+      </Tabs>
     </>
   );
+
+
 };
 
 export default ProjectCoordinatorProductView;

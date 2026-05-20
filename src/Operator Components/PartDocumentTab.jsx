@@ -505,7 +505,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     setCompletingOp(operation);
     setIsCompleteModalVisible(true);
     completeForm.setFieldsValue({
-      produced_quantity: 1,
+      produced_quantity: null,
       notes: ''
     });
   };
@@ -833,14 +833,35 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           form={completeForm}
           layout="vertical"
           onFinish={handleCompleteSubmit}
-          initialValues={{ produced_quantity: 1 }}
         >
           <Form.Item
             name="produced_quantity"
             label="Produced Quantity"
-            rules={[{ required: true, message: 'Please enter produced quantity' }]}
+            rules={[
+              { required: true, message: 'Please enter produced quantity' },
+              {
+                validator: (_, value) => {
+                  if (value === 0 || value === '0') {
+                    return Promise.reject(new Error('Produced quantity cannot be 0'));
+                  }
+                  return Promise.resolve();
+                }
+              }
+            ]}
           >
-            <InputNumber min={1} style={{ width: '100%' }} placeholder="Enter quantity" />
+            <InputNumber
+              min={0}
+              style={{ width: '100%' }}
+              placeholder="Enter quantity"
+              precision={0}
+              parser={value => value ? String(value).replace(/[^\d]/g, '') : ''}
+              formatter={value => value ? String(value).replace(/[^\d]/g, '') : ''}
+              onKeyDown={e => {
+                if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
+                  e.preventDefault();
+                }
+              }}
+            />
           </Form.Item>
 
           <Form.Item

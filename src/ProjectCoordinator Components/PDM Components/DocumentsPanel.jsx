@@ -7,7 +7,7 @@ import {
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import { Tabs, Button, Badge, Table, Select, Empty, Spin, message, Tooltip, Tag, Modal, Popconfirm, Typography, Upload, Input, Form } from "antd";
-import { normalizeVersion, fetchInto } from "./operationUtils";
+import { normalizeVersion, fetchInto } from "./operationUtils.js";
 import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
@@ -18,10 +18,10 @@ const { Dragger } = Upload;
 
 // ── OperationDocumentsList ──────────────────────────────────────────────────
 const OperationDocumentsList = ({ operationId, onPreview }) => {
-  const [docs, setDocs]       = useState([]);
+  const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
+  useEffect(() => {
     let alive = true;
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
@@ -52,13 +52,14 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
   );
 
   const grouped = docs.reduce((acc, d) => { const r = d.parent_id || d.id; (acc[r] = acc[r] || []).push(d); return acc; }, {});
-  const latest  = Object.values(grouped).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]);
+  const latest = Object.values(grouped).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]);
 
   const columns = [
     { title: 'Type', dataIndex: 'document_type', width: 120, render: t => <Tag color="blue" variant="filled" className="mr-0">{t || 'DOC'}</Tag> },
     { title: 'Document Name', dataIndex: 'document_name', ellipsis: true, render: t => <span className="font-medium text-gray-800">{t}</span> },
     { title: 'Version', dataIndex: 'document_version', width: 100, render: t => { const v = t || '1.0'; return <span className="text-blue-600 font-bold text-xs">{v}</span>; } },
-    { title: 'Actions', key: 'actions', width: 80, align: 'center', render: (_, doc) => (
+    {
+      title: 'Actions', key: 'actions', width: 80, align: 'center', render: (_, doc) => (
         <div className="flex gap-1 justify-center">
           <Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EyeOutlined />} onClick={() => onPreview(doc)} />
           <Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />}
@@ -120,14 +121,14 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
 
   return (
     <div className="flex-1 min-h-0 overflow-hidden w-full relative" ref={ref} style={{ height: '100%' }}>
-      <Table 
-        columns={columns} 
-        dataSource={dataSource} 
-        pagination={false} 
-        scroll={{ y: scrollY, x: scrollX }} 
-        size="small" 
-        {...props} 
-        className={`${props.className || ''} custom-fit-table`} 
+      <Table
+        columns={columns}
+        dataSource={dataSource}
+        pagination={false}
+        scroll={{ y: scrollY, x: scrollX }}
+        size="small"
+        {...props}
+        className={`${props.className || ''} custom-fit-table`}
       />
     </div>
   );
@@ -135,27 +136,27 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
 
 // ── DocumentsPanel ──────────────────────────────────────────────────────────
 const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
-  const [documents, setDocuments]   = useState([]);
+  const [documents, setDocuments] = useState([]);
   const [operations, setOperations] = useState([]);
-  const [activeTab, setActiveTab]   = useState('mbom');
-  const [loading, setLoading]       = useState(false);
+  const [activeTab, setActiveTab] = useState('mbom');
+  const [loading, setLoading] = useState(false);
 
   // Preview
-  const [previewDoc, setPreviewDoc]         = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null);
 
   // Modals
   const [showPartActionModal, setShowPartActionModal] = useState(false);
-  const [partActionType, setPartActionType]           = useState('');
-  const [selectedOperation, setSelectedOperation]     = useState(null);
+  const [partActionType, setPartActionType] = useState('');
+  const [selectedOperation, setSelectedOperation] = useState(null);
   const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen]         = useState(false);
-  const [viewOperation, setViewOperation]             = useState(null);
-  const [viewOperationTools, setViewOperationTools]   = useState([]);
-  const [loadingViewTools, setLoadingViewTools]       = useState(false);
-  const [modalTab, setModalTab]                       = useState('details');
-  const [showAddToolForm, setShowAddToolForm]         = useState(false);
-  const [showImportModal, setShowImportModal]         = useState(false);
-  const [importOperations, setImportOperations]       = useState([]);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [viewOperation, setViewOperation] = useState(null);
+  const [viewOperationTools, setViewOperationTools] = useState([]);
+  const [loadingViewTools, setLoadingViewTools] = useState(false);
+  const [modalTab, setModalTab] = useState('details');
+  const [showAddToolForm, setShowAddToolForm] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importOperations, setImportOperations] = useState([]);
   const [showReportModal, setShowReportModal] = useState(false);
 
   // eBOM version selection
@@ -163,22 +164,22 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   // Upload state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [uploading, setUploading]                 = useState(false);
-  const [selectedFileList, setSelectedFileList]   = useState([]);
-  const [uploadDocType, setUploadDocType]         = useState('2D');
+  const [uploading, setUploading] = useState(false);
+  const [selectedFileList, setSelectedFileList] = useState([]);
+  const [uploadDocType, setUploadDocType] = useState('2D');
   const [uploadDocTypeOther, setUploadDocTypeOther] = useState('');
-  const [uploadParentId, setUploadParentId]       = useState(null);
-  const [uploadVersion, setUploadVersion]         = useState('v1.0');
+  const [uploadParentId, setUploadParentId] = useState(null);
+  const [uploadVersion, setUploadVersion] = useState('v1.0');
 
   // Edit doc
   const [isEditDocModalOpen, setIsEditDocModalOpen] = useState(false);
-  const [editingDoc, setEditingDoc]                 = useState(null);
+  const [editingDoc, setEditingDoc] = useState(null);
   const [editForm] = Form.useForm();
   const watchedDocType = Form.useWatch('document_type', editForm);
 
   useEffect(() => {
     if (editingDoc) {
-      const isOther = !['2D','3D'].includes(editingDoc.document_type);
+      const isOther = !['2D', '3D'].includes(editingDoc.document_type);
       editForm.setFieldsValue({ document_name: editingDoc.document_name, document_type: isOther ? 'Other' : editingDoc.document_type, custom_type: isOther ? editingDoc.document_type : '' });
     } else { editForm.resetFields(); }
   }, [editingDoc, editForm]);
@@ -187,11 +188,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   const groupedPartDocs = useMemo(() =>
     documents.reduce((acc, d) => { const r = d.parent_id || d.id; (acc[r] = acc[r] || []).push(d); return acc; }, {}),
-  [documents]);
+    [documents]);
 
   const latestPartDocs = useMemo(() =>
     Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]),
-  [groupedPartDocs]);
+    [groupedPartDocs]);
 
   useEffect(() => {
     const next = { ...selectedVersions };
@@ -203,7 +204,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (changed) setSelectedVersions(next);
   }, [latestPartDocs, groupedPartDocs]);
 
-    useEffect(() => {
+  useEffect(() => {
     if (!selectedItem) { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
     if (selectedItem.itemType === 'part') fetchDocuments();
     else { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); }
@@ -255,11 +256,22 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   };
 
   const handleDownload = (id) => { const a = document.createElement('a'); a.href = `${API_BASE_URL}/documents/${id}/download`; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); };
-  const handlePreview  = (doc) => { if (!doc.document_url) { message.error("Document URL not found"); return; } setPreviewDoc(doc); };
+  const handlePreview = (doc) => { if (!doc.document_url) { message.error("Document URL not found"); return; } setPreviewDoc(doc); };
 
   const handleUpload = async () => {
     if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
     if (uploadDocType === 'Other' && !uploadDocTypeOther.trim()) { message.warning('Please enter document type'); return; }
+    if (!uploadVersion || !uploadVersion.trim()) { message.warning('Please enter a revision'); return; }
+
+    if (uploadParentId) {
+      const existingVersions = documents.filter(d => (d.parent_id || d.id) === uploadParentId);
+      const versionExists = existingVersions.some(v => String(v.document_version).trim() === uploadVersion.trim());
+      if (versionExists) {
+        message.error('This revision already exists for this document. Please enter a new revision.');
+        return;
+      }
+    }
+
     const file = selectedFileList[0];
     const fd = new FormData();
     fd.append('file', file);
@@ -289,7 +301,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     finally { setUploading(false); }
   };
 
-  const resetUploadState = () => { setSelectedFileList([]); setUploadParentId(null); setUploadVersion('v1.0'); setUploadDocType('2D'); setUploadDocTypeOther(''); };
+  const resetUploadState = () => { setSelectedFileList([]); setUploadParentId(null); setUploadVersion(''); setUploadDocType('2D'); setUploadDocTypeOther(''); };
 
   const handleDeleteDocument = async (id) => {
     try {
@@ -329,8 +341,19 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   };
 
   const initiateNewVersion = (doc, latestVer) => {
+    let nextVer = String(latestVer || "");
+    const match = nextVer.match(/(\d+)$/);
+    if (match) {
+      const numStr = match[1];
+      const num = parseInt(numStr, 10);
+      const nextNumStr = String(num + 1).padStart(numStr.length, '0');
+      nextVer = nextVer.substring(0, match.index) + nextNumStr;
+    } else {
+      nextVer = nextVer ? nextVer + "-01" : "01";
+    }
+
     setUploadParentId(doc.parent_id || doc.id);
-    setUploadVersion(latestVer || '');
+    setUploadVersion(nextVer);
     setUploadDocType(doc.document_type || '2D');
     setIsUploadModalOpen(true);
   };
@@ -362,24 +385,42 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   // ── operations table columns ───────────────────────────────────────────────
   const operationsColumns = [
-    { title: 'Op #', dataIndex: 'operation_number', key: 'op', width: 70,
-      render: (t, _, i) => <Tag color="cyan" className="font-mono text-sm font-medium m-0 px-1.5 py-0.5">{String(t || i + 1).padStart(2, '0')}</Tag> },
-    { title: <span className="font-semibold text-slate-700">Operation Name</span>, dataIndex: 'operation_name', key: 'name', ellipsis: true, minWidth: 150,
-      render: n => <span className="text-sm font-medium text-slate-900">{n || '—'}</span> },
-    { title: <span><ClockCircleOutlined className="mr-0.5" />Setup</span>, dataIndex: 'setup_time', key: 'setup', width: 100,
-      render: t => <Tag color="orange" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
-    { title: <span><ClockCircleOutlined className="mr-0.5" />Cycle</span>, dataIndex: 'cycle_time', key: 'cycle', width: 100,
-      render: t => <Tag color="green" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
-    { title: <span><EnvironmentOutlined className="mr-0.5" />Workcenter</span>, dataIndex: 'workcenter_id', key: 'wc',
-      render: (id, r) => <Tag color="purple" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.work_center_name || id || 'N/A'}</Tag> },
-    { title: <span className="font-semibold text-slate-700">Machine</span>, dataIndex: 'machine_id', key: 'mc',
-      render: (id, r) => <Tag color="geekblue" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.machine_name || id || 'N/A'}</Tag> },
-    { title: <span className="font-semibold text-slate-700">Op Type</span>, dataIndex: 'part_type_id', key: 'type',
-      render: (_, r) => <Tag color={r.part_type_name === 'Out-Source' ? 'orange' : 'blue'} className="m-0 px-1.5 py-0.5 text-xs">{r.part_type_name || 'IN-House'}</Tag> },
-    { title: <span className="font-semibold text-slate-700">From Date</span>, dataIndex: 'from_date', key: 'from',
-      render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
-    { title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to',
-      render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
+    {
+      title: 'Op #', dataIndex: 'operation_number', key: 'op', width: 70,
+      render: (t, _, i) => <Tag color="cyan" className="font-mono text-sm font-medium m-0 px-1.5 py-0.5">{String(t || i + 1).padStart(2, '0')}</Tag>
+    },
+    {
+      title: <span className="font-semibold text-slate-700">Operation Name</span>, dataIndex: 'operation_name', key: 'name', ellipsis: true, minWidth: 150,
+      render: n => <span className="text-sm font-medium text-slate-900">{n || '—'}</span>
+    },
+    {
+      title: <span><ClockCircleOutlined className="mr-0.5" />Setup</span>, dataIndex: 'setup_time', key: 'setup', width: 100,
+      render: t => <Tag color="orange" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag>
+    },
+    {
+      title: <span><ClockCircleOutlined className="mr-0.5" />Cycle</span>, dataIndex: 'cycle_time', key: 'cycle', width: 100,
+      render: t => <Tag color="green" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag>
+    },
+    {
+      title: <span><EnvironmentOutlined className="mr-0.5" />Workcenter</span>, dataIndex: 'workcenter_id', key: 'wc',
+      render: (id, r) => <Tag color="purple" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.work_center_name || id || 'N/A'}</Tag>
+    },
+    {
+      title: <span className="font-semibold text-slate-700">Machine</span>, dataIndex: 'machine_id', key: 'mc',
+      render: (id, r) => <Tag color="geekblue" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.machine_name || id || 'N/A'}</Tag>
+    },
+    {
+      title: <span className="font-semibold text-slate-700">Op Type</span>, dataIndex: 'part_type_id', key: 'type',
+      render: (_, r) => <Tag color={r.part_type_name === 'Out-Source' ? 'orange' : 'blue'} className="m-0 px-1.5 py-0.5 text-xs">{r.part_type_name || 'IN-House'}</Tag>
+    },
+    {
+      title: <span className="font-semibold text-slate-700">From Date</span>, dataIndex: 'from_date', key: 'from',
+      render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span>
+    },
+    {
+      title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to',
+      render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span>
+    },
   ];
 
   const getDocumentDisplayName = (doc) => {
@@ -389,14 +430,14 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       if (segment) {
         // Remove timestamp (YYYYMMDD_HHMMSS_) from the beginning
         let cleanName = segment.replace(/^\d{8}_\d{6}_/, '');
-        
+
         // Check if what remains starts with a UUID pattern (8+ alphanumeric chars followed by underscore)
         const uuidMatch = cleanName.match(/^([a-zA-Z0-9]{8,})_/);
         if (uuidMatch) {
           // Remove the UUID and underscore
           cleanName = cleanName.replace(/^([a-zA-Z0-9]{8,})_/, '');
         }
-        
+
         return cleanName || doc.document_name || '';
       }
     }
@@ -406,18 +447,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   // ── eBOM table columns ─────────────────────────────────────────────────────
   const eBomColumns = [
-    { title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
+    {
+      title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
       render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; const displayName = getDocumentDisplayName(cur); return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text></div>; }
     },
-    { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
+    {
+      title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
       render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
     },
-    { title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
+    {
+      title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
       render: (_, r) => {
         const rootId = r.parent_id || r.id;
-        const group  = groupedPartDocs[rootId] || [];
-        const cur    = selectedVersions[rootId] || r;
-        const fmtV   = (v) => String(v);
+        const group = groupedPartDocs[rootId] || [];
+        const cur = selectedVersions[rootId] || r;
+        const fmtV = (v) => String(v);
         return (
           <Select size="small" value={cur.id} variant="filled" className="w-full"
             onChange={val => { const s = group.find(d => d.id === val); setSelectedVersions(p => ({ ...p, [rootId]: s })); }}
@@ -439,7 +483,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         );
       }
     },
-    { title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 200, align: 'center',
+    {
+      title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 200, align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         return (
@@ -474,16 +519,16 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             </div>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden">
-            <FitTable 
-              dataSource={operations} 
-              columns={operationsColumns} 
-              rowKey="id" 
-              className="docs-ops-table" 
-              locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }} 
+            <FitTable
+              dataSource={operations}
+              columns={operationsColumns}
+              rowKey="id"
+              className="docs-ops-table"
+              locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
               onRow={(record) => ({
                 onClick: () => {
-                    setViewOperation(record);
-                    setIsViewModalOpen(true);
+                  setViewOperation(record);
+                  setIsViewModalOpen(true);
                 },
                 style: { cursor: 'pointer' }
               })}
@@ -497,21 +542,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       children: (
         <div className="h-full flex flex-col min-h-0 overflow-hidden">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 shrink-0 gap-2">
-            <span className="text-xs text-slate-500">Documents & versions</span>
+            <span className="text-xs text-slate-500">Documents & Revisions</span>
             <Button type="primary" size="small" icon={<PlusOutlined />} className="primary-btn-sm w-full sm:w-auto"
               onClick={() => { if (isPart) { openPartActionModal('document'); } else { resetUploadState(); setIsUploadModalOpen(true); } }}>
               Add Document
             </Button>
           </div>
           <div className="flex-1 min-h-0 overflow-hidden w-full">
-            <FitTable 
-              dataSource={latestPartDocs} 
-              rowKey="id" 
-              size="small" 
-              pagination={false} 
-              className="docs-ebom-table" 
-              scrollX={600} 
-              columns={eBomColumns} 
+            <FitTable
+              dataSource={latestPartDocs}
+              rowKey="id"
+              size="small"
+              pagination={false}
+              className="docs-ebom-table"
+              scrollX={600}
+              columns={eBomColumns}
             />
           </div>
 
@@ -520,15 +565,15 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             open={isUploadModalOpen} onCancel={() => { setIsUploadModalOpen(false); resetUploadState(); }} footer={null} destroyOnHidden width="95%" style={{ maxWidth: 450 }}>
             <div className="space-y-4 mt-4">
               <div>
-                <Text type="secondary" className="text-xs block mb-1">Document Type</Text>
+                <Text type="secondary" className="text-xs block mb-1">* Document Type</Text>
                 <Select className="w-full" value={uploadDocType} onChange={setUploadDocType}>
-                  {['2D','3D','Other'].map(t => <Select.Option key={t} value={t}>{t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}</Select.Option>)}
+                  {['2D', '3D', 'Other'].map(t => <Select.Option key={t} value={t}>{t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}</Select.Option>)}
                 </Select>
                 {uploadDocType === 'Other' && <Input className="mt-2" placeholder="Enter custom document type" value={uploadDocTypeOther} onChange={e => setUploadDocTypeOther(e.target.value)} />}
               </div>
               <div>
-                <Text type="secondary" className="text-xs block mb-1">Revision</Text>
-                <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} placeholder="Enter version..." />
+                <Text type="secondary" className="text-[11px] block font-medium">* Revision</Text>
+                <Input value={uploadVersion} onChange={e => setUploadVersion(e.target.value.replace(/[^a-zA-Z0-9.-]/g, ''))} placeholder="e.g. 00, 01" />
                 {uploadParentId && <Text type="warning" className="text-[10px] mt-1 block">Creating a new revision for an existing document.</Text>}
               </div>
               <Dragger multiple={false} fileList={selectedFileList} beforeUpload={f => { setSelectedFileList([f]); return false; }} onRemove={() => setSelectedFileList([])} className="bg-gray-50 border-dashed border-2 py-8">
@@ -554,7 +599,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               </Form.Item>
               <Form.Item label="Document Type" name="document_type" rules={[{ required: true, message: 'Please select document type' }]}>
                 <Select placeholder="Select type">
-                  {['2D','3D','Other'].map(t => <Select.Option key={t} value={t}>{t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}</Select.Option>)}
+                  {['2D', '3D', 'Other'].map(t => <Select.Option key={t} value={t}>{t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}</Select.Option>)}
                 </Select>
               </Form.Item>
               {watchedDocType === 'Other' && (

@@ -15,6 +15,21 @@ const { Option } = Select;
 const { TabPane } = Tabs;
 
 // ─────────────────────────────────────────────────────────────
+//  HELPER FUNCTIONS
+// ─────────────────────────────────────────────────────────────
+const getCurrentManufacturingCoordinatorId = () => {
+  try {
+    const stored = localStorage.getItem('user');
+    if (!stored) return null;
+    const user = JSON.parse(stored);
+    if (user?.id == null) return null;
+    return user.id;
+  } catch {
+    return null;
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
 //  COLOUR HELPERS
 // ─────────────────────────────────────────────────────────────
 const generateDistinctColors = (count) => {
@@ -151,7 +166,11 @@ const MachineScheduling = () => {
 
   const fetchSchedule = async () => {
     try {
-      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/gantt-data`);
+      const mcId = getCurrentManufacturingCoordinatorId();
+      const url = mcId
+        ? `${SCHEDULING_API_BASE_URL}/scheduling/gantt-data/manufacturing-coordinator/${mcId}`
+        : `${SCHEDULING_API_BASE_URL}/scheduling/gantt-data`;
+      const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
       const ops = [];
@@ -248,7 +267,11 @@ const MachineScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
+        const mcId = getCurrentManufacturingCoordinatorId();
+        const url = mcId
+          ? `${API_BASE_URL}/orders/?manufacturing_coordinator_id=${mcId}`
+          : `${API_BASE_URL}/orders/`;
+        const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);

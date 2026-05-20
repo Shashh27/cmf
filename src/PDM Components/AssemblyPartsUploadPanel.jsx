@@ -117,11 +117,12 @@ const AssemblyPartsUploadPanel = ({
   // Use provided partTypes or internal ones
   const effectivePartTypes = partTypes.length > 0 ? partTypes : internalPartTypes;
 
-  // Fetch part types on mount if not provided via props
+  // Removed: fetching part types on mount to prevent unnecessary API calls when product is selected.
+  // It will now be fetched after BOM parsing.
   useEffect(() => {
-    if (partTypes.length === 0) {
-      fetchPartTypes();
-    }
+    // if (partTypes.length === 0) {
+    //   fetchPartTypes();
+    // }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -191,6 +192,11 @@ const AssemblyPartsUploadPanel = ({
       setRows(extracted);
       setSelectedRowKeys(extracted.map((r) => r._key));
       setStep("review");
+
+      // Fetch part types after successful parsing to ensure they are available for the review step
+      if (effectivePartTypes.length === 0) {
+        fetchPartTypes();
+      }
     } catch (e) {
       const msg =
         e?.response?.data?.detail || e?.message || "Failed to parse document";
