@@ -117,6 +117,8 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/production_logs')) return 'Production Logs';
     if (path.includes('/dashboard')) return 'Dashboard';
     if (path.includes('/oms/orders')) return 'Orders';
+    if (path.includes('/oms/product/')) return 'Product Data Management';
+    if (path.includes('/order-tracking')) return 'Order Tracking';
     if (path.includes('/oms/parts-priority')) {
       const params = new URLSearchParams(location.search);
       const tab = params.get('tab');

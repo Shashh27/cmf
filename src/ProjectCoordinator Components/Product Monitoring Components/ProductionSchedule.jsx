@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { Card, Typography } from 'antd';
 import dayjs from 'dayjs';
 import SimpleGanttChart from './SimpleGanttChart';
-import useGanttStore from '../../stores/ganttChartStore';
+import useGanttStore from '../stores/ganttChartStore';
 
 const { Title, Text } = Typography;
 

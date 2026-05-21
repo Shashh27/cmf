@@ -229,13 +229,14 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             ...editingOrder,
             customer_id: customerValue,
             project_name: projectValue,
-          quantity: editingOrder.quantity?.toString() ?? "",
-          due_date: editingOrder.due_date ? dayjs(editingOrder.due_date) : null,
-          order_date: editingOrder.order_date ? dayjs(editingOrder.order_date) : null,
-          user_id: editingOrder.user_id?.toString() ?? "",
-          admin_id: editingOrder.admin_id?.toString() ?? undefined,
-          manufacturing_coordinator_id: editingOrder.manufacturing_coordinator_id?.toString() ?? undefined,
-        });
+            quantity: editingOrder.quantity?.toString() ?? "",
+            due_date: editingOrder.due_date ? dayjs(editingOrder.due_date) : null,
+            order_date: editingOrder.order_date ? dayjs(editingOrder.order_date) : null,
+            user_id: editingOrder.user_id?.toString() ?? "",
+            admin_id: editingOrder.admin_id?.toString() ?? undefined,
+            manufacturing_coordinator_id: editingOrder.manufacturing_coordinator_id?.toString() ?? undefined,
+            user_name_display: getCurrentUsername() || "",
+          });
       } else {
         form.resetFields();
         form.setFieldsValue({
