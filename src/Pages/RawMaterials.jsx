@@ -11,14 +11,11 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
 
-
 // Import split components
 
 import RawMaterialsTab from "../RawMaterialComponents/RawMaterialsTab";
 
 import LinkGeneralStockImproved from "../RawMaterialComponents/LinkGeneralStockImproved";
-
-import LinkMaterialsTab from "../RawMaterialComponents/LinkMaterialsTab";
 
 import PartsWithRawMaterialStatusTab from "../RawMaterialComponents/PartsWithRawMaterialStatusTab";
 
@@ -100,23 +97,14 @@ const RawMaterialsContent = () => {
 
     },
 
-    {
-
-      key: 'linking',
-
-      label: <span className="flex items-center gap-2 px-2"><LinkOutlined /> Procure Raw Materials</span>,
-
-      children: <LinkMaterialsTab rawMaterials={sharedRawMaterials} onDataChanged={refreshRawMaterials} />
-
-    },
-
+    
     {
 
       key: 'order-status',
 
-      label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procurement Status</span>,
+      label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procure Raw Material</span>,
 
-      children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} />
+      children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} rawMaterials={sharedRawMaterials} />
 
     },
 

@@ -27,20 +27,6 @@ const formatHms = (seconds) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
 
-const flattenPartsFromHierarchy = (data) => {
-  const parts = [];
-  const directParts = data?.direct_parts || data?.parts || [];
-  parts.push(...directParts);
-  const walkAssemblies = (assemblies) => {
-    (assemblies || []).forEach((asm) => {
-      if (asm?.parts) parts.push(...asm.parts);
-      if (asm?.subassemblies) walkAssemblies(asm.subassemblies);
-    });
-  };
-  walkAssemblies(data?.assemblies || []);
-  return parts;
-};
-
 // ─── Stat Card ──────────────────────────────────────────────────────────────
 
 const StatCard = ({ icon, label, value, iconColor }) => (
@@ -73,34 +59,35 @@ const SectionHeader = ({ icon, title, count }) => (
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-const ProductSummary = ({ productId, initialHierarchy }) => {
+const ProductSummary = ({ productId }) => {
   const [loading, setLoading] = useState(false);
-  const [hierarchy, setHierarchy] = useState(initialHierarchy || null);
+  const [summaryData, setSummaryData] = useState(null);
 
   useEffect(() => {
-    if (!productId) { setHierarchy(null); return; }
-    if (initialHierarchy) { setHierarchy(initialHierarchy); setLoading(false); return; }
+    if (!productId) { setSummaryData(null); return; }
 
     let isMounted = true;
     const controller = new AbortController();
     setLoading(true);
 
+    // Use lightweight summary-data endpoint - only operations data for hours calculation
     axios
-      .get(`${API_BASE_URL}/products/${productId}/hierarchical`, { signal: controller.signal })
-      .then((res) => { if (isMounted) setHierarchy(res.data); })
+      .get(`${API_BASE_URL}/products/${productId}/summary-data`, { signal: controller.signal })
+      .then((res) => { if (isMounted) setSummaryData(res.data); })
       .catch((e) => {
         if (e?.name !== "CanceledError" && e?.name !== "AbortError") {
           console.error("Product summary fetch error:", e);
-          if (isMounted) setHierarchy(null);
+          if (isMounted) setSummaryData(null);
         }
       })
       .finally(() => { if (isMounted && !controller.signal.aborted) setLoading(false); });
 
     return () => { isMounted = false; controller.abort(); };
-  }, [productId, initialHierarchy]);
+  }, [productId]);
 
   const summary = useMemo(() => {
-    const parts = hierarchy ? flattenPartsFromHierarchy(hierarchy) : [];
+    // New summary-data endpoint returns flat parts array directly
+    const parts = summaryData?.parts || [];
     const rows = [];
 
     parts.forEach((pd) => {
@@ -109,9 +96,8 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
       ops.forEach((op) => {
         const setupSec = parseHmsToSeconds(op?.setup_time);
         const cycleSec = parseHmsToSeconds(op?.cycle_time);
-        const partQty = part?.qty || 1; // Get part quantity, default to 1 if not specified
+        const partQty = part?.qty || 1;
         
-        // Calculate total time for all quantities
         // Setup time is one-time, cycle time is per quantity
         const totalCycleSec = cycleSec * partQty;
         const totalSec = setupSec + totalCycleSec;
@@ -132,11 +118,11 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
           cycle_time: op?.cycle_time || "00:00:00",
           machine_name: machineName,
           machine_id: op?.machine_id || null,
-          part_qty: partQty, // Store quantity for reference
-          is_outsource: isOutSource, // Store outsource flag
+          part_qty: partQty,
+          is_outsource: isOutSource,
           setup_seconds: setupSec,
-          cycle_seconds: totalCycleSec, // Total cycle time for all quantities
-          total_seconds: totalSec, // Total time (setup + cycle for all quantities)
+          cycle_seconds: totalCycleSec,
+          total_seconds: totalSec,
         });
       });
     });
@@ -156,8 +142,8 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
 
     const machineRows = Array.from(byMachine.values()).sort((a, b) => b.total_seconds - a.total_seconds);
 
-    return { productName: hierarchy?.product?.product_name || "", rows, totalSetup, totalCycle, totalAll: totalSetup + totalCycle, machineRows };
-  }, [hierarchy]);
+    return { productName: summaryData?.product?.product_name || "", rows, totalSetup, totalCycle, totalAll: totalSetup + totalCycle, machineRows };
+  }, [summaryData]);
 
   // ── Empty / Loading states ──────────────────────────────────────────────
 
@@ -173,7 +159,7 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     </div>
   );
 
-  if (!hierarchy) return (
+  if (!summaryData) return (
     <div className="h-full w-full flex items-center justify-center bg-white">
       <Empty description="No summary available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
     </div>

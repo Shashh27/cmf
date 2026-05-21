@@ -60,7 +60,7 @@ const EditOperationModal = ({
   const [activeTab, setActiveTab]               = useState(defaultTab);
   const [parentId, setParentId]                 = useState(null);
   const [parentDocName, setParentDocName]       = useState('');
-  const [uploadVersion, setUploadVersion]       = useState('v1.0');
+  const [uploadVersion, setUploadVersion]       = useState('');
   const [uploadType, setUploadType]             = useState('IPID');
   const [uploadTypeOther, setUploadTypeOther]   = useState('');
   const [selectedFileList, setSelectedFileList] = useState([]);
@@ -196,7 +196,7 @@ const EditOperationModal = ({
   }, [open, operation?.id, showAddToolForm]);
 
   // ── handlers ───────────────────────────────────────────────────────────────
-  const resetUpload = () => { setParentId(null); setParentDocName(''); setUploadVersion('v1.0'); setUploadType('IPID'); setUploadTypeOther(''); setSelectedFileList([]); setViewingDoc(null); };
+  const resetUpload = () => { setParentId(null); setParentDocName(''); setUploadVersion(''); setUploadType('IPID'); setUploadTypeOther(''); setSelectedFileList([]); setViewingDoc(null); };
 
   const handleUpload = async () => {
     if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
@@ -217,7 +217,8 @@ const EditOperationModal = ({
       fetchDocuments();
     } catch (e) {
       console.error(e);
-      message.error('Upload error');
+      const detail = e?.response?.data?.detail || e?.response?.data?.message || 'Upload error';
+      message.error(detail);
     } finally {
       setLoadingDocs(false);
     }
@@ -356,16 +357,15 @@ const EditOperationModal = ({
         })
         .map(pt => ({ label: pt.type_name, value: pt.id }))
     : [{ label: 'IN-House', value: inHouseId }, { label: 'Out-Source', value: outsourceId }];
-  const parseV          = (v) => parseFloat(String(v).replace(/^v/i, ''));
-  const fmtV            = (v) => String(v).startsWith('v') ? String(v) : `v${v}`;
+  const parseV          = (v) => parseFloat(String(v).replace(/[^0-9.]/g, ''));
 
   // ── documents tab ──────────────────────────────────────────────────────────
   const DocActions = ({ doc, rootId, latestV }) => (
     <div className="flex gap-1 shrink-0">
       <Tooltip title="View"><Button type="text" size="small" icon={<EyeOutlined className="text-blue-500" />} onClick={() => handlePreview(doc)} /></Tooltip>
-      <Tooltip title="Upload New Version">
+      <Tooltip title="Upload New Revision">
         <Button type="text" size="small" icon={<SyncOutlined className="text-orange-500" />}
-          onClick={() => { setViewingDoc(null); setParentId(rootId); setParentDocName(doc.document_name); setUploadVersion('v' + (latestV + 1).toFixed(1)); setUploadType(doc.document_type); }} />
+          onClick={() => { setViewingDoc(null); setParentId(rootId); setParentDocName(doc.document_name); setUploadVersion(''); setUploadType(doc.document_type); }} />
       </Tooltip>
       <Tooltip title="Download">
         <Button type="text" size="small" icon={<DownloadOutlined className="text-green-600" />} onClick={() => handleDownloadFile(doc)} />
@@ -382,7 +382,7 @@ const EditOperationModal = ({
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={14}>
           <div className="flex justify-between items-center mb-4">
-            <h4 className="text-sm font-semibold text-gray-800 m-0">Document History</h4>
+            <h4 className="text-sm font-semibold text-gray-800 m-0">Revision History</h4>
             <Badge count={documents.length} overflowCount={99} style={{ backgroundColor: '#1890ff' }}>
               <Tag color="blue" className="m-0 px-3 py-0.5 rounded-full border-0">Total Documents</Tag>
             </Badge>
@@ -401,10 +401,10 @@ const EditOperationModal = ({
                           <div className="flex gap-3 flex-1 min-w-0">
                             <div className="bg-blue-50 p-2 rounded text-blue-500 h-fit mt-1"><FileTextOutlined /></div>
                             <div className="flex-1 overflow-hidden">
-                              <a href={`${API_BASE_URL}/operation-documents/${item.id}/download`} className="text-gray-800 hover:text-blue-600 font-semibold truncate block mb-1" target="_blank" rel="noopener noreferrer">{item.document_name}</a>
+                              <span className="text-gray-800 font-semibold truncate block mb-1">{item.document_name}</span>
                               <div className="flex gap-2 items-center">
                                 <Tag color="blue" variant="filled" className="m-0 text-[10px] font-bold">{item.document_type}</Tag>
-                                <Tag color="blue" className="m-0 text-[10px] font-bold">{fmtV(item.document_version)}</Tag>
+                                <Tag color="blue" className="m-0 text-[10px] font-bold">{item.document_version}</Tag>
                               </div>
                             </div>
                           </div>
@@ -414,8 +414,8 @@ const EditOperationModal = ({
                           <div key={ver.id} className="bg-gray-50 p-2 ml-6 rounded-lg border border-gray-100 flex items-start justify-between gap-4 border-l-4 border-l-orange-400">
                             <div className="flex gap-2 flex-1 min-w-0 items-center">
                               <FileTextOutlined className="text-orange-400 text-xs shrink-0" />
-                              <a href={`${API_BASE_URL}/operation-documents/${ver.id}/download`} className="text-gray-700 hover:text-blue-600 text-sm truncate font-medium" target="_blank" rel="noopener noreferrer">{ver.document_name}</a>
-                              <Tag color="orange" className="m-0 text-[10px] font-bold shrink-0">{fmtV(ver.document_version)}</Tag>
+                              <span className="text-gray-700 text-sm truncate font-medium">{ver.document_name}</span>
+                              <Tag color="orange" className="m-0 text-[10px] font-bold shrink-0">{ver.document_version}</Tag>
                             </div>
                             <DocActions doc={ver} rootId={item.id} latestV={latestV} />
                           </div>
@@ -457,38 +457,71 @@ const EditOperationModal = ({
               </div>
             ) : (
               <>
-                <div className="flex justify-between items-center mb-4">
-                  <h4 className="text-sm font-semibold text-gray-800 m-0 flex items-center gap-2"><UploadOutlined />{parentId ? 'Update Version' : 'New Upload'}</h4>
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="text-sm font-semibold text-gray-800 m-0 flex items-center gap-2"><UploadOutlined />{parentId ? 'Update Revision' : 'New Upload'}</h4>
                   {parentId && <Button type="link" danger size="small" className="p-0 h-auto" onClick={resetUpload}>Cancel</Button>}
                 </div>
-                {parentId && (
-                  <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg">
-                    <div className="text-[10px] text-blue-500 font-bold uppercase mb-1">Updating File:</div>
-                    <div className="text-sm font-semibold text-gray-800 truncate">{parentDocName}</div>
+
+                {/* Selected File Display - Moved to top for clarity */}
+                {selectedFileList.length > 0 && (
+                  <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="bg-blue-500 p-1.5 rounded shadow-sm"><FileTextOutlined className="text-white text-xs" /></div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-[9px] text-blue-500 font-bold uppercase leading-none mb-0.5">Selected File</span>
+                        <span className="text-[11px] text-gray-800 truncate font-bold">{selectedFileList[0].name}</span>
+                      </div>
+                    </div>
+                    <Tooltip title="Remove File">
+                      <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => setSelectedFileList([])} className="hover:bg-red-50 flex items-center justify-center" />
+                    </Tooltip>
                   </div>
                 )}
-                <div className="mb-4">
-                  <Dragger fileList={selectedFileList} beforeUpload={(f) => { setSelectedFileList([f]); return false; }} onRemove={() => setSelectedFileList([])} multiple={false} className="bg-white border-dashed border-2 hover:border-blue-400 transition-colors rounded-xl overflow-hidden">
-                    <p className="ant-upload-drag-icon mb-2"><UploadOutlined className="text-blue-500 text-3xl" /></p>
-                    <p className="ant-upload-text text-sm font-medium">Click or drag file</p>
-                    <p className="ant-upload-hint text-[11px] text-gray-400 px-4">PDF, DOC, XLS, CSV, TXT</p>
+
+                {parentId && !selectedFileList.length && (
+                  <div className="mb-3 p-2.5 bg-orange-50 border border-orange-100 rounded-lg flex items-center gap-2">
+                    <SyncOutlined className="text-orange-500" />
+                    <div className="min-w-0">
+                      <div className="text-[9px] text-orange-500 font-bold uppercase leading-none mb-0.5">Updating:</div>
+                      <div className="text-[11px] font-bold text-gray-800 truncate">{parentDocName}</div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mb-3">
+                  <Dragger 
+                    showUploadList={false}
+                    fileList={selectedFileList} 
+                    beforeUpload={(f) => { setSelectedFileList([f]); return false; }} 
+                    multiple={false} 
+                    className="bg-white border-dashed border-2 hover:border-blue-400 transition-all rounded-xl overflow-hidden"
+                  >
+                    <div className="py-3">
+                      <p className="ant-upload-drag-icon mb-1"><UploadOutlined className="text-blue-500 text-xl" /></p>
+                      <p className="ant-upload-text text-[11px] font-bold text-gray-600">
+                        {selectedFileList.length ? 'Drag another to replace' : 'Click or drag file here'}
+                      </p>
+                      {!selectedFileList.length && <p className="ant-upload-hint text-[9px] text-gray-400">PDF, DOC, XLS, STEP, STL...</p>}
+                    </div>
                   </Dragger>
                 </div>
+
                 <Row gutter={[8, 8]} className="mb-4">
-                  <Col xs={24} sm={14}>
-                    <div className="text-[11px] font-semibold text-gray-500 mb-1 uppercase">Document Type</div>
-                    <Select value={uploadType} onChange={setUploadType} className="w-full">
+                  <Col xs={14}>
+                    <div className="text-[10px] font-bold text-gray-500 mb-1 uppercase tracking-wider">Type</div>
+                    <Select value={uploadType} onChange={setUploadType} className="w-full custom-select-sm">
                       {['IPID','Image','CNC','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
                     </Select>
-                    {uploadType === 'Other' && <Input className="mt-2" placeholder="Custom type" value={uploadTypeOther} onChange={e => setUploadTypeOther(e.target.value)} autoComplete="off" />}
+                    {uploadType === 'Other' && <Input className="mt-2 text-xs" placeholder="Custom type" value={uploadTypeOther} onChange={e => setUploadTypeOther(e.target.value)} autoComplete="off" />}
                   </Col>
-                  <Col xs={24} sm={10}>
-                    <div className="text-[11px] font-semibold text-gray-500 mb-1 uppercase">Version</div>
-                    <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} placeholder="v1.0" disabled={!parentId} className="font-bold text-center" style={{ backgroundColor: !parentId ? '#f0f2f5' : '#fff' }} />
+                  <Col xs={10}>
+                    <div className="text-[10px] font-bold text-gray-500 mb-1 uppercase tracking-wider">Revision <span className="text-red-500">*</span></div>
+                    <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} placeholder="00" className="font-bold text-center bg-white text-xs h-[32px]" />
                   </Col>
                 </Row>
-                <Button type="primary" block size="large" icon={<UploadOutlined />} className="h-11 rounded-lg font-semibold no-hover-btn" onClick={handleUpload} loading={loadingDocs} disabled={!selectedFileList.length}>
-                  {parentId ? 'Upload New Version' : 'Upload Document'}
+
+                <Button type="primary" block size="large" icon={<UploadOutlined />} className="h-10 rounded-lg font-bold shadow-md no-hover-btn mt-auto" onClick={handleUpload} loading={loadingDocs} disabled={!selectedFileList.length || !uploadVersion.trim()}>
+                  {parentId ? 'Upload New Revision' : 'Upload Document'}
                 </Button>
               </>
             )}

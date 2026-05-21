@@ -29,6 +29,8 @@ const RawMaterialHistoryTab = ({ materials }) => {
   const [sourceType, setSourceType] = useState(null);
   const [activityType, setActivityType] = useState(null);
   const [materialId, setMaterialId] = useState(null);
+  const [filterOrderNumber, setFilterOrderNumber] = useState(null);
+  const [filterVendorName, setFilterVendorName] = useState(null);
 
   const getCurrentUserId = () => {
     const user = localStorage.getItem('user');
@@ -119,6 +121,36 @@ const RawMaterialHistoryTab = ({ materials }) => {
       filteredData = filteredData.filter(item => item.activity_type === activityType);
     }
     
+    // Filter by order number
+    if (filterOrderNumber) {
+      filteredData = filteredData.filter(item => item.order_number === filterOrderNumber);
+    }
+    
+    // Filter by vendor name
+    if (filterVendorName) {
+      filteredData = filteredData.filter(item => {
+        // Check received vendor name
+        if (item.received_vendor_name && item.received_vendor_name === filterVendorName) {
+          return true;
+        }
+        // Check enquiry vendor name (split by comma for individual vendors)
+        if (item.enquiry_vendor_name) {
+          const enquiryVendors = item.enquiry_vendor_name.split(',').map(v => v.trim());
+          if (enquiryVendors.includes(filterVendorName)) {
+            return true;
+          }
+        }
+        // Check vendor name (split by comma for individual vendors)
+        if (item.vendor_name) {
+          const vendors = item.vendor_name.split(',').map(v => v.trim());
+          if (vendors.includes(filterVendorName)) {
+            return true;
+          }
+        }
+        return false;
+      });
+    }
+    
     // Force re-render by creating a completely new array
     setHistory([...filteredData]);
     setTotalCount(filteredData.length);
@@ -147,7 +179,7 @@ const RawMaterialHistoryTab = ({ materials }) => {
     if (allHistory.length > 0 && !isResetting) {
       applyFilters();
     }
-  }, [activityType, sourceType]);
+  }, [activityType, sourceType, filterOrderNumber, filterVendorName]);
 
   const handleMaterialSelect = (material) => {
     // Always select the material - don't deselect on same click
@@ -167,6 +199,8 @@ const RawMaterialHistoryTab = ({ materials }) => {
     setActivityType(null);
     setMaterialId(null);
     setSelectedMaterial(null);
+    setFilterOrderNumber(null);
+    setFilterVendorName(null);
     
     // Clear history immediately to show all data
     setHistory(allHistory);
@@ -316,6 +350,37 @@ const RawMaterialHistoryTab = ({ materials }) => {
       key: 'user_name',
       render: (name) => name || '-',
     },
+    {
+      title: <span style={{ fontWeight: 'bold', color: '#000' }}>Vendor</span>,
+      key: 'vendor',
+      render: (_, record) => {
+        if (record.activity_type === 'order_status_changed') {
+          // For order status changes, show both enquiry vendors and received vendor
+          if (record.received_vendor_name) {
+            return (
+              <div>
+                <div style={{ fontSize: '11px' }}>
+                  <Text type="secondary">Enquiry Vendors: </Text>
+                  <Text>{record.enquiry_vendor_name || '-'} ({record.enquiry_vendor_count || 0})</Text>
+                </div>
+                <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                  <Text type="secondary">Received From: </Text>
+                  <Text strong style={{ color: '#52c41a' }}>{record.received_vendor_name}</Text>
+                </div>
+              </div>
+            );
+          } else if (record.enquiry_vendor_name) {
+            return (
+              <div style={{ fontSize: '11px' }}>
+                <Text type="secondary">Enquiry Vendors: </Text>
+                <Text>{record.enquiry_vendor_name} ({record.enquiry_vendor_count})</Text>
+              </div>
+            );
+          }
+        }
+        return record.vendor_name || '-';
+      },
+    },
   ];
 
   // Generate year options (last 5 years)
@@ -398,75 +463,97 @@ const RawMaterialHistoryTab = ({ materials }) => {
         <Col xs={24} sm={24} md={18} lg={18} xl={18} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           {/* Header with Filters */}
           <Card size="small" style={{ marginBottom: 16, flex: '0 0 auto' }} styles={{ body: { padding: '12px' } }}>
-            <Row gutter={[8, 8]} align="middle">
-              {/* Date Range Filter */}
-              <Col xs={24} sm={12} md={8}>
-                <Space size="small" wrap>
-                  <Text strong style={{ fontSize: '12px' }}>Date Range:</Text>
-                  <RangePicker 
-                    size="small"
-                    value={[startDate, endDate]}
-                    onChange={(dates) => {
-                      setStartDate(dates ? dates[0] : null);
-                      setEndDate(dates ? dates[1] : null);
-                      setYear(null);
-                      setMonth(null);
-                      setDay(null);
-                    }}
-                  />
-                </Space>
-              </Col>
+            <Space size="small" wrap>
+              <Text strong style={{ fontSize: '12px' }}>Date Range:</Text>
+              <RangePicker 
+                size="small"
+                value={[startDate, endDate]}
+                onChange={(dates) => {
+                  setStartDate(dates ? dates[0] : null);
+                  setEndDate(dates ? dates[1] : null);
+                  setYear(null);
+                  setMonth(null);
+                  setDay(null);
+                }}
+              />
               
-              {/* Activity Type Filter */}
-              <Col xs={24} sm={12} md={5}>
-                <Space size="small" wrap>
-                  <Text strong style={{ fontSize: '12px' }}>Activity:</Text>
-                  <Select
-                    size="small"
-                    style={{ width: 120 }}
-                    placeholder="Select activity"
-                    value={activityType}
-                    onChange={setActivityType}
-                    allowClear
-                    options={[
-                      { label: 'Stock Created', value: 'stock_created' },
-                      { label: 'Material Linked', value: 'material_linked' },
-                      { label: 'Order Status Changed', value: 'order_status_changed' },
-                      { label: 'Stock Updated', value: 'stock_updated' },
-                      { label: 'Material Unlinked', value: 'material_unlinked' },
-                    ]}
-                  />
-                </Space>
-              </Col>
+              <Text strong style={{ fontSize: '12px' }}>Activity:</Text>
+              <Select
+                size="small"
+                style={{ width: 120 }}
+                placeholder="Select activity"
+                value={activityType}
+                onChange={setActivityType}
+                allowClear
+                options={[
+                  { label: 'Stock Created', value: 'stock_created' },
+                  { label: 'Material Linked', value: 'material_linked' },
+                  { label: 'Order Status Changed', value: 'order_status_changed' },
+                  { label: 'Stock Updated', value: 'stock_updated' },
+                  { label: 'Material Unlinked', value: 'material_unlinked' },
+                ]}
+              />
               
-              {/* Source Type Filter */}
-              <Col xs={24} sm={12} md={4}>
-                <Space size="small" wrap>
-                  <Text strong style={{ fontSize: '12px' }}>Source:</Text>
-                  <Select
-                    size="small"
-                    style={{ width: 80 }}
-                    placeholder="Source"
-                    value={sourceType}
-                    onChange={setSourceType}
-                    allowClear
-                    options={[
-                      { label: 'General', value: 'general' },
-                      { label: 'Order', value: 'order' },
-                    ]}
-                  />
-                </Space>
-              </Col>
+              <Text strong style={{ fontSize: '12px' }}>Source:</Text>
+              <Select
+                size="small"
+                style={{ width: 80 }}
+                placeholder="Source"
+                value={sourceType}
+                onChange={setSourceType}
+                allowClear
+                options={[
+                  { label: 'General', value: 'general' },
+                  { label: 'Order', value: 'order' },
+                ]}
+              />
               
-              {/* Action Buttons */}
-              <Col xs={24} sm={12} md={4}>
-                <Space size="small">
-                  <Button size="small" onClick={handleResetFilters}>
-                    Reset
-                  </Button>
-                </Space>
-              </Col>
-            </Row>
+              <Text strong style={{ fontSize: '12px' }}>Order:</Text>
+              <Select
+                size="small"
+                style={{ width: 120 }}
+                placeholder="Order Number"
+                value={filterOrderNumber}
+                onChange={setFilterOrderNumber}
+                allowClear
+                showSearch
+                optionFilterProp="children"
+                options={[
+                  ...new Set(allHistory.filter(h => h.order_number).map(h => h.order_number))
+                ].map(order => ({ label: order, value: order }))}
+              />
+              
+              <Text strong style={{ fontSize: '12px' }}>Vendor:</Text>
+              <Select
+                size="small"
+                style={{ width: 120 }}
+                placeholder="Vendor Name"
+                value={filterVendorName}
+                onChange={setFilterVendorName}
+                allowClear
+                showSearch
+                optionFilterProp="children"
+                options={(() => {
+                  const vendorNames = new Set();
+                  allHistory.forEach(h => {
+                    if (h.received_vendor_name) {
+                      vendorNames.add(h.received_vendor_name);
+                    }
+                    if (h.enquiry_vendor_name) {
+                      h.enquiry_vendor_name.split(',').forEach(v => vendorNames.add(v.trim()));
+                    }
+                    if (h.vendor_name) {
+                      h.vendor_name.split(',').forEach(v => vendorNames.add(v.trim()));
+                    }
+                  });
+                  return Array.from(vendorNames).sort().map(vendor => ({ label: vendor, value: vendor }));
+                })()}
+              />
+              
+              <Button size="small" onClick={handleResetFilters}>
+                Reset
+              </Button>
+            </Space>
             
             {/* Selected Material Info */}
             {selectedMaterial && (
