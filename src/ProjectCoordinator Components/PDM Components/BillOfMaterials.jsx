@@ -8,6 +8,7 @@ const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
+import { getLatestRevision } from "./operationUtils";
 
 // ── Highlight helper ──────────────────────────────────────────────────────────
 // Wraps every case-insensitive match of `query` inside `text` with a light-blue
@@ -41,7 +42,15 @@ const highlightText = (text, query) => {
   );
 };
 
-const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null, singleProductId = null }) => {
+const BillOfMaterials = ({ 
+  onItemSelected, 
+  onHierarchyLoaded, 
+  disableProductCreate = false, 
+  initialProductId = null, 
+  singleProductId = null,
+  projectName,
+  projectNumber
+}) => {
   const { message, modal } = App.useApp();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
@@ -226,6 +235,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
             .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
             .map(assembly => ({
               ...assembly.assembly,
+              documents: assembly.documents || [],
               parts: (assembly.parts || [])
                 .slice()
                 .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
@@ -254,6 +264,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
       .map(sub => ({
         ...sub.assembly,
+        documents: sub.documents || [],
         parts: (sub.parts || [])
           .slice()
           .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
@@ -522,6 +533,9 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   // ── Part row ──────────────────────────────────────────────────────────────
   const renderPartInTree = (part, level = 0, productId = null) => {
     const isSelected = activeItemId === part.id && activeItemType === 'part';
+    const revision = getLatestRevision(part.documents);
+    const partNumDisplay = revision ? `${part.part_number} (${revision})` : part.part_number;
+
     return (
       <div
         key={`part-${part.id}`}
@@ -531,7 +545,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
-          <Tooltip title={`${part.part_name} (${part.part_number})`}>
+          <Tooltip title={`${part.part_name} (${partNumDisplay})`}>
             <div className="flex flex-col min-w-0">
               {/* ── Highlighted part name ── */}
               <Text className={`text-sm font-medium truncate leading-tight ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
@@ -539,7 +553,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               </Text>
               {part.part_number && (
                 <Text className={`text-xs truncate ${isSelected ? 'text-indigo-500' : 'text-slate-400'}`}>
-                  {searchTerm ? highlightText(part.part_number, searchTerm) : part.part_number}
+                  {searchTerm ? highlightText(partNumDisplay, searchTerm) : partNumDisplay}
                 </Text>
               )}
             </div>
@@ -566,6 +580,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
     const hasChildren = combinedChildren.length > 0;
     const isSelected = activeItemId === assembly.id && activeItemType === 'assembly';
+    const revision = getLatestRevision(assembly.documents);
+    const assemblyNumDisplay = revision ? `${assembly.assembly_number} (${revision})` : assembly.assembly_number;
 
     return (
       <div key={`assembly-${assembly.id}`} className="select-none">
@@ -583,7 +599,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               ) : <div className="w-5" />}
             </div>
             <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly', level)}</span>
-            <Tooltip title={`${assembly.assembly_name} (${assembly.assembly_number})`}>
+            <Tooltip title={`${assembly.assembly_name} (${assemblyNumDisplay})`}>
               <div className="flex flex-col min-w-0">
                 {/* ── Highlighted assembly name ── */}
                 <Text className={`text-sm font-medium truncate leading-tight ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
@@ -591,7 +607,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                 </Text>
                 {assembly.assembly_number && (
                   <Text className={`text-xs truncate ${isSelected ? 'text-indigo-500' : 'text-slate-400'}`}>
-                    {searchTerm ? highlightText(assembly.assembly_number, searchTerm) : assembly.assembly_number}
+                    {searchTerm ? highlightText(assemblyNumDisplay, searchTerm) : assemblyNumDisplay}
                   </Text>
                 )}
               </div>
@@ -690,12 +706,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
       // Direct parts (not under any assembly)
       (productHierarchy.parts || []).forEach(part => {
+        const rev = getLatestRevision(part.documents);
+        const partNumDisplay = rev ? `${part.part_number} (${rev})` : part.part_number;
         pushUnique({
           ...part,
           itemType: 'part',
           productId: product.id,
           productName: product.product_name,
-          displayName: `${part.part_name} (${part.part_number})`
+          displayName: `${part.part_name} (${partNumDisplay})`
         });
       });
 
@@ -703,24 +721,28 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       // instead of calling getPartsForAssembly / getNestedAssemblies globally,
       // which caused the same items to be discovered via multiple paths.
       const processAssembly = (assembly, level = 0) => {
+        const revAsm = getLatestRevision(assembly.documents);
+        const asmNumDisplay = revAsm ? `${assembly.assembly_number} (${revAsm})` : assembly.assembly_number;
         pushUnique({
           ...assembly,
           itemType: 'assembly',
           level,
           productId: product.id,
           productName: product.product_name,
-          displayName: `${assembly.assembly_name} (${assembly.assembly_number})`
+          displayName: `${assembly.assembly_name} (${asmNumDisplay})`
         });
 
         // Use parts already on the assembly object (set during transform)
         (assembly.parts || []).forEach(part => {
+          const revPart = getLatestRevision(part.documents);
+          const partNumDisplay = revPart ? `${part.part_number} (${revPart})` : part.part_number;
           pushUnique({
             ...part,
             itemType: 'part',
             parentAssembly: assembly,
             productId: product.id,
             productName: product.product_name,
-            displayName: `${part.part_name} (${part.part_number})`
+            displayName: `${part.part_name} (${partNumDisplay})`
           });
         });
 
@@ -774,6 +796,18 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
                 <span className="sm:hidden">BOM</span>
               </h2>
             </div>
+
+            {(projectName || projectNumber) && (
+              <div className="text-right min-w-0 flex-1 ml-4">
+                <div className="text-[11px] font-bold text-slate-700 truncate leading-tight">
+                  {projectName}
+                </div>
+                <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                  {projectNumber}
+                </div>
+              </div>
+            )}
+
             {!singleProductId && (
               <Button
                 type="primary"

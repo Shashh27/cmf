@@ -43,27 +43,41 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight }) => {
                 </div>
               </div>
               <div>
+                <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Approved Quantity</Text>
+                <div style={{ marginTop: 4, fontWeight: 700, color: '#52C41A', fontSize: 18 }}>
+                  {productionStats.latestApproved || 0}
+                </div>
+              </div>
+              <div>
                 <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rework Quantity</Text>
                 <div style={{ marginTop: 4, fontWeight: 700, color: '#FA8C16', fontSize: 18 }}>
                   {productionStats.latestRework || 0}
                 </div>
               </div>
-            </div>
-            <div>
-              <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Remarks</Text>
-              <div style={{ 
-                marginTop: 4, 
-                fontWeight: 600, 
-                color: '#8C4A00', 
-                fontSize: 14,
-                wordBreak: 'break-word',
-                background: 'rgba(255, 255, 255, 0.5)',
-                padding: '8px 12px',
-                borderRadius: 8
-              }}>
-                {productionStats.reworkRemarks || 'No remarks'}
+              <div>
+                <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rejected Quantity</Text>
+                <div style={{ marginTop: 4, fontWeight: 700, color: '#FF4D4F', fontSize: 18 }}>
+                  {productionStats.latestRejected || 0}
+                </div>
               </div>
             </div>
+            {productionStats.latestRemarks && (
+              <div>
+                <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Remarks</Text>
+                <div style={{
+                  marginTop: 4,
+                  fontWeight: 600,
+                  color: '#8C4A00',
+                  fontSize: 14,
+                  wordBreak: 'break-word',
+                  background: 'rgba(255, 255, 255, 0.5)',
+                  padding: '8px 12px',
+                  borderRadius: 8
+                }}>
+                  {productionStats.latestRemarks}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ 

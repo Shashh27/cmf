@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
-import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined } from "@ant-design/icons";
+import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, EditOutlined } from "@ant-design/icons";
 import { Card, Tag, Typography, Empty, Table, Select, Spin, Modal, Tooltip, Button, message, Input, Form } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
+import { getLatestRevision } from "./operationUtils";
 
 const { Text } = Typography;
 
-const ProductDetails = ({ selectedItem, partDocuments }) => {
+const ProductDetails = ({ selectedItem, partDocuments, children }) => {
   const [rawMaterials, setRawMaterials] = useState([]);
   const [extractedMaterials, setExtractedMaterials] = useState([]);
   const [threeDDocuments, setThreeDDocuments] = useState([]);
@@ -219,8 +220,16 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   const getItemNumber = () => {
     switch (itemType) {
       case 'product': return item?.id;
-      case 'assembly': return item?.assembly_number || item?.id;
-      case 'part': return item?.part_number || item?.id;
+      case 'assembly': {
+        const num = item?.assembly_number || item?.id;
+        const rev = getLatestRevision(item?.documents);
+        return rev ? `${num} (${rev})` : num;
+      }
+      case 'part': {
+        const num = item?.part_number || item?.id;
+        const rev = getLatestRevision(partDocuments?.length > 0 ? partDocuments : item?.documents);
+        return rev ? `${num} (${rev})` : num;
+      }
       default: return item?.id;
     }
   };
@@ -278,24 +287,24 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
   const materialColumns =
     itemType === "part"
       ? [
-          ...baseMaterialColumns,
-          {
-            title: 'Actions',
-            key: 'actions',
-            width: 80,
-            render: (_, record) => (
-              <Tooltip title="Remove from part">
-                <Button
-                  type="text"
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleClearRawMaterial(record)}
-                />
-              </Tooltip>
-            ),
-          },
-        ]
+        ...baseMaterialColumns,
+        {
+          title: 'Actions',
+          key: 'actions',
+          width: 80,
+          render: (_, record) => (
+            <Tooltip title="Remove from part">
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleClearRawMaterial(record)}
+              />
+            </Tooltip>
+          ),
+        },
+      ]
       : baseMaterialColumns;
 
   const headerNoWrap = () => ({ style: { whiteSpace: 'nowrap' } });
@@ -358,7 +367,7 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       render: (text) => cellWithTooltip(text, 'N/A')
     },
     {
-      title: 'Version',
+      title: 'Revision',
       dataIndex: 'document_version',
       key: 'document_version',
       width: 90,
@@ -468,16 +477,16 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
       key: 'actions',
       width: 70,
       align: 'center',
+      fixed: 'right',
       onHeaderCell: headerNoWrap,
       render: (_, record) => (
-        <Tooltip title="Edit extracted data">
-          <Button
-            type="text"
-            size="small"
-            icon={<span style={{ fontSize: 13 }}>✏️</span>}
-            onClick={(e) => { e.stopPropagation(); handleExtractedMaterialClick(record); }}
-          />
-        </Tooltip>
+      <Tooltip title="Edit extracted data">
+        <Button
+          type="text"
+          size="small"
+          icon={<EditOutlined style={{ fontSize: 14, color: '#2563eb' }} />}
+          onClick={(e) => { e.stopPropagation(); handleExtractedMaterialClick(record); }}/>
+      </Tooltip>
       ),
     },
   ];
@@ -501,22 +510,6 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
         {/* 3D Viewer button — top-right, matches admin style */}
         {itemType === 'part' && (
           <div className="ml-auto flex items-center gap-2">
-            {threeDDocuments.length > 0 && (
-              <Select
-                size="small"
-                value={selectedThreeDDocumentId}
-                onChange={setSelectedThreeDDocumentId}
-                style={{ minWidth: 'clamp(100px, 18vw, 150px)', fontSize: '11px' }}
-                options={threeDDocuments.map(doc => {
-                  const v = doc.document_version;
-                  const vStr = v ? String(v) : "";
-                  return {
-                    value: doc.id,
-                    label: `${doc.document_name || "3D Model"}${vStr ? ` (${vStr})` : ""}`,
-                  };
-                })}
-              />
-            )}
             <Tooltip title="Open 3D Viewer">
               <Button
                 size="small"
@@ -524,7 +517,12 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                 icon={<EyeOutlined />}
                 onClick={() => openViewModal('default')}
                 disabled={threeDDocuments.length === 0}
-                style={{ background: '#2563eb', border: 'none' }}
+                style={{ 
+                  background: '#2563eb', 
+                  border: 'none',
+                  color: 'white',
+                  opacity: threeDDocuments.length === 0 ? 0.6 : 1
+                }}
               >
                 <span className="hidden sm:inline ml-1">3D Viewer</span>
               </Button>
@@ -533,15 +531,31 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
         )}
       </div>
 
+      {children && (
+        <div style={{ flex: '1', minHeight: 0, overflow: 'hidden' }} className="bg-white">
+          {children}
+        </div>
+      )}
+
       {/* ── Raw Materials + Extracted from 2D Files (bottom panel) ── */}
       {itemType === 'part' && (
-        <div className="px-3 py-2 border-t border-slate-100 bg-slate-50/60 shrink-0 overflow-auto" style={{ maxHeight: 280 }}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div 
+          className="p-3 border-t border-slate-200 bg-slate-50 overflow-y-auto" 
+          style={{ height: '32%', minHeight: '180px', shrink: 0 }}
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] xl:grid-cols-[300px_1fr] gap-4">
             {/* Assigned Raw Materials */}
-            <div>
-              <Text type="secondary" className="text-xs mb-1 block font-medium">
-                Raw Materials ({rawMaterials.length})
-              </Text>
+            <Card
+              size="small"
+              className="shadow-sm border-slate-200 rounded-lg overflow-hidden"
+              title={
+                <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                  <FileTextOutlined className="text-slate-400" />
+                  Raw Materials ({rawMaterials.length})
+                </span>
+              }
+              styles={{ body: { padding: 0 } }}
+            >
               {rawMaterials.length > 0 ? (
                 <Table
                   dataSource={rawMaterials}
@@ -549,28 +563,30 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                   rowKey="id"
                   size="small"
                   pagination={false}
-                  scroll={{ y: 100 }}
-                  bordered
+                  scroll={{ y: 150 }}
+                  className="border-none"
                 />
               ) : (
-                <div className="py-4 text-center border border-dashed border-gray-300 rounded-md bg-white">
+                <div className="py-6 text-center">
                   <Text className="text-xs text-gray-400">No raw materials assigned</Text>
                 </div>
               )}
-            </div>
+            </Card>
 
             {/* Extracted from 2D Files */}
-            <div>
-              <div className="flex items-center gap-1 mb-1 flex-wrap">
-                <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
-                <Text type="secondary" className="text-xs font-medium">
-                  Extracted from 2D Files ({extractedMaterials.length})
-                </Text>
-                <Text type="secondary" className="text-xs text-blue-600 ml-1">
-                  <InfoCircleOutlined className="mr-0.5" />
-                  Click ✏️ to edit
-                </Text>
-              </div>
+            <Card
+              size="small"
+              className="shadow-sm border-slate-200 rounded-lg overflow-hidden"
+              title={
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <FileTextOutlined className="text-blue-500" />
+                  <span className="text-xs font-semibold text-slate-700">
+                    Extracted from 2D Files ({extractedMaterials.length})
+                  </span>
+                </div>
+              }
+              styles={{ body: { padding: 0 } }}
+            >
               {extractedMaterials.length > 0 ? (
                 <div className="w-full overflow-x-auto">
                   <Table
@@ -579,17 +595,16 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
                     rowKey="_rootId"
                     size="small"
                     pagination={false}
-                    scroll={{ x: 'max-content', y: 100 }}
-                    bordered
-                    className="extracted-materials-table"
+                    scroll={{ x: 'max-content', y: 150 }}
+                    className="border-none extracted-materials-table"
                   />
                 </div>
               ) : (
-                <div className="py-4 text-center border border-dashed border-gray-300 rounded-md bg-white">
+                <div className="py-6 text-center">
                   <Text className="text-xs text-gray-400">No material data extracted from 2D files</Text>
                 </div>
               )}
-            </div>
+            </Card>
           </div>
         </div>
       )}
@@ -612,8 +627,23 @@ const ProductDetails = ({ selectedItem, partDocuments }) => {
           </div>
         ) : (
           <div>
-            <div className="flex justify-end mb-2">
-              <ViewControls onOpenModal={openViewModal} size="middle" />
+            <div className="flex justify-between items-center mb-2 px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-700">Select 3D Model:</span>
+                <Select
+                  value={selectedThreeDDocumentId}
+                  onChange={setSelectedThreeDDocumentId}
+                  style={{ minWidth: '200px' }}
+                  options={threeDDocuments.map(doc => {
+                    const v = doc.document_version;
+                    const vStr = v ? String(v) : "";
+                    return {
+                      value: doc.id,
+                      label: `${doc.document_name || "3D Model"}${vStr ? ` - v${vStr}` : ""}`,
+                    };
+                  })}
+                />
+              </div>
             </div>
             <div style={{ height: 'clamp(280px, 50vh, 420px)' }}>
               <ModelViewer3D

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Layout, Menu, Drawer, Button } from "antd";
+import { Layout, Menu, Drawer, Button, Badge } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
-  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined
+  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
+import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
 
 const { Sider } = Layout;
 
@@ -13,7 +14,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
   const selectedKey = location.pathname;
   const [isMobile, setIsMobile] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  
+  const [notificationCount, setNotificationCount] = useState(0);
+
   // Get the role prefix from the path
   const getRolePrefix = () => {
     const path = location.pathname;
@@ -51,11 +53,94 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         setMobileDrawerOpen(false);
       }
     };
-    
+
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Fetch notification count for operator
+  useEffect(() => {
+    if (prefix === '/operator') {
+      fetchOperatorNotificationCount();
+    } else if (prefix === '/supervisor') {
+      fetchSupervisorNotificationCount();
+    }
+  }, [prefix]);
+
+  const fetchOperatorNotificationCount = async () => {
+    try {
+      // Get operator ID from localStorage
+      let operatorId = null;
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          operatorId = user.id;
+        } catch (e) {
+          console.error("Error parsing user from local storage", e);
+        }
+      }
+      if (!operatorId) operatorId = localStorage.getItem('operator_id');
+
+      if (!operatorId) return;
+
+      // Fetch production logs
+      const apiUrl = `${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`;
+
+      const response = await fetch(apiUrl);
+      if (response.ok) {
+        const data = await response.json();
+        // Count logs where supervisor has responded, produced_quantity > 0, and not acknowledged
+        const supervisorRespondedLogs = (data || []).filter(
+          log => (log.supervisor_id !== null && log.supervisor_id !== undefined) &&
+                 (log.produced_quantity || 0) > 0 &&
+                 !log.operator_acknowledged_at &&
+                 !log.acknowledged
+        );
+        setNotificationCount(supervisorRespondedLogs.length);
+      }
+    } catch (error) {
+      console.error('Error fetching notification count:', error);
+    }
+  };
+
+  const fetchSupervisorNotificationCount = async () => {
+    try {
+      // Get supervisor ID from localStorage
+      const storedUser = localStorage.getItem('user');
+      let supervisorId = null;
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          supervisorId = user.id;
+        } catch (e) {
+          console.error("Error parsing user from local storage", e);
+        }
+      }
+      if (!supervisorId) supervisorId = localStorage.getItem('supervisor_id');
+
+      // Fetch all production logs
+      const apiUrl = `${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`;
+
+      const response = await fetch(apiUrl);
+      if (response.ok) {
+        const data = await response.json();
+        // Count logs related to supervisor (both responded and not responded)
+        // where produced_quantity > 0 and not acknowledged
+        const supervisorLogs = (data || []).filter(
+          log => ((log.supervisor_id === null || log.supervisor_id === undefined) ||
+                 String(log.supervisor_id) === String(supervisorId)) &&
+                 (log.produced_quantity || 0) > 0 &&
+                 !log.supervisor_acknowledged_at &&
+                 !log.acknowledged
+        );
+        setNotificationCount(supervisorLogs.length);
+      }
+    } catch (error) {
+      console.error('Error fetching notification count:', error);
+    }
+  };
 
   // Define all menu items with dynamic paths
   const allItems = [
@@ -180,9 +265,26 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <FileTextOutlined />,
       },
       {
+        key: `${prefix}/production-logs`,
+        label: <Link to={`${prefix}/production-logs`} onClick={() => setMobileDrawerOpen(false)}>Production Logs</Link>,
+        icon: <HistoryOutlined />,
+      },
+      
+      {
         key: `${prefix}/leave-log`,
         label: <Link to={`${prefix}/leave-log`} onClick={() => setMobileDrawerOpen(false)}>Leave Log</Link>,
         icon: <CalendarOutlined />,
+      },
+      {
+        key: `${prefix}/notifications`,
+        label: (
+          <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
+            <Badge count={notificationCount} offset={[10, 0]}>
+              Notifications
+            </Badge>
+          </Link>
+        ),
+        icon: <BellOutlined />,
       },
     ];
   } else if (prefix === '/project_coordinator') {
@@ -192,7 +294,21 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link>,
         icon: <ShoppingCartOutlined />,
       },
-      
+      {
+        key: `${prefix}/order-tracking`,
+        label: <Link to={`${prefix}/order-tracking`} onClick={() => setMobileDrawerOpen(false)}>Order Tracking</Link>,
+        icon: <SyncOutlined />,
+      },
+      {
+        key: `${prefix}/pps/machine-scheduling`,
+        label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link>,
+        icon: <AppstoreOutlined />,
+      },
+      {
+        key: `${prefix}/product-monitoring/planned-vs-actual`,
+        label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link>,
+        icon: <MonitorOutlined />,
+      },
     ];
   } else if (prefix === '/manufacturing_coordinator') {
     items = [
@@ -282,6 +398,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/production_logs`} onClick={() => setMobileDrawerOpen(false)}>Production logs</Link>,
         icon: <FileTextOutlined />,
       },
+      
       {
         key: `${prefix}/pps/assets-availability`,
         label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link>,
@@ -296,6 +413,17 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/create-inspection-plan`,
         label: <Link to={`${prefix}/create-inspection-plan`} onClick={() => setMobileDrawerOpen(false)}>Create Inspection Plan</Link>,
         icon: <BuildOutlined />,
+      },
+      {
+        key: `${prefix}/notifications`,
+        label: (
+          <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
+            <Badge count={notificationCount} offset={[10, 0]}>
+              Notifications
+            </Badge>
+          </Link>
+        ),
+        icon: <BellOutlined />,
       },
     ];
   } else if (prefix === '/inventory_supervisor') {
@@ -407,4 +535,3 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 };
 
 export default Sidebar;
-

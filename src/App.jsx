@@ -23,12 +23,15 @@ import Dashboard from "./Pages/Dashboard";
 import ShopFloorDashboard from "./Pages/ShopFloorDashboard";
 
 import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
+import ProjectCoordinatorProductView from "./ProjectCoordinator Components/ProjectCoordinatorProductView";
+import OrderTrackingSidebar from "./ProjectCoordinator Components/OrderTrackingSidebar";
+import PPS from "./Pages/PPS";
+import ProductionMonitoring from "./Pages/ProductionMonitoring";
 
 import OperatorDashboard from "./Pages/OperatorDashboard";
+import ProductionLogsHistory from "./Operator Components/ProductionLogsHistory";
+import OperatorNotifications from "./Operator Components/Notifications";
 
-import PPS from "./Pages/PPS";
-
-import ProductionMonitoring from "./Pages/ProductionMonitoring";
 import MaintenanceManagement from "./Pages/MaintenanceManagement";
 import QualityManagement from "./Quality Management Components/QualityManagement";
 
@@ -50,6 +53,7 @@ import MCSShopFloorDashboard from "./ManufacturingCoordinator Components/ShopFlo
 
 import SupervisorDashboard from "./Pages/SupervisorDashboard";
 import CreateInspectionPlan from "./Supervisor Components/CreateInspectionPlan";
+import SupervisorNotifications from "./Supervisor Components/Notifications";
 
 import QMSInspector from "./Quality Management Components/QMSInspector";
 
@@ -174,6 +178,12 @@ function App() {
 
           <Route path="/project_coordinator/pdm" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
 
+          <Route path="/project_coordinator/pps/*" element={<ProjectCoordinatorProductView />} />
+
+          <Route path="/project_coordinator/product-monitoring/*" element={<ProjectCoordinatorProductView />} />
+
+          <Route path="/project_coordinator/order-tracking" element={<OrderTrackingSidebar />} />
+
          
 
           {/* Manufacturing Coordinator */}
@@ -247,6 +257,7 @@ function App() {
           <Route path="/supervisor" element={<Navigate to="/supervisor/production_logs" replace />} />
 
           <Route path="/supervisor/production_logs" element={<SupervisorDashboard />} />
+          <Route path="/supervisor/notifications" element={<SupervisorNotifications />} />
           <Route path="/supervisor/pps/assets-availability" element={<SupervisorDashboard />} />
           <Route path="/supervisor/product-monitoring/pokayoke-checklists" element={<SupervisorDashboard />} />
           <Route path="/supervisor/create-inspection-plan" element={<CreateInspectionPlan />} />
@@ -278,6 +289,8 @@ function App() {
           <Route path="/operator/inventory-data" element={<OperatorDashboard />} />
           <Route path="/operator/inspection-results" element={<OperatorDashboard />} />
           <Route path="/operator/documents" element={<OperatorDashboard />} />
+          <Route path="/operator/production-logs" element={<ProductionLogsHistory />} />
+          <Route path="/operator/notifications" element={<OperatorNotifications />} />
           <Route path="/operator/leave-log" element={<OperatorDashboard />} />
           </Route>
 

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { API_BASE_URL } from '../Config/auth';
+import { API_BASE_URL } from '../../Config/auth';
 import { Card, Table, Spin, message, Row, Col, Statistic, Typography, Tag, Select, Empty, Space } from 'antd';
-import { 
-  ShoppingCartOutlined, 
+import {
+  ShoppingCartOutlined,
   SyncOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -18,7 +18,7 @@ const getStatusTag = (status) => {
   const colorMap = {
     'completed': 'success',
     'in progress': 'processing',
-    'started': 'processing', 
+    'started': 'processing',
     'pending': 'warning',
     'not started': 'default'
   };
@@ -27,18 +27,18 @@ const getStatusTag = (status) => {
 
 /* ─── MAIN COMPONENT ─────────────────────────────────────────────────────── */
 const OrderTracking = () => {
-  const [orders, setOrders]                       = useState([]);
-  const [selectedOrderId, setSelectedOrderId]     = useState(null);
-  const [selectedPartId, setSelectedPartId]       = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [selectedPartId, setSelectedPartId] = useState(null);
   const [selectedOperationId, setSelectedOperationId] = useState(null);
   const [expandedLogs, setExpandedLogs] = useState({});
-  const [orderDetails, setOrderDetails]           = useState(null);
+  const [orderDetails, setOrderDetails] = useState(null);
   const [orderTrackingData, setOrderTrackingData] = useState(null);
   const [productionLogsData, setProductionLogsData] = useState({});
-  const [loading, setLoading]                     = useState(false);
-  const [initialLoading, setInitialLoading]       = useState(true);
-  const [searchOrder, setSearchOrder]             = useState('');
-  const [searchPart, setSearchPart]               = useState('');
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [searchOrder, setSearchOrder] = useState('');
+  const [searchPart, setSearchPart] = useState('');
   const hasFetchedOrders = useRef(false);
 
   const getCurrentAdminId = () => {
@@ -111,16 +111,25 @@ const OrderTracking = () => {
   useEffect(() => {
     if (hasFetchedOrders.current) return;
     hasFetchedOrders.current = true;
+    
+    // Read order ID from local storage
+    const storedOrderId = localStorage.getItem('selectedOrderId');
+    if (storedOrderId) {
+      setSelectedOrderId(parseInt(storedOrderId, 10));
+    }
+    
     fetchOrders();
   }, []);
 
   useEffect(() => {
     if (selectedOrderId) {
+      // Store selected order ID in local storage
+      localStorage.setItem('selectedOrderId', selectedOrderId);
       fetchOrderDetails(selectedOrderId);
       fetchOrderTrackingData(selectedOrderId);
       setSelectedPartId(null); // Reset part selection when order changes
     } else {
-      setOrderDetails(null); 
+      setOrderDetails(null);
       setOrderTrackingData(null);
       setProductionLogsData({});
       setSelectedPartId(null);
@@ -145,13 +154,13 @@ const OrderTracking = () => {
       const userId = getCurrentAdminId();
       const userRole = getUserRole();
       const normalizedRole = (userRole || '').toLowerCase().replace(/_/g, ' ').trim();
-      
+
       // Use manufacturing_coordinator_id for MC users, admin_id for admin users
       const isManufacturingCoordinator = normalizedRole.includes('manufacturing coordinator') || normalizedRole === 'mc';
-      const params = userId != null 
+      const params = userId != null
         ? (isManufacturingCoordinator ? { manufacturing_coordinator_id: userId } : { admin_id: userId })
         : undefined;
-      
+
       const res = await axios.get(`${API_BASE_URL}/orders/`, { params });
       const data = Array.isArray(res.data) ? res.data : [];
       setOrders(data);
@@ -175,7 +184,7 @@ const OrderTracking = () => {
     try {
       const res = await axios.get(`${API_BASE_URL}/order-tracking/${orderId}`);
       setOrderTrackingData(res.data);
-      
+
       // Extract production logs from tracking data and update state
       // This avoids making multiple separate API calls for each operation
       const logsMap = {};
@@ -185,30 +194,30 @@ const OrderTracking = () => {
         });
       });
       setProductionLogsData(logsMap);
-    } catch { /* non-critical */ }
+    } catch (err) { console.error('Error fetching order tracking data:', err); }
   };
 
   const partsData = getPartsData(orderDetails, orderTrackingData);
   const selectedPart = partsData.find(p => p.part_id === selectedPartId);
 
-  const totalParts      = partsData.length;
-  const completedParts  = partsData.filter(p => p.status?.toLowerCase() === 'completed').length;
+  const totalParts = partsData.length;
+  const completedParts = partsData.filter(p => p.status?.toLowerCase() === 'completed').length;
   const inProgressParts = partsData.filter(p => ['in progress', 'started'].includes(p.status?.toLowerCase())).length;
-  const pendingParts    = partsData.filter(p => ['not started', 'pending'].includes(p.status?.toLowerCase())).length;
-  
-  const filteredOrders = orders.filter(o => 
+  const pendingParts = partsData.filter(p => ['not started', 'pending'].includes(p.status?.toLowerCase())).length;
+
+  const filteredOrders = orders.filter(o =>
     o.sale_order_number?.toLowerCase().includes(searchOrder.toLowerCase())
   );
 
-  const filteredParts = partsData.filter(p => 
-    p.part_name?.toLowerCase().includes(searchPart.toLowerCase()) || 
+  const filteredParts = partsData.filter(p =>
+    p.part_name?.toLowerCase().includes(searchPart.toLowerCase()) ||
     p.part_number?.toLowerCase().includes(searchPart.toLowerCase())
   );
 
   return (
-    <div style={{ 
-      padding: '12px', 
-      background: '#f0f2f5', 
+    <div style={{
+      padding: '12px',
+      background: '#f0f2f5',
       height: '100vh',
       display: 'flex',
       flexDirection: 'column',
@@ -216,82 +225,11 @@ const OrderTracking = () => {
       overflow: 'hidden'
     }}>
       {/* Top Header / Stats Row */}
-      <Card styles={{ body: { padding: '12px 24px' } }} style={{ borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', flexShrink: 0 }}>
-        <Row align="middle" justify="space-between">
-          <Col>
-            <Space size="middle">
-              <ShoppingCartOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
-              <Title level={4} style={{ margin: 0 }}>Order Tracking Dashboard</Title>
-            </Space>
-          </Col>
-          {selectedOrderId && (
-            <Col>
-              <Space size="large">
-                <Statistic title="Total Parts" value={totalParts} styles={{ content: { fontSize: '20px' } }} />
-                <Statistic title="Completed" value={completedParts} styles={{ content: { color: '#52c41a', fontSize: '20px' } }} />
-                <Statistic title="In Progress" value={inProgressParts} styles={{ content: { color: '#1890ff', fontSize: '20px' } }} />
-                <Statistic title="Pending" value={pendingParts} styles={{ content: { color: '#faad14', fontSize: '20px' } }} />
-              </Space>
-            </Col>
-          )}
-        </Row>
-      </Card>
+      
 
       <div style={{ display: 'flex', flex: 1, gap: '12px', overflow: 'hidden', minHeight: 0 }}>
-        {/* Left Column: Orders */}
-        <Card 
-          title={<Space><DatabaseOutlined /> Orders</Space>}
-          style={{ width: '280px', display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }}
-          styles={{ body: { padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }, header: { padding: '0 16px', flexShrink: 0 } }}
-        >
-          <div style={{ padding: '12px', borderBottom: '1px solid #f0f0f0', flexShrink: 0 }}>
-            <Select
-              showSearch
-              placeholder="Search orders..."
-              style={{ width: '100%' }}
-              onSearch={setSearchOrder}
-              onChange={setSelectedOrderId}
-              value={selectedOrderId}
-              filterOption={false}
-              loading={initialLoading}
-            >
-              {filteredOrders.map(order => (
-                <Select.Option key={order.id} value={order.id}>
-                  {order.sale_order_number}
-                </Select.Option>
-              ))}
-            </Select>
-          </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-            {initialLoading ? (
-              <div style={{ textAlign: 'center', padding: '20px' }}><Spin /></div>
-            ) : filteredOrders.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No orders" />
-            ) : (
-              filteredOrders.map(order => (
-                <div 
-                  key={order.id}
-                  onClick={() => setSelectedOrderId(order.id)}
-                  style={{
-                    padding: '12px 16px',
-                    cursor: 'pointer',
-                    background: selectedOrderId === order.id ? '#e6f7ff' : 'transparent',
-                    borderLeft: selectedOrderId === order.id ? '4px solid #1890ff' : '4px solid transparent',
-                    transition: 'all 0.2s',
-                    borderBottom: '1px solid #f5f5f5'
-                  }}
-                >
-                  <Text strong style={{ color: selectedOrderId === order.id ? '#1890ff' : '#262626', fontSize: '13px' }}>
-                    {order.sale_order_number}
-                  </Text>
-                </div>
-              ))
-            )}
-          </div>
-        </Card>
-
         {/* Middle Column: Parts */}
-        <Card 
+        <Card
           title={<Space><ToolOutlined /> Parts ({filteredParts.length})</Space>}
           style={{ flex: 1.2, display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }}
           bodyStyle={{ padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
@@ -369,10 +307,10 @@ const OrderTracking = () => {
                         <span>{Math.round(record.completion_percentage)}%</span>
                       </div>
                       <div style={{ height: '4px', background: '#f5f5f5', borderRadius: '2px', overflow: 'hidden', marginTop: '2px' }}>
-                        <div style={{ 
-                          height: '100%', 
-                          background: record.completion_percentage === 100 ? '#52c41a' : '#1890ff', 
-                          width: `${record.completion_percentage}%` 
+                        <div style={{
+                          height: '100%',
+                          background: record.completion_percentage === 100 ? '#52c41a' : '#1890ff',
+                          width: `${record.completion_percentage}%`
                         }} />
                       </div>
                     </div>
@@ -408,7 +346,7 @@ const OrderTracking = () => {
         </Card>
 
         {/* Right Column: Operations */}
-        <Card 
+        <Card
           title={<Space><SyncOutlined /> Operations {selectedPart ? `- ${selectedPart.part_number}` : ''}</Space>}
           style={{ flex: 1.5, display: 'flex', flexDirection: 'column', borderRadius: '8px', border: 'none', boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }}
           bodyStyle={{ padding: '0', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
@@ -433,12 +371,12 @@ const OrderTracking = () => {
                       const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
                       const operation = trackingOps?.find(o => o.operation_id === record.id);
                       const logs = operation?.production_logs || [];
-                      
+
                       if (logs.length === 0) {
                         return (
-                          <div style={{ 
-                            padding: '16px', 
-                            textAlign: 'center', 
+                          <div style={{
+                            padding: '16px',
+                            textAlign: 'center',
                             color: '#999',
                             background: '#fafafa'
                           }}>
@@ -446,10 +384,10 @@ const OrderTracking = () => {
                           </div>
                         );
                       }
-                      
+
                       return (
-                        <div style={{ 
-                          padding: '16px', 
+                        <div style={{
+                          padding: '16px',
                           background: '#fafafa',
                           borderRadius: '6px',
                           margin: '0 8px 12px',
@@ -459,10 +397,10 @@ const OrderTracking = () => {
                             Production Stages
                           </div>
                           {logs.map((log, index) => (
-                            <div key={log.id} style={{ 
-                              marginBottom: '8px', 
-                              padding: '12px', 
-                              background: '#fff', 
+                            <div key={log.id} style={{
+                              marginBottom: '8px',
+                              padding: '12px',
+                              background: '#fff',
                               borderRadius: '4px',
                               border: '1px solid #d9d9d9'
                             }}>
@@ -537,7 +475,7 @@ const OrderTracking = () => {
                         const machineName = operation?.machine_name || `M${opRecord.id}`;
 
                         return (
-                          <div style={{ 
+                          <div style={{
                             maxWidth: '140px',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -572,7 +510,9 @@ const OrderTracking = () => {
                       width: 80,
                       align: 'center',
                       render: (_, op) => {
-                        const logs = productionLogsData[op.id] || [];
+                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
+                        const operation = trackingOps?.find(o => o.operation_id === op.id);
+                        const logs = operation?.production_logs || [];
                         return <Text style={{ color: '#1890ff', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.produced_quantity || 0), 0)}</Text>;
                       }
                     },
@@ -582,7 +522,9 @@ const OrderTracking = () => {
                       width: 80,
                       align: 'center',
                       render: (_, op) => {
-                        const logs = productionLogsData[op.id] || [];
+                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
+                        const operation = trackingOps?.find(o => o.operation_id === op.id);
+                        const logs = operation?.production_logs || [];
                         return <Text style={{ color: '#52c41a', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.approved_quantity || 0), 0)}</Text>;
                       }
                     },
@@ -592,7 +534,9 @@ const OrderTracking = () => {
                       width: 75,
                       align: 'center',
                       render: (_, op) => {
-                        const logs = productionLogsData[op.id] || [];
+                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
+                        const operation = trackingOps?.find(o => o.operation_id === op.id);
+                        const logs = operation?.production_logs || [];
                         return <Text style={{ color: '#fa8c16', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rework_quantity || 0), 0)}</Text>;
                       }
                     },
@@ -602,7 +546,9 @@ const OrderTracking = () => {
                       width: 75,
                       align: 'center',
                       render: (_, op) => {
-                        const logs = productionLogsData[op.id] || [];
+                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
+                        const operation = trackingOps?.find(o => o.operation_id === op.id);
+                        const logs = operation?.production_logs || [];
                         return <Text style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rejected_quantity || 0), 0)}</Text>;
                       }
                     },

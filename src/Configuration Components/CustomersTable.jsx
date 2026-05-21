@@ -11,6 +11,8 @@ const CustomersTable = ({ userId }) => {
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [searchText, setSearchText] = useState('');
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     fetchCustomers();
@@ -90,7 +92,7 @@ const CustomersTable = ({ userId }) => {
     {
       title: 'SL NO',
       key: 'index',
-      render: (text, record, index) => index + 1,
+      render: (text, record, index) => (currentPage - 1) * pageSize + index + 1,
       width: 80,
       align: 'center',
     },
@@ -174,7 +176,7 @@ const CustomersTable = ({ userId }) => {
           <Input.Search
             placeholder="Search customers..."
             value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
+            onChange={(e) => { setSearchText(e.target.value); setCurrentPage(1); }}
             style={{ width: 250 }}
             allowClear
           />
@@ -217,12 +219,22 @@ const CustomersTable = ({ userId }) => {
         rowKey="id"
         loading={loading}
         pagination={{ 
-          pageSize: 10,
+          pageSize: pageSize,
+          current: currentPage,
           size: "small",
           responsive: true,
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
           showSizeChanger: true,
           showQuickJumper: true,
+          onChange: (page, size) => {
+            setCurrentPage(page);
+            setPageSize(size);
+          },
+          onShowSizeChange: (current, size) => {
+            setCurrentPage(1);
+            setPageSize(size);
+          },
+          pageSizeOptions: ['10', '20', '50', '100'],
         }}
         bordered
         size="middle"

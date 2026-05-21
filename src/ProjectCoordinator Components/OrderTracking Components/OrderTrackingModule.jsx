@@ -1,15 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { API_BASE_URL } from '../Config/auth';
+import { API_BASE_URL } from '../../Config/auth';
 import { Card, Table, Spin, message, Row, Col, Statistic, Typography, Tag, Select, Empty, Space } from 'antd';
-import { 
-  ShoppingCartOutlined, 
-  SyncOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  DatabaseOutlined,
-  ToolOutlined
-} from '@ant-design/icons';
+import { ShoppingCartOutlined, SyncOutlined,CheckCircleOutlined,ClockCircleOutlined,DatabaseOutlined,ToolOutlined} from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
@@ -26,7 +19,7 @@ const getStatusTag = (status) => {
 };
 
 /* ─── MAIN COMPONENT ─────────────────────────────────────────────────────── */
-const OrderTracking = () => {
+const OrderTrackingModule = () => {
   const [orders, setOrders]                       = useState([]);
   const [selectedOrderId, setSelectedOrderId]     = useState(null);
   const [selectedPartId, setSelectedPartId]       = useState(null);
@@ -145,13 +138,16 @@ const OrderTracking = () => {
       const userId = getCurrentAdminId();
       const userRole = getUserRole();
       const normalizedRole = (userRole || '').toLowerCase().replace(/_/g, ' ').trim();
-      
-      // Use manufacturing_coordinator_id for MC users, admin_id for admin users
+
+      // Use project_coordinator_id for PC users, manufacturing_coordinator_id for MC users, admin_id for admin users
       const isManufacturingCoordinator = normalizedRole.includes('manufacturing coordinator') || normalizedRole === 'mc';
-      const params = userId != null 
-        ? (isManufacturingCoordinator ? { manufacturing_coordinator_id: userId } : { admin_id: userId })
+      const isProjectCoordinator = normalizedRole.includes('project coordinator') || normalizedRole === 'pc';
+      const params = userId != null
+        ? (isManufacturingCoordinator ? { manufacturing_coordinator_id: userId }
+          : isProjectCoordinator ? { project_coordinator_id: userId }
+          : { admin_id: userId })
         : undefined;
-      
+
       const res = await axios.get(`${API_BASE_URL}/orders/`, { params });
       const data = Array.isArray(res.data) ? res.data : [];
       setOrders(data);
@@ -185,7 +181,7 @@ const OrderTracking = () => {
         });
       });
       setProductionLogsData(logsMap);
-    } catch { /* non-critical */ }
+    } catch (err) { console.error('Error fetching order tracking data:', err); }
   };
 
   const partsData = getPartsData(orderDetails, orderTrackingData);
@@ -537,7 +533,7 @@ const OrderTracking = () => {
                         const machineName = operation?.machine_name || `M${opRecord.id}`;
 
                         return (
-                          <div style={{ 
+                          <div style={{
                             maxWidth: '140px',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -572,7 +568,9 @@ const OrderTracking = () => {
                       width: 80,
                       align: 'center',
                       render: (_, op) => {
-                        const logs = productionLogsData[op.id] || [];
+                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
+                        const operation = trackingOps?.find(o => o.operation_id === op.id);
+                        const logs = operation?.production_logs || [];
                         return <Text style={{ color: '#1890ff', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.produced_quantity || 0), 0)}</Text>;
                       }
                     },
@@ -582,7 +580,9 @@ const OrderTracking = () => {
                       width: 80,
                       align: 'center',
                       render: (_, op) => {
-                        const logs = productionLogsData[op.id] || [];
+                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
+                        const operation = trackingOps?.find(o => o.operation_id === op.id);
+                        const logs = operation?.production_logs || [];
                         return <Text style={{ color: '#52c41a', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.approved_quantity || 0), 0)}</Text>;
                       }
                     },
@@ -592,7 +592,9 @@ const OrderTracking = () => {
                       width: 75,
                       align: 'center',
                       render: (_, op) => {
-                        const logs = productionLogsData[op.id] || [];
+                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
+                        const operation = trackingOps?.find(o => o.operation_id === op.id);
+                        const logs = operation?.production_logs || [];
                         return <Text style={{ color: '#fa8c16', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rework_quantity || 0), 0)}</Text>;
                       }
                     },
@@ -602,7 +604,9 @@ const OrderTracking = () => {
                       width: 75,
                       align: 'center',
                       render: (_, op) => {
-                        const logs = productionLogsData[op.id] || [];
+                        const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
+                        const operation = trackingOps?.find(o => o.operation_id === op.id);
+                        const logs = operation?.production_logs || [];
                         return <Text style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rejected_quantity || 0), 0)}</Text>;
                       }
                     },
@@ -672,4 +676,4 @@ const OrderTracking = () => {
   );
 };
 
-export default OrderTracking;
+export default OrderTrackingModule;
