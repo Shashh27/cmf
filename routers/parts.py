@@ -281,6 +281,7 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
         is_clearing_raw_material = True
     
     # If updating raw material allocation, handle the allocation logic
+    unit = None  # Initialize unit variable
     if is_updating_raw_material or is_clearing_raw_material:
         # Special case: All raw material fields are being cleared
         if is_clearing_raw_material:
@@ -295,20 +296,20 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
                         RawMaterialUsageModel.raw_material_unit_id == db_part.raw_material_unit_id,
                         RawMaterialUsageModel.part_id == part_id
                     ).first()
-                    
+
                     if usage:
                         # Restore unit's remaining length
                         unit.remaining_length += usage.used_length
-                        
+
                         # Update unit status
                         if unit.remaining_length == unit.total_length:
                             unit.status = "available"
                         elif unit.remaining_length > 0:
                             unit.status = "partially_used"
-                        
+
                         # Delete usage record
                         db.delete(usage)
-            
+
             # Clear part fields
             db_part.raw_material_id = None
             db_part.raw_material_unit_id = None
