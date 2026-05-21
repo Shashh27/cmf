@@ -120,7 +120,7 @@ const AssetAvailability = () => {
       const newStatusId = values.status_id;
       
       if (!currentStatusId) {
-        payload.available_from = '2026-01-01T00:00:00';
+        payload.available_from = dayjs().startOf('year').format('YYYY-MM-DDTHH:mm:ss');
         payload.available_to = null;
       } else if (currentStatusId === 1 && newStatusId === 2) {
         if (!values.available_from || !values.available_to) {
@@ -224,7 +224,7 @@ const AssetAvailability = () => {
       };
 
       if (!currentStatusId) {
-        payload.available_from = '2026-01-01T00:00:00';
+        payload.available_from = dayjs().startOf('year').format('YYYY-MM-DDTHH:mm:ss');
         payload.available_to = null;
       } else if (newStatusId === 2) {
         if (!row.available_from || !row.available_to) {

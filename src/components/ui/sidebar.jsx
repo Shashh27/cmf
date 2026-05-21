@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Layout, Menu, Drawer, Button, Badge } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
-  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined
+  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
@@ -294,7 +294,21 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/oms/orders`} onClick={() => setMobileDrawerOpen(false)}>Orders</Link>,
         icon: <ShoppingCartOutlined />,
       },
-      
+      {
+        key: `${prefix}/order-tracking`,
+        label: <Link to={`${prefix}/order-tracking`} onClick={() => setMobileDrawerOpen(false)}>Order Tracking</Link>,
+        icon: <SyncOutlined />,
+      },
+      {
+        key: `${prefix}/pps/machine-scheduling`,
+        label: <Link to={`${prefix}/pps/machine-scheduling`} onClick={() => setMobileDrawerOpen(false)}>Machine Scheduling</Link>,
+        icon: <AppstoreOutlined />,
+      },
+      {
+        key: `${prefix}/product-monitoring/planned-vs-actual`,
+        label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link>,
+        icon: <MonitorOutlined />,
+      },
     ];
   } else if (prefix === '/manufacturing_coordinator') {
     items = [
@@ -521,4 +535,3 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 };
 
 export default Sidebar;
-

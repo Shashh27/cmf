@@ -3,29 +3,38 @@ import axios from "axios";
 // Shared utility: normalise a version string as the user types
 export const normalizeVersion = (raw) => {
   let v = raw || '';
-  if (v && !v.startsWith('v')) v = 'v' + v;
-  v = v.replace(/[^v0-9.a-zA-Z]/g, '');
-  if (v.startsWith('v')) v = 'v' + v.substring(1).replace(/v/g, '');
-  const parts = v.split('.');
-  if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
-  const m = v.match(/^(v\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
-  if (m) return (m[1] || 'v') + '.' + (m[2] ? m[2].substring(0, 3) : '');
-  const init = v.match(/^(v\d{0,2})/);
-  return init ? init[1] + '.' : 'v.';
+  
+  // Strip leading 'v' or 'V' prefix for processing
+  if (v.startsWith('v') || v.startsWith('V')) v = v.substring(1);
+  
+  // Allow only digits and dots
+  v = v.replace(/[^0-9.]/g, '');
+  
+  // Prevent consecutive dots
+  v = v.replace(/\.{2,}/g, '.');
+  
+  // Prevent leading dot
+  if (v.startsWith('.')) v = v.substring(1);
+
+  return v;
 };
 
-const getCurrentUserId = () => {
-  try {
-    const stored = localStorage.getItem("user");
-    if (!stored) return null;
-    const u = JSON.parse(stored);
-    if (u?.id == null) return null;
-    return u.id;
-  } catch {
-    return null;
-  }
+// Shared utility: get the latest revision from a list of documents
+export const getLatestRevision = (docs) => {
+  if (!docs || !Array.isArray(docs) || docs.length === 0) return null;
+  const parseV = (v) => {
+    const val = parseFloat(String(v || '0').replace(/^v/i, ''));
+    return isNaN(val) ? 0 : val;
+  };
+  const sorted = [...docs].sort((a, b) => parseV(b.document_version) - parseV(a.document_version));
+  const latest = sorted[0]?.document_version;
+  if (!latest) return null;
+  const clean = String(latest).replace(/^v/i, '');
+  // If it's a simple integer, pad to 2 digits (e.g. "1" -> "01")
+  return /^\d+$/.test(clean) ? clean.padStart(2, '0') : clean;
 };
 
+// Shared utility: simple axios → setState helper with loading + guard
 export const fetchInto = async (url, setter, setLoading, guard) => {
   if (guard) return; // already loaded
   if (setLoading) setLoading(true);

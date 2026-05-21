@@ -59,6 +59,16 @@ const ProductionCompletion = () => {
     approvedQuantity: 0,
   });
 
+  // ── Update quantities modal state ────────────────────────────────────────────
+  const [updateModal, setUpdateModal] = useState({
+    visible: false,
+    log: null,
+    approvedQty: 0,
+    reworkQty: 0,
+    rejectedQty: 0,
+    remark: '',
+  });
+
   const screens = useBreakpoint();
   const isMobile = !screens.md;
 
@@ -207,6 +217,87 @@ const ProductionCompletion = () => {
     setRemarkModal({ visible: false, log: null, newStatus: '', remark: '', approvedQuantity: 0 });
   };
 
+  const openUpdateModal = (log) => {
+    setUpdateModal({
+      visible: true,
+      log,
+      approvedQty: log.approved_quantity || 0,
+      reworkQty: log.rework_quantity || 0,
+      rejectedQty: log.rejected_quantity || 0,
+      remark: log.remarks || '',
+    });
+  };
+
+  const closeUpdateModal = () => {
+    setUpdateModal({ visible: false, log: null, approvedQty: 0, reworkQty: 0, rejectedQty: 0, remark: '' });
+  };
+
+  const handleUpdateQuantities = async () => {
+    const { log, approvedQty, reworkQty, rejectedQty, remark } = updateModal;
+    const totalApproved = parseInt(approvedQty) || 0;
+    const totalRework = parseInt(reworkQty) || 0;
+    const totalRejected = parseInt(rejectedQty) || 0;
+
+    // Frontend validation
+    const totalAssigned = totalApproved + totalRework + totalRejected;
+    if (totalAssigned !== log.produced_quantity) {
+      message.error(`Total of approved (${totalApproved}) + rework (${totalRework}) + rejected (${totalRejected}) must equal produced quantity (${log.produced_quantity}). Got total ${totalAssigned} instead.`);
+      return;
+    }
+
+    if (totalApproved > log.produced_quantity) {
+      message.error(`Approved quantity (${totalApproved}) cannot be greater than produced quantity (${log.produced_quantity}).`);
+      return;
+    }
+
+    if (totalRework < 0 || totalRejected < 0) {
+      message.error('Rework and rejected quantities cannot be negative.');
+      return;
+    }
+
+    setLoading(true);
+
+    const payload = {
+      status: 'inprogress', // or whatever status you want
+      supervisor_id: supervisorId,
+      remarks: remark || null,
+      approved_quantity: totalApproved,
+      rework_quantity: totalRework,
+      rejected_quantity: totalRejected,
+    };
+
+    try {
+      const response = await fetch(
+        `${SCHEDULING_API_BASE_URL}/production-logs/${log.id}/status`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (response.ok) {
+        message.success('Quantities updated successfully');
+        setLogs((prev) =>
+          prev.map((l) =>
+            l.id === log.id
+              ? { ...l, approved_quantity: totalApproved, rework_quantity: totalRework, rejected_quantity: totalRejected }
+              : l
+          )
+        );
+        closeUpdateModal();
+      } else {
+        const errorData = await response.json();
+        message.error(`Failed to update quantities: ${errorData.detail || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error updating quantities:', error);
+      message.error('An error occurred while updating the quantities.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUpdateStatus = async () => {
     const { log, newStatus, remark } = remarkModal;
     setLoading(true);
@@ -299,10 +390,22 @@ const ProductionCompletion = () => {
   };
 
   const ActionButtons = ({ record }) => {
-    const isDisabled = record.status === 'completed' || record.status === 'rework';
+    const hasQuantities = (record.approved_quantity > 0) || (record.rework_quantity > 0) || (record.rejected_quantity > 0);
+    const isDisabled = record.status === 'completed' || record.status === 'rework' || hasQuantities;
     return (
       <Space>
-        <Tooltip title="Mark as Completed">
+        <Tooltip title="Update Quantities">
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            disabled={isDisabled}
+            onClick={() => openUpdateModal(record)}
+          >
+            Update
+          </Button>
+        </Tooltip>
+        {/* <Tooltip title="Mark as Completed">
           <span
             style={{
               color: isDisabled ? '#bfbfbf' : '#52c41a',
@@ -325,7 +428,7 @@ const ProductionCompletion = () => {
           >
             <RedoOutlined />
           </span>
-        </Tooltip>
+        </Tooltip> */}
       </Space>
     );
   };
@@ -409,6 +512,18 @@ const ProductionCompletion = () => {
                   </Text>
                 </div>
                 <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>{highlightText(record.operator?.user_name, searchText)}</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Machine</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {highlightText(record.planned_schedule_item?.machine_name, searchText)}
+                  </Text>
+                </div>
+                <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>Op. Number</Text>
                   <br />
                   <Text style={{ fontSize: 13 }}>
@@ -430,9 +545,18 @@ const ProductionCompletion = () => {
                   </Text>
                 </div>
                 <div>
-                  <Text type="secondary" style={{ fontSize: 11 }}>Operator</Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Rework Quantity</Text>
                   <br />
-                  <Text style={{ fontSize: 13 }}>{highlightText(record.operator?.user_name, searchText)}</Text>
+                  <Text style={{ fontSize: 13 }}>
+                    {record.rework_quantity !== null && record.rework_quantity !== undefined ? record.rework_quantity : '-'}
+                  </Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Rejected Quantity</Text>
+                  <br />
+                  <Text style={{ fontSize: 13 }}>
+                    {record.rejected_quantity !== null && record.rejected_quantity !== undefined ? record.rejected_quantity : '-'}
+                  </Text>
                 </div>
                 <div>
                   <Text type="secondary" style={{ fontSize: 11 }}>From</Text>
@@ -542,6 +666,15 @@ const ProductionCompletion = () => {
       ),
     },
     {
+      title: 'Operator',
+      key: 'operator',
+      render: (_, record) => (
+        <Text style={{ fontSize: '12px' }}>
+          {highlightText(record.operator?.user_name, searchText)}
+        </Text>
+      ),
+    },
+    {
       title: 'Machine',
       key: 'machine',
       render: (_, record) => (
@@ -573,6 +706,28 @@ const ProductionCompletion = () => {
       title: 'Approved Qty',
       dataIndex: 'approved_quantity',
       key: 'approved_quantity',
+      width: 100,
+      render: (quantity) => (
+        <Text style={{ fontSize: '12px' }}>
+          {quantity !== null && quantity !== undefined ? quantity : '-'}
+        </Text>
+      ),
+    },
+    {
+      title: 'Rework Qty',
+      dataIndex: 'rework_quantity',
+      key: 'rework_quantity',
+      width: 100,
+      render: (quantity) => (
+        <Text style={{ fontSize: '12px' }}>
+          {quantity !== null && quantity !== undefined ? quantity : '-'}
+        </Text>
+      ),
+    },
+    {
+      title: 'Rejected Qty',
+      dataIndex: 'rejected_quantity',
+      key: 'rejected_quantity',
       width: 100,
       render: (quantity) => (
         <Text style={{ fontSize: '12px' }}>
@@ -860,6 +1015,126 @@ const ProductionCompletion = () => {
             showCount
           />
         </div>
+      </Modal>
+
+      <Modal
+        open={updateModal.visible}
+        onCancel={closeUpdateModal}
+        onOk={handleUpdateQuantities}
+        okText="Update"
+        okButtonProps={{
+          loading: loading,
+        }}
+        cancelText="Cancel"
+        title={
+          <Space align="center">
+            <EditOutlined style={{ color: '#1677ff', fontSize: 18, marginRight: 8 }} />
+            <span>Update Quantities</span>
+          </Space>
+        }
+        destroyOnClose
+      >
+        {updateModal.log && (
+          <div>
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>
+                Total Produced
+              </Text>
+              <Input
+                type="number"
+                value={updateModal.log.produced_quantity}
+                disabled
+                style={{ backgroundColor: '#f5f5f5' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>
+                Approved Qty
+              </Text>
+              <Input
+                type="number"
+                placeholder="Enter approved quantity"
+                value={updateModal.approvedQty}
+                onChange={(e) => {
+                  let val = e.target.value;
+                  if (val.length > 6) val = val.slice(0, 6);
+                  setUpdateModal((prev) => ({ ...prev, approvedQty: val }));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === '-' || e.key === '+' || e.key === 'e' || e.key === 'E') {
+                    e.preventDefault();
+                  }
+                }}
+                min={0}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>
+                Rework Qty
+              </Text>
+              <Input
+                type="number"
+                placeholder="Enter rework quantity"
+                value={updateModal.reworkQty}
+                onChange={(e) => {
+                  let val = e.target.value;
+                  if (val.length > 6) val = val.slice(0, 6);
+                  setUpdateModal((prev) => ({ ...prev, reworkQty: val }));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === '-' || e.key === '+' || e.key === 'e' || e.key === 'E') {
+                    e.preventDefault();
+                  }
+                }}
+                min={0}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>
+                Rejected Qty
+              </Text>
+              <Input
+                type="number"
+                placeholder="Enter rejected quantity"
+                value={updateModal.rejectedQty}
+                onChange={(e) => {
+                  let val = e.target.value;
+                  if (val.length > 6) val = val.slice(0, 6);
+                  setUpdateModal((prev) => ({ ...prev, rejectedQty: val }));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === '-' || e.key === '+' || e.key === 'e' || e.key === 'E') {
+                    e.preventDefault();
+                  }
+                }}
+                min={0}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 6 }}>
+                Remark <Text type="secondary" style={{ fontWeight: 400 }}>(optional)</Text>
+              </Text>
+              <TextArea
+                rows={3}
+                placeholder="Enter your remark here..."
+                value={updateModal.remark}
+                onChange={(e) =>
+                  setUpdateModal((prev) => ({ ...prev, remark: e.target.value }))
+                }
+                maxLength={500}
+                showCount
+              />
+            </div>
+
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Total of approved + rework + rejected must not exceed produced quantity
+            </Text>
+          </div>
+        )}
       </Modal>
     </div>
   );

@@ -40,6 +40,17 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
     }
   };
 
+  const getCurrentUsername = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      return u?.user_name || u?.username || null;
+    } catch {
+      return null;
+    }
+  };
+
   const orderDateWatch = Form.useWatch('order_date', form);
 
   const limitDecimals = (value, fieldName, precision = 3) => {
@@ -231,11 +242,15 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           status: "Pending",
         });
         const userId = getCurrentUserId();
+        const username = getCurrentUsername();
         if (userId) {
           form.setFieldsValue({ 
             user_id: userId,
             project_coordinator_id: userId 
           });
+        }
+        if (username) {
+          form.setFieldsValue({ user_name_display: username });
         }
         const userRole = getCurrentUserRole();
         if (userRole) {
@@ -288,6 +303,20 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           console.error("Error creating product:", productError);
           message.warning("Could not create project, using default product");
         }
+      } else if (editingOrder && productId && values.project_name?.trim()) {
+        try {
+          const userId = getCurrentUserId();
+          if (userId) {
+            await axios.put(`${API_BASE_URL}/products/${productId}`, {
+              product_name: values.project_name.trim(),
+              product_version: "1.0",
+              user_id: parseInt(userId, 10),
+            });
+          }
+        } catch (productError) {
+          console.error("Error updating product name:", productError);
+          message.warning("Could not update project name");
+        }
       }
 
       const url = editingOrder 
@@ -306,9 +335,11 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         user_id: values.user_id ? parseInt(values.user_id, 10) : getCurrentUserId(),
         // Admin selected in dropdown - required field
         admin_id: values.admin_id ? parseInt(values.admin_id, 10) : getCurrentUserId(),
-        // For orders created from the Project Coordinator app, also stamp the
-        // creator as project_coordinator_id so backend filters work.
-        project_coordinator_id: values.user_id ? parseInt(values.user_id, 10) : null,
+        // Preserve the original project coordinator when editing, 
+        // otherwise set it to the creator if created by a project coordinator.
+        project_coordinator_id: editingOrder 
+          ? editingOrder.project_coordinator_id 
+          : (values.user_id ? parseInt(values.user_id, 10) : null),
         manufacturing_coordinator_id:
           values.manufacturing_coordinator_id === undefined || values.manufacturing_coordinator_id === ""
             ? null

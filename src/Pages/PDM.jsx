@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Layout, Drawer, Button, Tabs } from "antd";
 import { MenuOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
@@ -36,6 +36,11 @@ const PDM = () => {
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  React.useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = 'auto'; };
   }, []);
 
   const handleItemSelected = (item) => {
@@ -101,18 +106,22 @@ const PDM = () => {
             theme="light" 
             style={{ 
               borderRight: "1px solid #f0f0f0", 
-              overflow: 'auto',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
               minWidth: 300,
               maxWidth: 500,
               height: '100%'
             }}
           >
-            <BillOfMaterials 
-              onItemSelected={handleItemSelected} 
-              onHierarchyLoaded={handleHierarchyLoaded}
-              disableProductCreate={fromOms}
-              initialProductId={fromOms ? initialProductId : null}
-            />
+            <div className="flex flex-col h-full overflow-hidden">
+              <BillOfMaterials 
+                onItemSelected={handleItemSelected} 
+                onHierarchyLoaded={handleHierarchyLoaded}
+                disableProductCreate={fromOms}
+                initialProductId={fromOms ? initialProductId : null}
+              />
+            </div>
           </Sider>
         )}
 
@@ -164,12 +173,25 @@ const PDM = () => {
                     height: "100%"
                   }}
                 >
-                  <ProductDetails selectedItem={selectedItem} />
+                  <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
+                    <DocumentsPanel
+                      selectedItem={selectedItem}
+                      onDocumentsLoaded={setPartDocuments}
+                    />
+                  </ProductDetails>
                 </div>
               )}
               {selectedItem?.itemType === 'assembly' && (
                 <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
                   <AssemblyDocumentsPanel selectedItem={selectedItem} />
+                </div>
+              )}
+              {selectedItem?.itemType !== "part" && selectedItem?.itemType !== "assembly" && (
+                <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                  <DocumentsPanel
+                    selectedItem={selectedItem}
+                    onDocumentsLoaded={setPartDocuments}
+                  />
                 </div>
               )}
             </>

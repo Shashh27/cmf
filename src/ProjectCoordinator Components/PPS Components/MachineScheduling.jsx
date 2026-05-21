@@ -7,8 +7,8 @@ import { DataSet } from "vis-data";
 import "vis-timeline/styles/vis-timeline-graph2d.css";
 import moment from 'moment';
 import dayjs from 'dayjs';
-import { API_BASE_URL } from '../Config/auth.js';
-import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
+import { API_BASE_URL } from '../../Config/auth.js';
+import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig.js';
 
 const { Content } = Layout;
 const { Option } = Select;
@@ -149,9 +149,25 @@ const MachineScheduling = () => {
   const timelineContainerRef = useRef(null);
   const styleElementRef = useRef(null);
 
+  const getCurrentProjectCoordinatorId = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const user = JSON.parse(stored);
+      if (user?.id == null) return null;
+      return user.id;
+    } catch {
+      return null;
+    }
+  };
+
   const fetchSchedule = async () => {
     try {
-      const res = await fetch(`${SCHEDULING_API_BASE_URL}/scheduling/gantt-data`);
+      const coordinatorId = getCurrentProjectCoordinatorId();
+      const url = coordinatorId
+        ? `${SCHEDULING_API_BASE_URL}/scheduling/gantt-data/project-coordinator/${coordinatorId}`
+        : `${SCHEDULING_API_BASE_URL}/scheduling/gantt-data`;
+      const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
       const ops = [];
@@ -248,7 +264,11 @@ const MachineScheduling = () => {
     };
     const fetchOrders = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/orders/`);
+        const coordinatorId = getCurrentProjectCoordinatorId();
+        const url = coordinatorId
+          ? `${API_BASE_URL}/orders/?project_coordinator_id=${coordinatorId}`
+          : `${API_BASE_URL}/orders/`;
+        const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
           setOrders(Array.isArray(data) ? data : []);
@@ -628,7 +648,7 @@ const MachineScheduling = () => {
               </Button.Group>
 
               <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
-              <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button>
+              {/* <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update</Button> */}
               <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
             </div>
 

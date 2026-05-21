@@ -42,7 +42,7 @@ const AccessControl = () => {
             animationData: LockAnimation,
           });
         }
-      } catch {}
+      } catch { }
     });
   }, []);
 
