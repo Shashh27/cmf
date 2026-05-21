@@ -342,7 +342,7 @@ def get_order_materials(
     if status:
         query = query.filter(RawMaterialStockModel.order_status == status)
     
-    stock_items = query.order_by(RawMaterialStockModel.id.desc()).all()
+    stock_items = query.order_by(RawMaterialStockModel.id.asc()).all()
     
     # Use the _stock_with_details helper from rawmaterials.py
     # Import it here to avoid circular dependency
@@ -414,7 +414,24 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
         )
     
     try:
-        # Clear part references
+        # Get all units for this stock
+        units = db.query(RawMaterialUnitModel).filter(
+            RawMaterialUnitModel.stock_id == stock.id
+        ).all()
+        
+        unit_ids = [u.id for u in units]
+        
+        # Clear part references via raw_material_unit_id
+        if unit_ids:
+            parts_via_unit = db.query(PartModel).filter(
+                PartModel.raw_material_unit_id.in_(unit_ids)
+            ).all()
+            for part in parts_via_unit:
+                part.required_length = None
+                part.raw_material_id = None
+                part.raw_material_unit_id = None
+        
+        # Clear part references via stock.part_id
         from DB.models.oms import Part as PartModel
         if stock.part_id:
             part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
@@ -423,6 +440,10 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
                 part.required_length = None
                 part.raw_material_id = None
                 part.raw_material_unit_id = None
+        
+        # Delete units
+        for unit in units:
+            db.delete(unit)
         
         # Delete stock
         db.delete(stock)
@@ -476,7 +497,7 @@ def get_order_parts_raw_material_linked(
             # If no orders found, return empty result
             return []
     
-    stock_items = query.order_by(RawMaterialStockModel.id.desc()).all()
+    stock_items = query.order_by(RawMaterialStockModel.id.asc()).all()
     
     # Use the _stock_with_details helper from rawmaterials.py
     result = [_stock_with_details(item, db) for item in stock_items]
@@ -903,7 +924,17 @@ def delete_order_parts_raw_material_linked(
                 RawMaterialUsageModel.raw_material_unit_id.in_(unit_ids)
             ).delete()
         
-        # 3. Clear part references and delete raw material references from parts table
+        # 3. Clear part references via raw_material_unit_id
+        if unit_ids:
+            parts_via_unit = db.query(PartModel).filter(
+                PartModel.raw_material_unit_id.in_(unit_ids)
+            ).all()
+            for part in parts_via_unit:
+                part.required_length = None
+                part.raw_material_id = None
+                part.raw_material_unit_id = None
+        
+        # 4. Clear part references via stock.part_id
         if stock.part_id:
             part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
             parts = db.query(PartModel).filter(PartModel.id.in_(part_ids)).all()
@@ -912,11 +943,11 @@ def delete_order_parts_raw_material_linked(
                 part.raw_material_id = None
                 part.raw_material_unit_id = None
         
-        # 4. Delete all units (cascade should handle this, but explicit is safer)
+        # 5. Delete all units (cascade should handle this, but explicit is safer)
         for unit in units:
             db.delete(unit)
         
-        # 5. Delete stock
+        # 6. Delete stock
         db.delete(stock)
         
         db.commit()

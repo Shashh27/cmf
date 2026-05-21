@@ -117,7 +117,7 @@ async def upload_operation_documents(
     operation_id: int = Form(...),
     files: List[UploadFile] = File(...),
     document_type: str = Form("Technical"),
-    document_version: str = Form("1.0"),
+    document_version: str = Form(""),
     parent_id: Optional[int] = Form(None),
     user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db)
@@ -134,6 +134,19 @@ async def upload_operation_documents(
     uploaded_documents = []
     minio_client = get_minio_client()
     
+    # Check for duplicate revision within the same document group
+    if parent_id:
+        existing_version = db.query(OperationDocumentModel).filter(
+            (OperationDocumentModel.id == parent_id) | (OperationDocumentModel.parent_id == parent_id),
+            OperationDocumentModel.document_version == document_version
+        ).first()
+        
+        if existing_version:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Revision {document_version} already exists for this operation document."
+            )
+
     try:
         for file in files:
             # Generate unique object name with timestamp and UUID
@@ -263,6 +276,19 @@ async def upload_operation_documents_bulk(
                 if pid not in (0, None):
                     effective_parent = pid
 
+            # Check for duplicate revision within the same document group
+            if effective_parent:
+                existing_version = db.query(OperationDocumentModel).filter(
+                    (OperationDocumentModel.id == effective_parent) | (OperationDocumentModel.parent_id == effective_parent),
+                    OperationDocumentModel.document_version == effective_version
+                ).first()
+                
+                if existing_version:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Revision {effective_version} already exists for operation document '{effective_name}'."
+                    )
+
             document_url = minio_client.upload_file(
                 file_data=file_stream,
                 object_name=object_name,
@@ -376,6 +402,19 @@ async def upload_operation_documents_bulk_multi(
                         effective_parent = int(raw)
                     except ValueError:
                         effective_parent = None
+
+            # Check for duplicate revision within the same document group
+            if effective_parent:
+                existing_version = db.query(OperationDocumentModel).filter(
+                    (OperationDocumentModel.id == effective_parent) | (OperationDocumentModel.parent_id == effective_parent),
+                    OperationDocumentModel.document_version == effective_version
+                ).first()
+                
+                if existing_version:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Revision {effective_version} already exists for operation document '{effective_name}'."
+                    )
 
             document_url = minio_client.upload_file(
                 file_data=file_stream,

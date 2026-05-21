@@ -36,6 +36,9 @@ from DB.schemas.oms import (
     Operation as OperationSchema,
     Document as DocumentSchema,
     DocumentExtractedData as DocumentExtractedDataSchema,
+    ProductHierarchicalLightweight,
+    AssemblyLightweight,
+    PartLightweight,
 )
 from DB.minio_client import get_minio_client
 
@@ -486,6 +489,15 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     assembly_map = {asm.id: asm for asm in all_assemblies}
     part_map = {part.id: part for part in all_parts}
     
+    # Pre-build lookup maps to avoid O(n²) iteration in build_assembly_hierarchy
+    parts_by_assembly: dict[int | None, list] = {}
+    for part in all_parts:
+        parts_by_assembly.setdefault(part.assembly_id, []).append(part)
+    
+    assemblies_by_parent: dict[int | None, list] = {}
+    for asm in all_assemblies:
+        assemblies_by_parent.setdefault(asm.parent_id, []).append(asm)
+    
     # Get all related data for parts
     part_ids = list(part_map.keys())
     operations_by_part: dict[int, list[OperationModel]] = {}
@@ -666,18 +678,15 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
         """Recursively build assembly hierarchy"""
         assembly = assembly_map[assembly_id]
         
-        # Find parts directly belonging to this assembly
+        # Use pre-built lookup maps instead of iterating all_parts/all_assemblies (O(1) vs O(n))
         direct_parts = [
             create_part_details(part) 
-            for part in all_parts 
-            if part.assembly_id == assembly_id
+            for part in parts_by_assembly.get(assembly_id, [])
         ]
         
-        # Find child assemblies
         child_assemblies = [
             build_assembly_hierarchy(child.id) 
-            for child in all_assemblies 
-            if child.parent_id == assembly_id
+            for child in assemblies_by_parent.get(assembly_id, [])
         ]
         
         # Map assembly documents to schema models
@@ -690,18 +699,16 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             documents=asm_docs_schema,
         )
     
-    # Build root level assemblies (those with no parent)
+    # Build root level assemblies (those with no parent) using lookup map
     root_assemblies = [
         build_assembly_hierarchy(asm.id) 
-        for asm in all_assemblies 
-        if asm.parent_id is None
+        for asm in assemblies_by_parent.get(None, [])
     ]
     
-    # Get direct parts (parts not assigned to any assembly)
+    # Get direct parts (parts not assigned to any assembly) using lookup map
     direct_parts = [
         create_part_details(part) 
-        for part in all_parts 
-        if part.assembly_id is None
+        for part in parts_by_assembly.get(None, [])
     ]
     
     product_response = Product(
@@ -715,18 +722,313 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     )
     return ProductHierarchicalData(
         product=product_response,
-        assemblies=root_assemblies,
-        direct_parts=direct_parts
+        assemblies=[a for a in root_assemblies if a],
+        parts=direct_parts
     )
+
+
+@router.get("/{product_id}/summary-data")
+def get_product_summary_data(product_id: int, db: Session = Depends(get_db)):
+    """
+    Get minimal data for ProductSummary hours calculation.
+    Only returns: parts with qty, operations with setup_time/cycle_time/machine info.
+    Much faster than full hierarchical endpoint.
+    """
+    # Get product
+    product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with id {product_id} not found"
+        )
+
+    # Get all parts for this product
+    all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).all()
+    part_ids = [p.id for p in all_parts]
+
+    # Get all operations for these parts
+    operations = []
+    if part_ids:
+        operations = db.query(OperationModel).filter(
+            OperationModel.part_id.in_(part_ids)
+        ).order_by(OperationModel.id.asc()).all()
+
+    # Get machine names
+    all_machines = db.query(MachineModel).all()
+    machine_map = {m.id: m.make for m in all_machines}
+
+    # Get part type names
+    all_part_types = db.query(PartTypeModel).all()
+    part_type_map = {pt.id: pt.type_name for pt in all_part_types}
+
+    # Build part map for quick lookup
+    part_map = {p.id: p for p in all_parts}
+
+    # Build response - flat list of parts with their operations
+    parts_with_ops = []
+    for part in all_parts:
+        part_ops = [op for op in operations if op.part_id == part.id]
+        if part_ops:  # Only include parts that have operations
+            parts_with_ops.append({
+                "part": {
+                    "id": part.id,
+                    "part_name": part.part_name,
+                    "part_number": part.part_number,
+                    "qty": part.qty or 1,
+                },
+                "operations": [
+                    {
+                        "id": op.id,
+                        "operation_number": op.operation_number,
+                        "operation_name": op.operation_name,
+                        "setup_time": str(op.setup_time) if op.setup_time else "00:00:00",
+                        "cycle_time": str(op.cycle_time) if op.cycle_time else "00:00:00",
+                        "machine_id": op.machine_id,
+                        "machine_name": machine_map.get(op.machine_id),
+                        "part_type_id": op.part_type_id,
+                        "part_type_name": part_type_map.get(op.part_type_id),
+                    }
+                    for op in part_ops
+                ]
+            })
+
+    return {
+        "product": {
+            "id": product.id,
+            "product_name": product.product_name,
+        },
+        "parts": parts_with_ops,
+    }
+
+
+@router.get("/{product_id}/tools-data")
+def get_product_tools_data(product_id: int, db: Session = Depends(get_db)):
+    """
+    Get minimal data for ProductToolsViewer.
+    Only returns: tools linked to operations with part/operation info.
+    Much faster than full hierarchical endpoint.
+    """
+    # Get product
+    product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with id {product_id} not found"
+        )
+
+    # Get all parts for this product
+    all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).all()
+    part_ids = [p.id for p in all_parts]
+    part_map = {p.id: p for p in all_parts}
+
+    # Get all assemblies for assembly name lookup
+    all_assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).all()
+    assembly_map = {a.id: a for a in all_assemblies}
+
+    # Get all operations for these parts
+    operations = []
+    if part_ids:
+        operations = db.query(OperationModel).filter(
+            OperationModel.part_id.in_(part_ids)
+        ).order_by(OperationModel.id.asc()).all()
+
+    operation_ids = [op.id for op in operations]
+    operation_map = {op.id: op for op in operations}
+
+    # Get tools linked to operations
+    tools = []
+    if operation_ids:
+        tools = db.query(ToolWithPartModel).options(
+            joinedload(ToolWithPartModel.tool)
+        ).filter(
+            ToolWithPartModel.operation_id.in_(operation_ids)
+        ).all()
+
+    # Build response - flat list of tools with part/operation info
+    tools_list = []
+    for tool in tools:
+        operation = operation_map.get(tool.operation_id)
+        part = part_map.get(tool.part_id) if tool.part_id else None
+        if not part and operation:
+            part = part_map.get(operation.part_id)
+        
+        assembly_name = None
+        if part and part.assembly_id:
+            assembly = assembly_map.get(part.assembly_id)
+            assembly_name = assembly.assembly_name if assembly else None
+
+        tools_list.append({
+            "id": tool.id,
+            "tool_id": tool.tool_id,
+            "tool_number": tool.tool.identification_code if tool.tool else None,
+            "tool_name": tool.tool.item_description if tool.tool else None,
+            "tool_type": tool.tool.type if tool.tool else None,
+            "tool_range": tool.tool.range if tool.tool else None,
+            "tool_make": tool.tool.make if tool.tool else None,
+            "quantity": tool.tool.quantity if tool.tool else 1,
+            "part_id": part.id if part else None,
+            "part_name": part.part_name if part else None,
+            "part_number": part.part_number if part else None,
+            "assembly_name": assembly_name,
+            "operation_id": tool.operation_id,
+            "operation_name": operation.operation_name if operation else None,
+            "operation_number": operation.operation_number if operation else None,
+            "product_name": product.product_name,
+        })
+
+    return {
+        "product": {
+            "id": product.id,
+            "product_name": product.product_name,
+        },
+        "tools": tools_list,
+    }
 
 
 @router.get("/{product_id}/hierarchical", response_model=ProductHierarchicalData)
 def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)):
     """
-    Get hierarchical product data with nested structure:
+    Get FULL hierarchical product data with nested structure:
     - Product information
     - Assemblies with nested subassemblies and parts
     - Direct parts (parts not assigned to any assembly)
-    - Each part includes its operations, process plans, documents, and tools
+    - Each part includes its operations, documents, and tools
     """
     return fetch_product_hierarchy(db, product_id)
+
+
+@router.get("/{product_id}/hierarchical-lightweight", response_model=ProductHierarchicalLightweight)
+def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(get_db)):
+    """
+    Get lightweight hierarchical product data - optimized for BOM tree display.
+    Only includes: product, assemblies, parts with raw material info.
+    Does NOT include: operations, documents, tools, extracted_data.
+    Use individual endpoints for those details when needed.
+    """
+    # Get product
+    product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with id {product_id} not found"
+        )
+
+    # Get all assemblies for this product
+    all_assemblies = db.query(AssemblyModel).filter(
+        AssemblyModel.product_id == product_id
+    ).order_by(AssemblyModel.id.asc()).all()
+
+    # Get all parts for this product with vendor information
+    all_parts = db.query(PartModel).options(
+        joinedload(PartModel.vendor)
+    ).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
+
+    # Get all raw materials for mapping (name only)
+    all_raw_materials = db.query(RawMaterialModel).all()
+    raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
+    raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
+
+    # Get all part types for mapping
+    all_part_types = db.query(PartTypeModel).all()
+    part_type_map = {pt.id: pt.type_name for pt in all_part_types}
+
+    # User map
+    all_users = db.query(AccessUserModel).all()
+    user_map = {u.id: u.user_name for u in all_users}
+
+    # Pre-build lookup maps for O(1) access
+    parts_by_assembly: dict[int | None, list] = {}
+    for part in all_parts:
+        parts_by_assembly.setdefault(part.assembly_id, []).append(part)
+
+    assemblies_by_parent: dict[int | None, list] = {}
+    assembly_map: dict[int, any] = {}  # For O(1) assembly lookup
+    for asm in all_assemblies:
+        assemblies_by_parent.setdefault(asm.parent_id, []).append(asm)
+        assembly_map[asm.id] = asm
+
+    def create_part_lightweight(part: PartModel) -> dict:
+        """Create lightweight part dict"""
+        if part.raw_material_id is None:
+            raw_material_status = "N/A"
+        else:
+            raw_material_status = raw_material_status_map.get(part.raw_material_id, "Not Available")
+
+        return {
+            'id': part.id,
+            'part_name': part.part_name,
+            'part_number': part.part_number,
+            'type_id': part.type_id,
+            'type_name': part_type_map.get(part.type_id),
+            'assembly_id': part.assembly_id,
+            'product_id': part.product_id,
+            'qty': part.qty,
+            'size': part.size,
+            'raw_material_id': part.raw_material_id,
+            'raw_material_name': raw_material_map.get(part.raw_material_id),
+            'raw_material_status': raw_material_status,
+            'vendor_id': part.vendor_id,
+            'vendor_name': getattr(part.vendor, 'company_name', None) if part.vendor else None,
+            'user_id': part.user_id,
+            'user_name': user_map.get(part.user_id) if part.user_id else None,
+            'created_at': part.created_at,
+            'updated_at': part.updated_at,
+        }
+
+    def build_assembly_lightweight(assembly_id: int) -> dict:
+        """Recursively build lightweight assembly hierarchy"""
+        assembly = assembly_map.get(assembly_id)  # O(1) lookup instead of O(n)
+        if not assembly:
+            return None
+
+        direct_parts = [
+            create_part_lightweight(part)
+            for part in parts_by_assembly.get(assembly_id, [])
+        ]
+
+        child_assemblies = [
+            build_assembly_lightweight(child.id)
+            for child in assemblies_by_parent.get(assembly_id, [])
+        ]
+
+        return {
+            'id': assembly.id,
+            'assembly_name': assembly.assembly_name,
+            'assembly_number': assembly.assembly_number,
+            'product_id': assembly.product_id,
+            'parent_id': assembly.parent_id,
+            'user_id': assembly.user_id,
+            'user_name': user_map.get(assembly.user_id) if assembly.user_id else None,
+            'parts': direct_parts,
+            'child_assemblies': [ca for ca in child_assemblies if ca],
+            'created_at': assembly.created_at,
+            'updated_at': assembly.updated_at,
+        }
+
+    # Build root level assemblies (no parent)
+    root_assemblies = [
+        build_assembly_lightweight(asm.id)
+        for asm in assemblies_by_parent.get(None, [])
+    ]
+
+    # Get direct parts (no assembly)
+    direct_parts = [
+        create_part_lightweight(part)
+        for part in parts_by_assembly.get(None, [])
+    ]
+
+    product_response = Product(
+        id=product.id,
+        product_name=product.product_name,
+        product_version=product.product_version,
+        user_id=product.user_id,
+        user_name=user_map.get(product.user_id) if product.user_id else None,
+        created_at=product.created_at,
+        updated_at=product.updated_at,
+    )
+
+    return ProductHierarchicalLightweight(
+        product=product_response,
+        assemblies=[a for a in root_assemblies if a],
+        parts=direct_parts
+    )

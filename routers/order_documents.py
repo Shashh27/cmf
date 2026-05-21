@@ -28,13 +28,12 @@ def _can_upload_order_document(order, user_id: Optional[int]) -> bool:
     )
 
 
-# CRUD operations
 @router.post("/upload/{order_id}", response_model=OrderDocumentResponse)
 async def upload_order_document(
     order_id: int,
     file: UploadFile = File(...),
     document_type: str = Form(""),
-    document_version: str = Form("1.0"),
+    document_version: str = Form(""),
     parent_id: Optional[int] = Form(None),
     user_id: Optional[int] = Form(None),
     db: Session = Depends(get_db)
@@ -59,6 +58,21 @@ async def upload_order_document(
         parent = db.query(OrderDocument).filter(OrderDocument.id == parent_id).first()
         if not parent:
             raise HTTPException(status_code=404, detail="Parent document not found")
+        
+        # Check for duplicate revision within the same document group
+        existing_version = db.query(OrderDocument).filter(
+            (OrderDocument.id == parent_id) | (OrderDocument.parent_id == parent_id),
+            OrderDocument.document_version == document_version
+        ).first()
+        
+        if existing_version:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Revision {document_version} already exists for this document."
+            )
+
+    if not document_version:
+        raise HTTPException(status_code=400, detail="Revision is required")
 
     # Generate unique object name with timestamp and UUID for descriptive safety
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -169,9 +183,27 @@ async def upload_order_documents_bulk(
             if not effective_type:
                 effective_type = file.content_type or ""
 
-            effective_version = "1.0"
+            effective_version = ""
             if idx < len(document_version) and document_version[idx]:
-                effective_version = str(document_version[idx]).strip() or "1.0"
+                effective_version = str(document_version[idx]).strip()
+            if not effective_version:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Revision is required for document {file.filename}"
+                )
+            
+            # Check for duplicate revision within the same document group
+            if parent_id:
+                existing_version = db.query(OrderDocument).filter(
+                    (OrderDocument.id == parent_id) | (OrderDocument.parent_id == parent_id),
+                    OrderDocument.document_version == effective_version
+                ).first()
+                
+                if existing_version:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Revision {effective_version} already exists for document '{file.filename}'."
+                    )
 
             effective_name = file.filename
             if idx < len(document_name) and document_name[idx]:
@@ -298,7 +330,7 @@ async def replace_order_document_with_metadata(
     document_id: int,
     file: UploadFile = File(...),
     document_type: str = "",
-    document_version: str = "1.0",
+    document_version: str = "",
     db: Session = Depends(get_db)
 ):
     """Replace an existing order document with custom metadata (full control)"""
@@ -306,6 +338,9 @@ async def replace_order_document_with_metadata(
     existing_document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
     if not existing_document:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    if not document_version:
+        raise HTTPException(status_code=400, detail="Revision is required")
     
     try:
         # Get MinIO client
