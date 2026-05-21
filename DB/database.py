@@ -2,7 +2,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Database configuration
+<<<<<<< HEAD
 DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/CMF_Demo"
+=======
+DATABASE_URL = "postgresql://postgres:postgres@172.18.7.86:5432/CMF_Demo"
+>>>>>>> 98bc61dec1cd2d45bcfd0743e71090b0766d8e44
 
 # MinIO configuration
 MINIO_ENDPOINT = "172.18.7.91:9000"

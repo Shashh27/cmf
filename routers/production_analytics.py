@@ -458,6 +458,9 @@ def get_combined_schedule_production(
     start_date: Optional[datetime] = Query(None, description="Filter from this date"),
     end_date: Optional[datetime] = Query(None, description="Filter until this date"),
     machine_id: Optional[int] = Query(None, description="Filter by machine ID"),
+    admin_id: Optional[int] = Query(None),
+    project_coordinator_id: Optional[int] = Query(None),
+    manufacturing_coordinator_id: Optional[int] = Query(None),
     db: Session = Depends(get_db)
 ):
     """
@@ -487,21 +490,28 @@ def get_combined_schedule_production(
 
         # Get planned schedule items using raw SQL since table is in another microservice
         planned_query = """
-            SELECT id, part_id, part_number, sale_order_id, sale_order_number, 
-                   operation_id, machine_id, planned_start_time, planned_end_time,
-                   total_quantity, remaining_quantity, status, created_at,
-                   schedule_history_id
-            FROM scheduling.planned_schedule_items
-            WHERE (:start_date IS NULL OR planned_start_time >= :start_date)
-            AND (:end_date IS NULL OR planned_end_time <= :end_date)
-            AND (:machine_id IS NULL OR machine_id = :machine_id)
-            ORDER BY planned_start_time
+            SELECT psi.id, psi.part_id, psi.part_number, psi.sale_order_id, psi.sale_order_number, 
+                   psi.operation_id, psi.machine_id, psi.planned_start_time, psi.planned_end_time,
+                   psi.total_quantity, psi.remaining_quantity, psi.status, psi.created_at,
+                   psi.schedule_history_id
+            FROM scheduling.planned_schedule_items psi
+            LEFT JOIN oms.orders o ON psi.sale_order_id = o.id
+            WHERE (:start_date IS NULL OR psi.planned_start_time >= :start_date)
+            AND (:end_date IS NULL OR psi.planned_end_time <= :end_date)
+            AND (:machine_id IS NULL OR psi.machine_id = :machine_id)
+            AND (:admin_id IS NULL OR o.admin_id = :admin_id)
+            AND (:project_coordinator_id IS NULL OR o.project_coordinator_id = :project_coordinator_id)
+            AND (:manufacturing_coordinator_id IS NULL OR o.manufacturing_coordinator_id = :manufacturing_coordinator_id)
+            ORDER BY psi.planned_start_time
         """
         
         planned_result = db.execute(text(planned_query), {
             'start_date': start_date,
             'end_date': end_date,
-            'machine_id': machine_id
+            'machine_id': machine_id,
+            'admin_id': admin_id,
+            'project_coordinator_id': project_coordinator_id,
+            'manufacturing_coordinator_id': manufacturing_coordinator_id
         }).fetchall()
 
         # Build planned operations response
@@ -542,6 +552,8 @@ def get_combined_schedule_production(
             FROM scheduling.production_logs pl
             LEFT JOIN oms.operations o ON pl.operation_id = o.id
             LEFT JOIN oms.parts p ON o.part_id = p.id
+            LEFT JOIN oms.products pr ON p.product_id = pr.id
+            LEFT JOIN oms.orders ord ON pr.id = ord.product_id
             LEFT JOIN accesscontrol.access_users u ON pl.operator_id = u.id
             LEFT JOIN (
                 SELECT DISTINCT ON (operation_id) operation_id, sale_order_number 
@@ -550,13 +562,19 @@ def get_combined_schedule_production(
             WHERE (:start_date IS NULL OR (COALESCE(pl.from_date, '1900-01-01'::date) + COALESCE(pl.from_time, '00:00:00'::time) >= :start_date))
             AND (:end_date IS NULL OR (COALESCE(pl.to_date, pl.from_date, '2099-12-31'::date) + COALESCE(pl.to_time, pl.from_time, '23:59:59'::time) <= :end_date))
             AND (:machine_id IS NULL OR o.machine_id = :machine_id)
+            AND (:admin_id IS NULL OR ord.admin_id = :admin_id)
+            AND (:project_coordinator_id IS NULL OR ord.project_coordinator_id = :project_coordinator_id)
+            AND (:manufacturing_coordinator_id IS NULL OR ord.manufacturing_coordinator_id = :manufacturing_coordinator_id)
             ORDER BY pl.from_date DESC, pl.from_time DESC
         """
 
         logs = db.execute(text(logs_query), {
             'start_date': start_date,
             'end_date': end_date,
-            'machine_id': machine_id
+            'machine_id': machine_id,
+            'admin_id': admin_id,
+            'project_coordinator_id': project_coordinator_id,
+            'manufacturing_coordinator_id': manufacturing_coordinator_id
         }).fetchall()
 
         # Build actual production logs response

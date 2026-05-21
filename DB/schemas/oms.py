@@ -734,6 +734,10 @@ class OperationTrackingStatus(BaseModel):
     operator_id: Optional[int] = None
     operator_name: Optional[str] = None
     production_logs: List[dict] = []
+    machine_id: Optional[int] = None
+    machine_make: Optional[str] = None
+    machine_model: Optional[str] = None
+    machine_name: Optional[str] = None
 
     class Config:
         from_attributes = True
