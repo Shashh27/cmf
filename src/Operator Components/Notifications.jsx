@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Typography, Tag, Spin, message, Button, Row, Col } from 'antd';
-import { BellOutlined, CheckOutlined } from '@ant-design/icons';
+import { BellOutlined, CheckOutlined, ReloadOutlined } from '@ant-design/icons';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import dayjs from 'dayjs';
 
@@ -9,6 +9,7 @@ const { Title, Text } = Typography;
 const Notifications = () => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
 
   useEffect(() => {
     fetchNotifications();
@@ -129,6 +130,9 @@ const Notifications = () => {
     if (s === 'pending') return 'processing';
     if (s === 'rework') return 'warning';
     if (s === 'rejected') return 'error';
+    if (s === 'in_progress') return 'blue';
+    if (s === 'completed') return 'green';
+    if (s === 'submitted') return 'cyan';
     return 'default';
   };
 
@@ -157,31 +161,31 @@ const Notifications = () => {
 
   const columns = [
     {
-      title: 'Sl No',
+      title: 'Sl\nNo',
       key: 'slNo',
       align: 'center',
-      width: 70,
+      width: 50,
       render: (text, record, index) => index + 1,
     },
     {
-      title: 'Operation No',
+      title: 'Operation\nNo',
       key: 'operationNumber',
       align: 'center',
-      width: 120,
+      width: 80,
       render: (text, record) => record.operation?.operation_number || 'N/A',
     },
     {
-      title: 'Operation Name',
+      title: 'Operation\nName',
       key: 'operationName',
       align: 'center',
-      width: 140,
+      width: 100,
       render: (text, record) => record.operation?.operation_name || 'N/A',
     },
     {
-      title: 'Project Details',
+      title: 'Project\nDetails',
       key: 'projectDetails',
       align: 'center',
-      width: 140,
+      width: 100,
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{record.operation?.order?.sale_order_number || 'N/A'}</div>
@@ -190,10 +194,10 @@ const Notifications = () => {
       ),
     },
     {
-      title: 'Part Details',
+      title: 'Part\nDetails',
       key: 'partDetails',
       align: 'center',
-      width: 120,
+      width: 80,
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{record.operation?.part?.part_name || 'N/A'}</div>
@@ -205,7 +209,7 @@ const Notifications = () => {
       title: 'Machine',
       key: 'machine',
       align: 'center',
-      width: 140,
+      width: 100,
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{record.machine?.make || 'N/A'}</div>
@@ -214,28 +218,58 @@ const Notifications = () => {
       ),
     },
     {
-      title: 'Produced Qty',
+      title: 'From Date\n& Time',
+      key: 'fromDateTime',
+      align: 'center',
+      width: 100,
+      render: (text, record) => formatDateTime(record.from_date, record.from_time),
+    },
+    {
+      title: 'To Date\n& Time',
+      key: 'toDateTime',
+      align: 'center',
+      width: 100,
+      render: (text, record) => formatDateTime(record.to_date, record.to_time),
+    },
+    {
+      title: 'Produced\nQty',
       dataIndex: 'produced_quantity',
       key: 'producedQuantity',
       align: 'center',
-      width: 120,
-      render: (text) => text || 0,
+      width: 80,
+      render: (text) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+      ),
     },
     {
-      title: 'Approved Qty',
+      title: 'Approved\nQty',
       dataIndex: 'approved_quantity',
       key: 'approvedQuantity',
       align: 'center',
-      width: 140,
-      render: (text) => text || 0,
+      width: 80,
+      render: (text) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+      ),
     },
     {
-      title: 'Rework Qty',
+      title: 'Rework\nQty',
       dataIndex: 'rework_quantity',
       key: 'reworkQuantity',
       align: 'center',
-      width: 120,
-      render: (text) => text || 0,
+      width: 80,
+      render: (text) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+      ),
+    },
+    {
+      title: 'Rejected\nQty',
+      dataIndex: 'rejected_quantity',
+      key: 'rejectedQuantity',
+      align: 'center',
+      width: 80,
+      render: (text) => (
+        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
+      ),
     },
     {
       title: 'Status',
@@ -252,7 +286,7 @@ const Notifications = () => {
       title: 'Supervisor',
       key: 'supervisorName',
       align: 'center',
-      width: 150,
+      width: 100,
       render: (text, record) => record.supervisor?.user_name || 'N/A',
     },
     {
@@ -260,14 +294,15 @@ const Notifications = () => {
       dataIndex: 'remarks',
       key: 'remarks',
       align: 'center',
-      width: 200,
+      width: 120,
       render: (text) => text || '-',
     },
     {
       title: 'Action',
       key: 'action',
       align: 'center',
-      width: 120,
+      width: 50,
+      fixed: 'right',
       render: (text, record) => (
         <Button
           type="primary"
@@ -300,6 +335,16 @@ const Notifications = () => {
               </Text>
             </div>
           </Col>
+          <Col>
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              size="large"
+              onClick={() => window.location.reload()}
+            >
+              Refresh
+            </Button>
+          </Col>
         </Row>
       </Card>
 
@@ -314,15 +359,31 @@ const Notifications = () => {
             dataSource={notifications}
             rowKey="id"
             pagination={{
-              pageSize: 10,
-              pageSizeOptions: ['10', '20', '50', '100'],
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              pageSizeOptions: [10, 20, 50, 100],
               showSizeChanger: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              onChange: (page, pageSize) => {
+                setPagination({ current: page, pageSize });
+              },
+              onShowSizeChange: (current, size) => {
+                setPagination({ current: 1, pageSize: size });
+              },
             }}
             variant="outlined"
-            scroll={{ x: true }}
+            scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
             style={{
               textAlign: 'center',
+            }}
+            components={{
+              header: {
+                cell: (props) => (
+                  <th {...props} style={{ ...props.style, backgroundColor: '#ffffe0', fontWeight: 'bold' }}>
+                    {props.children}
+                  </th>
+                ),
+              },
             }}
           />
         </Spin>
