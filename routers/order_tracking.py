@@ -9,6 +9,7 @@ from DB.models.oms import (
     Part,
     Operation,
 )
+from DB.models.configuration import Machine
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import (
     OperationTrackingStatus,
@@ -114,7 +115,9 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
     # Fetch all operations for all parts
     all_operations = []
     for part in parts:
-        part_operations = db.query(Operation).filter(Operation.part_id == part.id).all()
+        part_operations = db.query(Operation).options(
+            joinedload(Operation.machine)
+        ).filter(Operation.part_id == part.id).all()
         all_operations.extend(part_operations)
     
     # Fetch all production logs for these operations
@@ -125,7 +128,8 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
         # Get production logs using raw SQL
         logs_query = text("""
             SELECT id, operation_id, operator_id, from_date, from_time, to_date, to_time, 
-                   status, produced_quantity, approved_quantity, operator_status, created_at
+                   status, produced_quantity, approved_quantity, rework_quantity, rejected_quantity,
+                   operator_status, created_at, notes, remarks
             FROM scheduling.production_logs
             WHERE operation_id IN :op_ids
         """)
@@ -137,16 +141,11 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
             if op_id not in production_logs_map:
                 production_logs_map[op_id] = []
             
-            # Calculate rework_quantity for the log
-            rework_qty = 0
-            if log.produced_quantity and log.approved_quantity:
-                rework_qty = log.produced_quantity - log.approved_quantity
-            elif log.produced_quantity and not log.approved_quantity:
-                rework_qty = log.produced_quantity
-            
             # Use a dictionary-like access since it's a Row
             log_dict = dict(log._mapping)
-            log_dict['rework_quantity'] = rework_qty
+            # Ensure rework_quantity and rejected_quantity have default values
+            log_dict['rework_quantity'] = log.rework_quantity if hasattr(log, 'rework_quantity') else 0
+            log_dict['rejected_quantity'] = log.rejected_quantity if hasattr(log, 'rejected_quantity') else 0
             production_logs_map[op_id].append(log_dict)
             
             # Track operation status based on production logs
@@ -237,7 +236,11 @@ def get_order_tracking(order_id: int, db: Session = Depends(get_db)):
                 completed_at=status_info["last_completed"] if status == "Completed" else None,
                 operator_id=status_info["operator_id"],
                 operator_name=operator_map.get(status_info["operator_id"]),
-                production_logs=logs
+                production_logs=logs,
+                machine_id=op.machine_id,
+                machine_make=op.machine.make if op.machine else None,
+                machine_model=op.machine.model if op.machine else None,
+                machine_name=f"{op.machine.make} {op.machine.model}" if op.machine and op.machine.make and op.machine.model else None
             ))
         
         # Calculate part status
@@ -318,7 +321,9 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
     # Fetch all operations for all parts
     all_operations = []
     for part in parts:
-        part_operations = db.query(Operation).filter(Operation.part_id == part.id).all()
+        part_operations = db.query(Operation).options(
+            joinedload(Operation.machine)
+        ).filter(Operation.part_id == part.id).all()
         all_operations.extend(part_operations)
     
     # Get operation status logic
@@ -335,7 +340,8 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
         # Get production logs using raw SQL
         logs_query = text("""
             SELECT id, operation_id, operator_id, from_date, from_time, to_date, to_time, 
-                   status, produced_quantity, approved_quantity, operator_status, created_at
+                   status, produced_quantity, approved_quantity, rework_quantity, rejected_quantity,
+                   operator_status, created_at, notes, remarks
             FROM scheduling.production_logs
             WHERE operation_id IN :op_ids
         """)
@@ -346,6 +352,9 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
                 production_logs_map[op_id] = []
             
             log_dict = dict(log._mapping)
+            # Ensure rework_quantity and rejected_quantity have default values
+            log_dict['rework_quantity'] = log.rework_quantity if hasattr(log, 'rework_quantity') else 0
+            log_dict['rejected_quantity'] = log.rejected_quantity if hasattr(log, 'rejected_quantity') else 0
             production_logs_map[op_id].append(log_dict)
             
             if op_id not in operation_final_status_map:
@@ -411,7 +420,11 @@ def get_order_tracking_summary(order_id: int, db: Session = Depends(get_db)):
                 started_at=status_info["first_started"],
                 completed_at=status_info["last_completed"] if status == "Completed" else None,
                 operator_id=status_info["operator_id"],
-                operator_name=None
+                operator_name=None,
+                machine_id=op.machine_id,
+                machine_make=op.machine.make if op.machine else None,
+                machine_model=op.machine.model if op.machine else None,
+                machine_name=f"{op.machine.make} {op.machine.model}" if op.machine and op.machine.make and op.machine.model else None
             ))
         
         part_status = calculate_part_status(operation_tracking_list)
@@ -500,7 +513,9 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
         )
     
     # Fetch operations for the part
-    operations = db.query(Operation).filter(Operation.part_id == part.id).all()
+    operations = db.query(Operation).options(
+        joinedload(Operation.machine)
+    ).filter(Operation.part_id == part.id).all()
     
     # Get operation status logic
     operation_ids = [op.id for op in operations]
@@ -512,7 +527,8 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
         # Get production logs using raw SQL
         logs_query = text("""
             SELECT id, operation_id, operator_id, from_date, from_time, to_date, to_time, 
-                   status, produced_quantity, approved_quantity, operator_status, created_at
+                   status, produced_quantity, approved_quantity, rework_quantity, rejected_quantity,
+                   operator_status, created_at, notes, remarks
             FROM scheduling.production_logs
             WHERE operation_id IN :op_ids
         """)
@@ -522,15 +538,10 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
             if op_id not in production_logs_map:
                 production_logs_map[op_id] = []
             
-            # Calculate rework_quantity for the log
-            rework_qty = 0
-            if log.produced_quantity and log.approved_quantity:
-                rework_qty = log.produced_quantity - log.approved_quantity
-            elif log.produced_quantity and not log.approved_quantity:
-                rework_qty = log.produced_quantity
-            
             log_dict = dict(log._mapping)
-            log_dict['rework_quantity'] = rework_qty
+            # Ensure rework_quantity and rejected_quantity have default values
+            log_dict['rework_quantity'] = log.rework_quantity if hasattr(log, 'rework_quantity') else 0
+            log_dict['rejected_quantity'] = log.rejected_quantity if hasattr(log, 'rejected_quantity') else 0
             production_logs_map[op_id].append(log_dict)
             
             if op_id not in operation_final_status_map:
@@ -606,7 +617,11 @@ def get_part_tracking(part_id: int, db: Session = Depends(get_db)):
             completed_at=status_info["last_completed"] if status == "Completed" else None,
             operator_id=status_info["operator_id"],
             operator_name=operator_map.get(status_info["operator_id"]),
-            production_logs=logs
+            production_logs=logs,
+            machine_id=op.machine_id,
+            machine_make=op.machine.make if op.machine else None,
+            machine_model=op.machine.model if op.machine else None,
+            machine_name=f"{op.machine.make} {op.machine.model}" if op.machine and op.machine.make and op.machine.model else None
         ))
     
     # Calculate part metrics
