@@ -235,6 +235,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           user_id: editingOrder.user_id?.toString() ?? "",
           admin_id: editingOrder.admin_id?.toString() ?? undefined,
           manufacturing_coordinator_id: editingOrder.manufacturing_coordinator_id?.toString() ?? undefined,
+          user_name_display: getCurrentUsername() || "",
         });
       } else {
         form.resetFields();
