@@ -232,6 +232,18 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
             detail=f"Part with id {part_id} not found"
         )
 
+    # Check if part is scheduled (status is "active")
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": part_id}
+    ).fetchone()
+    
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, this part cannot be modified because it is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+        )
+
     update_data = part.model_dump(exclude_unset=True)
     
     # Check if we're switching from outsource to in-house
@@ -331,7 +343,7 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
 
 @router.delete("/{part_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_part(part_id: int, db: Session = Depends(get_db)):
-    """Delete a part and all its related data (priorities, pokayoke logs, operations, documents, etc.)."""
+    """Delete a part and all its references across all schemas with raw material stock restoration."""
     db_part = db.query(PartModel).filter(PartModel.id == part_id).first()
     if not db_part:
         raise HTTPException(
@@ -359,22 +371,46 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
                 db.delete(log_obj)
         db.flush()
 
-        # Delete from scheduling.part_schedule_status to avoid FK violation
+        # 2. Delete from scheduling.part_schedule_status
         db.execute(
             text("DELETE FROM scheduling.part_schedule_status WHERE part_id = :pid"),
             {"pid": part_id}
         )
 
-        # 2. Delete order part priorities
+        # 3. Delete order part priorities
         db.query(OrderPartPriority).filter(OrderPartPriority.part_id == part_id).delete(
             synchronize_session=False
         )
 
-        # 3. Delete operations and their documents/tools
+        # 4. Delete operations and their documents/tools
         operations = db.query(OperationModel).filter(OperationModel.part_id == part_id).all()
         operation_ids = [op.id for op in operations]
         if operation_ids:
-            # Delete from scheduling.planned_schedule_items to avoid FK violation
+            # Delete from production_monitoring.machine_live_history
+            db.execute(
+                text("DELETE FROM production_monitoring.machine_live_history WHERE current_operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
+            # Delete from production_monitoring.machine_live_status
+            db.execute(
+                text("DELETE FROM production_monitoring.machine_live_status WHERE current_operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
+            # Delete from scheduling.production_logs
+            db.execute(
+                text("DELETE FROM scheduling.production_logs WHERE operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
+            # Delete from scheduling.rescheduling_items (by operation_id)
+            db.execute(
+                text("DELETE FROM scheduling.rescheduling_items WHERE operation_id IN :op_ids"),
+                {"op_ids": tuple(operation_ids)}
+            )
+
+            # Delete from scheduling.planned_schedule_items
             db.execute(
                 text("DELETE FROM scheduling.planned_schedule_items WHERE operation_id IN :op_ids"),
                 {"op_ids": tuple(operation_ids)}
@@ -392,15 +428,7 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
                 synchronize_session=False
             )
 
-        # 4. Delete part documents and their extracted data
-        # First delete any extracted data associated with this part
-        db.query(DocumentExtractedDataModel).filter(
-            DocumentExtractedDataModel.part_id == part_id
-        ).delete(synchronize_session=False)
-
-        # Now delete the documents associated with this part
-        # 4. Delete part documents and their extracted data
-        # First delete any extracted data associated with this part
+        # 5. Delete part documents and their extracted data
         db.query(DocumentExtractedDataModel).filter(
             DocumentExtractedDataModel.part_id == part_id
         ).delete(synchronize_session=False)
@@ -409,53 +437,103 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             synchronize_session=False
         )
 
-        # 5. Delete out source part status records
+        # 6. Delete out source part status records
         db.query(OutSourcePartStatusModel).filter(
             OutSourcePartStatusModel.part_id == part_id
         ).delete(synchronize_session=False)
 
-        # 6. Delete component_issues records that reference this part
+        # 7. Delete from maintenance.component_issues
         db.execute(
             text("DELETE FROM maintenance.component_issues WHERE part_id = :pid"),
             {"pid": part_id}
         )
 
-        # 8. Delete tools with part (that are not associated with operations)
+        # 8. Delete from maintenance.help_support
+        db.execute(
+            text("DELETE FROM maintenance.help_support WHERE part_id = :pid"),
+            {"pid": part_id}
+        )
+
+        # 9. Delete tools with part (that are not associated with operations)
         db.query(ToolWithPartModel).filter(ToolWithPartModel.part_id == part_id).delete(
             synchronize_session=False
         )
 
-        # 9. Delete inventory requests for this part
-        # First delete return requests that reference these inventory requests
+        # 10. Delete inventory requests and return requests
         db.execute(
             text("DELETE FROM inventory.inventory_return_requests WHERE requested_id IN (SELECT id FROM inventory.inventory_requests WHERE part_id = :pid)"),
             {"pid": part_id}
         )
-        
-        # Then delete the inventory requests
         db.execute(
             text("DELETE FROM inventory.inventory_requests WHERE part_id = :pid"),
             {"pid": part_id}
         )
 
-        # 9. Delete inventory requests for this part
-        # First delete return requests that reference these inventory requests
+        # 11. Delete from inventory.raw_material_usage
         db.execute(
-            text("DELETE FROM inventory.inventory_return_requests WHERE requested_id IN (SELECT id FROM inventory.inventory_requests WHERE part_id = :pid)"),
-            {"pid": part_id}
-        )
-        
-        # Then delete the inventory requests
-        db.execute(
-            text("DELETE FROM inventory.inventory_requests WHERE part_id = :pid"),
+            text("DELETE FROM inventory.raw_material_usage WHERE part_id = :pid"),
             {"pid": part_id}
         )
 
-        # 10. Deallocate raw material if this part has any allocated
+        # 12. Delete from notifications.inspection_notifications (by part_number)
+        if db_part.part_number:
+            db.execute(
+                text("DELETE FROM notifications.inspection_notifications WHERE part_number = :pnum"),
+                {"pnum": db_part.part_number}
+            )
+
+        # 13. Delete from quality.inspection_plan_status (by part_number)
+        if db_part.part_number:
+            db.execute(
+                text("DELETE FROM quality.inspection_plan_status WHERE part_number = :pnum"),
+                {"pnum": db_part.part_number}
+            )
+
+        # 14. Delete from quality.master_boc (part_id is character varying)
+        db.execute(
+            text("DELETE FROM quality.master_boc WHERE part_id = :pid"),
+            {"pid": str(part_id)}
+        )
+
+        # 15. Delete from quality.notes
+        db.execute(
+            text("DELETE FROM quality.notes WHERE part_id = :pid"),
+            {"pid": part_id}
+        )
+
+        # 16. Delete from quality.stage_inspection
+        db.execute(
+            text("DELETE FROM quality.stage_inspection WHERE part_id = :pid"),
+            {"pid": part_id}
+        )
+
+        # 17. Delete from scheduling.machine_schedule
+        db.execute(
+            text("DELETE FROM scheduling.machine_schedule WHERE part_id = :pid"),
+            {"pid": part_id}
+        )
+
+        # 18. Delete from scheduling.operation_status
+        db.execute(
+            text("DELETE FROM scheduling.operation_status WHERE part_id = :pid"),
+            {"pid": part_id}
+        )
+
+        # 19. Delete from scheduling.rescheduling_items (by part_id and part_number)
+        db.execute(
+            text("DELETE FROM scheduling.rescheduling_items WHERE part_id = :pid"),
+            {"pid": part_id}
+        )
+        if db_part.part_number:
+            db.execute(
+                text("DELETE FROM scheduling.rescheduling_items WHERE part_number = :pnum"),
+                {"pnum": db_part.part_number}
+            )
+
+        # 20. Deallocate raw material if this part has any allocated (RESTORE STOCK)
         stock_id_to_update = None
         if db_part.raw_material_unit_id:
             try:
-                # Use the unlink endpoint logic to restore unit
                 unit = db.query(RawMaterialUnit).filter(RawMaterialUnit.id == db_part.raw_material_unit_id).first()
                 if unit:
                     stock_id_to_update = unit.stock_id
@@ -464,11 +542,16 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
                         RawMaterialUsageModel.part_id == part_id
                     ).first()
                     if usage:
+                        # RESTORE: Add back the used length to unit's remaining length
                         unit.remaining_length += usage.used_length
+                        
+                        # Update unit status based on restored length
                         if unit.remaining_length == unit.total_length:
                             unit.status = "available"
                         elif unit.remaining_length > 0:
                             unit.status = "partially_used"
+                        
+                        # Delete the usage record
                         db.delete(usage)
             except Exception as e:
                 # Log error but don't fail the deletion
@@ -478,7 +561,7 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
         db.delete(db_part)
         db.commit()
         
-        # 🔥 Update stock status based on unit statuses after part deletion
+        # Update stock status based on unit statuses after part deletion
         if stock_id_to_update:
             StockAutoUpdateService.update_stock_status_from_units(db, stock_id_to_update)
     except Exception as e:

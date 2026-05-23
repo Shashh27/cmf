@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import text
 from typing import List
 from sqlalchemy.exc import IntegrityError
 
@@ -650,6 +651,41 @@ def delete_raw_material(raw_material_id: int, db: Session = Depends(get_db)):
             detail=f"Raw material with id {raw_material_id} not found"
         )
     
+    # Check if any parts linked to this material's stocks have active schedule status
+    stock_items = db.query(RawMaterialStockModel).filter(
+        RawMaterialStockModel.material_id == raw_material_id
+    ).all()
+    
+    stock_ids = [s.id for s in stock_items]
+    
+    if stock_ids:
+        units = db.query(RawMaterialUnitModel).filter(
+            RawMaterialUnitModel.stock_id.in_(stock_ids)
+        ).all()
+        unit_ids = [u.id for u in units]
+        
+        if unit_ids:
+            referencing_parts = db.query(PartModel).filter(PartModel.raw_material_unit_id.in_(unit_ids)).all()
+            part_ids = [p.id for p in referencing_parts]
+            
+            if part_ids:
+                active_parts = db.execute(
+                    text("""
+                        SELECT p.id, p.part_name 
+                        FROM oms.parts p
+                        JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+                        WHERE p.id IN :part_ids AND pss.status = 'active'
+                    """),
+                    {"part_ids": tuple(part_ids)}
+                ).fetchall()
+                
+                if active_parts:
+                    part_names = [row[1] for row in active_parts]
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Sorry, this raw material cannot be deleted because the following parts are currently scheduled for production: {', '.join(part_names)}. To delete this material, please inactivate the schedule status of these parts first."
+                    )
+    
     try:
         # Step 1: Find all stock items for this material
         stock_items = db.query(RawMaterialStockModel).filter(
@@ -1026,6 +1062,32 @@ def delete_raw_material_stock(stock_id: int, db: Session = Depends(get_db)):
             detail=f"Stock item with id {stock_id} not found"
         )
     
+    # Check if any parts linked to this stock have active schedule status
+    units = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).all()
+    unit_ids = [u.id for u in units]
+    
+    if unit_ids:
+        referencing_parts = db.query(PartModel).filter(PartModel.raw_material_unit_id.in_(unit_ids)).all()
+        part_ids = [p.id for p in referencing_parts]
+        
+        if part_ids:
+            active_parts = db.execute(
+                text("""
+                    SELECT p.id, p.part_name 
+                    FROM oms.parts p
+                    JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+                    WHERE p.id IN :part_ids AND pss.status = 'active'
+                """),
+                {"part_ids": tuple(part_ids)}
+            ).fetchall()
+            
+            if active_parts:
+                part_names = [row[1] for row in active_parts]
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Sorry, this stock cannot be deleted because the following parts are currently scheduled for production: {', '.join(part_names)}. To delete this stock, please inactivate the schedule status of these parts first."
+                )
+    
     try:
         # Get all units for this stock
         units = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).all()
@@ -1044,6 +1106,9 @@ def delete_raw_material_stock(stock_id: int, db: Session = Depends(get_db)):
                 part.raw_material_unit_id = None
                 part.raw_material_id = None
                 part.required_length = None
+            
+            # Flush to ensure part references are cleared before deleting units
+            db.flush()
         
         # Delete all usage records for these units
         if unit_ids:
@@ -1401,20 +1466,32 @@ def assign_material_to_part(
 ):
     """Assign material unit to a part and track usage"""
     
+    # Get part first to check schedule status
+    part = db.query(PartModel).filter(PartModel.id == part_id).first()
+    if not part:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Part with id {part_id} not found"
+        )
+    
+    # Check if part is scheduled (status is "active")
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": part_id}
+    ).fetchone()
+    
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, this part's raw material cannot be changed because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+        )
+    
     # Get unit
     unit = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.id == unit_id).first()
     if not unit:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Unit with id {unit_id} not found"
-        )
-    
-    # Get part
-    part = db.query(PartModel).filter(PartModel.id == part_id).first()
-    if not part:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Part with id {part_id} not found"
         )
     
     # Check if part already has a different unit assigned
@@ -1558,6 +1635,18 @@ def unlink_material_from_part(part_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {part_id} not found"
+        )
+    
+    # Check if part is scheduled (status is "active")
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": part_id}
+    ).fetchone()
+    
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, this part's raw material cannot be changed because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
         )
     
     if not part.raw_material_unit_id:

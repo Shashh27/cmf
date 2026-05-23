@@ -70,6 +70,9 @@ from routers import (
     production_analytics_router,
 )
 
+# Import recycle bin router
+from recyclebin_router.recyclebin import router as recycle_bin_router
+
 # Import scheduling router
 
 # from scheduling_routers.production_logs import router as production_logs_router
@@ -290,7 +293,10 @@ app.include_router(maintenance_router, prefix="/api/v1")
 app.include_router(order_tracking_router, prefix="/api/v1")
 
 app.include_router(monitoring_router, prefix="/api/v1")
+
 app.include_router(production_analytics_router, prefix="/api/v1")
+
+app.include_router(recycle_bin_router, prefix="/api/v1")
 
 # app.include_router(production_logs_router, prefix="/api/v1")
 

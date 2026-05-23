@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import text
 from typing import List, Optional
 from urllib.parse import urlparse
 from datetime import time
@@ -191,6 +192,20 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
     part_type_id = data.get("part_type_id") or 1
     data["part_type_id"] = part_type_id
 
+    # Check if part is scheduled (status is "active")
+    part_id = data.get("part_id")
+    if part_id:
+        schedule_status = db.execute(
+            text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": part_id}
+        ).fetchone()
+        
+        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sorry, this operation cannot be added/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+            )
+
     # Validate required times only for non Out-Source operations
     setup_time_val = data.get("setup_time")
     cycle_time_val = data.get("cycle_time")
@@ -208,7 +223,6 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
             )
 
     # Ensure part_id is present
-    part_id = data.get("part_id")
     if not part_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -285,6 +299,18 @@ def create_operations_bulk(operations: List[OperationCreate], db: Session = Depe
             detail="bulk create requires exactly one part_id across all operations",
         )
     part_id = next(iter(part_ids))
+
+    # Check if part is scheduled (status is "active")
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": part_id}
+    ).fetchone()
+    
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Part is currently scheduled for production. Operations cannot be added, modified, or deleted while the part is in active production schedule."
+        )
 
     existing_ops = db.query(OperationModel).filter(OperationModel.part_id == part_id).all()
     max_num = 0
@@ -521,6 +547,19 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
             detail=f"Operation with id {operation_id} not found"
         )
 
+    # Check if part is scheduled (status is "active")
+    if db_operation.part_id:
+        schedule_status = db.execute(
+            text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": db_operation.part_id}
+        ).fetchone()
+        
+        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sorry, this operation cannot be added/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+            )
+
     update_data = operation.model_dump(exclude_unset=True)
 
     if "operation_number" in update_data:
@@ -624,6 +663,7 @@ def swap_operation_numbers(op1_id: int, op2_id: int, db: Session = Depends(get_d
 
 @router.delete("/{operation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_operation(operation_id: int, db: Session = Depends(get_db)):
+    """Delete an operation and all its references across all schemas"""
     db_operation = db.query(OperationModel).filter(OperationModel.id == operation_id).first()
     if not db_operation:
         raise HTTPException(
@@ -631,35 +671,119 @@ def delete_operation(operation_id: int, db: Session = Depends(get_db)):
             detail=f"Operation with id {operation_id} not found"
         )
 
-    documents = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id).all()
-    minio_client = get_minio_client()
+    # Check if part is scheduled (status is "active")
+    if db_operation.part_id:
+        schedule_status = db.execute(
+            text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": db_operation.part_id}
+        ).fetchone()
+        
+        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sorry, this operation cannot be added/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+            )
 
-    for doc in documents:
-        try:
-            if doc.document_url:
-                parsed_url = urlparse(doc.document_url)
-                path_parts = parsed_url.path.lstrip('/').split('/', 1)
-                if len(path_parts) >= 2:
-                    bucket_name = path_parts[0]
-                    object_name = path_parts[1]
-                    minio_client.client.remove_object(bucket_name, object_name)
-                elif not parsed_url.netloc and '/' in doc.document_url:
-                    path_parts = doc.document_url.lstrip('/').split('/', 1)
+    try:
+        # 1. Delete operation documents from MinIO and database
+        documents = db.query(OperationDocumentModel).filter(OperationDocumentModel.operation_id == operation_id).all()
+        minio_client = get_minio_client()
+
+        for doc in documents:
+            try:
+                if doc.document_url:
+                    parsed_url = urlparse(doc.document_url)
+                    path_parts = parsed_url.path.lstrip('/').split('/', 1)
                     if len(path_parts) >= 2:
                         bucket_name = path_parts[0]
                         object_name = path_parts[1]
                         minio_client.client.remove_object(bucket_name, object_name)
-        except Exception as e:
-            print(f"Error deleting file from MinIO for document {doc.id}: {str(e)}")
-        db.delete(doc)
+                    elif not parsed_url.netloc and '/' in doc.document_url:
+                        path_parts = doc.document_url.lstrip('/').split('/', 1)
+                        if len(path_parts) >= 2:
+                            bucket_name = path_parts[0]
+                            object_name = path_parts[1]
+                            minio_client.client.remove_object(bucket_name, object_name)
+            except Exception as e:
+                print(f"Error deleting file from MinIO for document {doc.id}: {str(e)}")
+            db.delete(doc)
 
-    tools = db.query(ToolWithPartModel).filter(ToolWithPartModel.operation_id == operation_id).all()
-    for tool in tools:
-        db.delete(tool)
+        # 2. Delete tools with part references
+        tools = db.query(ToolWithPartModel).filter(ToolWithPartModel.operation_id == operation_id).all()
+        for tool in tools:
+            db.delete(tool)
 
-    db.delete(db_operation)
-    db.commit()
-    return None
+        # 3. Delete from oms.process_plans
+        db.execute(
+            text("DELETE FROM oms.process_plans WHERE operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 4. Delete from oms.order_schedule_status
+        db.execute(
+            text("DELETE FROM oms.order_schedule_status WHERE operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 5. Delete from notifications.inspection_notifications
+        db.execute(
+            text("DELETE FROM notifications.inspection_notifications WHERE operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 6. Delete from production_monitoring.machine_live_history
+        db.execute(
+            text("DELETE FROM production_monitoring.machine_live_history WHERE current_operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 7. Delete from production_monitoring.machine_live_status
+        db.execute(
+            text("DELETE FROM production_monitoring.machine_live_status WHERE current_operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 8. Delete from scheduling.production_logs
+        db.execute(
+            text("DELETE FROM scheduling.production_logs WHERE operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 9. Delete from scheduling.machine_schedule
+        db.execute(
+            text("DELETE FROM scheduling.machine_schedule WHERE operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 10. Delete from scheduling.operation_status
+        db.execute(
+            text("DELETE FROM scheduling.operation_status WHERE operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 11. Delete from scheduling.planned_schedule_items
+        db.execute(
+            text("DELETE FROM scheduling.planned_schedule_items WHERE operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # 12. Delete from scheduling.rescheduling_items
+        db.execute(
+            text("DELETE FROM scheduling.rescheduling_items WHERE operation_id = :op_id"),
+            {"op_id": operation_id}
+        )
+
+        # Finally, delete the operation itself
+        db.delete(db_operation)
+        db.commit()
+        return None
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting operation: {str(e)}"
+        )
 
 
 @router.post("/parse-mpp", response_model=List[OperationPreview])

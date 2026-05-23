@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List
 from pydantic import BaseModel
 
@@ -30,6 +31,18 @@ class BulkToolLinkItem(BaseModel):
 @router.post("/", response_model=ToolWithPart, status_code=status.HTTP_201_CREATED)
 def create_tool_with_part(tool: ToolWithPartCreate, db: Session = Depends(get_db)):
     """Create a new tool-part association"""
+    # Check if part is scheduled (status is "active")
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": tool.part_id}
+    ).fetchone()
+    
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, this tool cannot be added because the part is currently scheduled for production. To add tools, please inactivate the part's schedule status first."
+        )
+    
     db_tool = ToolWithPartModel(**tool.model_dump())
     db.add(db_tool)
     db.commit()
@@ -40,6 +53,18 @@ def create_tool_with_part(tool: ToolWithPartCreate, db: Session = Depends(get_db
 @router.post("/bulk", response_model=List[ToolWithPart], status_code=status.HTTP_201_CREATED)
 def create_tools_with_part_bulk(payload: BulkToolLinkRequest, db: Session = Depends(get_db)):
     """Create many tool-part associations in one request."""
+    # Check if part is scheduled (status is "active")
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": payload.part_id}
+    ).fetchone()
+    
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, tools cannot be added because the part is currently scheduled for production. To add tools, please inactivate the part's schedule status first."
+        )
+    
     tool_ids = payload.tool_ids or []
     if not tool_ids:
         return []
@@ -70,6 +95,25 @@ def create_tools_with_part_bulk_links(payload: List[BulkToolLinkItem], db: Sessi
     """Create many tool-part associations across multiple operations in one request."""
     if not payload:
         return []
+
+    # Check if any parts are scheduled (status is "active")
+    part_ids = list(set(item.part_id for item in payload))
+    active_parts = db.execute(
+        text("""
+            SELECT p.id, p.part_name 
+            FROM oms.parts p
+            JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+            WHERE p.id IN :part_ids AND pss.status = 'active'
+        """),
+        {"part_ids": tuple(part_ids)}
+    ).fetchall()
+    
+    if active_parts:
+        part_names = [row[1] for row in active_parts]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Sorry, tools cannot be added because the following parts are currently scheduled for production: {', '.join(part_names)}. To add tools, please inactivate the schedule status of these parts first."
+        )
 
     created: List[ToolWithPartModel] = []
     try:
@@ -158,6 +202,18 @@ def delete_tool_with_part(tool_with_part_id: int, db: Session = Depends(get_db))
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Tool-part association with id {tool_with_part_id} not found"
+        )
+    
+    # Check if part is scheduled (status is "active")
+    schedule_status = db.execute(
+        text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+        {"pid": db_tool.part_id}
+    ).fetchone()
+    
+    if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, this tool cannot be deleted because the part is currently scheduled for production. To delete tools, please inactivate the part's schedule status first."
         )
 
     db.delete(db_tool)
