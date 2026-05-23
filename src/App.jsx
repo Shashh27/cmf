@@ -25,6 +25,8 @@ import ShopFloorDashboard from "./Pages/ShopFloorDashboard";
 import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
 import ProjectCoordinatorProductView from "./ProjectCoordinator Components/ProjectCoordinatorProductView";
 import OrderTrackingSidebar from "./ProjectCoordinator Components/OrderTrackingSidebar";
+import Recyclebin from "./ProjectCoordinator Components/Recyclebin";
+import AdminRecyclebin from "./Pages/Recyclebin";
 import PPS from "./Pages/PPS";
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
 
@@ -162,8 +164,6 @@ function App() {
 
           <Route path="/admin/access_control" element={<AccessControl />} />
 
-
-
           {/* Project Coordinator Routes */}
 
           <Route path="/project_coordinator" element={<Navigate to="/project_coordinator/oms/orders" replace />} />
@@ -183,6 +183,8 @@ function App() {
           <Route path="/project_coordinator/product-monitoring/*" element={<ProjectCoordinatorProductView />} />
 
           <Route path="/project_coordinator/order-tracking" element={<OrderTrackingSidebar />} />
+
+          <Route path="/project_coordinator/recycle-bin" element={<Recyclebin />} />
 
          
 
@@ -249,8 +251,6 @@ function App() {
           <Route path="/manufacturing_coordinator/access_control" element={<ManufacturingCoordinator />} />
 
           <Route path="/manufacturing_coordinator/configuration" element={<Configuration />} />
-
-          
 
           {/* Supervisor */}
 

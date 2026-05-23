@@ -8,6 +8,7 @@ import ProductSummary from "./PDM Components/ProductSummary";
 import DocumentsPanel from "./PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
 import ProcessPlanning from "../PPS Components/ProcessPlanning";
+import Recyclebin from "./Recyclebin";
 
 const { Sider, Content } = Layout;
 
@@ -72,6 +73,7 @@ const PDM = () => {
               items={[
                 { key: "pdm", label: "PDM" },
                 { key: "pps", label: "PPS" },
+                { key: "recycle-bin", label: "Recycle Bin" },
               ]}
             />
             <Button size="small" onClick={() => navigate("/manufacturing_coordinator/oms/orders")}>
@@ -94,19 +96,19 @@ const PDM = () => {
 
         {/* Desktop: Fixed Sidebar - scrolls independently */}
         {!isMobile && (
-          <Sider 
-            width="33%" 
-            theme="light" 
-            style={{ 
-              borderRight: "1px solid #f0f0f0", 
+          <Sider
+            width="33%"
+            theme="light"
+            style={{
+              borderRight: "1px solid #f0f0f0",
               overflow: 'auto',
               minWidth: 300,
               maxWidth: 500,
               height: '100%'
             }}
           >
-            <BillOfMaterials 
-              onItemSelected={handleItemSelected} 
+            <BillOfMaterials
+              onItemSelected={handleItemSelected}
               onHierarchyLoaded={handleHierarchyLoaded}
               disableProductCreate={fromOms}
               initialProductId={fromOms ? initialProductId : null}
@@ -123,40 +125,40 @@ const PDM = () => {
             style={{ width: '85%' }}
             styles={{ body: { padding: 0 } }}
           >
-            <BillOfMaterials 
-              onItemSelected={handleItemSelected} 
+            <BillOfMaterials
+              onItemSelected={handleItemSelected}
               onHierarchyLoaded={handleHierarchyLoaded}
               disableProductCreate={fromOms}
               initialProductId={fromOms ? initialProductId : null}
             />
           </Drawer>
         )}
-        
+
         {/* Right: Product summary for product; otherwise details + documents */}
-        <Content 
-          style={{ 
-            display: "flex", 
-            flexDirection: "column", 
-            overflow: "hidden", 
-            backgroundColor: "#f8fafc", 
+        <Content
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            backgroundColor: "#f8fafc",
             height: "100%",
             marginLeft: isMobile ? 0 : undefined
           }}
         >
           {isProductSelected ? (
             <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-              <ProductSummary 
-                productId={selectedItem?.id} 
+              <ProductSummary
+                productId={selectedItem?.id}
               />
             </div>
           ) : (
             <>
               {/* Top panel: ProductDetails now includes DocumentsPanel */}
               {selectedItem?.itemType === 'part' && (
-                <div 
-                  style={{ 
-                    flex: 1, 
-                    minHeight: 0, 
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
                     overflow: "hidden",
                     height: "100%"
                   }}
@@ -173,11 +175,15 @@ const PDM = () => {
           )}
         </Content>
       </Layout>
-      ) : (
+      ) : activeTopTab === "pps" ? (
         <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#f5f5f5" }}>
           <ProcessPlanning initialOrderId={initialOrderId} />
         </div>
-      )}
+      ) : activeTopTab === "recycle-bin" ? (
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+          <Recyclebin orderId={initialOrderId} />
+        </div>
+      ) : null}
       </div>
     </>
   );

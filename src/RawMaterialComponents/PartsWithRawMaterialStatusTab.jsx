@@ -237,7 +237,11 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
           await axios.delete(`${API_BASE_URL}/rawmaterials/parts/${partId}/unlink-material`);
         } catch (error) {
           console.error(`Error unlinking part ${partId}:`, error);
-          message.error(`Error unlinking part ${partId}`);
+          const detail =
+            error?.response?.data?.detail ||
+            error?.response?.data?.message ||
+            `Error unlinking part ${partId}`;
+          message.error(detail);
           return;
         }
       }

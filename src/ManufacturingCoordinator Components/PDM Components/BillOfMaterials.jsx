@@ -327,7 +327,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const handleDelete = async (item, type) => {
-    const endpoints = { product: `/products/${item.id}`, assembly: `/assemblies/${item.id}`, part: `/parts/${item.id}` };
+    const endpoints = { product: `/products/${item.id}`, assembly: `/assemblies/${item.id}/soft-delete`, part: `/parts/${item.id}/soft-delete` };
     const names = { product: item.product_name, assembly: item.assembly_name, part: item.part_name };
     
     modal.confirm({
@@ -338,7 +338,16 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       cancelText: 'No',
       onOk: async () => {
         try {
-          await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
+          if (type === 'part') {
+            // Use soft delete for parts (move to recycle bin)
+            await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/soft-delete`);
+          } else if (type === 'assembly') {
+            // Use soft delete for assemblies (move to recycle bin)
+            await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/soft-delete`);
+          } else {
+            // Use permanent delete for products
+            await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
+          }
           message.success(`${type.charAt(0).toUpperCase() + type.slice(1)} "${names[type]}" deleted successfully.`);
           if (type === 'product') {
             setProducts(prev => prev.filter(p => p.id !== item.id));
@@ -584,21 +593,22 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
       (productHierarchy.parts && productHierarchy.parts.length > 0) ||
       (productHierarchy.assemblies && productHierarchy.assemblies.length > 0)
     );
+    const isInRecycleBin = (type === 'part' || type === 'assembly') && item.recycle_bin === true;
     const buttons = {
       part: [
-        { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit" },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'part'), danger: true, title: "Delete" }
+        { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit", disabled: isInRecycleBin },
+        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'part'), danger: true, title: "Delete", disabled: isInRecycleBin }
       ],
       assembly: [
-        { icon: PartitionOutlined, onClick: () => handleCreateSubAssembly(item), title: "Add Sub-Assembly" },
+        { icon: PartitionOutlined, onClick: () => handleCreateSubAssembly(item), title: "Add Sub-Assembly", disabled: isInRecycleBin },
         { icon: ToolOutlined, onClick: () => {
             const product = products.find(p => p.id === item.product_id);
             if (product) {
               handleCreatePart(product, item);
             }
-          }, title: "Add Part" },
-        { icon: EditOutlined, onClick: () => handleEditAssembly(item), title: "Edit" },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'assembly'), danger: true, title: "Delete" }
+          }, title: "Add Part", disabled: isInRecycleBin },
+        { icon: EditOutlined, onClick: () => handleEditAssembly(item), title: "Edit", disabled: isInRecycleBin },
+        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'assembly'), danger: true, title: "Delete", disabled: isInRecycleBin }
       ],
       product: [
         { icon: PartitionOutlined, onClick: () => handleCreateAssembly(item), title: "Add Assembly" },
@@ -608,7 +618,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           icon: DeleteOutlined, 
           onClick: hasParts ? () => handleDeleteAllParts(item) : () => handleDelete(item, 'product'), 
           danger: true, 
-          title: hasParts ? "Delete All Parts" : "Delete" 
+          title: "Delete"
         }
       ]
     };
@@ -622,36 +632,26 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               </Tag>
             </span>
           )}
-          {type === 'part' ? (
-            <>
-              {buttons.part.map(({ icon: Icon, onClick, danger, title, color }, idx) => (
-                <Tooltip key={idx} title={title}>
-                  <Button 
-                    type="text" 
-                    size="small" 
-                    danger={danger}
-                    onClick={(e) => { e.stopPropagation(); onClick(); }} 
-                    icon={<Icon style={{ fontSize: '14px', color: color || undefined }} />}
-                    style={{ padding: 4, minWidth: 24, height: 24 }}
-                  />
-                </Tooltip>
-              ))}
-              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details, item.part_detail, item.raw_material_id)}
-            </>
-          ) : (
-          buttons[type].map(({ icon: Icon, onClick, danger, title, color }, idx) => (
-            <Tooltip key={idx} title={title}>
-              <Button 
-                type="text" 
-                size="small" 
+          {isInRecycleBin && type === 'part' && (
+            <span className="hidden lg:inline-block">
+              <Tag color="red" className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
+                RECYCLE BIN
+              </Tag>
+            </span>
+          )}
+          {buttons[type].map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
+            <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
+              <Button
+                type="text"
+                size="small"
                 danger={danger}
-                onClick={(e) => { e.stopPropagation(); onClick(); }} 
-                icon={<Icon style={{ fontSize: '14px', color: color || undefined }} />}
+                disabled={disabled}
+                onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
+                icon={<Icon style={{ fontSize: '14px' }} />}
                 style={{ padding: 4, minWidth: 24, height: 24 }}
               />
             </Tooltip>
-          ))
-          )}
+          ))}
           {type === 'product' && (
             <ProductBOMPdfDownload product={item} bomExport={bomExport} />
           )}
@@ -690,21 +690,38 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const renderPartInTree = (part, level = 0, productId = null) => {
     if (!matchesFilter(part, activeFilter)) return null;
     const isSelected = activeItemId === part.id && activeItemType === 'part';
-    
+    const isInRecycleBin = part.recycle_bin === true;
+
     return (
       <div
         key={`part-${part.id}`}
-        className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
+        className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${
+          isInRecycleBin
+            ? 'bg-gray-100 border-gray-300 text-gray-400 opacity-60'
+            : isSelected
+            ? 'bg-indigo-50 border-indigo-500 text-indigo-800'
+            : 'hover:bg-slate-100 border-transparent'
+        }`}
         style={{ marginLeft: `${level * 14}px` }}
-        onClick={() => handleItemClick(part, 'part', productId || part.product_id)}
+        onClick={() => !isInRecycleBin && handleItemClick(part, 'part', productId || part.product_id)}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
           <div className="flex flex-col min-w-0">
-            <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
+            <Text className={`text-sm font-medium truncate ${
+              isInRecycleBin
+                ? 'text-gray-400'
+                : isSelected
+                ? 'text-indigo-800'
+                : 'text-slate-700'
+            }`}>
               {part.part_name}
             </Text>
-            <Text className="text-[10px] text-slate-400 truncate">
+            <Text className={`text-[10px] truncate ${
+              isInRecycleBin
+                ? 'text-gray-400'
+                : 'text-slate-400'
+            }`}>
               {part.part_number}
               {part.raw_material_name && (
                 <span className="ml-1 text-[9px] text-indigo-500">({part.raw_material_name})</span>

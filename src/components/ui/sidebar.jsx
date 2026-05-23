@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Layout, Menu, Drawer, Button, Badge } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
-  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined
+  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined,DeleteOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
@@ -308,6 +308,11 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/product-monitoring/planned-vs-actual`,
         label: <Link to={`${prefix}/product-monitoring/planned-vs-actual`} onClick={() => setMobileDrawerOpen(false)}>Planned vs Actual</Link>,
         icon: <MonitorOutlined />,
+      },
+      {
+        key: `${prefix}/recycle-bin`,
+        label: <Link to={`${prefix}/recycle-bin`} onClick={() => setMobileDrawerOpen(false)}>Recycle Bin</Link>,
+        icon: <DeleteOutlined />,
       },
     ];
   } else if (prefix === '/manufacturing_coordinator') {

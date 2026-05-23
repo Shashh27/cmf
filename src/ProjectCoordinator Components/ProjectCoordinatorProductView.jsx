@@ -9,6 +9,7 @@ import OrderTracking from "./Product Monitoring Components/OrderTracking";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
 import PPS from "./PPS";
 import ProductionMonitoring from "./ProductionMonitoring";
+import Recyclebin from "./Recyclebin";
 
 const { Sider, Content } = Layout;
 
@@ -237,6 +238,11 @@ const ProjectCoordinatorProductView = () => {
               </Link>
             </div>
             <OrderTracking />
+          </div>
+        </Tabs.TabPane>
+        <Tabs.TabPane tab="Recycle Bin" key="recycle-bin">
+          <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <Recyclebin />
           </div>
         </Tabs.TabPane>
       </Tabs>

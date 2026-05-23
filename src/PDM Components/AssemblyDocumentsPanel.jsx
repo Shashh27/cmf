@@ -12,6 +12,8 @@ import {
   ThunderboltOutlined,
   ApiOutlined,
   ExclamationCircleOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
 } from "@ant-design/icons";
 import ModelViewer3D from "./ModelViewer3D";
 import {
@@ -303,6 +305,40 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     }
   };
 
+  const handleAcknowledgeDocument = async (docId, currentStatus) => {
+    try {
+      await axios.put(`${API_BASE_URL}/documents/${docId}/acknowledge`, null, {
+        params: { is_acknowledged: !currentStatus }
+      });
+      message.success('Document acknowledged successfully');
+      // Optimistically update the local state
+      setDocuments(prevDocs => 
+        prevDocs.map(doc => 
+          doc.id === docId ? { ...doc, is_acknowledged: true } : doc
+        )
+      );
+      // Also update selectedVersions to reflect the change immediately
+      setSelectedVersions(prevVersions => {
+        const updated = { ...prevVersions };
+        for (const key in updated) {
+          if (updated[key]?.id === docId) {
+            updated[key] = { ...updated[key], is_acknowledged: true };
+          }
+        }
+        return updated;
+      });
+      // Then fetch to ensure consistency
+      await fetchDocuments();
+    } catch (e) {
+      console.error(e);
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
+        'Failed to update acknowledgment status';
+      message.error(detail);
+    }
+  };
+
   const handleVersionChange = (e) => {
     // This is kept for compatibility if needed elsewhere, 
     // but handleVersionChangeInRow is preferred now
@@ -498,9 +534,41 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
       },
     },
     {
+      title: <span className="text-xs font-semibold whitespace-nowrap">ACKNOWLEDGED</span>,
+      key: "acknowledged",
+      width: "18%",
+      align: "center",
+      render: (_, record) => {
+        const rootId = record.parent_id || record.id;
+        const currentDoc = selectedVersions[rootId] || record;
+        if (currentDoc.is_acknowledged) {
+          return <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>;
+        } else {
+          return (
+            <Popconfirm 
+              title="Acknowledge Document"
+              description="Are you sure you want to acknowledge this document?"
+              onConfirm={() => handleAcknowledgeDocument(currentDoc.id, currentDoc.is_acknowledged)}
+              okText="Yes"
+              cancelText="No"
+            >
+              <Button 
+                size="small" 
+                type="primary" 
+                icon={<CheckCircleOutlined />}
+                className="text-xs"
+              >
+                Acknowledge
+              </Button>
+            </Popconfirm>
+          );
+        }
+      },
+    },
+    {
       title: <span className="text-xs font-semibold whitespace-nowrap text-center block">ACTIONS</span>,
       key: "actions",
-      width: "20%",
+      width: "22%",
       align: "center",
       render: (_, record) => {
         const rootId = record.parent_id || record.id;

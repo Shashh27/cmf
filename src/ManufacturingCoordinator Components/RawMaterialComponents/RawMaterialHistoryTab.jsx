@@ -431,7 +431,7 @@ const RawMaterialHistoryTab = ({ materials }) => {
 
   return (
     <div style={{ padding: '16px', height: '100%', minHeight: 'calc(100vh - 120px)' }}>
-      <Row gutter={16} style={{ height: '100%' }}>
+      <Row gutter={12} style={{ height: '100%' }}>
         {/* Left Sidebar - Materials Only */}
         <Col xs={24} sm={24} md={6} lg={6} xl={6} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           {/* Materials List */}
@@ -497,7 +497,7 @@ const RawMaterialHistoryTab = ({ materials }) => {
               <Text strong style={{ fontSize: '12px' }}>Activity:</Text>
               <Select
                 size="small"
-                style={{ width: 120 }}
+                style={{ width: 150 }}
                 placeholder="Select activity"
                 value={activityType}
                 onChange={setActivityType}

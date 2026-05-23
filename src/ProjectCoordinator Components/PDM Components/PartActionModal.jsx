@@ -380,7 +380,11 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
         } catch (e) { console.error(e); }
       } catch (e) {
         console.error(e);
-        message.error('Failed to create operations');
+        const detail =
+          e?.response?.data?.detail ||
+          e?.response?.data?.message ||
+          'Failed to create operations';
+        message.error(detail);
       }
     } else {
       for (const item of items) {
@@ -422,7 +426,11 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
         created.forEach(d => results.push(d));
       } catch (e) {
         console.error(e);
-        message.error('Failed to upload documents');
+        const detail =
+          e?.response?.data?.detail ||
+          e?.response?.data?.message ||
+          'Failed to upload documents';
+        message.error(detail);
       }
     }
 
