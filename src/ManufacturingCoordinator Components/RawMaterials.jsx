@@ -14,7 +14,6 @@ import { API_BASE_URL } from "../Config/auth";
 // Import split components
 import RawMaterialsTab from "./RawMaterialComponents/RawMaterialsTab";
 import LinkGeneralStockImproved from "./RawMaterialComponents/LinkGeneralStockImproved";
-import LinkMaterialsTab from "./RawMaterialComponents/LinkMaterialsTab";
 import PartsWithRawMaterialStatusTab from "./RawMaterialComponents/PartsWithRawMaterialStatusTab";
 import RawMaterialHistoryTab from "./RawMaterialComponents/RawMaterialHistoryTab";
 
@@ -61,14 +60,9 @@ const RawMaterialsContent = () => {
       children: <LinkGeneralStockImproved rawMaterials={sharedRawMaterials} />
     },
     {
-      key: 'linking',
-      label: <span className="flex items-center gap-2 px-2"><LinkOutlined /> Procure Raw Materials</span>,
-      children: <LinkMaterialsTab rawMaterials={sharedRawMaterials} onDataChanged={refreshRawMaterials} />
-    },
-    {
       key: 'order-status',
-      label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procurement Status</span>,
-      children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} />
+      label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procure Raw Material</span>,
+      children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} rawMaterials={sharedRawMaterials} />
     },
     {
       key: 'history',

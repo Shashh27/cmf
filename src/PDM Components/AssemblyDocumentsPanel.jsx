@@ -11,6 +11,7 @@ import {
   UploadOutlined,
   ThunderboltOutlined,
   ApiOutlined,
+  ExclamationCircleOutlined,
 } from "@ant-design/icons";
 import ModelViewer3D from "./ModelViewer3D";
 import {
@@ -27,10 +28,12 @@ import {
   Typography,
   Upload,
   message,
+  Tooltip,
 } from "antd";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
+import { normalizeVersion } from "./operationUtils";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -73,7 +76,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
     docName: "",
     docType: "2D",
     docTypeOther: "",
-    version: "v1.0"
+    version: ""
   };
   const [uploadRows, setUploadRows] = useState([initialUploadRow]);
 
@@ -109,48 +112,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
   };
 
   const handleVersionChangeInRow = (id, value) => {
-    // Always start with 'v' if not present
-    if (value && !value.startsWith('v')) {
-      value = 'v' + value;
-    }
-    
-    // Remove invalid characters but keep v, digits, dots, and alphanumeric
-    value = value.replace(/[^v0-9.a-zA-Z]/g, '');
-    
-    // Ensure only one 'v' at the beginning
-    if (value.startsWith('v')) {
-      value = 'v' + value.substring(1).replace(/v/g, '');
-    }
-    
-    // Ensure only one dot
-    const parts = value.split('.');
-    if (parts.length > 2) {
-      value = parts[0] + '.' + parts.slice(1).join('');
-    }
-    
-    // Limit to exactly 3 characters before decimal (including 'v'), and max 3 characters after decimal
-    const match = value.match(/^(v\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
-    if (match) {
-      let major = match[1] || 'v';
-      let afterDecimal = match[2] || '';
-
-      value = major;
-      // Always include decimal point
-      value += '.';
-      // Add after decimal content (max 3 characters)
-      if (afterDecimal) {
-        afterDecimal = afterDecimal.substring(0, 3);
-        value += afterDecimal;
-      }
-    } else {
-      // Fallback for initial 'v' or 'v12' (max 3 chars total)
-      const initialMatch = value.match(/^(v\d{0,2})/);
-      if (initialMatch) {
-        value = initialMatch[1] + '.';
-      }
-    }
-    
-    updateUploadRow(id, 'version', value);
+    updateUploadRow(id, 'version', normalizeVersion(value));
   };
 
   const fetchDocuments = async () => {
@@ -347,9 +309,6 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
   };
 
   const initiateNewVersion = (doc, latestVer) => {
-    const nextVer =
-      "v" + (parseFloat(String(latestVer).replace(/^v/i, "")) + 1.0).toFixed(1);
-    
     setUploadParentId(doc.parent_id || doc.id);
     setUploadRows([{
       id: Date.now(),
@@ -358,7 +317,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
       docName: "",
       docType: doc.document_type || "2D",
       docTypeOther: "",
-      version: nextVer
+      version: ""
     }]);
     setIsUploadModalOpen(true);
   };
@@ -389,6 +348,10 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
       }
       if (row.docType === "Other" && !row.docTypeOther.trim()) {
         message.warning(`Please enter custom document type for ${row.docName}`);
+        return;
+      }
+      if (!row.version || !row.version.trim()) {
+        message.warning(`Please enter revision for document: ${row.docName}`);
         return;
       }
     }
@@ -427,7 +390,8 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
       fetchDocuments();
     } catch (e) {
       console.error("Error uploading documents", e);
-      message.error("Error uploading documents");
+      const detail = e?.response?.data?.detail || e?.response?.data?.message || "Error uploading documents";
+      message.error(detail);
     } finally {
       setUploading(false);
     }
@@ -476,7 +440,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
       },
     },
     {
-      title: <span className="text-xs font-semibold whitespace-nowrap">VERSION</span>,
+      title: <span className="text-xs font-semibold whitespace-nowrap">REVISION</span>,
       key: "version",
       width: "20%",
       render: (_, record) => {
@@ -484,10 +448,9 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
         const group = groupedDocs[rootId] || [];
         const currentDoc = selectedVersions[rootId] || record;
         const versionWidth = "100%";
-        const fmtV = (v) => (String(v || "1.0").startsWith("v") ? String(v || "1.0") : `v${v || "1.0"}`);
 
         if (group.length <= 1) {
-          const ver = currentDoc.document_version || "1.0";
+          const ver = currentDoc.document_version || "N/A";
           return (
             <Select
               size="small"
@@ -496,7 +459,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
               suffixIcon={null}
               variant="filled"
               style={{ width: versionWidth }}
-              options={[{ value: currentDoc.id, label: fmtV(ver) }]}
+              options={[{ value: currentDoc.id, label: ver }]}
             />
           );
         }
@@ -521,7 +484,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             {[...group]
               .sort((a, b) => a.id - b.id)
               .map((ver) => {
-                const verLabel = fmtV(ver.document_version || "1.0");
+                const verLabel = ver.document_version || "N/A";
                 return (
                   <Select.Option key={ver.id} value={ver.id} label={verLabel}>
                     <span className={`font-bold ${ver.id === currentDoc.id ? "text-blue-600" : "text-gray-600"}`}>
@@ -679,7 +642,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
       title={
         <div className="flex items-center gap-2">
           <PlusOutlined className="text-blue-500" />
-          <span>{uploadParentId ? "Upload New Version" : "Add New Document(s)"}</span>
+          <span>{uploadParentId ? "Upload New Revision" : "Add New Document(s)"}</span>
         </div>
       }
       open={isUploadModalOpen}
@@ -725,30 +688,45 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
                   <Text type="secondary" className="text-[11px] block font-medium">
                     * Select File
                   </Text>
-                  <Upload
-                    multiple={false}
-                    fileList={row.fileList}
-                    beforeUpload={(file) => {
-                      updateUploadRow(row.id, 'fileList', [file]);
-                      // Same behavior as DocumentsPanel: always derive document name from selected file
-                      const base = file.name.includes(".")
-                        ? file.name.slice(0, file.name.lastIndexOf("."))
-                        : file.name;
-                      updateUploadRow(row.id, 'docName', base);
-                      return false;
-                    }}
-                    onRemove={() => updateUploadRow(row.id, 'fileList', [])}
-                    maxCount={1}
-                    showUploadList={{ showRemoveIcon: true }}
-                  >
-                    <Button 
-                      icon={<InboxOutlined />} 
-                      size="middle" 
-                      className={`w-full justify-center ${row.fileList.length > 0 ? 'border-green-500 text-green-600 bg-green-50' : 'border-blue-400 text-blue-500'}`}
+                  {row.fileList.length > 0 ? (
+                    <div className="p-2 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between shadow-sm h-[32px]">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileTextOutlined className="text-blue-500 text-xs shrink-0" />
+                        <span className="text-[11px] text-gray-800 truncate font-bold">{row.fileList[0].name}</span>
+                      </div>
+                      <Button 
+                        type="text" 
+                        size="small" 
+                        danger 
+                        icon={<DeleteOutlined />} 
+                        onClick={() => updateUploadRow(row.id, 'fileList', [])} 
+                        className="hover:bg-red-50 flex items-center justify-center h-5 w-5" 
+                      />
+                    </div>
+                  ) : (
+                    <Upload
+                      multiple={false}
+                      fileList={row.fileList}
+                      beforeUpload={(file) => {
+                        updateUploadRow(row.id, 'fileList', [file]);
+                        const base = file.name.includes(".")
+                          ? file.name.slice(0, file.name.lastIndexOf("."))
+                          : file.name;
+                        updateUploadRow(row.id, 'docName', base);
+                        return false;
+                      }}
+                      maxCount={1}
+                      showUploadList={false}
                     >
-                      {row.fileList.length > 0 ? 'File Selected' : 'Choose File'}
-                    </Button>
-                  </Upload>
+                      <Button 
+                        icon={<UploadOutlined />} 
+                        size="middle" 
+                        className="w-full justify-center border-blue-400 text-blue-500 bg-white hover:bg-blue-50"
+                      >
+                        Choose File
+                      </Button>
+                    </Upload>
+                  )}
                 </div>
 
                 {/* Document name */}
@@ -760,7 +738,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
                     placeholder="Enter document name"
                     value={row.docName}
                     onChange={(e) => updateUploadRow(row.id, 'docName', e.target.value)}
-                    className="bg-white"
+                    className="bg-white h-[32px]"
                   />
                 </div>
 
@@ -771,7 +749,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
                   </Text>
                   <div className="flex flex-col gap-2">
                     <Select
-                      className="w-full bg-white"
+                      className="w-full bg-white h-[32px]"
                       value={row.docType}
                       onChange={(val) => updateUploadRow(row.id, 'docType', val)}
                       size="middle"
@@ -792,19 +770,20 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
                   </div>
                 </div>
 
-                {/* Version */}
+                {/* Revision */}
                 <div className="flex flex-col gap-1">
                   <div className="flex justify-between items-center">
                     <Text type="secondary" className="text-[11px] block font-medium">
-                      * Version
+
+-                      * Revision
                     </Text>
                   </div>
                   <Input
                     value={row.version}
                     onChange={(e) => handleVersionChangeInRow(row.id, e.target.value)}
-                    className="bg-gray-50 font-mono"
-                    disabled={!uploadParentId}
-                    title={!uploadParentId ? "Initial version is fixed at v1.0" : "Edit version format (e.g. v1.1, v2.0)"}
+                    className="bg-white font-mono h-[32px] text-center font-bold"
+                    placeholder="00"
+                    autoComplete="off"
                   />
                 </div>
               </div>
@@ -812,7 +791,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
               {uploadParentId && (
                 <div className="mt-3 p-2 bg-amber-50 border border-amber-100 rounded">
                   <Text type="warning" className="text-[11px] flex items-center gap-1">
-                    <SyncOutlined spin={uploading} /> Creating a new version for an existing document.
+                    <SyncOutlined spin={uploading} /> Creating a new revision for an existing document.
                   </Text>
                 </div>
               )}
@@ -852,7 +831,7 @@ const AssemblyDocumentsPanel = ({ selectedItem, partTypes = [], onPartsCreated }
             onClick={handleUpload}
             className="w-full sm:w-auto min-w-[140px]"
           >
-            {uploadParentId ? "Upload New Version" : `Upload ${uploadRows.length} Document(s)`}
+            {uploadParentId ? "Upload New Revision" : `Upload ${uploadRows.length} Document(s)`}
           </Button>
         </div>
       </div>

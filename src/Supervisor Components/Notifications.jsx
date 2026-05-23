@@ -354,7 +354,7 @@ const Notifications = () => {
               type="primary"
               icon={<ReloadOutlined />}
               size="large"
-              onClick={() => window.location.reload()}
+              onClick={() => fetchNotifications()}
             >
               Refresh
             </Button>

@@ -7,112 +7,41 @@ import ToolsDownload from "../DownloadReports/ToolsDownload";
 
 const { Text, Title } = Typography;
 
-const ProductToolsViewer = ({ visible, onClose, product, hierarchicalData }) => {
+const ProductToolsViewer = ({ visible, onClose, product }) => {
   const [tools, setTools] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    if (visible && product && hierarchicalData) {
-      extractToolsFromHierarchy();
-    } else if (visible && product) {
-      setTools([]);
-      setLoading(false);
+    if (visible && product) {
+      fetchTools();
     }
-  }, [visible, product, hierarchicalData]);
+  }, [visible, product]);
 
-  const extractToolsFromHierarchy = () => {
+  const fetchTools = async () => {
     setLoading(true);
-    const allTools = [];
-    
-    // Check if hierarchicalData has the expected structure
-    if (!hierarchicalData) {
+    try {
+      // Use lightweight tools-data endpoint - only tools linked to operations
+      const response = await axios.get(`${API_BASE_URL}/products/${product.id}/tools-data`);
+      if (response.status >= 200 && response.status < 300) {
+        setTools(response.data.tools || []);
+      }
+    } catch (error) {
+      console.error("Error fetching product tools:", error);
       setTools([]);
+    } finally {
       setLoading(false);
-      return;
     }
-    
-    const processPart = (partData, parentInfo = {}) => {
-      // partData now contains { part: {...}, operations: [...], tools: [...] }
-      const part = partData.part || partData; // Use partData.part if available, otherwise partData itself
-      const operations = partData.operations || [];
-
-      // Skip tools directly linked to part (user only wants operation-linked tools)
-      // Add tools linked to operations
-      if (operations.length > 0) {
-        operations.forEach(operation => {
-          if (operation.tools && operation.tools.length > 0) {
-            operation.tools.forEach(tool => {
-              allTools.push({
-                ...tool,
-                tool_number: tool.tool?.tool_number || tool.tool_id || tool.id || 'N/A',
-                tool_name: tool.tool?.item_description || tool.tool?.tool_name || tool.tool?.name || 'N/A', // Use item_description first
-                tool_type: tool.tool?.type || tool.tool?.tool_type || 'N/A', // Use type field
-                part_number: part.part_number,
-                part_name: part.part_name,
-                assembly_name: parentInfo.assembly_name || null,
-                product_name: product.product_name,
-                link_type: 'Operation',
-                operation_name: operation.operation_name,
-                operation_number: operation.operation_number,
-                quantity: tool.tool?.quantity || tool.tool?.total_quantity || 1
-              });
-            });
-          }
-        });
-      }
-    };
-
-    const processAssembly = (assemblyWrapper, parentInfo = {}) => {
-      // assemblyWrapper has structure: { assembly: {...}, parts: [...], subassemblies: [...] }
-      const assembly = assemblyWrapper.assembly || assemblyWrapper;
-      const currentInfo = {
-        ...parentInfo,
-        assembly_name: assembly.assembly_name || assembly.assembly_number || 'Unknown'
-      };
-
-      // Process parts in this assembly (from original data structure)
-      if (assemblyWrapper.parts && assemblyWrapper.parts.length > 0) {
-        assemblyWrapper.parts.forEach(partWrapper => {
-          // partWrapper is { part: {...}, operations: [...], tools: [...] }
-          processPart(partWrapper, currentInfo);
-        });
-      }
-
-      // Process child assemblies
-      if (assemblyWrapper.subassemblies && assemblyWrapper.subassemblies.length > 0) {
-        assemblyWrapper.subassemblies.forEach(childAssembly => processAssembly(childAssembly, currentInfo));
-      }
-    };
-
-    // Process direct parts (from original data structure)
-    if (hierarchicalData.direct_parts && hierarchicalData.direct_parts.length > 0) {
-      hierarchicalData.direct_parts.forEach(partWrapper => {
-        // partWrapper is { part: {...}, operations: [...], tools: [...] }
-        processPart(partWrapper);
-      });
-    }
-
-    // Process assemblies (from original data structure)
-    if (hierarchicalData.assemblies && hierarchicalData.assemblies.length > 0) {
-      hierarchicalData.assemblies.forEach(assembly => processAssembly(assembly));
-    }
-
-    setTools(allTools);
-    setLoading(false);
   };
 
   const getFilteredTools = () => {
     if (!searchTerm) return tools;
-    
+
     const searchLower = searchTerm.toLowerCase();
-    return tools.filter(tool => 
-      (tool.tool?.item_description || '').toLowerCase().includes(searchLower) ||
-      (tool.tool?.range || '').toLowerCase().includes(searchLower) ||
-      (tool.tool?.identification_code || '').toLowerCase().includes(searchLower) ||
-      (tool.tool?.make || '').toLowerCase().includes(searchLower) ||
-      (tool.tool?.type || '').toLowerCase().includes(searchLower) ||
-      (tool.tool?.category || '').toLowerCase().includes(searchLower) ||
+    return tools.filter(tool =>
+      (tool.tool_name || '').toLowerCase().includes(searchLower) ||
+      (tool.tool_number || '').toLowerCase().includes(searchLower) ||
+      (tool.tool_type || '').toLowerCase().includes(searchLower) ||
       (tool.part_number || '').toLowerCase().includes(searchLower) ||
       (tool.part_name || '').toLowerCase().includes(searchLower) ||
       (tool.assembly_name || '').toLowerCase().includes(searchLower) ||
@@ -123,29 +52,29 @@ const ProductToolsViewer = ({ visible, onClose, product, hierarchicalData }) => 
   const columns = [
     {
       title: <span className="font-semibold whitespace-nowrap">Item Description</span>,
-      dataIndex: ['tool', 'item_description'],
-      key: 'item_description',
+      dataIndex: 'tool_name',
+      key: 'tool_name',
       ellipsis: true,
       render: (text) => <Text className="text-sm whitespace-normal break-words">{text || 'N/A'}</Text>
     },
     {
       title: <span className="font-semibold whitespace-nowrap">Range / Size</span>,
-      dataIndex: ['tool', 'range'],
-      key: 'range',
+      dataIndex: 'tool_range',
+      key: 'tool_range',
       ellipsis: true,
       render: (text) => <Text className="text-sm text-gray-600 whitespace-normal break-words">{text || '-'}</Text>
     },
     {
       title: <span className="font-semibold whitespace-nowrap">ID Code</span>,
-      dataIndex: ['tool', 'identification_code'],
-      key: 'identification_code',
+      dataIndex: 'tool_number',
+      key: 'tool_number',
       ellipsis: true,
       render: (text) => <Text className="text-sm font-mono whitespace-normal break-words">{text || '-'}</Text>
     },
     {
       title: <span className="font-semibold whitespace-nowrap">Make</span>,
-      dataIndex: ['tool', 'make'],
-      key: 'make',
+      dataIndex: 'tool_make',
+      key: 'tool_make',
       ellipsis: true,
       render: (text) => <Text className="text-sm text-gray-700 whitespace-normal break-words">{text || '-'}</Text>
     },

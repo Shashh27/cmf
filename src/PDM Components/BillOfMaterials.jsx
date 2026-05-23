@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
@@ -18,7 +18,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [expandedItems, setExpandedItems] = useState({});
   const [loading, setLoading] = useState(true);
   const [hierarchicalData, setHierarchicalData] = useState({});
-  const [originalHierarchicalData, setOriginalHierarchicalData] = useState({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createType, setCreateType] = useState('');
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -33,6 +32,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [showToolsModal, setShowToolsModal] = useState(false);
   const [selectedProductForTools, setSelectedProductForTools] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const hasFetchedData = useRef(false);
 
@@ -140,135 +140,36 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProductId, loading, products, hierarchicalData]);
 
-  const flattenBOMForExport = (data) => {
-    const assemblies = [];
-    const parts = [];
-    const operations = [];
-    const documents = [];
-
-    const addPartNode = (wrapper, parentAssembly = null) => {
-      if (!wrapper) return;
-      const part = wrapper.part || wrapper;
-      if (!part) return;
-
-      parts.push({
-        id: part.id,
-        part_number: part.part_number,
-        part_name: part.part_name,
-        type_name: part.type_name,
-        parent_assembly_id: parentAssembly?.id || null,
-        parent_assembly_number: parentAssembly?.assembly_number || null,
-        parent_assembly_name: parentAssembly?.assembly_name || null,
-        raw_material_id: part.raw_material_id,
-        part_detail: part.part_detail,
-      });
-
-      (wrapper.operations || []).forEach((op, index) => {
-        operations.push({
-          id: op.id || `${part.id}-op-${index}`,
-          part_id: part.id,
-          part_number: part.part_number,
-          part_name: part.part_name,
-          operation_number: op.operation_number,
-          operation_name: op.operation_name,
-          setup_time: op.setup_time,
-          cycle_time: op.cycle_time,
-          work_center_name: op.work_center_name || op.workcenter_name || "",
-          workcenter_id: op.workcenter_id || null,
-          machine_name: op.machine_name || "",
-          machine_id: op.machine_id || null,
-          part_type_name: op.part_type_name || "IN-House",
-          work_instructions: op.work_instructions || "",
-          notes: op.notes || "",
-        });
-      });
-
-      (wrapper.documents || []).forEach((doc, index) => {
-        documents.push({
-          id: doc.id || `${part.id}-doc-${index}`,
-          part_id: part.id,
-          part_number: part.part_number,
-          part_name: part.part_name,
-          document_type: doc.document_type,
-          document_name: doc.document_name,
-          document_version: doc.document_version,
-        });
-      });
-    };
-
-    const processAssemblyWrapper = (wrapper, parentAssembly = null) => {
-      if (!wrapper) return;
-      const assembly = wrapper.assembly || wrapper;
-
-      if (assembly) {
-        assemblies.push({
-          id: assembly.id,
-          assembly_number: assembly.assembly_number,
-          assembly_name: assembly.assembly_name,
-          parent_assembly_id: parentAssembly?.id || null,
-          parent_assembly_number: parentAssembly?.assembly_number || null,
-          parent_assembly_name: parentAssembly?.assembly_name || null,
-        });
-      }
-
-      (wrapper.parts || []).forEach((p) => addPartNode(p, assembly));
-      (wrapper.subassemblies || []).forEach((sub) =>
-        processAssemblyWrapper(sub, assembly)
-      );
-    };
-
-    (data.assemblies || []).forEach((asm) => processAssemblyWrapper(asm, null));
-    (data.direct_parts || []).forEach((p) => addPartNode(p, null));
-
-    return {
-      assemblies,
-      parts,
-      operations,
-      documents,
-    };
-  };
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const fetchProductHierarchy = async (productId, forceRefresh = false) => {
     if (!forceRefresh && hierarchicalData[productId]) return hierarchicalData[productId];
-    
+
     try {
-      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical`);
+      // Use lightweight endpoint - no operations/documents/tools (much faster)
+      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical-lightweight`);
       if (response.status >= 200 && response.status < 300) {
         const data = response.data;
-        const bomExport = flattenBOMForExport(data);
+        const bomExport = flattenBOMForExportLightweight(data);
 
-        // Store original data for tools viewer
-        setOriginalHierarchicalData(prev => ({ ...prev, [productId]: data }));
-
-        // Transformed view for this component (used to render tree quickly)
+        // Lightweight data is already in the right format, no transformation needed
         const transformedData = {
-          ...data,
-          parts: (data.direct_parts || [])
-            .map(item => ({
-              ...item.part,
-              raw_material_status: item.part?.raw_material_status || item.raw_material_status,
-              extracted_data: item.extracted_data || [],
-              documents: item.documents || []
-            })),
-          assemblies: (data.assemblies || [])
-            .map(assembly => ({
-              ...assembly.assembly,
-              parts: (assembly.parts || [])
-                .map(part => ({
-                  ...part.part,
-                  raw_material_status: part.part?.raw_material_status || part.raw_material_status,
-                  extracted_data: part.extracted_data || [],
-                  documents: part.documents || []
-                })),
-              child_assemblies: transformSubassemblies(assembly.subassemblies || [])
-            })),
+          product: data.product,
+          parts: data.parts || [],
+          assemblies: data.assemblies || [],
           bomExport,
         };
 
         setHierarchicalData(prev => ({ ...prev, [productId]: transformedData }));
 
         // For external consumers (like ProductSummary) that need full PartDetails
-        // including operations, pass the original hierarchy 'data'.
+        // including operations, they should use the full hierarchical endpoint separately
         if (onHierarchyLoaded) {
           onHierarchyLoaded(productId, data);
         }
@@ -281,19 +182,50 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     }
   };
 
-  const transformSubassemblies = (subassemblies) => {
-    return (subassemblies || [])
-      .map(sub => ({
-        ...sub.assembly,
-        parts: (sub.parts || [])
-          .map(part => ({
-            ...part.part,
-            raw_material_status: part.part?.raw_material_status || part.raw_material_status,
-            extracted_data: part.extracted_data || [],
-            documents: part.documents || []
-          })),
-        child_assemblies: transformSubassemblies(sub.subassemblies || [])
-      }));
+  // Flatten BOM for export using lightweight data structure
+  const flattenBOMForExportLightweight = (data) => {
+    const assemblies = [];
+    const parts = [];
+
+    const processAssembly = (assembly, parentPath = []) => {
+      const currentPath = [...parentPath, assembly.assembly_name];
+      assemblies.push({
+        id: assembly.id,
+        assembly_name: assembly.assembly_name,
+        assembly_number: assembly.assembly_number,
+        path: currentPath.join(' > '),
+      });
+
+      // Process parts in this assembly
+      (assembly.parts || []).forEach(part => {
+        parts.push({
+          ...part,
+          assembly_path: currentPath.join(' > '),
+          assembly_name: assembly.assembly_name,
+        });
+      });
+
+      // Process child assemblies
+      (assembly.child_assemblies || []).forEach(child => {
+        processAssembly(child, currentPath);
+      });
+    };
+
+    // Process root assemblies
+    (data.assemblies || []).forEach(assembly => {
+      processAssembly(assembly);
+    });
+
+    // Process direct parts (no assembly)
+    (data.parts || []).forEach(part => {
+      parts.push({
+        ...part,
+        assembly_path: '',
+        assembly_name: 'Direct Part',
+      });
+    });
+
+    return { assemblies, parts };
   };
 
   const toggleExpand = (key) => {
@@ -1073,7 +1005,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const directResults = []; // Parts that directly match search
     
     filteredProducts.forEach(product => {
-      const { foundItems } = searchInHierarchicalData(product.id, searchTerm);
+      const { foundItems } = searchInHierarchicalData(product.id, debouncedSearchTerm);
       foundItems.forEach(item => {
         const resultWithProduct = { ...item, productName: product.product_name };
         
@@ -1365,7 +1297,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           setSelectedProductForTools(null);
         }}
         product={selectedProductForTools}
-        hierarchicalData={selectedProductForTools ? originalHierarchicalData[selectedProductForTools.id] : null}
       />
     </>
   );

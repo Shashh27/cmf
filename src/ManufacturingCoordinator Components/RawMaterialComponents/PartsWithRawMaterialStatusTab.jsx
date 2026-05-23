@@ -14,14 +14,18 @@ import {
   ReloadOutlined,
   DeleteOutlined,
   SafetyCertificateOutlined,
-  EditOutlined
+  EditOutlined,
+  AppstoreOutlined
 } from "@ant-design/icons";
 import { PartsWithRawMaterialsStatusPdfDownload } from "../../DownloadReports/RawMaterialsPdfDownload";
+import DimensionInputs from "./DimensionInputs";
+import ProcureRawMaterialModal from "./ProcureRawMaterialModal";
+import EditLinkedPartsModal from "./EditLinkedPartsModal";
 
 const { Text } = Typography;
 const { Option } = Select;
 
-const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
+const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRawMaterials }) => {
   const [linkedMaterials, setLinkedMaterials] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -44,8 +48,32 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   const [availableUnits, setAvailableUnits] = useState([]);
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [orderHierarchyMap, setOrderHierarchyMap] = useState({});
-  const [vendors, setVendors] = useState([]);
   const [statusEditReceivedVendorId, setStatusEditReceivedVendorId] = useState(null);
+  const [pendingUnlinks, setPendingUnlinks] = useState(new Set());
+  
+  // Procure modal states
+  const [procureModalOpen, setProcureModalOpen] = useState(false);
+  const [procureForm, setProcureForm] = useState({
+    material_id: null,
+    form_type: null,
+    diameter: '',
+    length: '',
+    breadth: '',
+    height: '',
+    inner_diameter: '',
+    outer_diameter: '',
+    quantity: 1,
+    order_id: null,
+    selected_vendor_id: []
+  });
+  const [procureLoading, setProcureLoading] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  
+  // Filter states
+  const [filterProjectNumber, setFilterProjectNumber] = useState(null);
+  const [filterVendorName, setFilterVendorName] = useState(null);
   
   // Quick status modal states
   const [quickStatusModalOpen, setQuickStatusModalOpen] = useState(false);
@@ -73,8 +101,14 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     if (initializedRef.current) return;
     initializedRef.current = true;
     fetchLinkedMaterials();
-    fetchVendors(); // Fetch vendors on component load
   }, []);
+
+  useEffect(() => {
+    if (procureModalOpen) {
+      fetchOrders();
+      fetchVendors();
+    }
+  }, [procureModalOpen]);
 
   const fetchLinkedMaterials = async () => {
     if (fetching.current) return;
@@ -96,21 +130,25 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     }
   };
 
-  const fetchVendors = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
-      setVendors(response.data || []);
-    } catch (error) {
-      console.error("Error fetching vendors:", error);
-    }
+  // Extract unique project numbers from linkedMaterials
+  const getUniqueProjectNumbers = () => {
+    const projectNumbers = linkedMaterials
+      .map(item => item.source_order_number)
+      .filter(pn => pn && pn.trim() !== '');
+    return [...new Set(projectNumbers)].sort();
   };
 
-  // Function to get vendors from the comma-separated vendor_id string
-  const getEnquiryVendors = (record) => {
-    if (!record?.vendor_id) return [];
-    
-    const vendorIds = record.vendor_id.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-    return vendors.filter(vendor => vendorIds.includes(vendor.id));
+  // Extract unique vendor names from linkedMaterials (using backend response)
+  const getUniqueVendorNames = () => {
+    const vendorNames = new Set();
+    linkedMaterials.forEach(item => {
+      if (item.vendor_name) {
+        // Split by comma if multiple vendors
+        const names = item.vendor_name.split(',').map(name => name.trim()).filter(name => name);
+        names.forEach(name => vendorNames.add(name));
+      }
+    });
+    return Array.from(vendorNames).sort();
   };
 
   const getStatusColor = (status) => {
@@ -200,19 +238,38 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         }
       }
 
+      // Process pending unlinks first
+      for (const partId of pendingUnlinks) {
+        try {
+          await axios.delete(`${API_BASE_URL}/rawmaterials/parts/${partId}/unlink-material`);
+        } catch (error) {
+          console.error(`Error unlinking part ${partId}:`, error);
+          message.error(`Error unlinking part ${partId}`);
+          return;
+        }
+      }
+
+      // Remove pending unlinks from local state before PUT
+      const filteredLinkages = statusEditCurrentLinkages.filter(l => !pendingUnlinks.has(l.part_id));
+      const filteredQuantities = {};
+      const filteredRequiredLengths = {};
+      const filteredUnits = {};
+      
+      filteredLinkages.forEach(l => {
+        if (!pendingUnlinks.has(l.part_id)) {
+          filteredQuantities[l.part_id] = statusEditPartQuantities[l.part_id] || 1;
+          filteredRequiredLengths[l.part_id] = statusEditPartRequiredLengths[l.part_id] || '';
+          filteredUnits[l.part_id] = statusEditPartRawMaterialUnits[l.part_id];
+        }
+      });
+
       // Always call PUT endpoint to update stock details
       const updateData = {
         quantity: statusEditOrderQty || record.quantity,
         form_type: record.form_type || "Round",
-        part_ids: statusEditCurrentLinkages.map(l => l.part_id).join(','),
-        part_quantities: statusEditCurrentLinkages.reduce((acc, l) => {
-          acc[l.part_id] = statusEditPartQuantities[l.part_id] || 1;
-          return acc;
-        }, {}),
-        required_lengths: statusEditCurrentLinkages.reduce((acc, l) => {
-          acc[l.part_id] = statusEditPartRequiredLengths[l.part_id] || '';
-          return acc;
-        }, {})
+        part_ids: filteredLinkages.map(l => l.part_id).join(','),
+        part_quantities: filteredQuantities,
+        required_lengths: filteredRequiredLengths
       };
       
       // Add dimensions based on form type
@@ -236,10 +293,10 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       );
       
       // Assign units to parts using the assign-material endpoint
-      for (const linkage of statusEditCurrentLinkages) {
+      for (const linkage of filteredLinkages) {
         const partId = linkage.part_id;
-        const requiredLength = statusEditPartRequiredLengths[partId];
-        const unitId = statusEditPartRawMaterialUnits[partId];
+        const requiredLength = filteredRequiredLengths[partId];
+        const unitId = filteredUnits[partId];
         
         // Only assign if both unit and length are provided
         if (unitId && requiredLength) {
@@ -254,13 +311,37 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         }
       }
 
-      await fetchLinkedMaterials();
-      if (typeof onDataChanged === "function") {
-        onDataChanged();
+      // Call hierarchy endpoint immediately after save
+      try {
+        const orderId = record.source_order_id || record.order_id;
+        if (orderId) {
+          const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+          setOrderHierarchyMap(prev => ({ ...prev, [orderId]: res.data }));
+        }
+      } catch (error) {
+        console.error("Error fetching hierarchy:", error);
       }
+
+      // Call units endpoint to refresh available units after save
+      try {
+        if (record.id) {
+          await fetchAvailableUnits(record.id);
+        }
+      } catch (error) {
+        console.error("Error fetching units:", error);
+      }
+
+      // Update local state to reflect the unlinks
+      setStatusEditCurrentLinkages(filteredLinkages);
+      setStatusEditPartQuantities(filteredQuantities);
+      setStatusEditPartRequiredLengths(filteredRequiredLengths);
+      setStatusEditPartRawMaterialUnits(filteredUnits);
+
+      await fetchLinkedMaterials();
       message.success("Status updated successfully");
-      setStatusEditModalOpen(false);
-      resetModalStates();
+      
+      // Clear pending unlinks but keep modal open
+      setPendingUnlinks(new Set());
     } catch (error) {
       message.error(error?.response?.data?.detail || "Error updating status");
     }
@@ -283,6 +364,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     setStatusEditPartRawMaterialUnits({});
     setAvailableUnits([]);
     setStatusEditReceivedVendorId(null);
+    setPendingUnlinks(new Set());
   };
 
   const getOrderHierarchy = async (orderId) => {
@@ -337,6 +419,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   const openStatusEditModal = async (record) => {
     setStatusEditRecord(record);
     setStatusEditModalOpen(true);
+    setPendingUnlinks(new Set()); // Clear pending unlinks when opening modal
     
     // Initialize dimensions from record
     setStatusEditDimensions({
@@ -460,288 +543,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     }
   };
 
-  const buildTreeData = (hierarchy) => {
-    if (!hierarchy || !hierarchy.product_hierarchy) return [];
-    
-    const { assemblies = [], direct_parts = [] } = hierarchy.product_hierarchy;
-    const treeData = [];
-    
-    // Process assemblies
-    assemblies.forEach(assembly => {
-      const assemblyNode = {
-        title: assembly.assembly?.assembly_name || 'Unknown Assembly',
-        key: `assembly-${assembly.assembly?.id}`,
-        type: 'assembly',
-        children: []
-      };
-      
-      // Process parts in this assembly
-      if (assembly.parts && Array.isArray(assembly.parts)) {
-        assembly.parts.forEach(partDetail => {
-          if (partDetail.part && partDetail.part.id) {
-            const part = partDetail.part;
-            const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
-            const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
-            const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
-            const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
-            
-            // Skip STANDARD and Out-Source WITHOUT_RAW_MATERIAL
-            if (part.type_name === "STANDARD" || 
-                (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
-              return;
-            }
-            
-            assemblyNode.children.push({
-              title: `${part.part_number} - ${part.part_name}`,
-              key: `part-${part.id}`,
-              type: 'part',
-              part: part,
-              isAlreadyLinked: isAlreadyLinked,
-              isLinkedToGeneralStock: isLinkedToGeneralStock,
-              isLinkedToOrderStock: isLinkedToOrderStock,
-              sourceType: sourceType
-            });
-          }
-        });
-      }
-      
-      // Process subassemblies
-      if (assembly.subassemblies && Array.isArray(assembly.subassemblies)) {
-        assembly.subassemblies.forEach(subassembly => {
-          const subNode = {
-            title: subassembly.assembly?.assembly_name || 'Unknown Subassembly',
-            key: `subassembly-${subassembly.assembly?.id}`,
-            type: 'assembly',
-            children: []
-          };
-          
-          if (subassembly.parts && Array.isArray(subassembly.parts)) {
-            subassembly.parts.forEach(partDetail => {
-              if (partDetail.part && partDetail.part.id) {
-                const part = partDetail.part;
-                const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
-                const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
-                const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
-                const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
-                
-                if (part.type_name === "STANDARD" || 
-                    (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
-                  return;
-                }
-                
-                subNode.children.push({
-                  title: `${part.part_number} - ${part.part_name}`,
-                  key: `part-${part.id}`,
-                  type: 'part',
-                  part: part,
-                  isAlreadyLinked: isAlreadyLinked,
-                  isLinkedToGeneralStock: isLinkedToGeneralStock,
-                  isLinkedToOrderStock: isLinkedToOrderStock,
-                  sourceType: sourceType
-                });
-              }
-            });
-          }
-          
-          assemblyNode.children.push(subNode);
-        });
-      }
-      
-      treeData.push(assemblyNode);
-    });
-    
-    // Process direct parts
-    if (direct_parts && Array.isArray(direct_parts)) {
-      const directNode = {
-        title: 'Direct Parts',
-        key: 'direct-parts',
-        type: 'assembly',
-        children: []
-      };
-      
-      direct_parts.forEach(partDetail => {
-        if (partDetail.part && partDetail.part.id) {
-          const part = partDetail.part;
-          const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
-          const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
-          const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
-          const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
-          
-          if (part.type_name === "STANDARD" || 
-              (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
-            return;
-          }
-          
-          directNode.children.push({
-            title: `${part.part_number} - ${part.part_name}`,
-            key: `part-${part.id}`,
-            type: 'part',
-            part: part,
-            isAlreadyLinked: isAlreadyLinked,
-            isLinkedToGeneralStock: isLinkedToGeneralStock,
-            isLinkedToOrderStock: isLinkedToOrderStock,
-            sourceType: sourceType
-          });
-        }
-      });
-      
-      if (directNode.children.length > 0) {
-        treeData.push(directNode);
-      }
-    }
-    
-    return treeData;
-  };
-
-  const renderTreeNode = (nodeData) => {
-    if (nodeData.type === 'part') {
-      const { part, isAlreadyLinked, isLinkedToGeneralStock, isLinkedToOrderStock, sourceType } = nodeData;
-      const isLinkedToCurrentStock = statusEditCurrentLinkages.some(l => l.part_id === part.id);
-      
-      return (
-        <div className="flex items-center justify-between w-full pr-4 py-1">
-          <div className="flex items-center gap-3 flex-1">
-            <div className="flex flex-col">
-              <span className="font-semibold text-sm text-gray-800">{part.part_number}</span>
-              <span className="text-xs text-gray-500">{part.part_name}</span>
-            </div>
-            <div className="flex gap-1">
-              {isLinkedToGeneralStock ? (
-                <Tag color="green" className="text-[10px] border-green-200">✓ Linked to General Stock</Tag>
-              ) : isLinkedToOrderStock ? (
-                <Tag color="blue" className="text-[10px] border-blue-200">✓ Linked to Order Stock</Tag>
-              ) : (
-                <>
-                  {sourceType === 'general' && (
-                    <Tag color="orange" className="text-[10px] border-orange-200">General Stock Type</Tag>
-                  )}
-                  {sourceType === 'order' && (
-                    <Tag color="purple" className="text-[10px] border-purple-200">Order Stock Type</Tag>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-          {(isLinkedToGeneralStock || isLinkedToOrderStock) && (
-            <div className="flex items-center gap-2">
-              <div className="bg-blue-50 border border-blue-200 rounded px-2 py-1 text-xs">
-                <span className="font-semibold text-blue-800">Unit #{part.raw_material_unit_id || 'N/A'}</span>
-                <span className="text-blue-600 ml-1">| Length: {part.required_length || 0}mm</span>
-              </div>
-              {!isLinkedToGeneralStock && (
-                <Button 
-                  size="small" 
-                  danger 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    Modal.confirm({
-                      title: 'Unlink Part',
-                      content: `Are you sure you want to unlink part ${part.part_number} from the raw material unit? This will restore the unit's remaining length.`,
-                      okText: 'Yes, Unlink',
-                      okType: 'danger',
-                      cancelText: 'Cancel',
-                      onOk: () => handleUnlinkPart(part.id)
-                    });
-                  }}
-                >
-                  Unlink
-                </Button>
-              )}
-            </div>
-          )}
-          {!isLinkedToGeneralStock && !isLinkedToOrderStock && (
-            <div className="flex items-center gap-2">
-              <Select
-                size="small"
-                placeholder="Unit"
-                value={statusEditPartRawMaterialUnits[part.id] || null}
-                onChange={(value) => {
-                  const currentLength = statusEditPartRequiredLengths[part.id];
-                  
-                  // Validate current length against new unit's available length
-                  if (currentLength && value) {
-                    const selectedUnit = availableUnits.find(u => u.id === value);
-                    if (selectedUnit && parseFloat(currentLength) > selectedUnit.remaining_length) {
-                      message.error(`Required length (${currentLength}mm) exceeds available length of selected unit (${selectedUnit.remaining_length}mm)`);
-                      return;
-                    }
-                  }
-                  
-                  setStatusEditPartRawMaterialUnits(prev => ({ ...prev, [part.id]: value }));
-                  // Auto-link if not already linked
-                  if (!isLinkedToCurrentStock) {
-                    handleLinkPart(part);
-                  }
-                }}
-                style={{ width: '200px' }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {availableUnits.map(unit => (
-                  <Option key={unit.id} value={unit.id} disabled={unit.status === 'exhausted'}>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-semibold">Unit #{unit.id}</span>
-                      <span className="text-[10px] text-gray-600">Total: {unit.total_length}mm | Remaining: {unit.remaining_length}mm</span>
-                      {unit.status === 'exhausted' && (
-                        <span className="text-[10px] text-red-500">Exhausted</span>
-                      )}
-                    </div>
-                  </Option>
-                ))}
-              </Select>
-              <Input
-                size="small"
-                placeholder="Length"
-                value={statusEditPartRequiredLengths[part.id] || ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  const selectedUnitId = statusEditPartRawMaterialUnits[part.id];
-                  
-                  // Validate length against available unit length
-                  if (value && selectedUnitId) {
-                    const selectedUnit = availableUnits.find(u => u.id === selectedUnitId);
-                    if (selectedUnit && parseFloat(value) > selectedUnit.remaining_length) {
-                      message.error(`Required length cannot exceed available length (${selectedUnit.remaining_length}mm)`);
-                      return;
-                    }
-                  }
-                  
-                  setStatusEditPartRequiredLengths(prev => ({ ...prev, [part.id]: value }));
-                  // Auto-link if not already linked
-                  if (!isLinkedToCurrentStock) {
-                    handleLinkPart(part);
-                  }
-                }}
-                style={{ width: '80px' }}
-                onClick={(e) => e.stopPropagation()}
-              />
-              {isLinkedToCurrentStock && (
-                <Button 
-                  size="small" 
-                  danger 
-                  icon={<DeleteOutlined />}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleUnlinkPart(part.id);
-                  }}
-                >
-                  Unlink
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-      );
-    }
-    
-    // Assembly node
-    return (
-      <span className="font-semibold text-gray-700 flex items-center gap-2">
-        <span className="text-blue-600">📁</span>
-        {nodeData.title}
-      </span>
-    );
-  };
-
   const handleLinkPart = (part) => {
     const newLinkage = {
       id: `${statusEditRecord.id}-${part.id}`,
@@ -759,39 +560,155 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     // Don't set unit ID here - let the user select it from dropdown
   };
 
-  const handleUnlinkPart = async (partId) => {
-    try {
-      // Call the backend unlink endpoint to properly recalculate
-      await axios.delete(`${API_BASE_URL}/rawmaterials/parts/${partId}/unlink-material`);
-      
-      // Remove from local state
-      setStatusEditCurrentLinkages(prev => prev.filter(l => l.part_id !== partId));
-      setStatusEditPartQuantities(prev => {
-        const newState = { ...prev };
-        delete newState[partId];
-        return newState;
-      });
-      setStatusEditPartRequiredLengths(prev => {
-        const newState = { ...prev };
-        delete newState[partId];
-        return newState;
-      });
-      setStatusEditPartRawMaterialUnits(prev => {
-        const newState = { ...prev };
-        delete newState[partId];
-        return newState;
-      });
-      
-      message.success('Part unlinked successfully');
-    } catch (error) {
-      console.error('Error unlinking part:', error);
-      message.error(error?.response?.data?.detail || 'Error unlinking part');
+  const handleInputKeyDown = (e) => {
+    // Allow: Backspace, Delete, Tab, Escape, Enter, Arrow keys
+    if ([8, 9, 27, 13, 37, 38, 39, 40].includes(e.keyCode)) {
+      return;
+    }
+    // Allow: Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
+    if (e.ctrlKey && [65, 67, 86, 88].includes(e.keyCode)) {
+      return;
+    }
+    // Block: non-digit characters
+    if (e.key && !/^\d$/.test(e.key)) {
+      e.preventDefault();
     }
   };
 
   const flattenPartsFromOrderHierarchy = (hierarchy) => {
     // This function is no longer needed with tree approach
     return { parts: [], meta: {} };
+  };
+
+  // Procure modal functions
+  const handleProcureDimensionChange = (field, value) => {
+    setProcureForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const fetchOrders = async () => {
+    setOrdersLoading(true);
+    try {
+      const uid = getCurrentUserId();
+      const response = await axios.get(`${API_BASE_URL}/orders/`, {
+        params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
+      });
+      // Filter out orders that already have raw materials linked
+      const availableOrders = (response.data || []).filter(order => !order.has_raw_materials);
+      setOrders(availableOrders);
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+      setOrders([]);
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const fetchVendors = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+      setVendors(response.data || []);
+    } catch (error) {
+      console.error("Error fetching vendors:", error);
+      setVendors([]);
+    }
+  };
+
+  const handleAddStock = async () => {
+    try {
+      const { material_id, form_type, diameter, length, breadth, height, inner_diameter, outer_diameter, quantity, order_id, selected_vendor_id } = procureForm;
+
+      // Validation
+      if (!material_id) {
+        message.error('Please select a material');
+        return;
+      }
+      if (!form_type) {
+        message.error('Please select a form type');
+        return;
+      }
+      if (form_type === 'Round' && !diameter) {
+        message.error('Please enter diameter');
+        return;
+      }
+      if (!length) {
+        message.error('Please enter length');
+        return;
+      }
+      if (form_type === 'Square' && (!breadth || !height)) {
+        message.error('Please enter breadth and height');
+        return;
+      }
+      if (form_type === 'Pipe' && (!inner_diameter || !outer_diameter)) {
+        message.error('Please enter inner and outer diameter');
+        return;
+      }
+      if (!quantity || quantity < 1) {
+        message.error('Please enter a valid quantity');
+        return;
+      }
+      if (!order_id) {
+        message.error('Please select an order');
+        return;
+      }
+      if (!selected_vendor_id || selected_vendor_id.length === 0) {
+        message.error('Please select a vendor');
+        return;
+      }
+
+      const requestData = {
+        raw_material_id: material_id,
+        form_type: form_type,
+        diameter: diameter || null,
+        length: length,
+        breadth: breadth || null,
+        height: height || null,
+        inner_diameter: inner_diameter || null,
+        outer_diameter: outer_diameter || null,
+        order_id: order_id,
+        part_ids: [],
+        required_lengths: [],
+        vendor_id: selected_vendor_id || [],
+        quantity: parseInt(quantity),
+        user_id: getCurrentUserId()
+      };
+
+      const response = await axios.post(`${API_BASE_URL}/rawmaterials/order-materials/link`, requestData);
+      
+      if (response.data) {
+        message.success('Stock added successfully!');
+        
+        // Reset form
+        setProcureForm({
+          material_id: null,
+          form_type: null,
+          diameter: '',
+          length: '',
+          breadth: '',
+          height: '',
+          inner_diameter: '',
+          outer_diameter: '',
+          quantity: 1,
+          order_id: null,
+          selected_vendor_id: []
+        });
+        setProcureModalOpen(false);
+        
+        // Refresh the table
+        await fetchLinkedMaterials();
+      }
+    } catch (error) {
+      console.error('Error adding stock:', error);
+      const errorMessage = error?.response?.data?.detail;
+      if (typeof errorMessage === 'string') {
+        message.error(errorMessage);
+      } else if (typeof errorMessage === 'object') {
+        message.error(JSON.stringify(errorMessage));
+      } else {
+        message.error('Error adding stock');
+      }
+    } finally {
+      setProcureLoading(false);
+    }
   };
 
   const filtered = linkedMaterials.filter(item => {
@@ -804,6 +721,24 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       (item.order_status?.toLowerCase() || '').includes(searchLower) ||
       (item.part_numbers?.join(' ').toLowerCase() || '').includes(searchLower)
     );
+  }).filter(item => {
+    // Apply project number filter
+    if (filterProjectNumber) {
+      if (item.source_order_number !== filterProjectNumber) {
+        return false;
+      }
+    }
+    // Apply vendor filter (using vendor_name from backend response)
+    if (filterVendorName) {
+      if (!item.vendor_name) {
+        return false;
+      }
+      const vendorNames = item.vendor_name.split(',').map(name => name.trim()).filter(name => name);
+      if (!vendorNames.includes(filterVendorName)) {
+        return false;
+      }
+    }
+    return true;
   });
 
 
@@ -904,19 +839,17 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       title: <span className="font-semibold text-gray-700">Vendor</span>,
       dataIndex: 'vendor_name',
       key: 'vendor_name',
-      ellipsis: false, // Remove ellipsis to show all vendor names
+      ellipsis: false,
       render: (vendorName, record) => {
-        // Show received vendor if available, otherwise show enquiry vendors
+        // Show received vendor if available, otherwise show vendor_name from backend response
         if (record.received_vendor_name) {
           return (
             <div>
               <span className="font-medium text-green-700">{record.received_vendor_name}</span>
-              <br />
-             
             </div>
           );
         } else if (vendorName) {
-          // Show vendor names separated by commas
+          // Show vendor_name directly from backend response (already contains comma-separated names)
           return (
             <div className="text-gray-700">
               {vendorName}
@@ -1000,12 +933,12 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
 
   return (
     <div className="mt-4">
-      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procurement Status</span></div><Space className="w-full sm:w-auto flex-col sm:flex-row gap-2"><Input.Search placeholder="Search all columns..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-64" size="middle" /><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /></Space></div>}>
+      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500 text-lg sm:text-xl" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procure Raw Material</span></div><Space className="w-full lg:w-auto flex flex-col sm:flex-row flex-wrap gap-2" size="small"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-auto min-w-[150px] xs:min-w-[200px]" size="middle" /><Select placeholder="Project" allowClear value={filterProjectNumber} onChange={setFilterProjectNumber} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueProjectNumbers().map(pn => <Option key={pn} value={pn}>{pn}</Option>)}</Select><Select placeholder="Vendor" allowClear value={filterVendorName} onChange={setFilterVendorName} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueVendorNames().map(vname => <Option key={vname} value={vname}>{vname}</Option>)}</Select><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /><Button type="primary" icon={<AppstoreOutlined />} onClick={() => setProcureModalOpen(true)} style={{ backgroundColor: '#2563eb' }} className="w-full sm:w-auto">Procure Raw Material</Button></Space></div>}>
         <Table columns={columns} dataSource={filtered} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table responsive-table" scroll={{ x: 'max-content' }} loading={loading} />
       </Card>
 
       {/* Quick Status Modal - for dropdown status changes */}
-      <Modal open={quickStatusModalOpen} onCancel={() => setQuickStatusModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800">Update Order Status & Vendor</span></div>} width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }} centered footer={[<Button key="cancel" onClick={() => setQuickStatusModalOpen(false)}>Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveQuickStatus}>Update Status</Button>]}>
+      <Modal open={quickStatusModalOpen} onCancel={() => setQuickStatusModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Update Order Status & Vendor</span></div>} width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }} centered footer={[<Button key="cancel" onClick={() => setQuickStatusModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveQuickStatus} className="w-full sm:w-auto">Update Status</Button>]}>
         <div className="py-4 space-y-4">
           {/* Order Status */}
           <div className="space-y-1">
@@ -1039,192 +972,70 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
               showSearch
               optionFilterProp="children"
             >
-              {getEnquiryVendors(quickStatusRecord).map(vendor => (
-                <Option key={vendor.id} value={vendor.id}>
-                  {vendor.company_name}
-                </Option>
-              ))}
+              {quickStatusRecord?.vendor_name ? (
+                quickStatusRecord.vendor_name.split(',').map((name, idx) => {
+                  const vendorIds = quickStatusRecord.vendor_id?.split(',').map(id => parseInt(id.trim())) || [];
+                  return (
+                    <Option key={vendorIds[idx] || idx} value={vendorIds[idx]}>
+                      {name.trim()}
+                    </Option>
+                  );
+                })
+              ) : (
+                <Option disabled>No vendors available</Option>
+              )}
             </Select>
             <Text type="secondary" className="text-xs">Select from vendors contacted during enquiry</Text>
           </div>
         </div>
       </Modal>
 
-      {/* Full Edit Modal - for edit icon */}
-      <Modal open={statusEditModalOpen} onCancel={() => setStatusEditModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800">Edit Linked Parts & Status</span></div>} width={{ xs: '95%', sm: '90%', md: 800, lg: 800 }} centered footer={[<Button key="cancel" onClick={() => setStatusEditModalOpen(false)}>Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveStatusEdit}>Save Changes</Button>]}>
-        <div className="py-2 space-y-3" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-          {/* Form Type */}
-          <div className="space-y-1">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Form Type</Text>
-            <Select
-              style={{ width: '100%' }}
-              placeholder="Select Form Type"
-              value={statusEditRecord?.form_type}
-              disabled
-              size="middle"
-              className="rounded-md"
-            >
-              <Option value="Round">Round</Option>
-              <Option value="Square">Square</Option>
-              <Option value="Pipe">Pipe</Option>
-            </Select>
-          </div>
+      {/* Edit Linked Parts & Status Modal */}
+      <EditLinkedPartsModal
+        open={statusEditModalOpen}
+        onCancel={() => setStatusEditModalOpen(false)}
+        onSave={handleSaveStatusEdit}
+        statusEditRecord={statusEditRecord}
+        statusEditOrderQty={statusEditOrderQty}
+        setStatusEditOrderQty={setStatusEditOrderQty}
+        statusEditDimensions={statusEditDimensions}
+        setStatusEditDimensions={setStatusEditDimensions}
+        statusEditCurrentLinkages={statusEditCurrentLinkages}
+        statusEditPartQuantities={statusEditPartQuantities}
+        setStatusEditPartQuantities={setStatusEditPartQuantities}
+        statusEditPartRequiredLengths={statusEditPartRequiredLengths}
+        setStatusEditPartRequiredLengths={setStatusEditPartRequiredLengths}
+        statusEditPartRawMaterialUnits={statusEditPartRawMaterialUnits}
+        setStatusEditPartRawMaterialUnits={setStatusEditPartRawMaterialUnits}
+        availableUnits={availableUnits}
+        loadingUnits={loadingUnits}
+        orderHierarchyMap={orderHierarchyMap}
+        statusEditReceivedVendorId={statusEditReceivedVendorId}
+        setStatusEditReceivedVendorId={setStatusEditReceivedVendorId}
+        pendingUnlinks={pendingUnlinks}
+        setPendingUnlinks={setPendingUnlinks}
+        loading={loading}
+        handleInputKeyDown={handleInputKeyDown}
+        handleLinkPart={handleLinkPart}
+        vendors={vendors}
+      />
 
-          {/* Quantity */}
-          <div className="space-y-1">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</Text>
-            <InputNumber 
-              min={1} 
-              style={{ width: '100%' }} 
-              value={statusEditOrderQty} 
-              onChange={setStatusEditOrderQty}
-              size="middle" 
-              className="rounded-md" 
-            />
-          </div>
-
-          {/* Dimensions based on form type */}
-          {statusEditRecord?.form_type === 'Round' && (
-            <>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Diameter (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Diameter"
-                  value={statusEditDimensions.diameter}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, diameter: value }))}
-                  min={0}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Length"
-                  value={statusEditDimensions.length}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
-                  min={0}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-            </>
-          )}
-
-          {statusEditRecord?.form_type === 'Square' && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Length"
-                    value={statusEditDimensions.length}
-                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
-                    min={0}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breadth (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Breadth"
-                    value={statusEditDimensions.breadth}
-                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, breadth: value }))}
-                    min={0}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Height (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Height"
-                  value={statusEditDimensions.height}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, height: value }))}
-                  min={0}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-            </>
-          )}
-
-          {statusEditRecord?.form_type === 'Pipe' && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Outer Diameter (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Outer Diameter"
-                    value={statusEditDimensions.outer_diameter}
-                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }))}
-                    min={0}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Inner Diameter (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Inner Diameter"
-                    value={statusEditDimensions.inner_diameter}
-                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }))}
-                    min={0}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Length"
-                  value={statusEditDimensions.length}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
-                  min={0}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-            </>
-          )}
-          
-          {/* Parts Management - Tree View */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Text className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Parts Hierarchy</Text>
-             
-            </div>
-            <div className="bg-white p-4 rounded-lg border border-gray-200" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              {loading ? (
-                <div className="flex justify-center py-12">
-                  <Spin size="large" tip="Loading parts..." />
-                </div>
-              ) : orderHierarchyMap[statusEditRecord?.source_order_id || statusEditRecord?.order_id] ? (
-                <Tree
-                  showLine={{ showLeafIcon: false }}
-                  defaultExpandAll
-                  treeData={buildTreeData(orderHierarchyMap[statusEditRecord?.source_order_id || statusEditRecord?.order_id])}
-                  titleRender={(nodeData) => renderTreeNode(nodeData)}
-                  className="custom-tree"
-                />
-              ) : (
-                <Empty description="No hierarchy available" />
-              )}
-            </div>
-          </div>
-        </div>
-      </Modal>
+      {/* Procure Raw Material Modal */}
+      <ProcureRawMaterialModal
+        open={procureModalOpen}
+        onCancel={() => setProcureModalOpen(false)}
+        onSubmit={handleAddStock}
+        loading={procureLoading}
+        procureForm={procureForm}
+        setProcureForm={setProcureForm}
+        externalRawMaterials={externalRawMaterials}
+        orders={orders}
+        vendors={vendors}
+        ordersLoading={ordersLoading}
+        onFetchOrders={fetchOrders}
+        onFetchVendors={fetchVendors}
+        handleProcureDimensionChange={handleProcureDimensionChange}
+      />
     </div>
   );
 };

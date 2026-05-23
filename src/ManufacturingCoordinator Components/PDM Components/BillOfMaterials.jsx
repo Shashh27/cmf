@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
 import { PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -18,7 +18,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [expandedItems, setExpandedItems] = useState({});
   const [loading, setLoading] = useState(true);
   const [hierarchicalData, setHierarchicalData] = useState({});
-  const [originalHierarchicalData, setOriginalHierarchicalData] = useState({});
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createType, setCreateType] = useState('');
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -33,8 +32,10 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const [showToolsModal, setShowToolsModal] = useState(false);
   const [selectedProductForTools, setSelectedProductForTools] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const hasFetchedData = useRef(false);
+  const searchTimerRef = useRef(null);
 
   const getExpandKey = (type, id) => `${type}-${id}`;
 
@@ -135,135 +136,37 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialProductId, loading, products, hierarchicalData]);
 
-  const flattenBOMForExport = (data) => {
-    const assemblies = [];
-    const parts = [];
-    const operations = [];
-    const documents = [];
-
-    const addPartNode = (wrapper, parentAssembly = null) => {
-      if (!wrapper) return;
-      const part = wrapper.part || wrapper;
-      if (!part) return;
-
-      parts.push({
-        id: part.id,
-        part_number: part.part_number,
-        part_name: part.part_name,
-        type_name: part.type_name,
-        parent_assembly_id: parentAssembly?.id || null,
-        parent_assembly_number: parentAssembly?.assembly_number || null,
-        parent_assembly_name: parentAssembly?.assembly_name || null,
-        raw_material_id: part.raw_material_id,
-        part_detail: part.part_detail,
-      });
-
-      (wrapper.operations || []).forEach((op, index) => {
-        operations.push({
-          id: op.id || `${part.id}-op-${index}`,
-          part_id: part.id,
-          part_number: part.part_number,
-          part_name: part.part_name,
-          operation_number: op.operation_number,
-          operation_name: op.operation_name,
-          setup_time: op.setup_time,
-          cycle_time: op.cycle_time,
-          work_center_name: op.work_center_name || op.workcenter_name || "",
-          workcenter_id: op.workcenter_id || null,
-          machine_name: op.machine_name || "",
-          machine_id: op.machine_id || null,
-          part_type_name: op.part_type_name || "IN-House",
-          work_instructions: op.work_instructions || "",
-          notes: op.notes || "",
-        });
-      });
-
-      (wrapper.documents || []).forEach((doc, index) => {
-        documents.push({
-          id: doc.id || `${part.id}-doc-${index}`,
-          part_id: part.id,
-          part_number: part.part_number,
-          part_name: part.part_name,
-          document_type: doc.document_type,
-          document_name: doc.document_name,
-          document_version: doc.document_version,
-        });
-      });
-    };
-
-    const processAssemblyWrapper = (wrapper, parentAssembly = null) => {
-      if (!wrapper) return;
-      const assembly = wrapper.assembly || wrapper;
-
-      if (assembly) {
-        assemblies.push({
-          id: assembly.id,
-          assembly_number: assembly.assembly_number,
-          assembly_name: assembly.assembly_name,
-          parent_assembly_id: parentAssembly?.id || null,
-          parent_assembly_number: parentAssembly?.assembly_number || null,
-          parent_assembly_name: parentAssembly?.assembly_name || null,
-        });
-      }
-
-      (wrapper.parts || []).forEach((p) => addPartNode(p, assembly));
-      (wrapper.subassemblies || []).forEach((sub) =>
-        processAssemblyWrapper(sub, assembly)
-      );
-    };
-
-    (data.assemblies || []).forEach((asm) => processAssemblyWrapper(asm, null));
-    (data.direct_parts || []).forEach((p) => addPartNode(p, null));
-
-    return {
-      assemblies,
-      parts,
-      operations,
-      documents,
-    };
-  };
+  // Debounce search term to avoid filtering on every keystroke
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchTerm]);
 
   const fetchProductHierarchy = async (productId, forceRefresh = false) => {
     if (!forceRefresh && hierarchicalData[productId]) return hierarchicalData[productId];
     
     try {
-      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical`);
+      // Use lightweight endpoint - no operations/documents/tools (much faster)
+      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical-lightweight`);
       if (response.status >= 200 && response.status < 300) {
         const data = response.data;
-        const bomExport = flattenBOMForExport(data);
+        const bomExport = flattenBOMForExportLightweight(data);
 
-        // Store original data for tools viewer
-        setOriginalHierarchicalData(prev => ({ ...prev, [productId]: data }));
-
-        // Transformed view for this component (used to render tree quickly)
+        // Lightweight data is already in the right format, no transformation needed
         const transformedData = {
-          ...data,
-          parts: (data.direct_parts || [])
-            .map(item => ({
-              ...item.part,
-              raw_material_status: item.part?.raw_material_status || item.raw_material_status,
-              extracted_data: item.extracted_data || [],
-              documents: item.documents || []
-            })),
-          assemblies: (data.assemblies || [])
-            .map(assembly => ({
-              ...assembly.assembly,
-              parts: (assembly.parts || [])
-                .map(part => ({
-                  ...part.part,
-                  raw_material_status: part.part?.raw_material_status || part.raw_material_status,
-                  extracted_data: part.extracted_data || [],
-                  documents: part.documents || []
-                })),
-              child_assemblies: transformSubassemblies(assembly.subassemblies || [])
-            })),
+          product: data.product,
+          parts: data.parts || [],
+          assemblies: data.assemblies || [],
           bomExport,
         };
 
         setHierarchicalData(prev => ({ ...prev, [productId]: transformedData }));
 
         // For external consumers (like ProductSummary) that need full PartDetails
-        // including operations, pass the original hierarchy 'data'.
+        // including operations, they should use the full hierarchical endpoint separately
         if (onHierarchyLoaded) {
           onHierarchyLoaded(productId, data);
         }
@@ -276,19 +179,50 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     }
   };
 
-  const transformSubassemblies = (subassemblies) => {
-    return (subassemblies || [])
-      .map(sub => ({
-        ...sub.assembly,
-        parts: (sub.parts || [])
-          .map(part => ({
-            ...part.part,
-            raw_material_status: part.part?.raw_material_status || part.raw_material_status,
-            extracted_data: part.extracted_data || [],
-            documents: part.documents || []
-          })),
-        child_assemblies: transformSubassemblies(sub.subassemblies || [])
-      }));
+  // Flatten BOM for export using lightweight data structure
+  const flattenBOMForExportLightweight = (data) => {
+    const assemblies = [];
+    const parts = [];
+
+    const processAssembly = (assembly, parentPath = []) => {
+      const currentPath = [...parentPath, assembly.assembly_name];
+      assemblies.push({
+        id: assembly.id,
+        assembly_name: assembly.assembly_name,
+        assembly_number: assembly.assembly_number,
+        path: currentPath.join(' > '),
+      });
+
+      // Process parts in this assembly
+      (assembly.parts || []).forEach(part => {
+        parts.push({
+          ...part,
+          assembly_path: currentPath.join(' > '),
+          assembly_name: assembly.assembly_name,
+        });
+      });
+
+      // Process child assemblies
+      (assembly.child_assemblies || []).forEach(child => {
+        processAssembly(child, currentPath);
+      });
+    };
+
+    // Process root assemblies
+    (data.assemblies || []).forEach(assembly => {
+      processAssembly(assembly);
+    });
+
+    // Process direct parts (no assembly)
+    (data.parts || []).forEach(part => {
+      parts.push({
+        ...part,
+        assembly_path: '',
+        assembly_name: 'Direct Part',
+      });
+    });
+
+    return { assemblies, parts };
   };
 
   const toggleExpand = (key) => {
@@ -555,7 +489,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     return [];
   };
 
-  const getBOMStats = () => {
+  const bomStats = useMemo(() => {
     const targetProducts = initialProductId 
       ? products.filter(p => Number(p.id) === Number(initialProductId))
       : products;
@@ -586,7 +520,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     });
     
     return stats;
-  };
+  }, [products, hierarchicalData, initialProductId]);
 
   const matchesFilter = (part, filter) => {
     if (!part || filter === 'all') return true;
@@ -617,12 +551,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     if (type === 'part') return matchesFilter(item, filter);
     
     if (type === 'assembly') {
-      // Check parts of this assembly
-      const parts = getPartsForAssembly(item.id);
+      // Use direct properties instead of expensive tree searches
+      const parts = item.parts || [];
       if (parts.some(p => matchesFilter(p, filter))) return true;
       
-      // Check child assemblies
-      const children = getNestedAssemblies(item.id);
+      const children = item.child_assemblies || [];
       if (children.some(child => hasMatchingItems(child, 'assembly', filter, productId))) return true;
       
       return false;
@@ -630,7 +563,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     
     if (type === 'product') {
       const data = hierarchicalData[item.id];
-      if (!data) return true; // Show product if data not yet loaded (it will load on expand)
+      if (!data) return true;
       
       const directParts = data.parts || [];
       if (directParts.some(p => matchesFilter(p, filter))) return true;
@@ -763,7 +696,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         key={`part-${part.id}`}
         className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
         style={{ marginLeft: `${level * 14}px` }}
-        onClick={() => handleItemClick(part, 'part', productId || findProductIdForItem(part.id))}
+        onClick={() => handleItemClick(part, 'part', productId || part.product_id)}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
@@ -792,19 +725,12 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const renderAssemblyTree = (assembly, level = 0, productId = null) => {
     if (!hasMatchingItems(assembly, 'assembly', activeFilter, productId)) return null;
     
-    const childAssemblies = getNestedAssemblies(assembly.id);
-    const assemblyParts = getPartsForAssembly(assembly.id);
-    const combinedChildren = [
-      ...assemblyParts.map(p => ({ ...p, __childType: 'part' })),
-      ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
-    ].sort((a, b) => {
-      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return timeA - timeB || (a.id || 0) - (b.id || 0);
-    });
+    // Use direct properties instead of expensive tree searches
+    const childAssemblies = assembly.child_assemblies || [];
+    const assemblyParts = assembly.parts || [];
+    const hasChildren = assemblyParts.length > 0 || childAssemblies.length > 0;
 
     const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
-    const hasChildren = combinedChildren.length > 0;
     const isSelected = activeItemId === assembly.id && activeItemType === 'assembly';
 
     return (
@@ -812,7 +738,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         <div
           className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
           style={{ marginLeft: `${level * 14}px` }}
-          onClick={() => handleItemClick(assembly, 'assembly', productId || findProductIdForItem(assembly.id))}
+          onClick={() => handleItemClick(assembly, 'assembly', productId || assembly.product_id)}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0 w-5 flex justify-center">
@@ -841,11 +767,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         </div>
         {isExpanded && hasChildren && (
           <div className="mt-0.5">
-            {combinedChildren.map(child =>
-              child.__childType === 'part'
-                ? renderPartInTree(child, level + 1, productId)
-                : renderAssemblyTree(child, level + 1, productId)
-            )}
+            {assemblyParts.map(part => renderPartInTree(part, level + 1, productId))}
+            {childAssemblies.map(child => renderAssemblyTree(child, level + 1, productId))}
           </div>
         )}
       </div>
@@ -859,16 +782,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     const hasData = !!productHierarchy;
     const childAssemblies = productHierarchy?.assemblies || [];
     const directParts = productHierarchy?.parts || [];
-    const combinedChildren = [
-      ...directParts.map(p => ({ ...p, __childType: 'part' })),
-      ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
-    ].sort((a, b) => {
-      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return timeA - timeB || (a.id || 0) - (b.id || 0);
-    });
+    const hasChildren = directParts.length > 0 || childAssemblies.length > 0;
     const isExpanded = expandedItems[getExpandKey('product', product.id)];
-    const hasChildren = combinedChildren.length > 0;
     const showArrow = !hasData || hasChildren;
     const isSelected = activeItemId === product.id && activeItemType === 'product';
 
@@ -898,11 +813,8 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         </div>
         {isExpanded && hasChildren && (
           <div className="mt-0.5 ml-2 border-l border-slate-200 pl-1">
-            {combinedChildren.map(child =>
-              child.__childType === 'part'
-                ? renderPartInTree(child, 1, product.id)
-                : renderAssemblyTree(child, 1, product.id)
-            )}
+            {childAssemblies.map(asm => renderAssemblyTree(asm, 1, product.id))}
+            {directParts.map(part => renderPartInTree(part, 1, product.id))}
           </div>
         )}
       </div>
@@ -1067,14 +979,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
 
   // Function to render search results
   const renderSearchResults = () => {
-    if (!searchTerm.trim()) return null;
+    if (!debouncedSearchTerm.trim()) return null;
     
     // Group results by assembly to show related parts together
     const groupedResults = {};
     const directResults = []; // Parts that directly match search
     
     filteredProducts.forEach(product => {
-      const { foundItems } = searchInHierarchicalData(product.id, searchTerm, activeFilter);
+      const { foundItems } = searchInHierarchicalData(product.id, debouncedSearchTerm, activeFilter);
       foundItems.forEach(item => {
         const resultWithProduct = { ...item, productName: product.product_name };
         
@@ -1117,7 +1029,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     if (allResults.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[200px] text-slate-400">
-          <Empty description={`No results found for "${searchTerm}"`} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty description={`No results found for "${debouncedSearchTerm}"`} image={Empty.PRESENTED_IMAGE_SIMPLE} />
         </div>
       );
     }
@@ -1169,14 +1081,14 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               <div className="flex flex-col min-w-0">
                 <Text className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
                   {result.type === 'part' 
-                    ? highlightText(result.item.part_name, searchTerm)
-                    : highlightText(result.item.assembly_name, searchTerm)
+                    ? highlightText(result.item.part_name, debouncedSearchTerm)
+                    : highlightText(result.item.assembly_name, debouncedSearchTerm)
                   }
                 </Text>
                 <Text className="text-[10px] text-slate-400 truncate">
                   {result.type === 'part' 
-                    ? highlightText(result.item.part_number, searchTerm)
-                    : highlightText(result.item.assembly_number, searchTerm)
+                    ? highlightText(result.item.part_number, debouncedSearchTerm)
+                    : highlightText(result.item.assembly_number, debouncedSearchTerm)
                   }
                 </Text>
                 <div className="flex items-center gap-2 mt-1">
@@ -1207,7 +1119,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               acc + (group.parts ? group.parts.length + 1 : 1), 0
             )} result{allResults.reduce((acc, group) => 
               acc + (group.parts ? group.parts.length + 1 : 1), 0
-            ) !== 1 ? 's' : ''} {searchTerm ? `for "${searchTerm}"` : ''}
+            ) !== 1 ? 's' : ''} {debouncedSearchTerm ? `for "${debouncedSearchTerm}"` : ''}
           </span>
         </div>
         
@@ -1231,12 +1143,11 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     );
   };
 
-  const filteredProductsBase = products.sort((a, b) => (b.id || 0) - (a.id || 0));
-
-  const initialPid = initialProductId != null ? Number(initialProductId) : null;
-  const filteredProducts = initialPid
-    ? filteredProductsBase.filter(p => Number(p.id) === initialPid)
-    : filteredProductsBase;
+  const filteredProducts = useMemo(() => {
+    const sorted = [...products].sort((a, b) => (b.id || 0) - (a.id || 0));
+    const pid = initialProductId != null ? Number(initialProductId) : null;
+    return pid ? sorted.filter(p => Number(p.id) === pid) : sorted;
+  }, [products, initialProductId]);
 
   if (loading) {
     return (
@@ -1318,7 +1229,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           </div>
           <div className="w-44 sm:w-52 shrink-0">
             <BOMFilters 
-              stats={getBOMStats()} 
+              stats={bomStats} 
               activeFilter={activeFilter} 
               onFilterChange={(filter) => {
                 setActiveFilter(filter);
@@ -1330,7 +1241,7 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
         </div>
         </div>
         <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 bom-scroll min-h-0">
-          {searchTerm.trim() ? (
+          {debouncedSearchTerm.trim() ? (
             renderSearchResults()
           ) : filteredProducts.length > 0 ? (
             filteredProducts.map(product => renderProductTree(product))
@@ -1368,7 +1279,6 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
           setSelectedProductForTools(null);
         }}
         product={selectedProductForTools}
-        hierarchicalData={selectedProductForTools ? originalHierarchicalData[selectedProductForTools.id] : null}
       />
     </>
   );

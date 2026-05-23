@@ -4,7 +4,7 @@ import axios from "axios";
 import { API_BASE_URL } from '../../Config/auth';
 import { Modal, Form, Input, Select, Button, message, Upload, Card, Badge, TimePicker, Row, Col, DatePicker } from 'antd';
 import dayjs from 'dayjs';
-import { fetchInto, timePickerRules } from './operationUtils.js';
+import { normalizeVersion, fetchInto, timePickerRules } from './operationUtils.js';
 
 const { TextArea } = Input;
 
@@ -165,7 +165,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
         : [{ part_type_id: inHouseId, documents: [] }];
       form.setFieldsValue({ items });
     } else {
-      form.setFieldsValue({ items: [{ document_version: 'v1.0', document_type: '2D' }] });
+      form.setFieldsValue({ items: [{ document_version: '', document_type: '2D' }] });
     }
   }, [open, actionType, initialOperations, inHouseId]);
 
@@ -251,7 +251,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
               fd.append('files', fileObj);
               fd.append('document_name', fileObj.name || 'Document');
               fd.append('document_type', resolveType(doc.document_type, doc.document_type_other) || 'IPID');
-              fd.append('document_version', (doc.document_version || 'v1.0').replace(/^v/i, ''));
+              fd.append('document_version', (doc.document_version || '1.0').replace(/^v/i, ''));
               fd.append('parent_id', '');
             }
           }
@@ -282,7 +282,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
           bulkDocFormData.append('files', file);
           bulkDocFormData.append('document_name', item.document_name || file.name?.replace(/\.[^/.]+$/, '') || 'Document');
           bulkDocFormData.append('document_type', resolveType(item.document_type, item.document_type_other));
-          bulkDocFormData.append('document_version', item.document_version || 'v1.0');
+          bulkDocFormData.append('document_version', item.document_version || '1.0');
           if (item.parent_id) bulkDocFormData.append('parent_id', String(item.parent_id));
           }
         } catch (e) { console.error(e); message.error('Failed to create item'); }
@@ -553,8 +553,8 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                       </Form.Item>
                                     </Col>
                                     <Col xs={18} sm={2} lg={2}>
-                                      <Form.Item {...dr} name={[dn, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Ver</span>} className="mb-0" initialValue="v1.0">
-                                        <Input placeholder="v1.0" disabled size="small" className="bg-gray-50 text-center" />
+                                      <Form.Item {...dr} name={[dn, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Rev</span>} className="mb-0" initialValue="" getValueFromEvent={e => normalizeVersion(e.target.value)} rules={[{ required: true, message: 'Required' }]}>
+                                        <Input placeholder="00" size="small" className="bg-white text-center" autoComplete="off" />
                                       </Form.Item>
                                     </Col>
                                     <Col xs={6} sm={2} lg={2} className="flex justify-center">
@@ -564,7 +564,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                 </Card>
                               ))}
                               <Form.Item>
-                                <Button type="dashed" onClick={() => addDoc({ document_type: 'IPID', document_version: 'v1.0' })} block icon={<PlusOutlined />} className="text-blue-500 border-blue-200">
+                                <Button type="dashed" onClick={() => addDoc({ document_type: 'IPID', document_version: '' })} block icon={<PlusOutlined />} className="text-blue-500 border-blue-200">
                                   Add Document to Operation
                                 </Button>
                               </Form.Item>
@@ -600,7 +600,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                 <div className="flex flex-col gap-2">
                                   <Form.Item {...restField} name={[name, 'document_type']} label={<span className="text-xs font-medium text-gray-600">Document Type</span>} className="mb-0" rules={[{ required: true, message: 'Required' }]}>
                                     <Select placeholder="Select Type">
-                                      {['2D','3D','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
+                                      {['2D','3D','Other'].map(t => <Select.Option key={t} value={t}>{t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}</Select.Option>)}
                                     </Select>
                                   </Form.Item>
                                   {type === 'Other' && (
@@ -614,8 +614,8 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                           </Form.Item>
                         </Col>
                         <Col xs={24} sm={12} lg={6}>
-                          <Form.Item {...restField} name={[name, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Version</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0">
-                            <Input placeholder="v1.0" disabled className="bg-gray-50" />
+                          <Form.Item {...restField} name={[name, 'document_version']} label={<span className="text-xs font-medium text-gray-600">Revision</span>} rules={[{ required: true, message: 'Required' }]} className="mb-0" getValueFromEvent={e => normalizeVersion(e.target.value)}>
+                            <Input placeholder="00" className="bg-white" autoComplete="off" />
                           </Form.Item>
                         </Col>
                       </Row>
@@ -625,7 +625,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
               </div>
 
               <Form.Item style={{ marginTop: 16 }}>
-                <Button type="dashed" onClick={() => add(actionType === 'operation' ? { part_type_id: inHouseId, documents: [] } : { document_version: 'v1.0', document_type: '2D' })} block icon={<PlusOutlined />}>
+                <Button type="dashed" onClick={() => add(actionType === 'operation' ? { part_type_id: inHouseId, documents: [] } : { document_version: '', document_type: '2D' })} block icon={<PlusOutlined />}>
                   Add Another {actionType === 'operation' ? 'Operation' : 'Document'}
                 </Button>
               </Form.Item>

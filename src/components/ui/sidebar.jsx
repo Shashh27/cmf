@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Layout, Menu, Drawer, Button, Badge } from "antd";
 import { Link, useLocation } from "react-router-dom";
 import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
-  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined
+  SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined,ReloadOutlined
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
@@ -278,11 +278,13 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       {
         key: `${prefix}/notifications`,
         label: (
-          <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
-            <Badge count={notificationCount} offset={[10, 0]}>
-              Notifications
-            </Badge>
-          </Link>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
+              <Badge count={notificationCount} offset={[10, 0]}>
+                Notifications
+              </Badge>
+            </Link>
+          </div>
         ),
         icon: <BellOutlined />,
       },

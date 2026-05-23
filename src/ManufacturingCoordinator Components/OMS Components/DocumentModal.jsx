@@ -2,7 +2,20 @@ import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Empty, message, Upload, Tag, Divider, Popconfirm, Card, Badge, Tooltip } from "antd";
-import { FileTextOutlined, DownloadOutlined, DeleteOutlined, UploadOutlined } from "@ant-design/icons";
+import { FileTextOutlined, DownloadOutlined, DeleteOutlined, UploadOutlined, SyncOutlined, ExclamationCircleOutlined } from "@ant-design/icons";
+
+// Shared utility: normalise a revision string as the user types
+const normalizeRevision = (raw) => {
+  let v = raw || '';
+  // Allow alphanumeric and common revisioning symbols: . - _ / space
+  v = v.replace(/[^0-9a-zA-Z\s._\/-]/g, '');
+  return v;
+};
+
+const cleanDocName = (name) => {
+  if (!name) return '';
+  return String(name).replace(/^re\s+/i, '');
+};
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -17,58 +30,8 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   const [parentId, setParentId] = useState(null);
   const [updatingDocName, setUpdatingDocName] = useState("");
 
-  // Version validation function
-  const validateVersionFormat = (value) => {
-    if (!value) return true; // Allow empty for optional validation
-    const versionPattern = /^v\d{1,2}\.\d{0,3}[a-zA-Z0-9]{0,3}$/;
-    return versionPattern.test(value);
-  };
-
-  const handleVersionChange = (e) => {
-    let value = e.target.value;
-    
-    // Always start with 'v' if not present
-    if (value && !value.startsWith('v')) {
-      value = 'v' + value;
-    }
-    
-    // Remove invalid characters but keep v, digits, dots, and alphanumeric
-    value = value.replace(/[^v0-9.a-zA-Z]/g, '');
-    
-    // Ensure only one 'v' at the beginning
-    if (value.startsWith('v')) {
-      value = 'v' + value.substring(1).replace(/v/g, '');
-    }
-    
-    // Ensure only one dot
-    const parts = value.split('.');
-    if (parts.length > 2) {
-      value = parts[0] + '.' + parts.slice(1).join('');
-    }
-    
-    // Limit to exactly 3 characters before decimal (including 'v'), and max 3 characters after decimal
-    const match = value.match(/^(v\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
-    if (match) {
-      let major = match[1] || 'v';
-      let afterDecimal = match[2] || '';
-
-      value = major;
-      // Always include decimal point
-      value += '.';
-      // Add after decimal content (max 3 characters)
-      if (afterDecimal) {
-        afterDecimal = afterDecimal.substring(0, 3);
-        value += afterDecimal;
-      }
-    } else {
-      // Fallback for initial 'v' or 'v12' (max 3 chars total)
-      const initialMatch = value.match(/^(v\d{0,2})/);
-      if (initialMatch) {
-        value = initialMatch[1] + '.';
-      }
-    }
-    
-    form.setFieldValue('document_version', value);
+  const handleRevisionChange = (e) => {
+    form.setFieldValue('document_version', normalizeRevision(e.target.value));
   };
 
   const getCurrentUserId = () => {
@@ -118,12 +81,6 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       return;
     }
 
-    // Validate version format
-    if (!validateVersionFormat(values.document_version)) {
-      message.error("Version format must be: vXXX.XXX (e.g., v1.0, v12.3a, v123.456)");
-      return;
-    }
-
     const currentUserId = getCurrentUserId();
     if (currentUserId == null) {
       message.error("User is required. Please ensure you are logged in.");
@@ -139,7 +96,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       docType = values.document_type_other.trim();
     }
     uploadFormData.append("document_type", docType);
-    uploadFormData.append("document_version", parentId ? (values.document_version || "v1.0") : "v1.0"); // Enforce v1.0 for new uploads
+    uploadFormData.append("document_version", values.document_version || "");
     if (parentId) {
       uploadFormData.append("parent_id", parentId);
     }
@@ -153,8 +110,9 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
       const result = response.data;
       onDocumentUploaded(result);
+      message.success("Document uploaded successfully");
       form.resetFields();
-      form.setFieldsValue({ document_version: "v1.0" });
+      form.setFieldsValue({ document_version: "" });
       setParentId(null);
       setUpdatingDocName("");
       if (selectedOrderId) {
@@ -221,43 +179,28 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
     }
   };
 
-  const handleUpdateVersion = (doc) => {
-    // Determine the root parent ID. If this doc is already a version, use its parent_id.
-    // Otherwise, use its own id as the root for all future versions.
+  const handleUpdateRevision = (doc) => {
+    // Determine the root parent ID. If this doc is already a revision, use its parent_id.
+    // Otherwise, use its own id as the root for all future revisions.
     const rootId = doc.parent_id || doc.id;
     setParentId(rootId);
     setUpdatingDocName(doc.document_name);
     
-    // Find all documents belonging to this version group to find the latest version
-    const versionGroup = documents.filter(d => d.id === rootId || d.parent_id === rootId);
-    
-    let maxVersion = 1.0;
-    versionGroup.forEach(d => {
-      // Correctly parse version string like "v2.0" by removing the 'v'
-      const v = parseFloat(String(d.document_version).replace(/^v/i, ''));
-      if (!isNaN(v) && v > maxVersion) {
-        maxVersion = v;
-      }
-    });
-
-    const nextVersion = 'v' + (maxVersion + 1.0).toFixed(1);
-
     form.setFieldsValue({
       document_type: doc.document_type,
-      document_version: nextVersion
+      document_version: "" // Let the user enter revision manually
     });
     
-    message.info(`Creating version ${nextVersion} for: ${doc.document_name}`);
+    message.info(`Please enter new revision for: ${doc.document_name}`);
   };
 
   const groupDocuments = () => {
-    // Version ordering inside each root:
+    // Revision ordering inside each root:
     // - FIFO  : smaller `id` (earlier inserted) first
     // - LIFO  : larger `id` (latest inserted) first
-    // We sort by `id` because `document_version` is stored like "v1.0" which caused NaN sorting.
-    const VERSION_ORDER = "FIFO"; // oldest first
-    const rootSort = (a, b) => (VERSION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
-    const versionSort = (a, b) => (VERSION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
+    const REVISION_ORDER = "FIFO"; // oldest first
+    const rootSort = (a, b) => (REVISION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
+    const revisionSort = (a, b) => (REVISION_ORDER === "FIFO" ? a.id - b.id : b.id - a.id);
 
     const roots = documents
       .filter((d) => !d.parent_id)
@@ -265,45 +208,47 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
     return roots.map((root) => ({
       ...root,
-      versions: documents
+      revisions: documents
         .filter((v) => v.parent_id === root.id)
-        .sort(versionSort),
+        .sort(revisionSort),
     }));
   };
 
-  const renderDocumentItem = (doc, isVersion = false) => (
+  const renderDocumentItem = (doc, isRevision = false) => (
     <div 
       key={doc.id} 
       style={{ 
         padding: '12px', 
-        backgroundColor: isVersion ? '#fdfeff' : '#fff', 
+        backgroundColor: isRevision ? '#fdfeff' : '#fff', 
         border: '1px solid #f0f0f0', 
         borderRadius: 8,
-        marginBottom: isVersion ? 8 : 12,
-        marginLeft: isVersion ? 24 : 0,
+        marginBottom: isRevision ? 8 : 12,
+        marginLeft: isRevision ? 24 : 0,
         boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-        borderLeft: isVersion ? '3px solid #ffa940' : '3px solid #1890ff'
+        borderLeft: isRevision ? '3px solid #ffa940' : '3px solid #1890ff'
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <FileTextOutlined style={{ color: isVersion ? '#ffa940' : '#1890ff', fontSize: 16 }} />
-            <Text strong style={{ fontSize: 14 }}>{doc.document_name}</Text>
+            <FileTextOutlined style={{ color: isRevision ? '#ffa940' : '#1890ff', fontSize: 16 }} />
+            <Text strong style={{ fontSize: 14 }}>{cleanDocName(doc.document_name)}</Text>
             <Tag color="blue" style={{ fontSize: '13px', fontWeight: 'bold', border: '1px solid #91d5ff' }}>
-              {doc.document_version?.startsWith('v') ? doc.document_version : `v${doc.document_version}`}
+              {doc.document_version}
             </Tag>
           </div>
-          <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Tag color="blue" variant="filled" style={{ fontSize: '11px' }}>{doc.document_type}</Tag>
-          </div>
+          {doc.document_type && String(doc.document_type).trim().toLowerCase() !== 're' && (
+            <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Tag color="blue" variant="filled" style={{ fontSize: '11px' }}>{doc.document_type}</Tag>
+            </div>
+          )}
         </div>
         <Space size={4} style={{ flexShrink: 0 }}>
-          <Tooltip title="Upload New Version">
+          <Tooltip title="Upload New Revision">
             <Button
               type="text"
               size="small"
-              onClick={() => handleUpdateVersion(doc)}
+              onClick={() => handleUpdateRevision(doc)}
               icon={<UploadOutlined style={{ color: '#fa8c16' }} />}
             />
           </Tooltip>
@@ -338,7 +283,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const handleClose = () => {
     form.resetFields();
-    form.setFieldsValue({ document_version: "v1.0" });
+    form.setFieldsValue({ document_version: "" });
     setDocuments([]);
     setParentId(null);
     setUpdatingDocName("");
@@ -361,7 +306,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
             </div>
             <div>
               <Title level={4} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 18px)' }}>Document Management</Title>
-              <Text type="secondary" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Manage and version project documents</Text>
+              <Text type="secondary" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Manage and revision project documents</Text>
             </div>
           </Space>
           <Badge count={documents.length} overflowCount={99} style={{ backgroundColor: '#1890ff' }}>
@@ -383,12 +328,12 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
         form={form}
         layout="vertical"
         onFinish={handleUpload}
-        initialValues={{ document_version: 'v1.0' }}
+        initialValues={{ document_version: '' }}
       >
         <Row gutter={[12, 12]}>
           <Col xs={24} lg={14}>
             <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-              <Title level={5} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 16px)' }}>Document History</Title>
+              <Title level={5} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 16px)' }}>Revision History</Title>
               {orderId ? (
                 <Tag color="cyan" style={{ fontSize: 'clamp(10px, 2vw, 12px)' }}>Order: {orders.find(order => order.id.toString() === orderId.toString())?.sale_order_number || `Order ${orderId}`}</Tag>
               ) : (
@@ -423,7 +368,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                   groupDocuments().map(root => (
                     <div key={root.id} style={{ marginBottom: 16 }}>
                       {renderDocumentItem(root)}
-                      {root.versions.map(v => renderDocumentItem(v, true))}
+                      {root.revisions.map(v => renderDocumentItem(v, true))}
                     </div>
                   ))
                 )
@@ -445,7 +390,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: '8px' }}>
                 <Title level={5} style={{ margin: 0, fontSize: 'clamp(14px, 3vw, 16px)' }}>
                   {parentId ? (
-                    <Space><UploadOutlined /> Update Version</Space>
+                    <Space><UploadOutlined /> Update Revision</Space>
                   ) : (
                     <Space><UploadOutlined /> New Upload</Space>
                   )}
@@ -459,7 +404,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                       setParentId(null);
                       setUpdatingDocName("");
                       form.resetFields();
-                      form.setFieldsValue({ document_version: "v1.0" });
+                      form.setFieldsValue({ document_version: "" });
                     }}
                   >
                     Cancel
@@ -533,25 +478,19 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={10}>
-                  <Form.Item 
-                    name="document_version" 
-                    label="Version" 
+                  <Form.Item
+                    name="document_version"
+                    label={<Text strong>Revision</Text>}
                     rules={[
-                      { required: true, message: 'Version is required' },
-                      { validator: (_, value) => {
-                        if (!validateVersionFormat(value)) {
-                          return Promise.reject('Version format must be: vXXX.XXX (e.g., v1.0, v12.3a, v123.456)');
-                        }
-                        return Promise.resolve();
-                      }}
-                    ]} 
+                      { required: true, message: 'Required' }
+                    ]}
                     style={{ marginBottom: 16 }}
                   >
-                    <Input 
-                      placeholder="v1.0" 
-                      disabled={!parentId} 
-                      onChange={handleVersionChange}
-                      style={{ backgroundColor: !parentId ? '#f5f5f5' : '#fff', fontWeight: 'bold' }} 
+                    <Input
+                      placeholder="00"
+                      onChange={handleRevisionChange}
+                      autoComplete="off"
+                      style={{ backgroundColor: '#fff', fontWeight: 'bold', textAlign: 'center' }}
                     />
                   </Form.Item>
                 </Col>
@@ -567,7 +506,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                 size="large"
                 style={{ height: 45, borderRadius: 8, marginTop: 8 }}
               >
-                {parentId ? "Upload New Version" : "Upload Document"}
+                {parentId ? "Upload Revision" : "Upload Document"}
               </Button>
             </div>
           </Col>
