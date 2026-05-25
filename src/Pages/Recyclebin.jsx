@@ -64,12 +64,12 @@ const Recyclebin = ({ orderId }) => {
       const response = await axios.get(url);
       const allParts = response.data.parts || [];
       const allAssemblies = response.data.assemblies || [];
+      const orderInfo = response.data.order_info;
       
       setAllParts(allParts);
       setAllAssemblies(allAssemblies);
       
       // If order_info is provided and no parts/assemblies, display order info
-      const orderInfo = response.data.order_info;
       if (orderInfo && allParts.length === 0 && allAssemblies.length === 0) {
         setProjects([{
           product_id: orderInfo.product_id,
@@ -79,7 +79,7 @@ const Recyclebin = ({ orderId }) => {
           parts: [],
           assemblies: []
         }]);
-        return;
+        return { allParts, allAssemblies, orderInfo };
       }
       
       // Group by product
@@ -117,6 +117,9 @@ const Recyclebin = ({ orderId }) => {
       });
       
       setProjects(Object.values(projectMap));
+      
+      // Return the data for immediate use
+      return { allParts, allAssemblies, orderInfo };
     } catch (error) {
       console.error("Error fetching projects:", error);
       antMessage.error("Failed to load projects");
@@ -125,77 +128,51 @@ const Recyclebin = ({ orderId }) => {
     }
   };
 
-  const fetchProductBOM = async (productId) => {
+  const fetchProductBOM = async (productId, partsData = null, assembliesData = null) => {
     setLoading(true);
     try {
-      // Filter parts and assemblies by product_id from the already fetched recycle-bin data
-      const productParts = allParts.filter(part => part.product_id === productId);
-      const productAssemblies = allAssemblies.filter(assembly => assembly.product_id === productId);
+      // Filter parts and assemblies by product_id from the provided data or state
+      const sourceParts = partsData || allParts;
+      const sourceAssemblies = assembliesData || allAssemblies;
+      const productParts = sourceParts.filter(part => part.product_id === productId);
+      const productAssemblies = sourceAssemblies.filter(assembly => assembly.product_id === productId);
       
-      // Need to fetch full hierarchy to get assembly structure
-      // since parts may belong to assemblies not in recycle bin
-      const hierarchyResponse = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical-lightweight`);
-      const fullHierarchy = hierarchyResponse.data;
-      
-      // Build hierarchy structure from full hierarchy data
-      // But only show parts that are in recycle bin
+      // Group parts by assembly_id using only recycle bin data
       const assemblyMap = {};
-      const buildAssemblyMap = (assemblies) => {
-        if (!assemblies) return;
-        assemblies.forEach(assembly => {
-          assemblyMap[assembly.id] = {
-            ...assembly,
-            parts: [],
-            child_assemblies: []
-          };
-          if (assembly.child_assemblies) {
-            buildAssemblyMap(assembly.child_assemblies);
-          }
-        });
-      };
-      
-      buildAssemblyMap(fullHierarchy.assemblies || []);
-      
-      // Build parent-child relationships for assemblies
-      const rootAssemblies = [];
-      const buildTree = (assemblies, parentId = null) => {
-        if (!assemblies) return;
-        assemblies.forEach(assembly => {
-          if (assemblyMap[assembly.id]) {
-            if (parentId && assemblyMap[parentId]) {
-              assemblyMap[parentId].child_assemblies.push(assemblyMap[assembly.id]);
-            } else {
-              rootAssemblies.push(assemblyMap[assembly.id]);
-            }
-            if (assembly.child_assemblies) {
-              buildTree(assembly.child_assemblies, assembly.id);
-            }
-          }
-        });
-      };
-      
-      buildTree(fullHierarchy.assemblies || []);
-      
-      // Assign recycle bin parts to their assemblies
       productParts.forEach(part => {
-        if (part.assembly_id && assemblyMap[part.assembly_id]) {
+        if (part.assembly_id) {
+          if (!assemblyMap[part.assembly_id]) {
+            assemblyMap[part.assembly_id] = {
+              id: part.assembly_id,
+              assembly_name: part.assembly_name,
+              parts: []
+            };
+          }
           assemblyMap[part.assembly_id].parts.push(part);
         }
       });
+      
+      // Convert assembly map to array
+      const assemblies = Object.values(assemblyMap);
       
       // Build the final BOM structure
       const bomData = {
         product: {
           id: productId,
-          product_name: selectedProject?.product_name || productParts[0]?.product_name || productAssemblies[0]?.product_name || fullHierarchy.product?.product_name || ''
+          product_name: selectedProject?.product_name || productParts[0]?.product_name || productAssemblies[0]?.product_name || ''
         },
         parts: productParts.filter(part => !part.assembly_id), // Direct parts (no assembly)
-        assemblies: rootAssemblies
+        assemblies: assemblies
       };
       
       setBomData(bomData);
       setFilteredBomData(bomData);
-      setExpandedKeys(['product-' + productId]);
+      // Preserve current expanded keys, only ensure product is expanded
+      setExpandedKeys(prev => {
+        const keys = new Set(prev);
+        keys.add('product-' + productId);
+        return Array.from(keys);
+      });
     } catch (error) {
       console.error("Error filtering BOM:", error);
       antMessage.error("Failed to load BOM");
@@ -225,9 +202,9 @@ const Recyclebin = ({ orderId }) => {
             await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/restore`);
             antMessage.success(`Assembly "${item.assembly_name}" and all its parts restored successfully`);
           }
-          fetchProjects();
+          const data = await fetchProjects();
           if (selectedProject) {
-            fetchProductBOM(selectedProject.product_id);
+            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
           }
         } catch (error) {
           console.error("Error restoring:", error);
@@ -277,9 +254,9 @@ const Recyclebin = ({ orderId }) => {
             await axios.delete(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/permanent-delete`);
             antMessage.success(`Assembly "${item.assembly_name}" permanently deleted`);
           }
-          fetchProjects();
+          const data = await fetchProjects();
           if (selectedProject) {
-            fetchProductBOM(selectedProject.product_id);
+            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
           }
         } catch (error) {
           console.error("Error permanently deleting:", error);
@@ -434,7 +411,7 @@ const Recyclebin = ({ orderId }) => {
           </div>
         ),
         key: `product-${product.id}`,
-        children: treeData.length > 0 ? treeData : (productChildren.length > 0 ? productChildren : undefined),
+        children: [...treeData, ...productChildren],
       }];
     }
     

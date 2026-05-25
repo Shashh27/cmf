@@ -1,12 +1,32 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Card, Empty, Spin, Table, Tag, Typography } from "antd";
-import { ClockCircleOutlined, AppstoreOutlined, ToolOutlined, PartitionOutlined } from "@ant-design/icons";
+import { Card, Empty, Spin, Table, Tag, Typography, Input, Select } from "antd";
+import { ClockCircleOutlined, AppstoreOutlined, ToolOutlined, PartitionOutlined, SearchOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 
 const { Text } = Typography;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+const highlightText = (text, searchTerm) => {
+  if (!text || !searchTerm) return text;
+  const textStr = String(text);
+  const searchLower = searchTerm.toLowerCase();
+  const index = textStr.toLowerCase().indexOf(searchLower);
+  if (index === -1) return textStr;
+  
+  const before = textStr.substring(0, index);
+  const match = textStr.substring(index, index + searchTerm.length);
+  const after = textStr.substring(index + searchTerm.length);
+  
+  return (
+    <span>
+      {before}
+      <span style={{ backgroundColor: '#fef08a', fontWeight: 600 }}>{match}</span>
+      {after}
+    </span>
+  );
+};
 
 const parseHmsToSeconds = (val) => {
   if (!val || typeof val !== "string") return 0;
@@ -62,6 +82,9 @@ const SectionHeader = ({ icon, title, count }) => (
 const ProductSummary = ({ productId }) => {
   const [loading, setLoading] = useState(false);
   const [summaryData, setSummaryData] = useState(null);
+  const [machineFilter, setMachineFilter] = useState(null);
+  const [operationFilter, setOperationFilter] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     if (!productId) { setSummaryData(null); return; }
@@ -127,11 +150,39 @@ const ProductSummary = ({ productId }) => {
       });
     });
 
-    const totalSetup = rows.reduce((a, r) => a + r.setup_seconds, 0);
-    const totalCycle = rows.reduce((a, r) => a + r.cycle_seconds, 0);
+    // Apply filters
+    let filteredRows = rows;
+    
+    // Filter by machine
+    if (machineFilter) {
+      filteredRows = filteredRows.filter(r => 
+        r.machine_name === machineFilter || r.machine_id === machineFilter
+      );
+    }
+    
+    // Filter by operation name
+    if (operationFilter) {
+      filteredRows = filteredRows.filter(r => 
+        r.operation_name === operationFilter
+      );
+    }
+    
+    // Filter by search term (part name, part number, operation name, machine name)
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      filteredRows = filteredRows.filter(r =>
+        r.part_name?.toLowerCase().includes(searchLower) ||
+        r.part_number?.toLowerCase().includes(searchLower) ||
+        r.operation_name?.toLowerCase().includes(searchLower) ||
+        r.machine_name?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    const totalSetup = filteredRows.reduce((a, r) => a + r.setup_seconds, 0);
+    const totalCycle = filteredRows.reduce((a, r) => a + r.cycle_seconds, 0);
 
     const byMachine = new Map();
-    rows.forEach((r) => {
+    filteredRows.forEach((r) => {
       const key = r.machine_id || r.machine_name || "N/A";
       const prev = byMachine.get(key) || { machine_name: r.machine_name, setup_seconds: 0, cycle_seconds: 0, total_seconds: 0 };
       prev.setup_seconds += r.setup_seconds;
@@ -142,8 +193,22 @@ const ProductSummary = ({ productId }) => {
 
     const machineRows = Array.from(byMachine.values()).sort((a, b) => b.total_seconds - a.total_seconds);
 
-    return { productName: summaryData?.product?.product_name || "", rows, totalSetup, totalCycle, totalAll: totalSetup + totalCycle, machineRows };
-  }, [summaryData]);
+    // Extract unique machines and operations for filter options
+    const uniqueMachines = Array.from(new Set(rows.map(r => r.machine_name).filter(m => m && m !== "N/A"))).sort();
+    const uniqueOperations = Array.from(new Set(rows.map(r => r.operation_name).filter(o => o))).sort();
+
+    return { 
+      productName: summaryData?.product?.product_name || "", 
+      rows: filteredRows, 
+      totalSetup, 
+      totalCycle, 
+      totalAll: totalSetup + totalCycle, 
+      machineRows,
+      uniqueMachines,
+      uniqueOperations,
+      allRows: rows
+    };
+  }, [summaryData, machineFilter, operationFilter, searchTerm]);
 
   // ── Empty / Loading states ──────────────────────────────────────────────
 
@@ -176,7 +241,7 @@ const ProductSummary = ({ productId }) => {
       width: 120,
       render: (t) => (
         <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 11, lineHeight: "1.3" }}>
-          {t || "N/A"}
+          {highlightText(t || "N/A", searchTerm)}
         </Tag>
       ),
     },
@@ -223,10 +288,10 @@ const ProductSummary = ({ productId }) => {
       render: (_, r) => (
         <div className="min-w-0">
           <div style={{ fontWeight: 500, color: "#1e293b", wordBreak: "break-word", lineHeight: "1.3", fontSize: 11 }}>
-            {r.part_name}
+            {highlightText(r.part_name, searchTerm)}
           </div>
           <div style={{ fontSize: 10, color: "#64748b", fontFamily: "monospace", wordBreak: "break-all" }}>
-            {r.part_number}
+            {highlightText(r.part_number, searchTerm)}
           </div>
         </div>
       ),
@@ -253,7 +318,7 @@ const ProductSummary = ({ productId }) => {
           color: r.is_outsource ? "#dc2626" : "#1e293b",
           fontWeight: r.is_outsource ? 600 : "normal"
         }}>
-          {t} {r.is_outsource && "(OUTSOURCE)"}
+          {highlightText(t, searchTerm)} {r.is_outsource && "(OUTSOURCE)"}
         </span>
       ),
     },
@@ -274,7 +339,7 @@ const ProductSummary = ({ productId }) => {
       width: 120,
       render: (t) => (
         <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 10, lineHeight: "1.3" }}>
-          {t || "N/A"}
+          {highlightText(t || "N/A", searchTerm)}
         </Tag>
       ),
     },
@@ -361,12 +426,39 @@ const ProductSummary = ({ productId }) => {
         style={{ height: "100%", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box" }}
       >
 
-        {/* Product title */}
-        <div className="flex items-center gap-2">
+        {/* Product title with search and filters */}
+        <div className="flex items-center gap-2 flex-wrap">
           <AppstoreOutlined className="text-blue-600 text-lg" />
           <span style={{ fontWeight: 700, color: "#1e293b", fontSize: 13 }} className="truncate">
             {summary.productName || "Product Summary"}
           </span>
+          <Input
+            placeholder="Search part, operation, machine..."
+            prefix={<SearchOutlined className="text-slate-400" />}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            allowClear
+            size="small"
+            style={{ width: 250 }}
+          />
+          <Select
+            placeholder="Filter by Machine"
+            value={machineFilter}
+            onChange={setMachineFilter}
+            allowClear
+            size="small"
+            style={{ minWidth: 150 }}
+            options={summary.uniqueMachines.map(m => ({ label: m, value: m }))}
+          />
+          <Select
+            placeholder="Filter by Operation"
+            value={operationFilter}
+            onChange={setOperationFilter}
+            allowClear
+            size="small"
+            style={{ minWidth: 150 }}
+            options={summary.uniqueOperations.map(o => ({ label: o, value: o }))}
+          />
         </div>
 
         {/* Stat cards */}

@@ -12,7 +12,7 @@ import ProductToolsViewer from "./ProductToolsViewer";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 import BOMFilters from "./BOMFilters";
 
-const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
+const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null, bomRefreshTrigger = 0 }) => {
   const { message, modal } = App.useApp();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
@@ -147,6 +147,16 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // Refresh product hierarchy when bomRefreshTrigger changes (after parts upload)
+  useEffect(() => {
+    if (bomRefreshTrigger > 0) {
+      // Refresh all loaded product hierarchies
+      Object.keys(hierarchicalData).forEach(productId => {
+        fetchProductHierarchy(Number(productId), true);
+      });
+    }
+  }, [bomRefreshTrigger]);
 
   const fetchProductHierarchy = async (productId, forceRefresh = false) => {
     if (!forceRefresh && hierarchicalData[productId]) return hierarchicalData[productId];

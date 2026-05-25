@@ -27,6 +27,7 @@ const PDM = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [productHierarchies, setProductHierarchies] = useState({});
   const [activeTopTab, setActiveTopTab] = useState("pdm");
+  const [bomRefreshTrigger, setBomRefreshTrigger] = useState(0);
 
   // Detect screen size
   React.useEffect(() => {
@@ -51,6 +52,10 @@ const PDM = () => {
   };
   const handleHierarchyLoaded = (productId, hierarchy) => {
     setProductHierarchies(prev => ({ ...prev, [productId]: hierarchy }));
+  };
+  const handlePartsCreated = () => {
+    // Trigger BOM refresh when parts are created for assemblies
+    setBomRefreshTrigger(prev => prev + 1);
   };
   const isProductSelected = selectedItem?.itemType === "product";
 
@@ -122,6 +127,7 @@ const PDM = () => {
                 onHierarchyLoaded={handleHierarchyLoaded}
                 disableProductCreate={fromOms}
                 initialProductId={fromOms ? initialProductId : null}
+                bomRefreshTrigger={bomRefreshTrigger}
               />
             </div>
           </Sider>
@@ -141,6 +147,7 @@ const PDM = () => {
               onHierarchyLoaded={handleHierarchyLoaded}
               disableProductCreate={fromOms}
               initialProductId={fromOms ? initialProductId : null}
+              bomRefreshTrigger={bomRefreshTrigger}
             />
           </Drawer>
         )}
@@ -184,7 +191,7 @@ const PDM = () => {
               )}
               {selectedItem?.itemType === 'assembly' && (
                 <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                  <AssemblyDocumentsPanel selectedItem={selectedItem} />
+                  <AssemblyDocumentsPanel selectedItem={selectedItem} onPartsCreated={handlePartsCreated} />
                 </div>
               )}
               {selectedItem?.itemType !== "part" && selectedItem?.itemType !== "assembly" && (

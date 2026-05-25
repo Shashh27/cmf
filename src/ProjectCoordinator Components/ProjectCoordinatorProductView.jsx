@@ -134,118 +134,135 @@ const ProjectCoordinatorProductView = () => {
         background: #94a3b8;
       }
     `}</style>
-      <Tabs activeKey={activeTab} onChange={setActiveTab} style={{ marginBottom: 16 }}>
-        <Tabs.TabPane tab="PDM" key="bom">
-          <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
-              <Link
-                to="/project_coordinator/oms/orders"
-                className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
-              >
-                <ArrowLeftOutlined />
-                Back to Orders
-              </Link>
-            </div>
-            <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex' }}>
-              {isMobile && (
-                <Button
-                  type="text"
-                  icon={<MenuOutlined />}
-                  onClick={() => setMobileDrawerOpen(true)}
-                  className="pdm-mobile-toggle"
-                />
-              )}
-
-              {!isMobile && (
-                <Sider
-                  width="33%"
-                  theme="light"
-                  style={{
-                    borderRight: "1px solid #f0f0f0",
-                    overflow: "hidden",
-                    display: "flex",
-                    flexDirection: "column",
-                    minWidth: 300,
-                    maxWidth: 500,
-                    height: '100%'
-                  }}
-                >
-                  {bomSidebar}
-                </Sider>
-              )}
-
-              {isMobile && (
-                <Drawer
-                  placement="left"
-                  onClose={() => setMobileDrawerOpen(false)}
-                  open={mobileDrawerOpen}
-                  style={{ width: "85%" }}
-                  styles={{ body: { padding: 0 } }}
-                >
-                  {bomSidebar}
-                </Drawer>
-              )}
-
-              <Content
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
-                  backgroundColor: "#f8fafc",
-                  height: "100%",
-                  marginLeft: isMobile ? 0 : undefined,
-                }}
-              >
-                {selectedItem?.itemType === "part" && (
-                  <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                    <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
-                      <DocumentsPanel
-                        selectedItem={selectedItem}
-                        onDocumentsLoaded={setPartDocuments}
-                      />
-                    </ProductDetails>
-                  </div>
-                )}
-                {selectedItem?.itemType === "assembly" && (
-                  <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                    <AssemblyDocumentsPanel selectedItem={selectedItem} />
-                  </div>
-                )}
-                {selectedItem &&
-                  selectedItem.itemType !== "part" &&
-                  selectedItem.itemType !== "assembly" &&
-                  selectedItem.itemType !== "product" && (
-                    <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
-                      <DocumentsPanel
-                        selectedItem={selectedItem}
-                        onDocumentsLoaded={setPartDocuments}
-                      />
-                    </div>
+      <Tabs 
+        activeKey={activeTab} 
+        onChange={setActiveTab} 
+        style={{ marginBottom: 16 }}
+        items={[
+          {
+            key: 'bom',
+            label: 'PDM',
+            children: (
+              <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
+                  <Link
+                    to="/project_coordinator/oms/orders"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
+                  >
+                    <ArrowLeftOutlined />
+                    Back to Orders
+                  </Link>
+                </div>
+                <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex' }}>
+                  {isMobile && (
+                    <Button
+                      type="text"
+                      icon={<MenuOutlined />}
+                      onClick={() => setMobileDrawerOpen(true)}
+                      className="pdm-mobile-toggle"
+                    />
                   )}
-              </Content>
-            </Layout>
-          </div>
-        </Tabs.TabPane>
-        <Tabs.TabPane tab="Order Tracking" key="order">
-          <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
-              <Link
-                to="/project_coordinator/oms/orders"
-                className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
-              >
-                <ArrowLeftOutlined />
-                Back to Orders
-              </Link>
-            </div>
-            <OrderTracking />
-          </div>
-        </Tabs.TabPane>
-        <Tabs.TabPane tab="Recycle Bin" key="recycle-bin">
-          <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <Recyclebin />
-          </div>
-        </Tabs.TabPane>
-      </Tabs>
+
+                  {!isMobile && (
+                    <Sider
+                      width="33%"
+                      theme="light"
+                      style={{
+                        borderRight: "1px solid #f0f0f0",
+                        overflow: "hidden",
+                        display: "flex",
+                        flexDirection: "column",
+                        minWidth: 300,
+                        maxWidth: 500,
+                        height: '100%'
+                      }}
+                    >
+                      {bomSidebar}
+                    </Sider>
+                  )}
+
+                  {isMobile && (
+                    <Drawer
+                      placement="left"
+                      onClose={() => setMobileDrawerOpen(false)}
+                      open={mobileDrawerOpen}
+                      style={{ width: "85%" }}
+                      styles={{ body: { padding: 0 } }}
+                    >
+                      {bomSidebar}
+                    </Drawer>
+                  )}
+
+                  <Content
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      overflow: "hidden",
+                      backgroundColor: "#f8fafc",
+                      height: "100%",
+                      marginLeft: isMobile ? 0 : undefined,
+                    }}
+                  >
+                    {selectedItem?.itemType === "part" && (
+                      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                        <ProductDetails selectedItem={selectedItem} partDocuments={partDocuments}>
+                          <DocumentsPanel
+                            selectedItem={selectedItem}
+                            onDocumentsLoaded={setPartDocuments}
+                          />
+                        </ProductDetails>
+                      </div>
+                    )}
+                    {selectedItem?.itemType === "assembly" && (
+                      <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                        <AssemblyDocumentsPanel selectedItem={selectedItem} />
+                      </div>
+                    )}
+                    {selectedItem &&
+                      selectedItem.itemType !== "part" &&
+                      selectedItem.itemType !== "assembly" &&
+                      selectedItem.itemType !== "product" && (
+                        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+                          <DocumentsPanel
+                            selectedItem={selectedItem}
+                            onDocumentsLoaded={setPartDocuments}
+                          />
+                        </div>
+                      )}
+                  </Content>
+                </Layout>
+              </div>
+            )
+          },
+          {
+            key: 'order',
+            label: 'Order Tracking',
+            children: (
+              <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
+                  <Link
+                    to="/project_coordinator/oms/orders"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
+                  >
+                    <ArrowLeftOutlined />
+                    Back to Orders
+                  </Link>
+                </div>
+                <OrderTracking />
+              </div>
+            )
+          },
+          {
+            key: 'recycle-bin',
+            label: 'Recycle Bin',
+            children: (
+              <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <Recyclebin />
+              </div>
+            )
+          }
+        ]}
+      />
     </>
   );
 

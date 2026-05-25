@@ -12,7 +12,7 @@ import ProductToolsViewer from "./ProductToolsViewer";
 import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 import BOMFilters from "./BOMFilters";
 
-const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null }) => {
+const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCreate = false, initialProductId = null, bomRefreshTrigger = 0 }) => {
   const { message, modal } = App.useApp();
   const [products, setProducts] = useState([]);
   const [expandedItems, setExpandedItems] = useState({});
@@ -144,6 +144,16 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
     }, 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
   }, [searchTerm]);
+
+  // Refresh product hierarchy when bomRefreshTrigger changes (after parts upload)
+  useEffect(() => {
+    if (bomRefreshTrigger > 0) {
+      // Refresh all loaded product hierarchies
+      Object.keys(hierarchicalData).forEach(productId => {
+        fetchProductHierarchy(Number(productId), true);
+      });
+    }
+  }, [bomRefreshTrigger]);
 
   const fetchProductHierarchy = async (productId, forceRefresh = false) => {
     if (!forceRefresh && hierarchicalData[productId]) return hierarchicalData[productId];
@@ -639,19 +649,38 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               </Tag>
             </span>
           )}
-          {buttons[type].map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
-            <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
-              <Button
-                type="text"
-                size="small"
-                danger={danger}
-                disabled={disabled}
-                onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
-                icon={<Icon style={{ fontSize: '14px' }} />}
-                style={{ padding: 4, minWidth: 24, height: 24 }}
-              />
-            </Tooltip>
-          ))}
+          {type === 'part' ? (
+            <>
+              {buttons.part.map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
+                <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
+                  <Button
+                    type="text"
+                    size="small"
+                    danger={danger}
+                    disabled={disabled}
+                    onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
+                    icon={<Icon style={{ fontSize: '14px' }} />}
+                    style={{ padding: 4, minWidth: 24, height: 24 }}
+                  />
+                </Tooltip>
+              ))}
+              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details, item.part_detail, item.raw_material_id)}
+            </>
+          ) : (
+            buttons[type].map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
+              <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
+                <Button
+                  type="text"
+                  size="small"
+                  danger={danger}
+                  disabled={disabled}
+                  onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
+                  icon={<Icon style={{ fontSize: '14px' }} />}
+                  style={{ padding: 4, minWidth: 24, height: 24 }}
+                />
+              </Tooltip>
+            ))
+          )}
           {type === 'product' && (
             <ProductBOMPdfDownload product={item} bomExport={bomExport} />
           )}

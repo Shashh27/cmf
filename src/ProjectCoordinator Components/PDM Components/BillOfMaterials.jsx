@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -9,6 +9,7 @@ import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
 import { getLatestRevision } from "./operationUtils";
+import BOMFilters from "./BOMFilters";
 
 // ── Highlight helper ──────────────────────────────────────────────────────────
 // Wraps every case-insensitive match of `query` inside `text` with a light-blue
@@ -68,6 +69,7 @@ const BillOfMaterials = ({
   const [partActionType, setPartActionType] = useState('');
   const [activeItemId, setActiveItemId] = useState(null);
   const [activeItemType, setActiveItemType] = useState(null);
+  const [activeFilter, setActiveFilter] = useState('all');
   const hasFetchedData = useRef(false);
   const singleProductFetched = useRef(false);
 
@@ -116,11 +118,10 @@ const BillOfMaterials = ({
       setLoading(true);
       const loadSingle = async () => {
         try {
-          const productRes = await axios.get(`${API_BASE_URL}/products/${singleProductId}`);
-          const product = productRes.data;
-          setProducts([{ id: product.id, product_name: product.product_name || product.product_number || `Product ${product.id}` }]);
           const transformedData = await fetchProductHierarchy(singleProductId);
           if (transformedData) {
+            // Set product from hierarchical data (no need for separate product API call)
+            setProducts([{ id: singleProductId, product_name: transformedData.product_name || transformedData.product_number || `Product ${singleProductId}` }]);
             setExpandedItems(prev => ({ ...prev, [getExpandKey('product', singleProductId)]: true }));
           }
         } catch (e) {
@@ -451,19 +452,38 @@ const BillOfMaterials = ({
               </Tag>
             </span>
           )}
-          {buttons[type].map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
-            <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
-              <Button
-                type="text"
-                size="small"
-                danger={danger}
-                disabled={disabled}
-                onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
-                icon={<Icon style={{ fontSize: '14px' }} />}
-                style={{ padding: 4, minWidth: 24, height: 24 }}
-              />
-            </Tooltip>
-          ))}
+          {type === 'part' ? (
+            <>
+              {buttons.part.map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
+                <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
+                  <Button
+                    type="text"
+                    size="small"
+                    danger={danger}
+                    disabled={disabled}
+                    onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
+                    icon={<Icon style={{ fontSize: '14px' }} />}
+                    style={{ padding: 4, minWidth: 24, height: 24 }}
+                  />
+                </Tooltip>
+              ))}
+              {getRawMaterialStatusTag(item.raw_material_status, null, item.raw_material_stock_details, item.part_detail, item.raw_material_id)}
+            </>
+          ) : (
+            buttons[type].map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
+              <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
+                <Button
+                  type="text"
+                  size="small"
+                  danger={danger}
+                  disabled={disabled}
+                  onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
+                  icon={<Icon style={{ fontSize: '14px' }} />}
+                  style={{ padding: 4, minWidth: 24, height: 24 }}
+                />
+              </Tooltip>
+            ))
+          )}
           {type === 'product' && (
             <ProductBOMPdfDownload product={item} bomExport={bomExport} />
           )}
@@ -472,8 +492,137 @@ const BillOfMaterials = ({
     );
   };
 
+  const getRawMaterialStatusTag = (status, stockStatus, stockDetails, partDetail, rawMaterialId) => {
+    // If part is WITHOUT_RAW_MATERIAL, don't show raw material status
+    if (partDetail === 'WITHOUT_RAW_MATERIAL' || !rawMaterialId) {
+      return <Tag className="m-0 text-[10px] shrink-0" color="default">N/A</Tag>;
+    }
+    
+    // Show stock status if available, otherwise fall back to material status
+    const statusToShow = stockStatus || status || "N/A";
+    const s = statusToShow.toString().toLowerCase();
+    
+    if (s === "available") return <Tag className="m-0 text-[10px] shrink-0" color="success">Available</Tag>;
+    if (s === "not available") return <Tag className="m-0 text-[10px] shrink-0" color="error">Not Available</Tag>;
+    
+    // If we have stock details, show stock-specific status
+    if (stockDetails) {
+      if (stockDetails.status === 'available') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="success">In Stock</Tag>;
+      } else if (stockDetails.status === 'reserved') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="warning">Reserved</Tag>;
+      } else if (stockDetails.status === 'used') {
+        return <Tag className="m-0 text-[10px] shrink-0" color="default">Used</Tag>;
+      }
+    }
+    
+    return <Tag className="m-0 text-[10px] shrink-0">{statusToShow}</Tag>;
+  };
+
+  const bomStats = useMemo(() => {
+    const targetProducts = singleProductId 
+      ? products.filter(p => Number(p.id) === Number(singleProductId))
+      : products;
+      
+    const stats = { total: 0, inhouse: 0, outsource: 0, standard: 0, linked: 0, unlinked: 0 };
+    
+    const countParts = (parts) => {
+      if (!parts) return;
+      parts.forEach(p => {
+        stats.total++;
+        const type = (p.type_name || p.type || '').toLowerCase().trim();
+        const isInhouse = type.includes('in') && type.includes('house') || type === 'inhouse' || type === 'in-house' || type === 'make';
+        const isOutsource = type.includes('out') || type === 'buy' || type === 'outsource' || type === 'out-source' || type === 'outsourced';
+        const isStandard = type.includes('standard') || type.includes('std') || type.includes('catalogue');
+        
+        if (isInhouse) stats.inhouse++;
+        else if (isOutsource) stats.outsource++;
+        else if (isStandard) stats.standard++;
+        
+        const isLinked = p.raw_material_id != null && p.part_detail !== 'WITHOUT_RAW_MATERIAL';
+        if (isLinked) stats.linked++;
+        else stats.unlinked++;
+      });
+    };
+    
+    const processAssembly = (assembly) => {
+      countParts(assembly.parts);
+      (assembly.child_assemblies || []).forEach(processAssembly);
+    };
+    
+    targetProducts.forEach(product => {
+      const data = hierarchicalData[product.id];
+      if (!data) return;
+      
+      // Count direct parts
+      countParts(data.parts);
+      
+      // Count parts in assemblies
+      (data.assemblies || []).forEach(processAssembly);
+    });
+    
+    return stats;
+  }, [products, hierarchicalData, singleProductId]);
+
+  const matchesFilter = (part, filter) => {
+    if (!part || filter === 'all') return true;
+    const typeName = (part.type_name || part.type || '').toLowerCase().trim();
+    
+    const inHouseTypes = ["make", "in-house", "in house", "inhouse", "part"];
+    const outSourceTypes = ["buy", "out-source", "out source", "outsourced", "outsourcing"];
+    const standardTypes = ["standard", "std", "catalogue"];
+
+    const isInhouse = inHouseTypes.includes(typeName) || (typeName.includes('in') && typeName.includes('house'));
+    const isOutsource = outSourceTypes.includes(typeName) || typeName.includes('out');
+    const isStandard = standardTypes.some(t => typeName.includes(t));
+    const isLinked = part.raw_material_id != null && part.part_detail !== 'WITHOUT_RAW_MATERIAL';
+
+    switch (filter) {
+      case 'inhouse': return isInhouse;
+      case 'outsource': return isOutsource;
+      case 'standard': return isStandard;
+      case 'linked': return isLinked;
+      case 'unlinked': return !isLinked;
+      default: return true;
+    }
+  };
+
+  const hasMatchingItems = (item, type, filter, productId) => {
+    if (filter === 'all') return true;
+    
+    if (type === 'part') {
+      return matchesFilter(item, filter);
+    }
+    
+    if (type === 'assembly') {
+      const parts = item.parts || [];
+      const childAssemblies = item.child_assemblies || [];
+      
+      const hasMatchingParts = parts.some(p => matchesFilter(p, filter));
+      const hasMatchingChildren = childAssemblies.some(child => hasMatchingItems(child, 'assembly', filter, productId));
+      
+      return hasMatchingParts || hasMatchingChildren;
+    }
+    
+    if (type === 'product') {
+      const data = hierarchicalData[productId];
+      if (!data) return false;
+      
+      const directParts = data.parts || [];
+      const assemblies = data.assemblies || [];
+      
+      const hasMatchingDirectParts = directParts.some(p => matchesFilter(p, filter));
+      const hasMatchingAssemblies = assemblies.some(asm => hasMatchingItems(asm, 'assembly', filter, productId));
+      
+      return hasMatchingDirectParts || hasMatchingAssemblies;
+    }
+    
+    return true;
+  };
+
   // ── Part row ──────────────────────────────────────────────────────────────
   const renderPartInTree = (part, level = 0, productId = null) => {
+    if (!matchesFilter(part, activeFilter)) return null;
     const isSelected = activeItemId === part.id && activeItemType === 'part';
     const isInRecycleBin = part.recycle_bin === true;
     const revision = getLatestRevision(part.documents);
@@ -532,6 +681,8 @@ const BillOfMaterials = ({
 
   // ── Assembly row ──────────────────────────────────────────────────────────
   const renderAssemblyTree = (assembly, level = 0, productId = null) => {
+    if (!hasMatchingItems(assembly, 'assembly', activeFilter, productId)) return null;
+    
     const childAssemblies = getNestedAssemblies(assembly.id);
     const assemblyParts = getPartsForAssembly(assembly.id);
     const combinedChildren = [
@@ -612,6 +763,8 @@ const BillOfMaterials = ({
 
   // ── Product row ───────────────────────────────────────────────────────────
   const renderProductTree = (product) => {
+    if (!hasMatchingItems(product, 'product', activeFilter, product.id)) return null;
+    
     const productHierarchy = hierarchicalData[product.id];
     const hasData = !!productHierarchy;
     const childAssemblies = productHierarchy?.assemblies || [];
@@ -798,18 +951,30 @@ const BillOfMaterials = ({
               </Button>
             )}
           </div>
-          <Input
-            prefix={<SearchOutlined className="text-slate-400" />}
-            placeholder="Search assemblies, sub-assemblies, and parts..."
-            value={searchTerm}
-            onChange={(e) => {
-              const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
-              setSearchTerm(filteredValue);
-            }}
-            maxLength={30}
-            className="rounded-md text-sm border-slate-200"
-            allowClear
-          />
+          <div className="flex items-center gap-2 flex-1">
+            <div className="flex-1 min-w-0">
+              <Input
+                prefix={<SearchOutlined className="text-slate-400" />}
+                placeholder="Search by part/assembly..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                allowClear
+                className="w-full"
+                size="small"
+              />
+            </div>
+            <div className="w-44 sm:w-52 shrink-0">
+              <BOMFilters 
+                stats={bomStats} 
+                activeFilter={activeFilter} 
+                onFilterChange={(filter) => {
+                  setActiveFilter(filter);
+                  setActiveItemId(null);
+                  setActiveItemType(null);
+                }} 
+              />
+            </div>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">

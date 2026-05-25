@@ -240,6 +240,17 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     }
   };
 
+  const getCurrentUserRole = () => {
+    try {
+      const stored = localStorage.getItem("user");
+      if (!stored) return null;
+      const u = JSON.parse(stored);
+      return u?.role || null;
+    } catch {
+      return null;
+    }
+  };
+
   const fetchDocuments = async () => {
     if (!selectedItem || selectedItem.itemType !== 'part') { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
     setLoading(true);
@@ -530,8 +541,16 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
+        const currentUserId = getCurrentUserId();
+        const currentUserRole = getCurrentUserRole();
+        
+        // If document was uploaded by PC and current user is PC, don't show acknowledge button
+        const isUploadedByPC = cur.user_id === currentUserId && currentUserRole === 'project_coordinator';
+        
         if (cur.is_acknowledged) {
           return <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>;
+        } else if (isUploadedByPC) {
+          return <span className="text-xs text-gray-400">Not Acknowledged</span>;
         } else {
           return (
             <Popconfirm 
