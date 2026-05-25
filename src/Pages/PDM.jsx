@@ -9,6 +9,7 @@ import DocumentsPanel from "../PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "../PDM Components/AssemblyDocumentsPanel";
 import ProcessPlanning from "../PPS Components/ProcessPlanning";
 import QualityManagement from "../Quality Management Components/QualityManagement";
+import Recyclebin from "./Recyclebin";
 
 const { Sider, Content } = Layout;
 
@@ -79,6 +80,7 @@ const PDM = () => {
                 { key: "pdm", label: "PDM" },
                 { key: "pps", label: "PPS" },
                 { key: "quality", label: "Quality Management" },
+                { key: "recycle-bin", label: "Recycle Bin" },
               ]}
             />
             <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
@@ -201,7 +203,7 @@ const PDM = () => {
         <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#f5f5f5" }}>
           <ProcessPlanning initialOrderId={initialOrderId} />
         </div>
-      ) : (
+      ) : activeTopTab === "quality" ? (
         <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 12, background: "#f5f5f5" }}>
           <QualityManagement 
             initialProductId={fromOms ? initialProductId : null} 
@@ -209,7 +211,11 @@ const PDM = () => {
             fromOms={fromOms} 
           />
         </div>
-      )}
+      ) : activeTopTab === "recycle-bin" ? (
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
+          <Recyclebin orderId={initialOrderId} />
+        </div>
+      ) : null}
       </div>
     </>
   );

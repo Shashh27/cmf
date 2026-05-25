@@ -3,7 +3,7 @@ import {
   PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined,
   SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined,
   DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined,
-  HolderOutlined, ExclamationCircleOutlined
+  HolderOutlined, ExclamationCircleOutlined, CheckCircleOutlined, CloseCircleOutlined
 } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
@@ -337,6 +337,40 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     }
   };
 
+  const handleAcknowledgeDocument = async (docId, currentStatus) => {
+    try {
+      await axios.put(`${API_BASE_URL}/documents/${docId}/acknowledge`, null, {
+        params: { is_acknowledged: !currentStatus }
+      });
+      message.success('Document acknowledged successfully');
+      // Optimistically update the local state
+      setDocuments(prevDocs => 
+        prevDocs.map(doc => 
+          doc.id === docId ? { ...doc, is_acknowledged: true } : doc
+        )
+      );
+      // Also update selectedVersions to reflect the change immediately
+      setSelectedVersions(prevVersions => {
+        const updated = { ...prevVersions };
+        for (const key in updated) {
+          if (updated[key]?.id === docId) {
+            updated[key] = { ...updated[key], is_acknowledged: true };
+          }
+        }
+        return updated;
+      });
+      // Then fetch to ensure consistency
+      await fetchDocuments();
+    } catch (e) {
+      console.error(e);
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
+        'Failed to update acknowledgment status';
+      message.error(detail);
+    }
+  };
+
   const initiateNewVersion = (doc, latestVer) => {
     setUploadParentId(doc.parent_id || doc.id);
     setUploadVersion('');
@@ -522,6 +556,33 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             }
           />
         );
+      }
+    },
+    { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        if (cur.is_acknowledged) {
+          return <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>;
+        } else {
+          return (
+            <Popconfirm 
+              title="Acknowledge Document"
+              description="Are you sure you want to acknowledge this document?"
+              onConfirm={() => handleAcknowledgeDocument(cur.id, cur.is_acknowledged)}
+              okText="Yes"
+              cancelText="No"
+            >
+              <Button 
+                size="small" 
+                type="primary" 
+                icon={<CheckCircleOutlined />}
+                className="text-xs"
+              >
+                Acknowledge
+              </Button>
+            </Popconfirm>
+          );
+        }
       }
     },
     { title: <span className="text-xs font-semibold text-center block">ACTIONS</span>, key: 'actions', width: 220, align: 'center', fixed: 'right',

@@ -81,9 +81,6 @@ const AssemblyPartsUploadPanel = ({
   const [submitting, setSubmitting]       = useState(false);
   const [submitResults, setSubmitResults] = useState(null); // { created, duplicates, errors }
 
-  // New state for delete parts functionality
-  const [deletingParts, setDeletingParts] = useState(false);
-
   // ── helpers ───────────────────────────────────────────────────────────────
   const getCurrentUserId = () => {
     try {
@@ -292,30 +289,6 @@ const AssemblyPartsUploadPanel = ({
     }
   };
 
-  // ── BULK DELETE PARTS ─────────────────────────────────────────────────────
-  const handleBulkDeleteParts = async () => {
-    if (!selectedItem || selectedItem.itemType !== "assembly") return;
-    
-    setDeletingParts(true);
-    try {
-      const response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-assembly/${selectedItem.id}`);
-      const { deleted_count, part_ids } = response.data;
-      
-      if (deleted_count > 0) {
-        message.success(`${deleted_count} part(s) deleted successfully`);
-        onPartsCreated?.(); // Refresh parts list if callback exists
-      } else {
-        message.info("No parts found to delete for this assembly");
-      }
-    } catch (e) {
-      console.error("Error bulk deleting parts", e);
-      const errorMsg = e?.response?.data?.detail || e?.message || "Failed to delete parts";
-      message.error(errorMsg);
-    } finally {
-      setDeletingParts(false);
-    }
-  };
-
   // ── column definitions ────────────────────────────────────────────────────
   const statusTag = (record) => {
     if (record._status === "success")
@@ -478,26 +451,6 @@ const AssemblyPartsUploadPanel = ({
         >
           Upload Parts
         </Button>
-        
-        <Popconfirm
-          title="Delete All Parts"
-          description={`Delete all parts for "${selectedItem?.label || selectedItem?.name || 'this assembly'}"? This cannot be undone.`}
-          onConfirm={handleBulkDeleteParts}
-          okText="Yes, Delete"
-          cancelText="Cancel"
-          okButtonProps={{ danger: true }}
-        >
-          <Button
-            type="primary"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            loading={deletingParts}
-            className="bg-red-600 hover:bg-red-700 border-red-600"
-          >
-            {deletingParts ? "Deleting…" : "Delete Parts"}
-          </Button>
-        </Popconfirm>
       </div>
 
       <Modal
