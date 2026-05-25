@@ -9,7 +9,7 @@ import io
 import mimetypes
 
 from DB.database import get_db, SessionLocal
-from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel
+from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel, Assembly as AssemblyModel
 from DB.schemas.oms import Document, DocumentUpdate, ExtractedDataUpdate
 from DB.minio_client import get_minio_client
 from .step_converter import StepConverter
@@ -19,6 +19,26 @@ router = APIRouter(
     prefix="/documents",
     tags=["documents"]
 )
+
+
+def _check_assembly_recycle_bin_recursive(assembly_id: int, db: Session) -> Optional[str]:
+    """
+    Check if the assembly or any of its parent assemblies are in the recycle bin.
+    Returns the name of the first assembly found in recycle bin, or None if none are.
+    """
+    current_assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
+    if not current_assembly:
+        return None
+    
+    # Check current assembly
+    if current_assembly.recycle_bin:
+        return current_assembly.assembly_name
+    
+    # Recursively check parent
+    if current_assembly.parent_id:
+        return _check_assembly_recycle_bin_recursive(current_assembly.parent_id, db)
+    
+    return None
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.csv', '.xlsx', '.doc', '.xls', '.txt', '.stl', '.step', '.stp', '.png', '.jpg', '.jpeg', '.gif', '.svg'}
@@ -241,6 +261,15 @@ async def create_document(
             detail="Either part_id or assembly_id must be provided"
         )
 
+    # Check if assembly or any parent assembly is in recycle bin - only for assembly documents
+    if assembly_id:
+        recycle_bin_assembly = _check_assembly_recycle_bin_recursive(assembly_id, db)
+        if recycle_bin_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, documents cannot be added because the assembly '{recycle_bin_assembly}' (or a parent assembly) is in the recycle bin. To add documents, please restore the assembly from the recycle bin first."
+            )
+
     # Check if part is scheduled (status is "active") - only for part documents
     if part_id:
         schedule_status = db.execute(
@@ -393,6 +422,15 @@ async def create_documents_bulk(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Either part_id or assembly_id must be provided"
         )
+
+    # Check if assembly or any parent assembly is in recycle bin - only for assembly documents
+    if assembly_id:
+        recycle_bin_assembly = _check_assembly_recycle_bin_recursive(assembly_id, db)
+        if recycle_bin_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, documents cannot be added because the assembly '{recycle_bin_assembly}' (or a parent assembly) is in the recycle bin. To add documents, please restore the assembly from the recycle bin first."
+            )
 
     # Check if part is scheduled (status is "active") - only for part documents
     if part_id:
@@ -755,6 +793,15 @@ def update_document(document_id: int, document: DocumentUpdate, db: Session = De
             detail=f"Document with id {document_id} not found"
         )
 
+    # Check if assembly or any parent assembly is in recycle bin - only for assembly documents
+    if db_document.assembly_id:
+        recycle_bin_assembly = _check_assembly_recycle_bin_recursive(db_document.assembly_id, db)
+        if recycle_bin_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, this document cannot be modified because the assembly '{recycle_bin_assembly}' (or a parent assembly) is in the recycle bin. To modify documents, please restore the assembly from the recycle bin first."
+            )
+
     # Check if part is scheduled (status is "active") - only for part documents
     if db_document.part_id:
         schedule_status = db.execute(
@@ -793,6 +840,15 @@ async def replace_document_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with id {document_id} not found"
         )
+
+    # Check if assembly or any parent assembly is in recycle bin - only for assembly documents
+    if db_document.assembly_id:
+        recycle_bin_assembly = _check_assembly_recycle_bin_recursive(db_document.assembly_id, db)
+        if recycle_bin_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, this document cannot be modified because the assembly '{recycle_bin_assembly}' (or a parent assembly) is in the recycle bin. To modify documents, please restore the assembly from the recycle bin first."
+            )
 
     # Check if part is scheduled (status is "active") - only for part documents
     if db_document.part_id:
@@ -914,6 +970,15 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with id {document_id} not found"
         )
+
+    # Check if assembly or any parent assembly is in recycle bin - only for assembly documents
+    if db_document.assembly_id:
+        recycle_bin_assembly = _check_assembly_recycle_bin_recursive(db_document.assembly_id, db)
+        if recycle_bin_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, this document cannot be deleted because the assembly '{recycle_bin_assembly}' (or a parent assembly) is in the recycle bin. To delete documents, please restore the assembly from the recycle bin first."
+            )
 
     # Check if part is scheduled (status is "active") - only for part documents
     if db_document.part_id:

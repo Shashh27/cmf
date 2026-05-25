@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, text
 from pydantic import BaseModel
@@ -18,6 +17,7 @@ from DB.models.oms import (
     ToolWithPart as ToolWithPartModel,
     OperationDocument as OperationDocumentModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
+    Assembly as AssemblyModel,
     DocumentExtractedData as DocumentExtractedDataModel,
 )
 from DB.models.configuration import PokayokeCompletedLog
@@ -30,6 +30,26 @@ router = APIRouter(
     prefix="/parts",
     tags=["parts"]
 )
+
+
+def _check_assembly_recycle_bin_recursive(assembly_id: int, db: Session) -> Optional[str]:
+    """
+    Check if the assembly or any of its parent assemblies are in the recycle bin.
+    Returns the name of the first assembly found in recycle bin, or None if none are.
+    """
+    current_assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
+    if not current_assembly:
+        return None
+    
+    # Check current assembly
+    if current_assembly.recycle_bin:
+        return current_assembly.assembly_name
+    
+    # Recursively check parent
+    if current_assembly.parent_id:
+        return _check_assembly_recycle_bin_recursive(current_assembly.parent_id, db)
+    
+    return None
 
 
 def _build_part_maps(db: Session):
@@ -83,6 +103,15 @@ def _part_to_dict(part: PartModel, type_map: dict, rm_map: dict, unit_map: dict,
 @router.post("/", response_model=Part, status_code=status.HTTP_201_CREATED)
 def create_part(part: PartCreate, db: Session = Depends(get_db)):
     """Create a new part"""
+    # Check if assembly or any parent assembly is in recycle bin - only for assembly parts
+    if part.assembly_id:
+        recycle_bin_assembly = _check_assembly_recycle_bin_recursive(part.assembly_id, db)
+        if recycle_bin_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, parts cannot be added because the assembly '{recycle_bin_assembly}' (or a parent assembly) is in the recycle bin. To add parts, please restore the assembly from the recycle bin first."
+            )
+
     # Check for duplicate part number only within the same product
     if part.product_id:
         db_part = db.query(PartModel).filter(
@@ -786,6 +815,22 @@ def bulk_create_parts(payload: BulkPartCreateRequest, db: Session = Depends(get_
     created:    list[dict] = []
     duplicates: list[str]  = []
     errors:     list[dict] = []
+
+    # Check if any assembly or parent assembly is in recycle bin - only for assembly parts
+    assembly_ids = set(item.assembly_id for item in payload.parts if item.assembly_id)
+    if assembly_ids:
+        recycle_bin_assemblies = []
+        for assembly_id in assembly_ids:
+            recycle_bin_assembly = _check_assembly_recycle_bin_recursive(assembly_id, db)
+            if recycle_bin_assembly and recycle_bin_assembly not in recycle_bin_assemblies:
+                recycle_bin_assemblies.append(recycle_bin_assembly)
+        if recycle_bin_assemblies:
+            assembly_names_str = ', '.join(recycle_bin_assemblies)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, parts cannot be added because the following assemblies (or their parents) are in the recycle bin: {assembly_names_str}. To add parts, please restore these assemblies from the recycle bin first."
+            )
+
  
     type_map, rm_map, stock_map, user_map, vendor_map = _build_part_maps(db)
  
