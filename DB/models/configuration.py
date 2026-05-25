@@ -8,7 +8,8 @@ from sqlalchemy import (
     TIME,
     Boolean,
     Float,
-    func
+    func,
+    text
 )
 from sqlalchemy.orm import relationship
 from ..database import Base
@@ -149,12 +150,22 @@ class PokayokeCompletedLog(Base):
     assignment_id = Column(Integer, ForeignKey("configuration.pokayoke_machine_assignments.id"), nullable=True)
     frequency = Column(String, nullable=True)  # 'Daily', 'Weekly', 'Monthly'
     shift = Column(String, nullable=True)      # 'Morning', 'Evening', 'Both'
+    
+    # Acknowledgment fields for operator
+    operator_acknowledged = Column(Boolean, nullable=False, server_default=text("false"))
+    operator_acknowledged_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    
+    # Acknowledgment fields for supervisor
+    supervisor_acknowledged = Column(Boolean, nullable=False, server_default=text("false"))
+    supervisor_acknowledged_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
     # Relationships
     checklist = relationship("PokayokeChecklist")
     machine = relationship("Machine")
     part = relationship("DB.models.oms.Part")
-    operator = relationship("AccessUser")
+    operator = relationship("AccessUser", foreign_keys=[operator_id])
+    supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
     order = relationship("Order")
     item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
     machine_assignment = relationship("PokayokeMachineAssignment")

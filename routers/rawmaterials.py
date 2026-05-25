@@ -320,6 +320,37 @@ def get_raw_material_history(
         elif stock.form_type == "Pipe":
             dimensions = f"Ø{stock.outer_diameter}mm (ID: {stock.inner_diameter}mm) × {stock.length}mm" if stock.outer_diameter and stock.inner_diameter and stock.length else ""
         
+        # Add vendor information for stock creation
+        enquiry_vendor_name = None
+        enquiry_vendor_count = 0
+        received_vendor_name = None
+        vendor_name = None
+        
+        # For order source, get all vendor names from comma-separated vendor_id
+        if stock.source_type == "order" and stock.vendor_id:
+            try:
+                vendor_ids = [int(vid.strip()) for vid in stock.vendor_id.split(',') if vid.strip()]
+                vendors = db.query(VendorsModel).filter(VendorsModel.id.in_(vendor_ids)).all()
+                if vendors:
+                    enquiry_vendor_name = ", ".join([vendor.company_name for vendor in vendors])
+                    enquiry_vendor_count = len(vendors)
+                    vendor_name = enquiry_vendor_name  # Use all vendor names for stock creation
+            except (ValueError, AttributeError):
+                pass
+        
+        # Get received vendor name if available
+        if stock.received_vendor_id:
+            received_vendor = db.query(VendorsModel).filter(VendorsModel.id == stock.received_vendor_id).first()
+            if received_vendor:
+                received_vendor_name = received_vendor.company_name
+                # If no vendor_name set yet, use received vendor name
+                if not vendor_name:
+                    vendor_name = received_vendor_name
+        
+        # For general source, use the vendor relationship
+        if stock.source_type == "general" and stock.vendor:
+            vendor_name = stock.vendor.company_name
+        
         history_item = RawMaterialHistoryItem(
             id=stock.id,
             activity_type="stock_created",
@@ -338,7 +369,10 @@ def get_raw_material_history(
             form_type=stock.form_type,
             dimensions=dimensions,
             vendor_id=stock.received_vendor_id,
-            vendor_name=stock.vendor.company_name if stock.vendor else None,
+            vendor_name=vendor_name,
+            enquiry_vendor_name=enquiry_vendor_name,
+            enquiry_vendor_count=enquiry_vendor_count,
+            received_vendor_name=received_vendor_name,
             description=f"Stock created: {stock.quantity} units of {stock.material.material_name if stock.material else 'Unknown'}"
         )
         history_items.append(history_item)
@@ -481,22 +515,46 @@ def get_raw_material_history(
         elif stock.form_type == "Pipe":
             dimensions = f"Ø{stock.outer_diameter}mm (ID: {stock.inner_diameter}mm) × {stock.length}mm" if stock.outer_diameter and stock.inner_diameter and stock.length else ""
         
-        # Create multiple status change events based on the current status
-        # If current status is 'received', create events for all previous status changes
-        status_progression = ['enquiry', 'purchase_request', 'purchase_order', 'received']
-        current_status_index = status_progression.index(stock.order_status) if stock.order_status in status_progression else 0
+        # Create only one status change event - the actual transition that happened
+        # enquiry is the same as purchase_request
+        status_progression = ['enquiry', 'purchase_order', 'received']
         
-        # Create events for each status change up to the current status
-        for i in range(1, current_status_index + 1):
-            previous_status = status_progression[i-1]
-            current_status = status_progression[i]
+        # Only create events if current status is in our progression
+        if stock.order_status in status_progression and stock.order_status != 'enquiry':
+            current_status = stock.order_status
+            current_status_index = status_progression.index(current_status)
+            previous_status = status_progression[current_status_index - 1]
+            
+            # Display previous status as "purchase_request" if it's "enquiry"
+            display_previous_status = 'purchase_request' if previous_status == 'enquiry' else previous_status
             
             # Create unique ID for this specific status change event
-            status_change_id = stock.id + 2000000 + (i * 100000)
+            status_change_id = stock.id + 2000000
             
-            # Calculate timestamp (stagger the times to show progression)
-            time_offset = (current_status_index - i) * 3600  # 1 hour between status changes
+            # Use updated_at as the timestamp when status was changed
             status_timestamp = stock.updated_at
+            
+            # Add vendor information
+            enquiry_vendor_name = None
+            enquiry_vendor_count = 0
+            received_vendor_name = None
+            
+            # Get enquiry vendor names from comma-separated vendor_id
+            if stock.vendor_id:
+                try:
+                    vendor_ids = [int(vid.strip()) for vid in stock.vendor_id.split(',') if vid.strip()]
+                    vendors = db.query(VendorsModel).filter(VendorsModel.id.in_(vendor_ids)).all()
+                    if vendors:
+                        enquiry_vendor_name = ", ".join([vendor.company_name for vendor in vendors])
+                        enquiry_vendor_count = len(vendors)
+                except (ValueError, AttributeError):
+                    pass
+            
+            # Get received vendor name
+            if stock.received_vendor_id:
+                received_vendor = db.query(VendorsModel).filter(VendorsModel.id == stock.received_vendor_id).first()
+                if received_vendor:
+                    received_vendor_name = received_vendor.company_name
             
             history_item = RawMaterialHistoryItem(
                 id=status_change_id,
@@ -517,7 +575,10 @@ def get_raw_material_history(
                 dimensions=dimensions,
                 vendor_id=stock.received_vendor_id,
                 vendor_name=stock.vendor.company_name if stock.vendor else None,
-                description=f"{previous_status} → {current_status}"
+                enquiry_vendor_name=enquiry_vendor_name,
+                enquiry_vendor_count=enquiry_vendor_count,
+                received_vendor_name=received_vendor_name,
+                description=f"{display_previous_status} → {current_status}"
             )
             history_items.append(history_item)
     
@@ -1230,30 +1291,32 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
                     orders = db.query(OrderModel).filter(OrderModel.product_id.in_(product_ids)).all()
                     if orders:
                         existing_order_numbers = result.get("source_order_number", "")
-                        new_order_numbers = ", ".join([order.sale_order_number for order in orders])
+                        # Split existing order numbers into a set to avoid duplicates
+                        existing_set = set()
                         if existing_order_numbers:
-                            result["source_order_number"] = existing_order_numbers + "," + new_order_numbers
-                        else:
-                            result["source_order_number"] = new_order_numbers
+                            existing_set = set([num.strip() for num in existing_order_numbers.split(',') if num.strip()])
+                        # Add new order numbers to the set
+                        for order in orders:
+                            existing_set.add(order.sale_order_number)
+                        # Join unique order numbers back together
+                        result["source_order_number"] = ", ".join(sorted(existing_set))
     
     # Add vendor details (handle both comma-separated vendor IDs and received vendor)
-    if stock.received_vendor_id:
-        # Show the final vendor who received the order
-        received_vendor = db.query(VendorsModel).filter(VendorsModel.id == stock.received_vendor_id).first()
-        if received_vendor:
-            result["vendor_name"] = received_vendor.company_name
-            result["received_vendor_name"] = received_vendor.company_name
-    elif stock.vendor_id:
-        # Handle comma-separated vendor IDs for enquiry phase
+    # Always handle comma-separated vendor IDs for enquiry phase (all vendors)
+    if stock.vendor_id:
         try:
             vendor_ids = [int(vid.strip()) for vid in stock.vendor_id.split(',') if vid.strip()]
             vendors = db.query(VendorsModel).filter(VendorsModel.id.in_(vendor_ids)).all()
             if vendors:
-                result["vendor_names"] = [vendor.company_name for vendor in vendors]
                 result["vendor_name"] = ", ".join([vendor.company_name for vendor in vendors])
-                result["enquiry_vendor_count"] = len(vendors)
         except (ValueError, AttributeError):
             result["vendor_name"] = stock.vendor_id  # Keep as string if invalid format
+    
+    # Add received vendor name separately if available
+    if stock.received_vendor_id:
+        received_vendor = db.query(VendorsModel).filter(VendorsModel.id == stock.received_vendor_id).first()
+        if received_vendor:
+            result["received_vendor_name"] = received_vendor.company_name
     
     # Add creator name
     if stock.creator:

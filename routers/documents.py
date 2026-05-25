@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
@@ -7,7 +7,7 @@ from datetime import datetime
 import io
 import mimetypes
 
-from DB.database import get_db
+from DB.database import get_db, SessionLocal
 from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel
 from DB.schemas.oms import Document, DocumentUpdate, ExtractedDataUpdate
 from DB.minio_client import get_minio_client
@@ -165,6 +165,48 @@ def get_content_type(filename: str) -> str:
     return content_types.get(ext, 'application/octet-stream')
 
 
+def _extract_pdf_background(extraction_jobs):
+    """
+    Background task to extract data from PDFs and save to DB.
+    Each job is a dict with: document_id, part_id, file_content, effective_type, file_extension
+    """
+    db = SessionLocal()
+    try:
+        for job in extraction_jobs:
+            part_id = job["part_id"]
+            file_extension = job["file_extension"]
+            effective_type = job["effective_type"]
+            file_content = job["file_content"]
+            document_id = job["document_id"]
+
+            if (
+                part_id is not None
+                and file_extension.lower() == '.pdf'
+                and str(effective_type).lower() in ['2d', '2d drawing', 'drawing']
+            ):
+                try:
+                    extracted = extract_pdf_data(file_content)
+                    if extracted:
+                        db.add(DocumentExtractedDataModel(
+                            document_id=document_id,
+                            part_id=part_id,
+                            note=extracted.get("Note"),
+                            title=extracted.get("Title"),
+                            stock_size=extracted.get("Stock Size"),
+                            material=extracted.get("Material"),
+                            stocksize_kg=extracted.get("Stocksize KG"),
+                            net_wt_kg=extracted.get("Net WT KG"),
+                        ))
+                except Exception as extract_error:
+                    print(f"Error extracting data from PDF: {str(extract_error)}")
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Background PDF extraction failed: {str(e)}")
+    finally:
+        db.close()
+
+
 @router.post("/", response_model=Document, status_code=status.HTTP_201_CREATED)
 async def create_document(
         file: UploadFile = File(...),
@@ -175,6 +217,7 @@ async def create_document(
         assembly_id: Optional[int] = Form(None),
         parent_id: Optional[int] = Form(None),
         user_id: Optional[int] = Form(None),
+        background_tasks: BackgroundTasks = None,
         db: Session = Depends(get_db)
 ):
     """
@@ -203,6 +246,21 @@ async def create_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File type not allowed. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         )
+
+    # Check for duplicate revision within the same document group
+    processed_parent_id = None if parent_id in (0, None) else parent_id
+    if processed_parent_id:
+        # Check if the parent or any of its siblings have the same version
+        existing_version = db.query(DocumentModel).filter(
+            (DocumentModel.id == processed_parent_id) | (DocumentModel.parent_id == processed_parent_id),
+            DocumentModel.document_version == document_version
+        ).first()
+        
+        if existing_version:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Revision {document_version} already exists for this document."
+            )
 
     try:
         # Get MinIO client
@@ -266,23 +324,16 @@ async def create_document(
             and file_extension.lower() == '.pdf'
             and document_type.lower() in ['2d', '2d drawing', 'drawing']
         ):
-            try:
-                extracted = extract_pdf_data(file_content)
-                if extracted:
-                    record = DocumentExtractedDataModel(
-                        document_id=db_document.id,
-                        part_id=part_id,
-                        note=extracted.get("Note"),
-                        title=extracted.get("Title"),
-                        stock_size=extracted.get("Stock Size"),
-                        material=extracted.get("Material"),
-                        stocksize_kg=extracted.get("Stocksize KG"),
-                        net_wt_kg=extracted.get("Net WT KG"),
-                    )
-                    db.add(record)
-                    db.commit()
-            except Exception as extract_error:
-                print(f"Error extracting data from PDF: {str(extract_error)}")
+            background_tasks.add_task(
+                _extract_pdf_background,
+                [{
+                    "document_id": db_document.id,
+                    "part_id": part_id,
+                    "file_content": file_content,
+                    "effective_type": document_type,
+                    "file_extension": file_extension,
+                }]
+            )
 
         return db_document
 
@@ -304,6 +355,7 @@ async def create_documents_bulk(
         part_id: Optional[int] = Form(None),
         assembly_id: Optional[int] = Form(None),
         user_id: Optional[int] = Form(None),
+        background_tasks: BackgroundTasks = None,
         db: Session = Depends(get_db)
 ):
     """
@@ -344,6 +396,7 @@ async def create_documents_bulk(
         owner_id = assembly_id
 
     created_docs: List[DocumentModel] = []
+    extraction_jobs = []
 
     try:
         for idx, file in enumerate(files):
@@ -363,17 +416,35 @@ async def create_documents_bulk(
             if not effective_type:
                 effective_type = "Document"
 
-            effective_version = None
+            effective_version = ""
             if idx < len(document_version) and document_version[idx]:
                 effective_version = str(document_version[idx]).strip()
             if not effective_version:
-                effective_version = "v1.0"
+                # If no version provided, we'll try to use whatever the user entered or stay empty
+                # Raise error if version is absolutely required by backend
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Revision is required for document '{effective_name}'."
+                )
 
             effective_parent = None
             if idx < len(parent_id):
                 pid = parent_id[idx]
                 if pid not in (0, None):
                     effective_parent = pid
+
+            # Check for duplicate revision within the same document group
+            if effective_parent:
+                existing_version = db.query(DocumentModel).filter(
+                    (DocumentModel.id == effective_parent) | (DocumentModel.parent_id == effective_parent),
+                    DocumentModel.document_version == effective_version
+                ).first()
+                
+                if existing_version:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Revision {effective_version} already exists for document '{effective_name}'."
+                    )
 
             object_name = f"documents/{owner_prefix}_{owner_id}/{ts}_{unique_id}_{file.filename}"
 
@@ -417,25 +488,20 @@ async def create_documents_bulk(
                 and file_extension.lower() == '.pdf'
                 and str(effective_type).lower() in ['2d', '2d drawing', 'drawing']
             ):
-                try:
-                    extracted = extract_pdf_data(file_content)
-                    if extracted:
-                        db.add(DocumentExtractedDataModel(
-                            document_id=db_document.id,
-                            part_id=part_id,
-                            note=extracted.get("Note"),
-                            title=extracted.get("Title"),
-                            stock_size=extracted.get("Stock Size"),
-                            material=extracted.get("Material"),
-                            stocksize_kg=extracted.get("Stocksize KG"),
-                            net_wt_kg=extracted.get("Net WT KG"),
-                        ))
-                except Exception as extract_error:
-                    print(f"Error extracting data from PDF: {str(extract_error)}")
+                extraction_jobs.append({
+                    "document_id": db_document.id,
+                    "part_id": part_id,
+                    "file_content": file_content,
+                    "effective_type": effective_type,
+                    "file_extension": file_extension,
+                })
 
         db.commit()
         for d in created_docs:
             db.refresh(d)
+
+        if extraction_jobs and background_tasks:
+            background_tasks.add_task(_extract_pdf_background, extraction_jobs)
 
         return created_docs
 

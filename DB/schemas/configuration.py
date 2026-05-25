@@ -252,6 +252,11 @@ class PokayokeCompletedLogBase(BaseModel):
     assignment_id: Optional[int] = None
     frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
     shift: Optional[str] = None      # 'Morning', 'Evening', 'Both'
+    operator_acknowledged: bool = False
+    operator_acknowledged_at: Optional[datetime] = None
+    supervisor_acknowledged: bool = False
+    supervisor_acknowledged_at: Optional[datetime] = None
+    supervisor_id: Optional[int] = None
 
 
 class PokayokeCompletedLog(PokayokeCompletedLogBase):
@@ -310,6 +315,11 @@ class PokayokeCompletedLogUpdate(BaseModel):
     assignment_id: Optional[int] = None
     frequency: Optional[str] = None
     shift: Optional[str] = None
+    operator_acknowledged: Optional[bool] = None
+    operator_acknowledged_at: Optional[datetime] = None
+    supervisor_acknowledged: Optional[bool] = None
+    supervisor_acknowledged_at: Optional[datetime] = None
+    supervisor_id: Optional[int] = None
 
 
 class PokayokeItemResponseUpdate(BaseModel):
@@ -421,6 +431,9 @@ class SimpleCompletedLog(BaseModel):
     operator_name: str
     completed_at: datetime
     overall_status: str  # 'approved', 'rejected', 'pending'
+    supervisor_name: Optional[str] = None
+    operator_acknowledged: bool = False
+    supervisor_acknowledged: bool = False
     items: List[SimpleItemResponse] = []
 
 

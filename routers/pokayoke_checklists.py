@@ -564,11 +564,17 @@ def get_all_completed_logs_simple(db: Session = Depends(get_db)):
 
         # Get machine name
         machine = db.query(Machine).filter(Machine.id == log.machine_id).first()
-        machine_name = machine.name if machine else 'Unknown'
+        machine_name = f"{machine.make} {machine.model}" if machine and machine.make and machine.model else (machine.type if machine else 'Unknown')
 
         # Get checklist name
         checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == log.checklist_id).first()
         checklist_name = checklist.name if checklist else 'Unknown'
+
+        # Get supervisor name if supervisor has acknowledged
+        supervisor_name = None
+        if log.supervisor_id:
+            supervisor = db.query(AccessUser).filter(AccessUser.id == log.supervisor_id).first()
+            supervisor_name = supervisor.user_name if supervisor else None
 
         # Get all item responses for this log
         responses = db.query(PokayokeItemResponse).filter(
@@ -617,6 +623,9 @@ def get_all_completed_logs_simple(db: Session = Depends(get_db)):
             operator_name=operator_name,
             completed_at=log.completed_at,
             overall_status=overall_status,
+            supervisor_name=supervisor_name,
+            operator_acknowledged=log.operator_acknowledged,
+            supervisor_acknowledged=log.supervisor_acknowledged,
             items=items_data
         ))
 
@@ -703,7 +712,7 @@ def get_machine_completed_logs_simple(machine_id: int, db: Session = Depends(get
             detail=f"Machine with id {machine_id} not found"
         )
 
-    machine_name = machine.name
+    machine_name = f"{machine.make} {machine.model}" if machine and machine.make and machine.model else (machine.type if machine else 'Unknown')
 
     logs = db.query(PokayokeCompletedLog).filter(
         PokayokeCompletedLog.machine_id == machine_id
@@ -719,6 +728,12 @@ def get_machine_completed_logs_simple(machine_id: int, db: Session = Depends(get
         # Get checklist name
         checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == log.checklist_id).first()
         checklist_name = checklist.name if checklist else 'Unknown'
+
+        # Get supervisor name if supervisor has acknowledged
+        supervisor_name = None
+        if log.supervisor_id:
+            supervisor = db.query(AccessUser).filter(AccessUser.id == log.supervisor_id).first()
+            supervisor_name = supervisor.user_name if supervisor else None
 
         # Get all item responses for this log
         responses = db.query(PokayokeItemResponse).filter(
@@ -767,6 +782,9 @@ def get_machine_completed_logs_simple(machine_id: int, db: Session = Depends(get
             operator_name=operator_name,
             completed_at=log.completed_at,
             overall_status=overall_status,
+            supervisor_name=supervisor_name,
+            operator_acknowledged=log.operator_acknowledged,
+            supervisor_acknowledged=log.supervisor_acknowledged,
             items=items_data
         ))
 
@@ -1282,6 +1300,46 @@ def get_simple_item_responses_for_log(log_id: int, db: Session = Depends(get_db)
         overall_status=overall_status,
         items=items_data
     )
+
+
+# =======================
+# POKAYOKE COMPLETED LOG ACKNOWLEDGMENT
+# =======================
+
+@completed_logs_router.put("/{log_id}/acknowledge", response_model=PokayokeCompletedLogSchema)
+def acknowledge_pokayoke_notification(
+    log_id: int,
+    operator_id: Optional[int] = None,
+    supervisor_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """Acknowledge a Pokayoke completed log notification for either operator or supervisor"""
+    db_log = db.query(PokayokeCompletedLog).filter(PokayokeCompletedLog.id == log_id).first()
+    if not db_log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Completed log with id {log_id} not found"
+        )
+    
+    # Determine who is acknowledging and update the appropriate fields
+    if operator_id is not None:
+        # Operator is acknowledging
+        db_log.operator_acknowledged = True
+        db_log.operator_acknowledged_at = datetime.now(IST).replace(tzinfo=None)
+    elif supervisor_id is not None:
+        # Supervisor is acknowledging
+        db_log.supervisor_acknowledged = True
+        db_log.supervisor_acknowledged_at = datetime.now(IST).replace(tzinfo=None)
+        db_log.supervisor_id = supervisor_id
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either operator_id or supervisor_id must be provided as query parameter"
+        )
+    
+    db.commit()
+    db.refresh(db_log)
+    return db_log
 
 
 # Export both routers

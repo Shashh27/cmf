@@ -398,6 +398,56 @@ class ProductHierarchicalData(BaseModel):
     direct_parts: List[PartDetails] = []
 
 
+# =======================
+# Lightweight Hierarchical Product Data Schemas (No operations/documents/tools)
+# =======================
+class PartLightweight(BaseModel):
+    id: int
+    part_name: str
+    part_number: str
+    type_id: Optional[int] = None
+    type_name: Optional[str] = None
+    assembly_id: Optional[int] = None
+    product_id: Optional[int] = None
+    qty: Optional[int] = None
+    size: Optional[str] = None
+    raw_material_id: Optional[int] = None
+    raw_material_name: Optional[str] = None
+    raw_material_status: Optional[str] = None
+    vendor_id: Optional[int] = None
+    vendor_name: Optional[str] = None
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AssemblyLightweight(BaseModel):
+    id: int
+    assembly_name: str
+    assembly_number: str
+    product_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    parts: List[PartLightweight] = []
+    child_assemblies: List['AssemblyLightweight'] = []
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProductHierarchicalLightweight(BaseModel):
+    product: Product
+    assemblies: List[AssemblyLightweight] = []
+    parts: List[PartLightweight] = []
+
+
 
 
 # =======================
@@ -684,6 +734,10 @@ class OperationTrackingStatus(BaseModel):
     operator_id: Optional[int] = None
     operator_name: Optional[str] = None
     production_logs: List[dict] = []
+    machine_id: Optional[int] = None
+    machine_make: Optional[str] = None
+    machine_model: Optional[str] = None
+    machine_name: Optional[str] = None
 
     class Config:
         from_attributes = True
