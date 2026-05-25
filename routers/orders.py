@@ -1173,7 +1173,7 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
 @router.delete("/{order_id}")
 def delete_order(order_id: int, db: Session = Depends(get_db)):
     """
-    Delete an order and all its related data.
+    Delete an order and all its references across all schemas.
     
     If the product linked to this order has no other orders, 
     the product and all its related data will also be deleted (cascade).
@@ -1181,6 +1181,24 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Check if any parts related to this order have active schedule status
+    active_parts = db.execute(
+        text("""
+            SELECT p.id, p.part_name 
+            FROM oms.parts p
+            JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+            WHERE p.product_id = :product_id AND pss.status = 'active'
+        """),
+        {"product_id": order.product_id}
+    ).fetchall()
+    
+    if active_parts:
+        part_names = [row[1] for row in active_parts]
+        raise HTTPException(
+            status_code=400,
+            detail=f"Sorry, this order cannot be deleted because the following parts are currently scheduled for production: {', '.join(part_names)}. To delete this order, please inactivate the schedule status of these parts first."
+        )
     
     product_id = order.product_id
     sale_order_number = order.sale_order_number
@@ -1196,8 +1214,7 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     # Main deletion transaction: remove all related data and the order itself.
     # This block should either fully succeed or fully roll back.
     try:
-        # Delete part_schedule_status records using a savepoint to avoid transaction abort
-        # This table exists in the scheduling schema and uses sale_order_id (order_id)
+        # 1. Delete from scheduling.part_schedule_status (by sale_order_id)
         savepoint = db.begin_nested()
         try:
             db.execute(
@@ -1207,10 +1224,9 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
             savepoint.commit()
         except Exception as e:
             savepoint.rollback()
-            print(f"Note: Could not delete from part_schedule_status (table may not exist or no records): {e}")
+            print(f"Note: Could not delete from part_schedule_status: {e}")
         
-        # Delete component_issues records using a savepoint
-        # This table exists in the maintenance schema
+        # 2. Delete from maintenance.component_issues (by production_order_id)
         savepoint = db.begin_nested()
         try:
             db.execute(
@@ -1220,12 +1236,11 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
             savepoint.commit()
         except Exception as e:
             savepoint.rollback()
-            print(f"Note: Could not delete from component_issues (table may not exist or no records): {e}")
+            print(f"Note: Could not delete from component_issues: {e}")
         
-        # Delete order documents and their MinIO files
+        # 3. Delete order documents and their MinIO files
         order_docs = db.query(OrderDocument).filter(OrderDocument.order_id == order_id).all()
         for order_doc in order_docs:
-            # Best-effort MinIO delete when client is available
             if minio_client:
                 try:
                     object_name = order_doc.document_url.split(f"/{minio_client.bucket_name}/")[1]
@@ -1234,91 +1249,218 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
                     print(f"Error deleting order document from MinIO: {e}")
             db.delete(order_doc)
 
-        # Delete order part priorities
+        # 4. Delete order part priorities
         db.query(OrderPartPriority).filter(OrderPartPriority.order_id == order_id).delete()
 
-        # Delete inventory-related records using raw SQL to respect FK relationships
-        # 1) Delete tool issues that reference inventory requests for this order
+        # 5. Delete from inventory.tool_issues (via inventory_requests)
         db.execute(
-            text(
-                """
-                DELETE FROM inventory.tool_issues
-                WHERE request_id IN (
-                    SELECT id FROM inventory.inventory_requests
-                    WHERE project_id = :order_id
-                )
-                """
-            ),
-            {"order_id": order_id},
+            text("DELETE FROM inventory.tool_issues WHERE request_id IN (SELECT id FROM inventory.inventory_requests WHERE project_id = :order_id)"),
+            {"order_id": order_id}
         )
 
-        # 2) Delete return requests that reference inventory requests for this order
+        # 6. Delete from inventory.inventory_return_requests (via inventory_requests)
         db.execute(
-            text(
-                """
-                DELETE FROM inventory.inventory_return_requests
-                WHERE requested_id IN (
-                    SELECT id FROM inventory.inventory_requests
-                    WHERE project_id = :order_id
-                )
-                """
-            ),
-            {"order_id": order_id},
+            text("DELETE FROM inventory.inventory_return_requests WHERE requested_id IN (SELECT id FROM inventory.inventory_requests WHERE project_id = :order_id)"),
+            {"order_id": order_id}
         )
 
-        # 3) Delete the inventory requests themselves
+        # 7. Delete from inventory.inventory_requests (by project_id)
         db.execute(
-            text(
-                """
-                DELETE FROM inventory.inventory_requests
-                WHERE project_id = :order_id
-                """
-            ),
-            {"order_id": order_id},
+            text("DELETE FROM inventory.inventory_requests WHERE project_id = :order_id"),
+            {"order_id": order_id}
         )
 
-        # Delete out source part status records linked to this order
+        # 8. Delete from oms.out_source_parts_status
         db.execute(
-            text(
-                """
-                DELETE FROM oms.out_source_parts_status
-                WHERE order_id = :order_id
-                """
-            ),
-            {"order_id": order_id},
+            text("DELETE FROM oms.out_source_parts_status WHERE order_id = :order_id"),
+            {"order_id": order_id}
         )
 
-        # Delete order-level schedule status records (scheduling.order_schedule_status)
-        # to satisfy FK constraint order_schedule_status_order_id_fkey
+        # 9. Delete from scheduling.order_schedule_status
         db.execute(
-            text(
-                """
-                DELETE FROM scheduling.order_schedule_status
-                WHERE order_id = :order_id
-                """
-            ),
-            {"order_id": order_id},
+            text("DELETE FROM scheduling.order_schedule_status WHERE order_id = :order_id"),
+            {"order_id": order_id}
         )
 
-        # Delete order notifications referencing this order to satisfy FK in notifications.order_notifications
+        # 10. Delete from notifications.order_notifications
         db.execute(
-            text(
-                """
-                DELETE FROM notifications.order_notifications
-                WHERE order_id = :order_id
-                """
-            ),
-            {"order_id": order_id},
+            text("DELETE FROM notifications.order_notifications WHERE order_id = :order_id"),
+            {"order_id": order_id}
         )
 
-        # Delete pokayoke logs
-        pokayoke_logs = (
-            db.query(PokayokeCompletedLog)
-            .filter(PokayokeCompletedLog.production_order_id == order_id)
-            .all()
-        )
+        # 11. Delete from configuration.pokayoke_completed_logs (by production_order_id)
+        pokayoke_logs = db.query(PokayokeCompletedLog).filter(PokayokeCompletedLog.production_order_id == order_id).all()
         for log in pokayoke_logs:
             db.delete(log)
+
+        # 12. Delete from oms.order_parts_raw_material_linked
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM oms.order_parts_raw_material_linked WHERE order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from order_parts_raw_material_linked: {e}")
+
+        # 13. Delete from maintenance.help_support (by production_order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM maintenance.help_support WHERE production_order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from help_support: {e}")
+
+        # 14. Delete from notifications.inspection_notifications (by order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM notifications.inspection_notifications WHERE order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from inspection_notifications: {e}")
+
+        # 15. Delete from production_monitoring.machine_live_history (by current_order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM production_monitoring.machine_live_history WHERE current_order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from machine_live_history: {e}")
+
+        # 16. Delete from production_monitoring.machine_live_status (by current_order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM production_monitoring.machine_live_status WHERE current_order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from machine_live_status: {e}")
+
+        # 17. Delete from quality.ftp_status (by order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM quality.ftp_status WHERE order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from ftp_status: {e}")
+
+        # 18. Delete from quality.inspection_plan_status (by sales_order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM quality.inspection_plan_status WHERE sales_order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from inspection_plan_status: {e}")
+
+        # 19. Delete from quality.master_boc (by sales_order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM quality.master_boc WHERE sales_order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from master_boc: {e}")
+
+        # 20. Delete from quality.stage_inspection (by sale_order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM quality.stage_inspection WHERE sale_order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from stage_inspection: {e}")
+
+        # 21. Delete from scheduling.machine_schedule (by order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM scheduling.machine_schedule WHERE order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from machine_schedule: {e}")
+
+        # 22. Delete from scheduling.operation_status (by order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM scheduling.operation_status WHERE order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from operation_status: {e}")
+
+        # 23. Delete from scheduling.planned_schedule_items (by sale_order_id)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM scheduling.planned_schedule_items WHERE sale_order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from planned_schedule_items: {e}")
+
+        # 24. Delete from scheduling.rescheduling_items (by order_id only)
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM scheduling.rescheduling_items WHERE order_id = :order_id"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from rescheduling_items: {e}")
+
+        # 26. Delete from inventory.raw_material_stock (by source_order_id)
+        # Note: This will also cascade to units and usage records
+        savepoint = db.begin_nested()
+        try:
+            db.execute(
+                text("DELETE FROM inventory.raw_material_stock WHERE source_order_id = :order_id AND source_type = 'order'"),
+                {"order_id": order_id}
+            )
+            savepoint.commit()
+        except Exception as e:
+            savepoint.rollback()
+            print(f"Note: Could not delete from raw_material_stock: {e}")
 
         db.flush()
 
@@ -1346,8 +1488,7 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
             detail=f"Error deleting order: {str(e)}"
         )
 
-    # Best-effort resequencing of remaining priorities.
-    # If this fails for any reason, the order deletion should still be considered successful.
+    # Best-effort resequencing of remaining priorities
     try:
         remaining_priorities = (
             db.query(OrderPartPriority)
@@ -1356,7 +1497,6 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
         )
         for index, record in enumerate(remaining_priorities):
             record.priority = index + 1
-
         db.commit()
     except Exception as e:
         db.rollback()

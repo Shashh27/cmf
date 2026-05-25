@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import List, Optional
 import os
 import uuid
@@ -9,10 +10,12 @@ import mimetypes
 
 from DB.database import get_db, SessionLocal
 from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel
+from DB.models.access_control import AccessUser
 from DB.schemas.oms import Document, DocumentUpdate, ExtractedDataUpdate
 from DB.minio_client import get_minio_client
 from .step_converter import StepConverter
 from .rawmaterial_extract import extract_pdf_data
+from services.notification_service import NotificationService
 
 router = APIRouter(
     prefix="/documents",
@@ -240,6 +243,19 @@ async def create_document(
             detail="Either part_id or assembly_id must be provided"
         )
 
+    # Check if part is scheduled (status is "active") - only for part documents
+    if part_id:
+        schedule_status = db.execute(
+            text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": part_id}
+        ).fetchone()
+        
+        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sorry, this document cannot be uploaded/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+            )
+
     # Validate file extension
     if not is_allowed_file(file.filename):
         raise HTTPException(
@@ -311,12 +327,31 @@ async def create_document(
             part_id=part_id,
             assembly_id=assembly_id,
             parent_id=processed_parent_id,
-            user_id=user_id
+            user_id=user_id,
+            is_acknowledged=False
         )
 
         db.add(db_document)
         db.commit()
         db.refresh(db_document)
+
+        # Log document creation for PC notifications
+        user_name = None
+        user_role = None
+        if user_id:
+            user = db.query(AccessUser).filter(AccessUser.id == user_id).first()
+            user_name = user.user_name if user else None
+            user_role = user.role if user else None
+        
+        NotificationService.log_document_change(
+            db=db,
+            document_id=db_document.id,
+            action="created",
+            user_id=user_id,
+            user_name=user_name,
+            user_role=user_role,
+            details={"document_name": db_document.document_name, "document_type": db_document.document_type}
+        )
 
         # Extract data from PDF if applicable (2D files) - currently only for part documents
         if (
@@ -337,6 +372,10 @@ async def create_document(
 
         return db_document
 
+    except HTTPException:
+        # Re-raise HTTPException as-is (includes our active status check)
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -374,6 +413,19 @@ async def create_documents_bulk(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Either part_id or assembly_id must be provided"
         )
+
+    # Check if part is scheduled (status is "active") - only for part documents
+    if part_id:
+        schedule_status = db.execute(
+            text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": part_id}
+        ).fetchone()
+        
+        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sorry, this document cannot be uploaded/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+            )
 
     if not files:
         return []
@@ -475,7 +527,8 @@ async def create_documents_bulk(
                 part_id=part_id,
                 assembly_id=assembly_id,
                 parent_id=effective_parent,
-                user_id=user_id
+                user_id=user_id,
+                is_acknowledged=False
             )
             db.add(db_document)
             # Ensure db_document.id is available for extracted-data insert
@@ -505,6 +558,10 @@ async def create_documents_bulk(
 
         return created_docs
 
+    except HTTPException:
+        # Re-raise HTTPException as-is (includes our active status check)
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -718,11 +775,68 @@ def update_document(document_id: int, document: DocumentUpdate, db: Session = De
             detail=f"Document with id {document_id} not found"
         )
 
+    # Check if part is scheduled (status is "active") - only for part documents
+    if db_document.part_id:
+        schedule_status = db.execute(
+            text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": db_document.part_id}
+        ).fetchone()
+        
+        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sorry, this document cannot be uploaded/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+            )
+
     update_data = document.model_dump(exclude_unset=True)
+    
+    # Capture old values before updating
+    old_values = {}
+    for field in update_data.keys():
+        old_values[field] = getattr(db_document, field, None)
+    
     for field, value in update_data.items():
         setattr(db_document, field, value)
 
     db.commit()
+    
+    # Log document update for PC notifications
+    user_name = None
+    user_role = None
+    if db_document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    # Capture changes with old and new values
+    changes = {}
+    for field in update_data.keys():
+        old_value = old_values[field]
+        new_value = update_data[field]
+        
+        # Convert time/datetime objects to strings for JSON serialization
+        if old_value is not None and hasattr(old_value, 'isoformat'):
+            old_value = old_value.isoformat()
+        elif hasattr(old_value, '__str__') and not isinstance(old_value, (str, int, float, bool)):
+            old_value = str(old_value)
+        
+        if new_value is not None and hasattr(new_value, 'isoformat'):
+            new_value = new_value.isoformat()
+        elif hasattr(new_value, '__str__') and not isinstance(new_value, (str, int, float, bool)):
+            new_value = str(new_value)
+        
+        changes[field] = {"old": old_value, "new": new_value}
+    
+    NotificationService.log_document_change(
+        db=db,
+        document_id=db_document.id,
+        action="updated",
+        user_id=db_document.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"document_name": db_document.document_name, "document_type": db_document.document_type, "changes": changes}
+    )
+    
     db.refresh(db_document)
     return db_document
 
@@ -743,6 +857,19 @@ async def replace_document_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with id {document_id} not found"
         )
+
+    # Check if part is scheduled (status is "active") - only for part documents
+    if db_document.part_id:
+        schedule_status = db.execute(
+            text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": db_document.part_id}
+        ).fetchone()
+        
+        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sorry, this document cannot be uploaded/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+            )
 
     # Validate file extension
     if not is_allowed_file(file.filename):
@@ -819,6 +946,29 @@ async def replace_document_file(
         )
 
 
+@router.put("/{document_id}/acknowledge", response_model=Document)
+def acknowledge_document(document_id: int, is_acknowledged: bool, db: Session = Depends(get_db)):
+    """Update document acknowledgment status"""
+    db_document = db.query(DocumentModel).filter(DocumentModel.id == document_id).first()
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Document with id {document_id} not found"
+        )
+
+    try:
+        db_document.is_acknowledged = is_acknowledged
+        db.commit()
+        db.refresh(db_document)
+        return db_document
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update document acknowledgment: {str(e)}"
+        )
+
+
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_document(document_id: int, db: Session = Depends(get_db)):
     """Delete a document (removes from database and MinIO)"""
@@ -828,6 +978,37 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with id {document_id} not found"
         )
+
+    # Check if part is scheduled (status is "active") - only for part documents
+    if db_document.part_id:
+        schedule_status = db.execute(
+            text("SELECT status FROM scheduling.part_schedule_status WHERE part_id = :pid"),
+            {"pid": db_document.part_id}
+        ).fetchone()
+        
+        if schedule_status and schedule_status[0] and schedule_status[0].lower() == "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sorry, this document cannot be uploaded/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
+            )
+
+    # Log document deletion for PC notifications before deletion
+    user_name = None
+    user_role = None
+    if db_document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_document_change(
+        db=db,
+        document_id=db_document.id,
+        action="deleted",
+        user_id=db_document.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"document_name": db_document.document_name, "document_type": db_document.document_type}
+    )
 
     try:
         # Get object name before deleting from database

@@ -645,7 +645,7 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'part_detail': calculated_part_detail,
             'assembly_id': part.assembly_id,
             'product_id': part.product_id,
-            'user_id': part.user_id,        
+            'user_id': part.user_id,
             'qty': part.qty,    # New optional quantity field
             'size': part.size,  # Size specification for the part
             'vendor_id': part.vendor_id,
@@ -656,6 +656,7 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
             'raw_material_source_type': raw_material_source_type,  # Add source_type field
             'user_name': user_map.get(part.user_id) if part.user_id else None,
             'vendor_name': getattr(part.vendor, 'company_name', None) if part.vendor else None,
+            'recycle_bin': getattr(part, 'recycle_bin', False),  # Add recycle_bin field
             'created_at': part.created_at,
             'updated_at': part.updated_at,
         }
@@ -723,7 +724,7 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     return ProductHierarchicalData(
         product=product_response,
         assemblies=[a for a in root_assemblies if a],
-        parts=direct_parts
+        direct_parts=direct_parts
     )
 
 
@@ -897,7 +898,7 @@ def get_product_hierarchical_data(product_id: int, db: Session = Depends(get_db)
     return fetch_product_hierarchy(db, product_id)
 
 
-@router.get("/{product_id}/hierarchical-lightweight", response_model=ProductHierarchicalLightweight)
+@router.get("/{product_id}/hierarchical-lightweight")
 def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(get_db)):
     """
     Get lightweight hierarchical product data - optimized for BOM tree display.
@@ -922,6 +923,16 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
     all_parts = db.query(PartModel).options(
         joinedload(PartModel.vendor)
     ).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
+
+    # Get part schedule status for all parts
+    part_ids = [p.id for p in all_parts]
+    part_schedule_status_map = {}
+    if part_ids:
+        schedule_statuses = db.execute(
+            text("SELECT part_id, status FROM scheduling.part_schedule_status WHERE part_id IN :pids"),
+            {"pids": tuple(part_ids)}
+        ).fetchall()
+        part_schedule_status_map = {row[0]: row[1] for row in schedule_statuses}
 
     # Get all raw materials for mapping (name only)
     all_raw_materials = db.query(RawMaterialModel).all()
@@ -967,10 +978,12 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             'raw_material_id': part.raw_material_id,
             'raw_material_name': raw_material_map.get(part.raw_material_id),
             'raw_material_status': raw_material_status,
+            'schedule_status': part_schedule_status_map.get(part.id, None),
             'vendor_id': part.vendor_id,
             'vendor_name': getattr(part.vendor, 'company_name', None) if part.vendor else None,
             'user_id': part.user_id,
             'user_name': user_map.get(part.user_id) if part.user_id else None,
+            'recycle_bin': getattr(part, 'recycle_bin', False),
             'created_at': part.created_at,
             'updated_at': part.updated_at,
         }
@@ -999,6 +1012,7 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             'parent_id': assembly.parent_id,
             'user_id': assembly.user_id,
             'user_name': user_map.get(assembly.user_id) if assembly.user_id else None,
+            'recycle_bin': getattr(assembly, 'recycle_bin', False),
             'parts': direct_parts,
             'child_assemblies': [ca for ca in child_assemblies if ca],
             'created_at': assembly.created_at,
@@ -1027,8 +1041,8 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
         updated_at=product.updated_at,
     )
 
-    return ProductHierarchicalLightweight(
-        product=product_response,
-        assemblies=[a for a in root_assemblies if a],
-        parts=direct_parts
-    )
+    return {
+        'product': product_response,
+        'assemblies': [a for a in root_assemblies if a],
+        'parts': direct_parts
+    }

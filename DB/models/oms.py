@@ -92,6 +92,7 @@ class Assembly(Base):
 
     assembly_number = Column(String, nullable=False)
 
+    recycle_bin = Column(Boolean, default=False, nullable=False)
 
 
     product_id = Column(Integer, ForeignKey("oms.products.id"))
@@ -209,10 +210,12 @@ class Part(Base):
 
 
     qty = Column(Integer, nullable=True, default=1)  # Optional quantity field, defaults to 1
-    
+
     size = Column(String, nullable=True)  # Size specification for the part
 
     vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Vendor for outsourced parts
+
+    recycle_bin = Column(Boolean, nullable=False, default=False)  # Soft delete flag for recycle bin
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -375,6 +378,8 @@ class Document(Base):
     parent_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=True)
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
+    is_acknowledged = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

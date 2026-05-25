@@ -70,6 +70,9 @@ from routers import (
     production_analytics_router,
 )
 
+# Import recycle bin router
+from recyclebin_router.recyclebin import router as recycle_bin_router
+
 # Import scheduling router
 
 # from scheduling_routers.production_logs import router as production_logs_router
@@ -88,6 +91,8 @@ from notification_routers import (
     order_notifications_router,
 
     tool_issues_notification_router,
+
+    pc_notifications_router,
 
 )
 
@@ -290,7 +295,10 @@ app.include_router(maintenance_router, prefix="/api/v1")
 app.include_router(order_tracking_router, prefix="/api/v1")
 
 app.include_router(monitoring_router, prefix="/api/v1")
+
 app.include_router(production_analytics_router, prefix="/api/v1")
+
+app.include_router(recycle_bin_router, prefix="/api/v1")
 
 # app.include_router(production_logs_router, prefix="/api/v1")
 
@@ -307,6 +315,8 @@ app.include_router(machine_notifications_router, prefix="/api/v1")
 app.include_router(order_notifications_router, prefix="/api/v1")
 
 app.include_router(tool_issues_notification_router, prefix="/api/v1")
+
+app.include_router(pc_notifications_router, prefix="/api/v1")
 
 
 
@@ -518,3 +528,4 @@ if __name__ == "__main__":
 # uvicorn main:app --reload --host 172.18.7.91 --port 3000
 
 #  uvicorn main:app --reload --host 172.18.7.86 --port 8000
+

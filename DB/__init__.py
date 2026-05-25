@@ -25,6 +25,10 @@ from .models.documents import (
     GeneralFolder,
     GeneralDocument
 )
+from .models.notifications import (
+    ActivityLog,
+    PCNotification
+)
 from . import schemas
 from .minio_client import get_minio_client, init_minio_client, MinIOClient
 
@@ -51,6 +55,8 @@ __all__ = [
     "ToolsList",
     "GeneralFolder",
     "GeneralDocument",
+    "ActivityLog",
+    "PCNotification",
     "schemas",
     "get_minio_client",
     "init_minio_client",
