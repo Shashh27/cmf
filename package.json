@@ -38,6 +38,7 @@
     "react-image": "^4.1.0",
     "react-pdf": "^7.7.3",
     "react-router-dom": "^7.13.0",
+    "react-window": "^2.2.7",
     "recharts": "^3.8.1",
     "tailwind-merge": "^3.6.0",
     "three": "^0.182.0",

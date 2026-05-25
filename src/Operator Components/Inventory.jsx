@@ -607,6 +607,8 @@ const Inventory = () => {
           >
             <Select
               placeholder="Select a project"
+              showSearch
+              optionFilterProp="label"
               onChange={(value) => {
                 const selectedOrder = orders.find(o => o.id === value);
                 if (selectedOrder) fetchParts(selectedOrder.sale_order_number);
@@ -614,7 +616,7 @@ const Inventory = () => {
               }}
             >
               {orders.map(o => (
-                <Option key={o.id} value={o.id}>{o.sale_order_number || `Order ${o.id}`}</Option>
+                <Option key={o.id} value={o.id} label={o.sale_order_number || `Order ${o.id}`}>{o.sale_order_number || `Order ${o.id}`}</Option>
               ))}
             </Select>
           </Form.Item>
@@ -624,9 +626,16 @@ const Inventory = () => {
             label="Part"
             rules={[{ required: true, message: 'Please select a part' }]}
           >
-            <Select placeholder="Select a part" disabled={!parts.length}>
+            <Select
+              placeholder="Select a part"
+              disabled={!parts.length}
+              showSearch
+              optionFilterProp="label"
+            >
               {parts.map(p => (
-                <Option key={p.id} value={p.id}>{p.part_name || p.part_number}</Option>
+                <Option key={p.id} value={p.id} label={`${p.part_name || ''} (${p.part_number || ''})`}>
+                  {p.part_name || p.part_number} ({p.part_number || p.part_name})
+                </Option>
               ))}
             </Select>
           </Form.Item>
@@ -638,9 +647,16 @@ const Inventory = () => {
               { required: true, message: 'Please enter quantity' },
               {
                 validator(_, value) {
+                  if (value === undefined || value === null || value === '') {
+                    return Promise.resolve();
+                  }
+                  const num = Number(value);
+                  if (isNaN(num) || num <= 0) {
+                    return Promise.reject(new Error('Quantity must be greater than 0'));
+                  }
                   const selectedTool = tools.find(t => t.id === selectedToolId);
                   const available = selectedTool?.quantity ?? 0;
-                  if (value && value > available) {
+                  if (num > available) {
                     return Promise.reject(
                       new Error(`Available quantity: ${available}. You cannot request more than this.`)
                     );
@@ -656,7 +672,6 @@ const Inventory = () => {
             }
           >
             <InputNumber
-              min={1}
               style={{ width: '100%' }}
               precision={0}
               parser={value => value.replace(/[^\d]/g, '')}

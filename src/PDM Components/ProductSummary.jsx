@@ -27,20 +27,6 @@ const formatHms = (seconds) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 };
 
-const flattenPartsFromHierarchy = (data) => {
-  const parts = [];
-  const directParts = data?.direct_parts || data?.parts || [];
-  parts.push(...directParts);
-  const walkAssemblies = (assemblies) => {
-    (assemblies || []).forEach((asm) => {
-      if (asm?.parts) parts.push(...asm.parts);
-      if (asm?.subassemblies) walkAssemblies(asm.subassemblies);
-    });
-  };
-  walkAssemblies(data?.assemblies || []);
-  return parts;
-};
-
 // ─── Stat Card ──────────────────────────────────────────────────────────────
 
 const StatCard = ({ icon, label, value, iconColor }) => (
@@ -73,34 +59,35 @@ const SectionHeader = ({ icon, title, count }) => (
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-const ProductSummary = ({ productId, initialHierarchy }) => {
+const ProductSummary = ({ productId }) => {
   const [loading, setLoading] = useState(false);
-  const [hierarchy, setHierarchy] = useState(initialHierarchy || null);
+  const [summaryData, setSummaryData] = useState(null);
 
   useEffect(() => {
-    if (!productId) { setHierarchy(null); return; }
-    if (initialHierarchy) { setHierarchy(initialHierarchy); setLoading(false); return; }
+    if (!productId) { setSummaryData(null); return; }
 
     let isMounted = true;
     const controller = new AbortController();
     setLoading(true);
 
+    // Use lightweight summary-data endpoint - only operations data for hours calculation
     axios
-      .get(`${API_BASE_URL}/products/${productId}/hierarchical`, { signal: controller.signal })
-      .then((res) => { if (isMounted) setHierarchy(res.data); })
+      .get(`${API_BASE_URL}/products/${productId}/summary-data`, { signal: controller.signal })
+      .then((res) => { if (isMounted) setSummaryData(res.data); })
       .catch((e) => {
         if (e?.name !== "CanceledError" && e?.name !== "AbortError") {
           console.error("Product summary fetch error:", e);
-          if (isMounted) setHierarchy(null);
+          if (isMounted) setSummaryData(null);
         }
       })
       .finally(() => { if (isMounted && !controller.signal.aborted) setLoading(false); });
 
     return () => { isMounted = false; controller.abort(); };
-  }, [productId, initialHierarchy]);
+  }, [productId]);
 
   const summary = useMemo(() => {
-    const parts = hierarchy ? flattenPartsFromHierarchy(hierarchy) : [];
+    // New summary-data endpoint returns flat parts array directly
+    const parts = summaryData?.parts || [];
     const rows = [];
 
     parts.forEach((pd) => {
@@ -156,8 +143,8 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
 
     const machineRows = Array.from(byMachine.values()).sort((a, b) => b.total_seconds - a.total_seconds);
 
-    return { productName: hierarchy?.product?.product_name || "", rows, totalSetup, totalCycle, totalAll: totalSetup + totalCycle, machineRows };
-  }, [hierarchy]);
+    return { productName: summaryData?.product?.product_name || "", rows, totalSetup, totalCycle, totalAll: totalSetup + totalCycle, machineRows };
+  }, [summaryData]);
 
   // ── Empty / Loading states ──────────────────────────────────────────────
 
@@ -173,7 +160,7 @@ const ProductSummary = ({ productId, initialHierarchy }) => {
     </div>
   );
 
-  if (!hierarchy) return (
+  if (!summaryData) return (
     <div className="h-full w-full flex items-center justify-center bg-white">
       <Empty description="No summary available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
     </div>

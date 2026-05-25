@@ -147,7 +147,6 @@ const PDM = () => {
             <div style={{ flex: 1, minHeight: 0, overflow: "hidden", height: "100%" }}>
               <ProductSummary 
                 productId={selectedItem?.id} 
-                initialHierarchy={productHierarchies[selectedItem?.id]}
               />
             </div>
           ) : (

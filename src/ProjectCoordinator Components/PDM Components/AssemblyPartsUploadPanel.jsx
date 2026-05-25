@@ -478,26 +478,6 @@ const AssemblyPartsUploadPanel = ({
         >
           Upload Parts
         </Button>
-        
-        <Popconfirm
-          title="Delete All Parts"
-          description={`Delete all parts for "${selectedItem?.label || selectedItem?.name || 'this assembly'}"? This cannot be undone.`}
-          onConfirm={handleBulkDeleteParts}
-          okText="Yes, Delete"
-          cancelText="Cancel"
-          okButtonProps={{ danger: true }}
-        >
-          <Button
-            type="primary"
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
-            loading={deletingParts}
-            className="bg-red-600 hover:bg-red-700 border-red-600"
-          >
-            {deletingParts ? "Deleting…" : "Delete Parts"}
-          </Button>
-        </Popconfirm>
       </div>
 
       <Modal

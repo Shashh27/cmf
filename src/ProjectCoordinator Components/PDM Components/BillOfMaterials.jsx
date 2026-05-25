@@ -8,6 +8,7 @@ const { Text } = Typography;
 import CreateProductModal from "./CreateProductModal";
 import PartActionModal from "./PartActionModal";
 import ProductBOMPdfDownload from "../../DownloadReports/ProductBOMPdfDownload";
+import AssemblyPartsUploadPanel from "./AssemblyPartsUploadPanel";
 import { getLatestRevision } from "./operationUtils";
 
 // ── Highlight helper ──────────────────────────────────────────────────────────
@@ -821,18 +822,44 @@ const BillOfMaterials = ({
               </Button>
             )}
           </div>
-          <Input
-            prefix={<SearchOutlined className="text-slate-400" />}
-            placeholder="Search assemblies, sub-assemblies, and parts..."
-            value={searchTerm}
-            onChange={(e) => {
-              const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
-              setSearchTerm(filteredValue);
-            }}
-            maxLength={30}
-            className="rounded-md text-sm border-slate-200"
-            allowClear
-          />
+          <div className="flex items-center gap-2">
+            <Input
+              prefix={<SearchOutlined className="text-slate-400" />}
+              placeholder="Search assemblies, sub-assemblies, and parts..."
+              value={searchTerm}
+              onChange={(e) => {
+                const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
+                setSearchTerm(filteredValue);
+              }}
+              maxLength={30}
+              className="rounded-md text-sm border-slate-200 flex-1"
+              allowClear
+            />
+            <AssemblyPartsUploadPanel
+              selectedItem={(() => {
+                if (activeItemType === 'product' && activeItemId) {
+                  const prod = products.find(p => p.id === activeItemId);
+                  return { id: activeItemId, product_id: activeItemId, itemType: 'product', label: prod?.product_name || 'Product' };
+                }
+                if (activeItemType === 'assembly' && activeItemId) {
+                  for (const [pid, hd] of Object.entries(hierarchicalData)) {
+                    const found = hd.assemblies?.find(a => a.id === activeItemId);
+                    if (found) return { id: activeItemId, product_id: Number(pid), itemType: 'assembly', label: found.assembly_name || 'Assembly' };
+                  }
+                }
+                if (singleProductId) {
+                  const prod = products.find(p => p.id === singleProductId);
+                  return { id: singleProductId, product_id: singleProductId, itemType: 'product', label: prod?.product_name || 'Product' };
+                }
+                return null;
+              })()}
+              onPartsCreated={() => {
+                const pid = activeItemType === 'product' ? activeItemId : (activeItemType === 'assembly' ? null : singleProductId);
+                if (pid) fetchProductHierarchy(pid, true);
+                else if (singleProductId) fetchProductHierarchy(singleProductId, true);
+              }}
+            />
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">

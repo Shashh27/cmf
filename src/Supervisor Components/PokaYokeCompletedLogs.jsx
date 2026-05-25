@@ -46,7 +46,7 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch completion logs');
       const data = await response.json();
-      setLogs(Array.isArray(data) ? data : []);
+      setLogs(Array.isArray(data) ? [...data].reverse() : []);
     } catch (error) {
       message.error(error.message || 'Failed to load completion logs');
     } finally {
@@ -372,24 +372,24 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       className: 'table-header-styled',
       render: (_, record) => (
         <Space size="small">
-          <Tooltip title="Approve">
-            <Button
-              type="text"
-              size="small"
-              icon={<CheckOutlined style={{ color: '#52c41a' }} />}
-              onClick={() => handleApproveClick(record)}
-              disabled={record.approval_status === 'approved'}
-            />
-          </Tooltip>
-          <Tooltip title="Reject">
-            <Button
-              type="text"
-              size="small"
-              icon={<CloseOutlined style={{ color: '#ff4d4f' }} />}
-              onClick={() => handleRejectClick(record)}
-              disabled={record.approval_status === 'rejected'}
-            />
-          </Tooltip>
+        <Tooltip title="Approve">
+          <Button
+            type="text"
+            size="small"
+            icon={<CheckOutlined style={{ color: '#52c41a' }} />}
+            onClick={() => handleApproveClick(record)}
+            disabled={record.approval_status === 'approved' || record.approval_status === 'rejected'}
+          />
+        </Tooltip>
+        <Tooltip title="Reject">
+          <Button
+            type="text"
+            size="small"
+            icon={<CloseOutlined style={{ color: '#ff4d4f' }} />}
+            onClick={() => handleRejectClick(record)}
+            disabled={record.approval_status === 'approved' || record.approval_status === 'rejected'}
+          />
+        </Tooltip>
         </Space>
       ),
     },

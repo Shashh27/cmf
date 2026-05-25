@@ -53,7 +53,7 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
   const columns = [
     { title: 'Type', dataIndex: 'document_type', width: 120, render: t => <Tag color="blue" variant="filled" className="mr-0">{t || 'DOC'}</Tag> },
     { title: 'Document Name', dataIndex: 'document_name', ellipsis: true, render: t => <span className="font-medium text-gray-800">{t}</span> },
-    { title: 'Version', dataIndex: 'document_version', width: 100, render: t => { const v = t || '1.0'; return <span className="text-blue-600 font-bold text-xs">{v.startsWith('v') ? v : `v${v}`}</span>; } },
+    { title: 'Revision', dataIndex: 'document_version', width: 100, render: t => <span className="text-blue-600 font-bold text-xs">{t || 'N/A'}</span> },
     { title: 'Actions', key: 'actions', width: 80, align: 'center', render: (_, doc) => (
         <div className="flex gap-1 justify-center">
           <Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EyeOutlined />} onClick={() => onPreview(doc)} />
@@ -72,12 +72,12 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
           const versions = [...(grouped[r.parent_id || r.id] || [])].sort((a, b) => a.id - b.id);
           return (
             <div className="bg-gray-50 p-3 rounded">
-              <p className="text-xs font-medium text-gray-600 mb-2">Version History:</p>
+              <p className="text-xs font-medium text-gray-600 mb-2">Revision History:</p>
               <div className="flex flex-col gap-2">
                 {versions.map(ver => (
                   <div key={ver.id} className="flex justify-between items-center bg-white px-3 py-2 rounded border border-gray-200 shadow-sm">
                     <div className="flex items-center gap-3 min-w-0">
-                      <Tag color="blue" variant="filled" className="text-[10px] m-0 px-2">{ver.document_version?.startsWith('v') ? ver.document_version : `v${ver.document_version || ''}`}</Tag>
+                      <Tag color="blue" variant="filled" className="text-[10px] m-0 px-2">{ver.document_version || 'N/A'}</Tag>
                       <span className="text-xs text-gray-700 truncate">{ver.document_name}</span>
                     </div>
                     <div className="flex gap-2">
@@ -158,7 +158,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const [uploadDocType, setUploadDocType]         = useState('2D');
   const [uploadDocTypeOther, setUploadDocTypeOther] = useState('');
   const [uploadParentId, setUploadParentId]       = useState(null);
-  const [uploadVersion, setUploadVersion]         = useState('v1.0');
+  const [uploadVersion, setUploadVersion]         = useState('');
 
   // Edit doc
   const [isEditDocModalOpen, setIsEditDocModalOpen] = useState(false);
@@ -292,7 +292,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     finally { setUploading(false); }
   };
 
-  const resetUploadState = () => { setSelectedFileList([]); setUploadParentId(null); setUploadVersion('v1.0'); setUploadDocType('2D'); setUploadDocTypeOther(''); };
+  const resetUploadState = () => { setSelectedFileList([]); setUploadParentId(null); setUploadVersion(''); setUploadDocType('2D'); setUploadDocTypeOther(''); };
 
   const handleDeleteDocument = async (id) => {
     try {
@@ -339,7 +339,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
 
   const initiateNewVersion = (doc, latestVer) => {
     setUploadParentId(doc.parent_id || doc.id);
-    setUploadVersion('v' + (parseFloat((latestVer || '1.0').replace('v', '')) + 1).toFixed(1));
+    setUploadVersion('');
     setUploadDocType(doc.document_type || '2D');
     setIsUploadModalOpen(true);
   };
@@ -482,12 +482,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     { title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
       render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
     },
-    { title: <span className="text-xs font-semibold">VERSION</span>, key: 'ver', width: 150,
+    { title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
       render: (_, r) => {
         const rootId = r.parent_id || r.id;
         const group  = groupedPartDocs[rootId] || [];
         const cur    = selectedVersions[rootId] || r;
-        const fmtV   = (v) => String(v).startsWith('v') ? String(v) : `v${v}`;
         const versionWidth = 88;
         if (group.length <= 1) {
           const ver = cur?.document_version || '1.0';
@@ -499,7 +498,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               suffixIcon={null}
               variant="filled"
               style={{ width: versionWidth }}
-              options={[{ value: cur.id, label: fmtV(ver) }]}
+              options={[{ value: cur.id, label: ver }]}
             />
           );
         }
@@ -515,11 +514,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             labelRender={({ value }) => {
               const v = group.find(d => d.id === value);
               const ver = v?.document_version || '1.0';
-              return <span className="font-bold text-blue-600">{fmtV(ver)}</span>;
+              return <span className="font-bold text-blue-600">{ver}</span>;
             }}
             options={[...group]
               .sort((a, b) => a.id - b.id)
-              .map((ver) => ({ value: ver.id, label: fmtV(ver.document_version || '1.0') }))
+              .map((ver) => ({ value: ver.id, label: ver.document_version || '1.0' }))
             }
           />
         );
@@ -531,10 +530,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         return (
           <div className="flex gap-1 justify-center">
             <Tooltip title="Preview"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handlePreview(cur)} className="hover:text-blue-500 hover:bg-blue-50" /></Tooltip>
-            <Tooltip title="Update Version"><Button size="small" type="text" className="text-orange-500 hover:bg-orange-50" icon={<SyncOutlined />} onClick={() => initiateNewVersion(r, r.document_version)} /></Tooltip>
+            <Tooltip title="Update Revision"><Button size="small" type="text" className="text-orange-500 hover:bg-orange-50" icon={<SyncOutlined />} onClick={() => initiateNewVersion(r, r.document_version)} /></Tooltip>
             <Tooltip title="Edit Details"><Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />} onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} /></Tooltip>
             <Tooltip title="Download"><Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />} onClick={() => handleDownload(cur.id)} /></Tooltip>
-            <Popconfirm title="Delete Document" description="Delete this version? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
+            <Popconfirm title="Delete Document" description="Delete this revision? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
               <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
             </Popconfirm>
           </div>
@@ -594,7 +593,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       children: (
         <div className="h-full flex flex-col min-h-0 overflow-hidden">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 shrink-0 gap-2">
-            <span className="text-xs text-slate-500">Documents & versions</span>
+            <span className="text-xs text-slate-500">Documents & revisions</span>
             <Button type="primary" size="small" icon={<PlusOutlined />} className="primary-btn-sm w-full sm:w-auto"
               onClick={() => { if (isPart) { openPartActionModal('document'); } else { resetUploadState(); setIsUploadModalOpen(true); } }}>
               Add Document
@@ -605,7 +604,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           </div>
 
           {/* Upload Modal */}
-          <Modal title={<div className="flex items-center gap-2"><PlusOutlined className="text-blue-500" /><span>{uploadParentId ? 'Upload New Version' : 'Add New Document'}</span></div>}
+          <Modal title={<div className="flex items-center gap-2"><PlusOutlined className="text-blue-500" /><span>{uploadParentId ? 'Upload New Revision' : 'Add New Document'}</span></div>}
             open={isUploadModalOpen} onCancel={() => { setIsUploadModalOpen(false); resetUploadState(); }} footer={null} destroyOnHidden width="95%" style={{ maxWidth: 450 }}>
             <div className="space-y-4 mt-4">
               <div>
@@ -616,19 +615,35 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
                 {uploadDocType === 'Other' && <Input className="mt-2" placeholder="Enter custom document type" value={uploadDocTypeOther} onChange={e => setUploadDocTypeOther(e.target.value)} />}
               </div>
               <div>
-                <Text type="secondary" className="text-xs block mb-1">Version</Text>
-                <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} className="bg-gray-50" />
-                {uploadParentId && <Text type="warning" className="text-[10px] mt-1 block">Creating a new version for an existing document.</Text>}
+                <Text type="secondary" className="text-xs block mb-1">Revision <span className="text-red-500">*</span></Text>
+                <Input value={uploadVersion} onChange={e => setUploadVersion(normalizeVersion(e.target.value))} placeholder="00" className="bg-white" />
+                {uploadParentId && <Text type="warning" className="text-[10px] mt-1 block">Creating a new revision for an existing document.</Text>}
               </div>
-              <Dragger multiple={false} fileList={selectedFileList} beforeUpload={f => { setSelectedFileList([f]); return false; }} onRemove={() => setSelectedFileList([])} className="bg-gray-50 border-dashed border-2 py-8">
-                <p className="ant-upload-drag-icon"><InboxOutlined className="text-3xl text-blue-400" /></p>
-                <p className="ant-upload-text">Click or drag file here</p>
-                <p className="ant-upload-hint text-xs text-gray-400">Supports PDF, STL, STEP, Images...</p>
+              <Dragger 
+                showUploadList={false}
+                multiple={false} 
+                fileList={selectedFileList} 
+                beforeUpload={f => { setSelectedFileList([f]); return false; }} 
+                className="bg-gray-50 border-dashed border-2"
+                style={{ padding: '12px 0' }}
+              >
+                <p className="ant-upload-drag-icon mb-1"><InboxOutlined className="text-xl text-blue-400" /></p>
+                <p className="ant-upload-text text-[11px] font-medium">Click or drag file here</p>
+                <p className="ant-upload-hint text-[10px] text-gray-400">PDF, STL, STEP, Images...</p>
               </Dragger>
+              {selectedFileList.length > 0 && (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-100 rounded-lg flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileTextOutlined className="text-blue-500 shrink-0" />
+                    <span className="text-[11px] text-gray-700 truncate font-medium">{selectedFileList[0].name}</span>
+                  </div>
+                  <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => setSelectedFileList([])} className="h-6 w-6 flex items-center justify-center p-0" />
+                </div>
+              )}
               <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
                 <Button onClick={() => setIsUploadModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>
-                <Button type="primary" icon={<UploadOutlined />} loading={uploading} disabled={!selectedFileList.length} onClick={handleUpload} className="no-hover-btn w-full sm:w-auto">
-                  {uploadParentId ? 'Upload New Version' : 'Upload Document'}
+                <Button type="primary" icon={<UploadOutlined />} loading={uploading} disabled={!selectedFileList.length || !uploadVersion.trim()} onClick={handleUpload} className="no-hover-btn w-full sm:w-auto">
+                  {uploadParentId ? 'Upload New Revision' : 'Upload Document'}
                 </Button>
               </div>
             </div>

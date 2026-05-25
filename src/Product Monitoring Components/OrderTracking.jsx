@@ -472,7 +472,7 @@ const OrderTracking = () => {
                                   {log.status}
                                 </Tag>
                               </div>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', fontSize: '12px' }}>
                                 <div>
                                   <span style={{ color: '#666' }}>Produced: </span>
                                   <span style={{ color: '#1677ff', fontWeight: 'bold' }}>{log.produced_quantity || 0}</span>
@@ -483,7 +483,11 @@ const OrderTracking = () => {
                                 </div>
                                 <div>
                                   <span style={{ color: '#666' }}>Rework: </span>
-                                  <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}>{log.rework_quantity || 0}</span>
+                                  <span style={{ color: '#fa8c16', fontWeight: 'bold' }}>{log.rework_quantity || 0}</span>
+                                </div>
+                                <div>
+                                  <span style={{ color: '#666' }}>Rejected: </span>
+                                  <span style={{ color: '#ff4d4f', fontWeight: 'bold' }}>{log.rejected_quantity || 0}</span>
                                 </div>
                               </div>
                               <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
@@ -508,7 +512,7 @@ const OrderTracking = () => {
                     {
                       title: '#',
                       key: 'index',
-                      width: 40,
+                      width: 50,
                       align: 'center',
                       render: (_, __, index) => <Text style={{ fontSize: '11px', color: '#8c8c8c' }}>{index + 1}</Text>
                     },
@@ -517,6 +521,7 @@ const OrderTracking = () => {
                       dataIndex: 'operation_name',
                       key: 'operation_name',
                       width: 150,
+                      ellipsis: true,
                       render: (text) => (
                         <Text style={{ fontSize: '12px', color: '#333' }}>{text}</Text>
                       )
@@ -524,57 +529,57 @@ const OrderTracking = () => {
                     {
                       title: 'Machine Name',
                       key: 'machine_name',
-                      width: 120,
+                      width: 140,
                       align: 'center',
                       render: (_, opRecord) => {
-                        // Get machine name from production logs
                         const trackingOps = orderTrackingData?.parts?.find(p => p.part_id === selectedPartId)?.operations;
                         const operation = trackingOps?.find(o => o.operation_id === opRecord.id);
-                        const logs = operation?.production_logs || [];
-                        
-                        // Extract machine name from logs or create default
-                        const machineName = logs.length > 0 ? 
-                          (logs[0].notes?.match(/machine\s*[:\-]\s*(.+)/i)?.[1] || 
-                           logs[0].remarks?.match(/machine\s*[:\-]\s*(.+)/i)?.[1] || 
-                           `M${opRecord.id}`) : 
-                          `M${opRecord.id}`;
-                        
+                        const machineName = operation?.machine_name || `M${opRecord.id}`;
+
                         return (
-                          <Tag 
-                            color="blue" 
-                            style={{ 
-                              fontSize: '9px', 
-                              fontWeight: 500,
-                              borderRadius: '3px',
-                              padding: '1px 4px'
-                            }}
-                          >
-                            {machineName}
-                          </Tag>
+                          <div style={{ 
+                            maxWidth: '140px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            <Tag
+                              color="blue"
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 500,
+                                borderRadius: '3px',
+                                padding: '2px 6px',
+                                margin: 0
+                              }}
+                            >
+                              {machineName}
+                            </Tag>
+                          </div>
                         );
                       }
                     },
                     {
                       title: 'Required',
                       key: 'required',
-                      width: 50,
+                      width: 73,
                       align: 'center',
-                      render: (_, op) => <Text style={{ fontSize: '12px' }}>{selectedPart?.qty || 1}</Text>
+                      render: (_, op) => <Text style={{ fontSize: '12px', fontWeight: 500 }}>{selectedPart?.qty || 1}</Text>
                     },
                     {
                       title: 'Produced',
-                      key: 'approved',
-                      width: 50,
+                      key: 'produced',
+                      width: 80,
                       align: 'center',
                       render: (_, op) => {
                         const logs = productionLogsData[op.id] || [];
-                        return <Text style={{ color: '#52c41a', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.approved_quantity || 0), 0)}</Text>;
+                        return <Text style={{ color: '#1890ff', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.produced_quantity || 0), 0)}</Text>;
                       }
                     },
                     {
                       title: 'Approved',
                       key: 'approved',
-                      width: 50,
+                      width: 80,
                       align: 'center',
                       render: (_, op) => {
                         const logs = productionLogsData[op.id] || [];
@@ -583,12 +588,22 @@ const OrderTracking = () => {
                     },
                     {
                       title: 'Rework',
-                      key: 'rejected',
-                      width: 50,
+                      key: 'rework',
+                      width: 75,
                       align: 'center',
                       render: (_, op) => {
                         const logs = productionLogsData[op.id] || [];
-                        return <Text style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rework_quantity || 0), 0)}</Text>;
+                        return <Text style={{ color: '#fa8c16', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rework_quantity || 0), 0)}</Text>;
+                      }
+                    },
+                    {
+                      title: 'Rejected',
+                      key: 'rejected',
+                      width: 75,
+                      align: 'center',
+                      render: (_, op) => {
+                        const logs = productionLogsData[op.id] || [];
+                        return <Text style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: '12px' }}>{logs.reduce((s, l) => s + (l.rejected_quantity || 0), 0)}</Text>;
                       }
                     },
                     {
@@ -641,6 +656,16 @@ const OrderTracking = () => {
         }
         .ant-table-small .ant-table-thead > tr > th {
           background-color: #fafafa;
+          padding: 8px 12px !important;
+          font-weight: 600;
+          font-size: 11px;
+        }
+        .ant-table-small .ant-table-tbody > tr > td {
+          padding: 8px 12px !important;
+          vertical-align: middle;
+        }
+        .ant-table-small .ant-table-row {
+          height: 40px;
         }
       `}</style>
     </div>

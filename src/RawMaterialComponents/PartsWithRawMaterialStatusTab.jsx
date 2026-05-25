@@ -14,15 +14,17 @@ import {
   ReloadOutlined,
   DeleteOutlined,
   SafetyCertificateOutlined,
-  EditOutlined
+  EditOutlined,
+  AppstoreOutlined
 } from "@ant-design/icons";
 import DimensionInputs from "./DimensionInputs";
+import ProcureRawMaterialModal from "./ProcureRawMaterialModal";
 import { PartsWithRawMaterialsStatusPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
 
 const { Text } = Typography;
 const { Option } = Select;
 
-const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
+const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRawMaterials }) => {
   const [linkedMaterials, setLinkedMaterials] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -45,8 +47,33 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   const [availableUnits, setAvailableUnits] = useState([]);
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [orderHierarchyMap, setOrderHierarchyMap] = useState({});
-  const [vendors, setVendors] = useState([]);
   const [statusEditReceivedVendorId, setStatusEditReceivedVendorId] = useState(null);
+  const [pendingUnlinks, setPendingUnlinks] = useState(new Set());
+  
+  // Procure modal states
+  const [procureModalOpen, setProcureModalOpen] = useState(false);
+  const [procureForm, setProcureForm] = useState({
+    material_id: null,
+    form_type: null,
+    diameter: '',
+    length: '',
+    breadth: '',
+    height: '',
+    inner_diameter: '',
+    outer_diameter: '',
+    quantity: 1,
+    order_id: null,
+    selected_vendor_id: [],
+    order_status: 'enquiry'
+  });
+  const [procureLoading, setProcureLoading] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  
+  // Filter states
+  const [filterProjectNumber, setFilterProjectNumber] = useState(null);
+  const [filterVendorName, setFilterVendorName] = useState(null);
   
   // Quick status modal states
   const [quickStatusModalOpen, setQuickStatusModalOpen] = useState(false);
@@ -74,7 +101,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     if (initializedRef.current) return;
     initializedRef.current = true;
     fetchLinkedMaterials();
-    fetchVendors(); // Fetch vendors on component load
   }, []);
 
   const fetchLinkedMaterials = async () => {
@@ -97,21 +123,25 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     }
   };
 
-  const fetchVendors = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
-      setVendors(response.data || []);
-    } catch (error) {
-      console.error("Error fetching vendors:", error);
-    }
+  // Extract unique project numbers from linkedMaterials
+  const getUniqueProjectNumbers = () => {
+    const projectNumbers = linkedMaterials
+      .map(item => item.source_order_number)
+      .filter(pn => pn && pn.trim() !== '');
+    return [...new Set(projectNumbers)].sort();
   };
 
-  // Function to get vendors from the comma-separated vendor_id string
-  const getEnquiryVendors = (record) => {
-    if (!record?.vendor_id) return [];
-    
-    const vendorIds = record.vendor_id.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
-    return vendors.filter(vendor => vendorIds.includes(vendor.id));
+  // Extract unique vendor names from linkedMaterials (using backend response)
+  const getUniqueVendorNames = () => {
+    const vendorNames = new Set();
+    linkedMaterials.forEach(item => {
+      if (item.vendor_name) {
+        // Split by comma if multiple vendors
+        const names = item.vendor_name.split(',').map(name => name.trim()).filter(name => name);
+        names.forEach(name => vendorNames.add(name));
+      }
+    });
+    return Array.from(vendorNames).sort();
   };
 
   const getStatusColor = (status) => {
@@ -201,19 +231,38 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         }
       }
 
+      // Process pending unlinks first
+      for (const partId of pendingUnlinks) {
+        try {
+          await axios.delete(`${API_BASE_URL}/rawmaterials/parts/${partId}/unlink-material`);
+        } catch (error) {
+          console.error(`Error unlinking part ${partId}:`, error);
+          message.error(`Error unlinking part ${partId}`);
+          return;
+        }
+      }
+
+      // Remove pending unlinks from local state before PUT
+      const filteredLinkages = statusEditCurrentLinkages.filter(l => !pendingUnlinks.has(l.part_id));
+      const filteredQuantities = {};
+      const filteredRequiredLengths = {};
+      const filteredUnits = {};
+      
+      filteredLinkages.forEach(l => {
+        if (!pendingUnlinks.has(l.part_id)) {
+          filteredQuantities[l.part_id] = statusEditPartQuantities[l.part_id] || 1;
+          filteredRequiredLengths[l.part_id] = statusEditPartRequiredLengths[l.part_id] || '';
+          filteredUnits[l.part_id] = statusEditPartRawMaterialUnits[l.part_id];
+        }
+      });
+
       // Always call PUT endpoint to update stock details
       const updateData = {
         quantity: statusEditOrderQty || record.quantity,
         form_type: record.form_type || "Round",
-        part_ids: statusEditCurrentLinkages.map(l => l.part_id).join(','),
-        part_quantities: statusEditCurrentLinkages.reduce((acc, l) => {
-          acc[l.part_id] = statusEditPartQuantities[l.part_id] || 1;
-          return acc;
-        }, {}),
-        required_lengths: statusEditCurrentLinkages.reduce((acc, l) => {
-          acc[l.part_id] = statusEditPartRequiredLengths[l.part_id] || '';
-          return acc;
-        }, {})
+        part_ids: filteredLinkages.map(l => l.part_id).join(','),
+        part_quantities: filteredQuantities,
+        required_lengths: filteredRequiredLengths
       };
       
       // Add dimensions based on form type
@@ -237,10 +286,10 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       );
       
       // Assign units to parts using the assign-material endpoint
-      for (const linkage of statusEditCurrentLinkages) {
+      for (const linkage of filteredLinkages) {
         const partId = linkage.part_id;
-        const requiredLength = statusEditPartRequiredLengths[partId];
-        const unitId = statusEditPartRawMaterialUnits[partId];
+        const requiredLength = filteredRequiredLengths[partId];
+        const unitId = filteredUnits[partId];
         
         // Only assign if both unit and length are provided
         if (unitId && requiredLength) {
@@ -255,13 +304,37 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
         }
       }
 
-      await fetchLinkedMaterials();
-      if (typeof onDataChanged === "function") {
-        onDataChanged();
+      // Call hierarchy endpoint immediately after save
+      try {
+        const orderId = record.source_order_id || record.order_id;
+        if (orderId) {
+          const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+          setOrderHierarchyMap(prev => ({ ...prev, [orderId]: res.data }));
+        }
+      } catch (error) {
+        console.error("Error fetching hierarchy:", error);
       }
+
+      // Call units endpoint to refresh available units after save
+      try {
+        if (record.id) {
+          await fetchAvailableUnits(record.id);
+        }
+      } catch (error) {
+        console.error("Error fetching units:", error);
+      }
+
+      // Update local state to reflect the unlinks
+      setStatusEditCurrentLinkages(filteredLinkages);
+      setStatusEditPartQuantities(filteredQuantities);
+      setStatusEditPartRequiredLengths(filteredRequiredLengths);
+      setStatusEditPartRawMaterialUnits(filteredUnits);
+
+      await fetchLinkedMaterials();
       message.success("Status updated successfully");
-      setStatusEditModalOpen(false);
-      resetModalStates();
+      
+      // Clear pending unlinks but keep modal open
+      setPendingUnlinks(new Set());
     } catch (error) {
       message.error(error?.response?.data?.detail || "Error updating status");
     }
@@ -284,6 +357,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     setStatusEditPartRawMaterialUnits({});
     setAvailableUnits([]);
     setStatusEditReceivedVendorId(null);
+    setPendingUnlinks(new Set());
   };
 
   const getOrderHierarchy = async (orderId) => {
@@ -338,6 +412,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
   const openStatusEditModal = async (record) => {
     setStatusEditRecord(record);
     setStatusEditModalOpen(true);
+    setPendingUnlinks(new Set()); // Clear pending unlinks when opening modal
     
     // Initialize dimensions from record
     setStatusEditDimensions({
@@ -598,6 +673,8 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     if (nodeData.type === 'part') {
       const { part, isAlreadyLinked, isLinkedToGeneralStock, isLinkedToOrderStock, sourceType } = nodeData;
       const isLinkedToCurrentStock = statusEditCurrentLinkages.some(l => l.part_id === part.id);
+      const hasUnitAndLength = statusEditPartRawMaterialUnits[part.id] && statusEditPartRequiredLengths[part.id];
+      const isPendingUnlink = pendingUnlinks.has(part.id);
       
       return (
         <div className="flex items-center justify-between w-full pr-4 py-1">
@@ -632,20 +709,14 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
               {!isLinkedToGeneralStock && (
                 <Button 
                   size="small" 
-                  danger 
+                  danger
+                  disabled={isPendingUnlink}
                   onClick={(e) => {
                     e.stopPropagation();
-                    Modal.confirm({
-                      title: 'Unlink Part',
-                      content: `Are you sure you want to unlink part ${part.part_number} from the raw material unit? This will restore the unit's remaining length.`,
-                      okText: 'Yes, Unlink',
-                      okType: 'danger',
-                      cancelText: 'Cancel',
-                      onOk: () => handleUnlinkPart(part.id)
-                    });
+                    setPendingUnlinks(prev => new Set([...prev, part.id]));
                   }}
                 >
-                  Unlink
+                  {isPendingUnlink ? 'Unlinking...' : 'Unlink'}
                 </Button>
               )}
             </div>
@@ -656,6 +727,8 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                 size="small"
                 placeholder="Unit"
                 value={statusEditPartRawMaterialUnits[part.id] || null}
+                allowClear
+                getPopupContainer={(triggerNode) => triggerNode.parentNode}
                 onChange={(value) => {
                   const currentLength = statusEditPartRequiredLengths[part.id];
                   
@@ -700,9 +773,34 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                   // Validate length against available unit length
                   if (value && selectedUnitId) {
                     const selectedUnit = availableUnits.find(u => u.id === selectedUnitId);
-                    if (selectedUnit && parseFloat(value) > selectedUnit.remaining_length) {
-                      message.error(`Required length cannot exceed available length (${selectedUnit.remaining_length}mm)`);
-                      return;
+                    if (selectedUnit) {
+                      const newLength = parseFloat(value);
+                      if (newLength > selectedUnit.remaining_length) {
+                        message.error(`Required length cannot exceed available length (${selectedUnit.remaining_length}mm)`);
+                        return;
+                      }
+                      
+                      // Calculate total required length for this unit across all parts
+                      let totalForUnit = newLength;
+                      Object.entries(statusEditPartRawMaterialUnits).forEach(([partId, unitId]) => {
+                        if (unitId === selectedUnitId && partId !== part.id.toString()) {
+                          totalForUnit += (parseFloat(statusEditPartRequiredLengths[partId]) || 0);
+                        }
+                      });
+                      
+                      // Also add already linked parts for this unit
+                      if (statusEditRecord && statusEditRecord.id === selectedUnit.stock_id) {
+                        statusEditCurrentLinkages.forEach(linkage => {
+                          if (linkage.raw_material_unit_id === selectedUnitId && linkage.part_id !== part.id) {
+                            totalForUnit += (parseFloat(linkage.required_length) || 0);
+                          }
+                        });
+                      }
+                      
+                      if (totalForUnit > selectedUnit.remaining_length) {
+                        message.error(`Total required length (${totalForUnit}mm) exceeds available unit length (${selectedUnit.remaining_length}mm)`);
+                        return;
+                      }
                     }
                   }
                   
@@ -715,19 +813,6 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                 style={{ width: '80px' }}
                 onClick={(e) => e.stopPropagation()}
               />
-              {isLinkedToCurrentStock && (
-                <Button 
-                  size="small" 
-                  danger 
-                  icon={<DeleteOutlined />}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleUnlinkPart(part.id);
-                  }}
-                >
-                  Unlink
-                </Button>
-              )}
             </div>
           )}
         </div>
@@ -760,39 +845,146 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
     // Don't set unit ID here - let the user select it from dropdown
   };
 
-  const handleUnlinkPart = async (partId) => {
-    try {
-      // Call the backend unlink endpoint to properly recalculate
-      await axios.delete(`${API_BASE_URL}/rawmaterials/parts/${partId}/unlink-material`);
-      
-      // Remove from local state
-      setStatusEditCurrentLinkages(prev => prev.filter(l => l.part_id !== partId));
-      setStatusEditPartQuantities(prev => {
-        const newState = { ...prev };
-        delete newState[partId];
-        return newState;
-      });
-      setStatusEditPartRequiredLengths(prev => {
-        const newState = { ...prev };
-        delete newState[partId];
-        return newState;
-      });
-      setStatusEditPartRawMaterialUnits(prev => {
-        const newState = { ...prev };
-        delete newState[partId];
-        return newState;
-      });
-      
-      message.success('Part unlinked successfully');
-    } catch (error) {
-      console.error('Error unlinking part:', error);
-      message.error(error?.response?.data?.detail || 'Error unlinking part');
+  const handleInputKeyDown = (e) => {
+    // Allow: Backspace, Delete, Tab, Escape, Enter, Arrow keys
+    if ([8, 9, 27, 13, 37, 38, 39, 40].includes(e.keyCode)) {
+      return;
+    }
+    // Allow: Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
+    if (e.ctrlKey && [65, 67, 86, 88].includes(e.keyCode)) {
+      return;
+    }
+    // Block: non-digit characters
+    if (e.key && !/^\d$/.test(e.key)) {
+      e.preventDefault();
     }
   };
 
   const flattenPartsFromOrderHierarchy = (hierarchy) => {
     // This function is no longer needed with tree approach
     return { parts: [], meta: {} };
+  };
+
+  // Procure modal functions
+  const handleProcureDimensionChange = (field, value) => {
+    setProcureForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const fetchOrders = async () => {
+    setOrdersLoading(true);
+    try {
+      const uid = getCurrentUserId();
+      const response = await axios.get(`${API_BASE_URL}/orders/`, {
+        params: uid != null ? { admin_id: uid } : undefined,
+      });
+      // Filter out orders that already have raw materials linked
+      const availableOrders = (response.data || []).filter(order => !order.has_raw_materials);
+      setOrders(availableOrders);
+    } catch (error) {
+      console.error("Error fetching orders:", error);
+      setOrders([]);
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const fetchVendors = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+      setVendors(response.data || []);
+    } catch (error) {
+      console.error("Error fetching vendors:", error);
+      setVendors([]);
+    }
+  };
+
+  const handleAddStock = async () => {
+    const userId = getCurrentUserId();
+    if (!userId) {
+      message.error('User not authenticated');
+      return;
+    }
+
+    // Require all details
+    if (!procureForm.material_id) {
+      message.error('Please select a material');
+      return;
+    }
+
+    if (!procureForm.form_type) {
+      message.error('Please select a form type');
+      return;
+    }
+
+    if (!procureForm.quantity || procureForm.quantity <= 0) {
+      message.error('Please enter a valid quantity');
+      return;
+    }
+
+    if (!procureForm.selected_vendor_id || procureForm.selected_vendor_id.length === 0) {
+      message.error('Please select at least one vendor');
+      return;
+    }
+
+    if (!procureForm.order_id) {
+      message.error('Please select an order - this tab is for order-linked stock only');
+      return;
+    }
+
+    setProcureLoading(true);
+    try {
+      const requestData = {
+        raw_material_id: procureForm.material_id,
+        form_type: procureForm.form_type,
+        diameter: procureForm.diameter || null,
+        length: procureForm.length,
+        breadth: procureForm.breadth || null,
+        height: procureForm.height || null,
+        inner_diameter: procureForm.inner_diameter || null,
+        outer_diameter: procureForm.outer_diameter || null,
+        order_id: procureForm.order_id,
+        part_ids: [],
+        required_lengths: [],
+        vendor_id: procureForm.selected_vendor_id || null,
+        quantity: procureForm.quantity,
+        user_id: userId
+      };
+
+      const response = await axios.post(`${API_BASE_URL}/rawmaterials/order-materials/link`, requestData);
+      
+      if (response.data) {
+        message.success('Stock added successfully!');
+        
+        // Reset form
+        setProcureForm({
+          material_id: null,
+          form_type: null,
+          diameter: '',
+          length: '',
+          breadth: '',
+          height: '',
+          inner_diameter: '',
+          outer_diameter: '',
+          quantity: 1,
+          order_id: null,
+          selected_vendor_id: [],
+          order_status: 'enquiry'
+        });
+        
+        // Close modal
+        setProcureModalOpen(false);
+        
+        // Refresh linked materials list
+        await fetchLinkedMaterials();
+        if (typeof onDataChanged === "function") {
+          onDataChanged();
+        }
+      }
+    } catch (error) {
+      message.error('Failed to add stock: ' + (error.response?.data?.detail || error.message));
+    } finally {
+      setProcureLoading(false);
+    }
   };
 
   const filtered = linkedMaterials.filter(item => {
@@ -805,6 +997,24 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       (item.order_status?.toLowerCase() || '').includes(searchLower) ||
       (item.part_numbers?.join(' ').toLowerCase() || '').includes(searchLower)
     );
+  }).filter(item => {
+    // Apply project number filter
+    if (filterProjectNumber) {
+      if (item.source_order_number !== filterProjectNumber) {
+        return false;
+      }
+    }
+    // Apply vendor filter (using vendor_name from backend response)
+    if (filterVendorName) {
+      if (!item.vendor_name) {
+        return false;
+      }
+      const vendorNames = item.vendor_name.split(',').map(name => name.trim()).filter(name => name);
+      if (!vendorNames.includes(filterVendorName)) {
+        return false;
+      }
+    }
+    return true;
   });
 
 
@@ -1001,12 +1211,12 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
 
   return (
     <div className="mt-4">
-      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procurement Status</span></div><Space className="w-full sm:w-auto flex-col sm:flex-row gap-2"><Input.Search placeholder="Search all columns..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-64" size="middle" /><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /></Space></div>}>
+      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500 text-lg sm:text-xl" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procure Raw Material</span></div><Space className="w-full lg:w-auto flex flex-col sm:flex-row flex-wrap gap-2" size="small"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-auto min-w-[150px] xs:min-w-[200px]" size="middle" /><Select placeholder="Project" allowClear value={filterProjectNumber} onChange={setFilterProjectNumber} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueProjectNumbers().map(pn => <Option key={pn} value={pn}>{pn}</Option>)}</Select><Select placeholder="Vendor" allowClear value={filterVendorName} onChange={setFilterVendorName} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueVendorNames().map(vname => <Option key={vname} value={vname}>{vname}</Option>)}</Select><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /><Button type="primary" icon={<AppstoreOutlined />} onClick={() => setProcureModalOpen(true)} style={{ backgroundColor: '#2563eb' }} className="w-full sm:w-auto">Procure Raw Material</Button></Space></div>}>
         <Table columns={columns} dataSource={filtered} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table responsive-table" scroll={{ x: 'max-content' }} loading={loading} />
       </Card>
 
       {/* Quick Status Modal - for dropdown status changes */}
-      <Modal open={quickStatusModalOpen} onCancel={() => setQuickStatusModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800">Update Order Status & Vendor</span></div>} width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }} centered footer={[<Button key="cancel" onClick={() => setQuickStatusModalOpen(false)}>Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveQuickStatus}>Update Status</Button>]}>
+      <Modal open={quickStatusModalOpen} onCancel={() => setQuickStatusModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Update Order Status & Vendor</span></div>} width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }} centered footer={[<Button key="cancel" onClick={() => setQuickStatusModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveQuickStatus} className="w-full sm:w-auto">Update Status</Button>]}>
         <div className="py-4 space-y-4">
           {/* Order Status */}
           <div className="space-y-1">
@@ -1040,11 +1250,18 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
               showSearch
               optionFilterProp="children"
             >
-              {getEnquiryVendors(quickStatusRecord).map(vendor => (
-                <Option key={vendor.id} value={vendor.id}>
-                  {vendor.company_name}
-                </Option>
-              ))}
+              {quickStatusRecord?.vendor_name ? (
+                quickStatusRecord.vendor_name.split(',').map((name, idx) => {
+                  const vendorIds = quickStatusRecord.vendor_id?.split(',').map(id => parseInt(id.trim())) || [];
+                  return (
+                    <Option key={vendorIds[idx] || idx} value={vendorIds[idx]}>
+                      {name.trim()}
+                    </Option>
+                  );
+                })
+              ) : (
+                <Option disabled>No vendors available</Option>
+              )}
             </Select>
             <Text type="secondary" className="text-xs">Select from vendors contacted during enquiry</Text>
           </div>
@@ -1052,7 +1269,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
       </Modal>
 
       {/* Full Edit Modal - for edit icon */}
-      <Modal open={statusEditModalOpen} onCancel={() => setStatusEditModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800">Edit Linked Parts & Status</span></div>} width={{ xs: '95%', sm: '90%', md: 800, lg: 800 }} centered footer={[<Button key="cancel" onClick={() => setStatusEditModalOpen(false)}>Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveStatusEdit}>Save Changes</Button>]}>
+      <Modal open={statusEditModalOpen} onCancel={() => setStatusEditModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Edit Linked Parts & Status</span></div>} width={{ xs: '95%', sm: '90%', md: 800, lg: 800 }} centered footer={[<Button key="cancel" onClick={() => setStatusEditModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveStatusEdit} className="w-full sm:w-auto">Save Changes</Button>]}>
         <div className="py-2 space-y-3" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
           {/* Form Type */}
           <div className="space-y-1">
@@ -1075,10 +1292,17 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
           <div className="space-y-1">
             <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</Text>
             <InputNumber 
-              min={1} 
+              min={1}
+              precision={0}
+              controls={false}
+              onKeyDown={handleInputKeyDown}
               style={{ width: '100%' }} 
               value={statusEditOrderQty} 
-              onChange={setStatusEditOrderQty}
+              onChange={(value) => {
+                if (value !== null && value >= 1) {
+                  setStatusEditOrderQty(value);
+                }
+              }}
               size="middle" 
               className="rounded-md" 
             />
@@ -1093,8 +1317,15 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                   style={{ width: '100%' }}
                   placeholder="Diameter"
                   value={statusEditDimensions.diameter}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, diameter: value }))}
+                  onChange={(value) => {
+                    if (value !== null && value >= 0) {
+                      setStatusEditDimensions(prev => ({ ...prev, diameter: value }));
+                    }
+                  }}
                   min={0}
+                  precision={0}
+                  controls={false}
+                  onKeyDown={handleInputKeyDown}
                   size="middle"
                   className="rounded-md"
                 />
@@ -1105,8 +1336,15 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                   style={{ width: '100%' }}
                   placeholder="Length"
                   value={statusEditDimensions.length}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
+                  onChange={(value) => {
+                    if (value !== null && value >= 0) {
+                      setStatusEditDimensions(prev => ({ ...prev, length: value }));
+                    }
+                  }}
                   min={0}
+                  precision={0}
+                  controls={false}
+                  onKeyDown={handleInputKeyDown}
                   size="middle"
                   className="rounded-md"
                 />
@@ -1118,68 +1356,39 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
             <>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Length"
-                    value={statusEditDimensions.length}
-                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
-                    min={0}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-                <div className="space-y-1">
                   <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breadth (mm)</Text>
                   <InputNumber
                     style={{ width: '100%' }}
                     placeholder="Breadth"
                     value={statusEditDimensions.breadth}
-                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, breadth: value }))}
+                    onChange={(value) => {
+                      if (value !== null && value >= 0) {
+                        setStatusEditDimensions(prev => ({ ...prev, breadth: value }));
+                      }
+                    }}
                     min={0}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Height (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Height"
-                  value={statusEditDimensions.height}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, height: value }))}
-                  min={0}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-            </>
-          )}
-
-          {statusEditRecord?.form_type === 'Pipe' && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Outer Diameter (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Outer Diameter"
-                    value={statusEditDimensions.outer_diameter}
-                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }))}
-                    min={0}
+                    precision={0}
+                    controls={false}
+                    onKeyDown={handleInputKeyDown}
                     size="middle"
                     className="rounded-md"
                   />
                 </div>
                 <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Inner Diameter (mm)</Text>
+                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Height (mm)</Text>
                   <InputNumber
                     style={{ width: '100%' }}
-                    placeholder="Inner Diameter"
-                    value={statusEditDimensions.inner_diameter}
-                    onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }))}
+                    placeholder="Height"
+                    value={statusEditDimensions.height}
+                    onChange={(value) => {
+                      if (value !== null && value >= 0) {
+                        setStatusEditDimensions(prev => ({ ...prev, height: value }));
+                      }
+                    }}
                     min={0}
+                    precision={0}
+                    controls={false}
+                    onKeyDown={handleInputKeyDown}
                     size="middle"
                     className="rounded-md"
                   />
@@ -1191,8 +1400,79 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
                   style={{ width: '100%' }}
                   placeholder="Length"
                   value={statusEditDimensions.length}
-                  onChange={(value) => setStatusEditDimensions(prev => ({ ...prev, length: value }))}
+                  onChange={(value) => {
+                    if (value !== null && value >= 0) {
+                      setStatusEditDimensions(prev => ({ ...prev, length: value }));
+                    }
+                  }}
                   min={0}
+                  precision={0}
+                  controls={false}
+                  onKeyDown={handleInputKeyDown}
+                  size="middle"
+                  className="rounded-md"
+                />
+              </div>
+            </>
+          )}
+
+          {statusEditRecord?.form_type === 'Pipe' && (
+            <>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Inner Diameter (mm)</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    placeholder="Inner Diameter"
+                    value={statusEditDimensions.inner_diameter}
+                    onChange={(value) => {
+                      if (value !== null && value >= 0) {
+                        setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }));
+                      }
+                    }}
+                    min={0}
+                    precision={0}
+                    controls={false}
+                    onKeyDown={handleInputKeyDown}
+                    size="middle"
+                    className="rounded-md"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Outer Diameter (mm)</Text>
+                  <InputNumber
+                    style={{ width: '100%' }}
+                    placeholder="Outer Diameter"
+                    value={statusEditDimensions.outer_diameter}
+                    onChange={(value) => {
+                      if (value !== null && value >= 0) {
+                        setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }));
+                      }
+                    }}
+                    min={0}
+                    precision={0}
+                    controls={false}
+                    onKeyDown={handleInputKeyDown}
+                    size="middle"
+                    className="rounded-md"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
+                <InputNumber
+                  style={{ width: '100%' }}
+                  placeholder="Length"
+                  value={statusEditDimensions.length}
+                  onChange={(value) => {
+                    if (value !== null && value >= 0) {
+                      setStatusEditDimensions(prev => ({ ...prev, length: value }));
+                    }
+                  }}
+                  min={0}
+                  precision={0}
+                  controls={false}
+                  onKeyDown={handleInputKeyDown}
                   size="middle"
                   className="rounded-md"
                 />
@@ -1209,12 +1489,11 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
             <div className="bg-white p-4 rounded-lg border border-gray-200" style={{ maxHeight: '300px', overflowY: 'auto' }}>
               {loading ? (
                 <div className="flex justify-center py-12">
-                  <Spin size="large" tip="Loading parts..." />
+                  <Spin size="large" />
                 </div>
               ) : orderHierarchyMap[statusEditRecord?.source_order_id || statusEditRecord?.order_id] ? (
                 <Tree
                   showLine={{ showLeafIcon: false }}
-                  defaultExpandAll
                   treeData={buildTreeData(orderHierarchyMap[statusEditRecord?.source_order_id || statusEditRecord?.order_id])}
                   titleRender={(nodeData) => renderTreeNode(nodeData)}
                   className="custom-tree"
@@ -1226,6 +1505,23 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged }) => {
           </div>
         </div>
       </Modal>
+
+      {/* Procure Raw Material Modal */}
+      <ProcureRawMaterialModal
+        open={procureModalOpen}
+        onCancel={() => setProcureModalOpen(false)}
+        onSubmit={handleAddStock}
+        loading={procureLoading}
+        procureForm={procureForm}
+        setProcureForm={setProcureForm}
+        externalRawMaterials={externalRawMaterials}
+        orders={orders}
+        vendors={vendors}
+        ordersLoading={ordersLoading}
+        onFetchOrders={fetchOrders}
+        onFetchVendors={fetchVendors}
+        handleProcureDimensionChange={handleProcureDimensionChange}
+      />
     </div>
   );
 };

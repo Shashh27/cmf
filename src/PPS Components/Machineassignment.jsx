@@ -259,7 +259,7 @@ const MachineAssignment = ({ activeTab, machineData }) => {
 
       if (response.ok) {
         message.success('Assignment deleted successfully');
-        fetchAssignments(assignment.shift_config_id);
+        fetchAssignments(currentConfig?.id);
       } else {
         message.error('Failed to delete assignment');
       }
@@ -302,7 +302,7 @@ const MachineAssignment = ({ activeTab, machineData }) => {
       key: "machine_id",
       render: (machineId, record) => {
         const machine = machines.find(m => m.machine_id === machineId);
-        return machine ? `${machine.machine_make} (ID: ${machineId})` : `Machine ID: ${machineId}`;
+        return machine ? `(${machine.machine_make}) ${machine.machine_model || ''}` : `Machine ID: ${machineId}`;
       },
     },
     {
@@ -515,18 +515,18 @@ const MachineAssignment = ({ activeTab, machineData }) => {
             name="machine_id"
             rules={[{ required: true, message: 'Please select a machine' }]}
           >
-            <Select 
+            <Select
               placeholder="Select machine"
               showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
+              optionFilterProp="label"
             >
-              {machines.map(machine => (
-                <Option key={machine.machine_id} value={machine.machine_id}>
-                  {machine.machine_make} (ID: {machine.machine_id})
-                </Option>
-              ))}
+              {machines
+                .filter(machine => machine.status_name?.toLowerCase() !== 'off' && machine.status_id !== 2)
+                .map(machine => (
+                  <Option key={machine.machine_id} value={machine.machine_id} label={`(${machine.machine_make}) ${machine.machine_model || ''}`}>
+                    ({machine.machine_make}) {machine.machine_model || ''}
+                  </Option>
+                ))}
             </Select>
           </Form.Item>
 
@@ -535,16 +535,14 @@ const MachineAssignment = ({ activeTab, machineData }) => {
             name="operator_id"
             rules={[{ required: true, message: 'Please select an operator' }]}
           >
-            <Select 
+            <Select
               placeholder="Select operator"
               showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
+              optionFilterProp="label"
             >
               {operators.map(operator => (
-                <Option key={operator.id} value={operator.id}>
-                  {operator.user_name} ({operator.gmail})
+                <Option key={operator.id} value={operator.id} label={`${operator.user_name} (${operator.gmail || ''})`}>
+                  {operator.user_name} ({operator.gmail || ''})
                 </Option>
               ))}
             </Select>
@@ -558,13 +556,11 @@ const MachineAssignment = ({ activeTab, machineData }) => {
             <Select
               placeholder="Select shift configuration"
               showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
+              optionFilterProp="label"
               disabled={!!currentConfig}
             >
               {shiftConfigs.map(config => (
-                <Option key={config.id} value={config.id}>
+                <Option key={config.id} value={config.id} label={`${dayjs(config.date).format('DD MMM YYYY')} — ${config.working_day ? 'Working' : 'Non-Working'} (${config.number_of_shifts} shift${config.number_of_shifts !== 1 ? 's' : ''})${config.selected_shifts?.length ? ` · ${config.selected_shifts.join(', ')}` : ''}`}>
                   {dayjs(config.date).format('DD MMM YYYY')} —{' '}
                   {config.working_day ? 'Working' : 'Non-Working'} ({config.number_of_shifts} shift{config.number_of_shifts !== 1 ? 's' : ''})
                   {config.selected_shifts?.length ? ` · ${config.selected_shifts.join(', ')}` : ''}

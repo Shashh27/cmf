@@ -5,6 +5,14 @@ import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collap
 import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 
+// Shared utility: normalise a revision string as the user types
+const normalizeVersion = (raw) => {
+  let v = raw || '';
+  // Allow alphanumeric and common versioning symbols: . - _ / space
+  v = v.replace(/[^0-9a-zA-Z\s._\/-]/g, '');
+  return v;
+};
+
 const { Title } = Typography;
 const { Option } = Select;
 
@@ -245,6 +253,24 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
 
   const handleSubmit = async (values) => {
+    // 1. Validation: Check if all documents have a revision before doing anything
+    if (!editingOrder && documents.length > 0) {
+      for (const doc of documents) {
+        if (doc.file && (!doc.document_version || !doc.document_version.trim())) {
+          message.error(`Revision is required for document: ${doc.document_name || doc.file.name}`);
+          return;
+        }
+      }
+    }
+
+    if (!editingOrder && documents.some(doc =>
+      doc.document_type === "Other" &&
+      !(doc.document_type_other && doc.document_type_other.trim())
+    )) {
+      message.error("Please enter document type name for all 'Other' order documents");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -315,15 +341,6 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         catch { payload.due_date = null; }
       } else { payload.due_date = null; }
 
-      if (!editingOrder && documents.some(doc =>
-        doc.document_type === "Other" &&
-        !(doc.document_type_other && doc.document_type_other.trim())
-      )) {
-        message.error("Please enter document type name for all 'Other' order documents");
-        setLoading(false);
-        return;
-      }
-
       const response = await axios({
         url,
         method,
@@ -378,7 +395,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         document_name: "",
         document_type: "Other",
         document_type_other: "",
-        document_version: "v1.0",
+        document_version: "",
       },
     ]);
   };
@@ -417,7 +434,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       uploadFormData.append("files", doc.file);
       uploadFormData.append("document_name", doc.document_name || doc.file?.name || "Document");
       uploadFormData.append("document_type", docType);
-      uploadFormData.append("document_version", "v1.0"); // Hardcoded to v1.0 for new order creation
+      uploadFormData.append("document_version", doc.document_version || "");
     }
 
     // If user added rows but did not choose any file, skip the upload call
@@ -430,6 +447,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       );
     } catch (error) {
       console.error("Error uploading documents:", error);
+      const detail = error?.response?.data?.detail || error?.response?.data?.message || "Error uploading documents";
+      message.error(detail);
     }
   };
 
@@ -719,7 +738,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                       <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[25%]">File Selection</th>
                       <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[25%]">Document Name</th>
                       <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[30%]">Document Type</th>
-                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[10%] text-center">Ver</th>
+                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[10%] text-center">Rev <span className="text-red-500">*</span></th>
                       <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[5%] text-center">Del</th>
                     </tr>
                   </thead>
@@ -800,9 +819,12 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                           </div>
                         </td>
                         <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">
-                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 sm:px-3 py-1.5 rounded-md border border-gray-200">
-                            v1.0
-                          </span>
+                          <Input
+                            value={doc.document_version}
+                            onChange={(e) => handleDocumentChange(index, 'document_version', normalizeVersion(e.target.value))}
+                            placeholder="00"
+                            className="text-xs font-bold text-center h-10 w-full"
+                          />
                         </td>
                         <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">
                           <Button

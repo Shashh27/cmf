@@ -1,17 +1,11 @@
 import axios from "axios";
 
-// Shared utility: normalise a version string as the user types
+// Shared utility: normalise a revision string as the user types
 export const normalizeVersion = (raw) => {
     let v = raw || '';
-    if (v && !v.startsWith('v')) v = 'v' + v;
-    v = v.replace(/[^v0-9.a-zA-Z]/g, '');
-    if (v.startsWith('v')) v = 'v' + v.substring(1).replace(/v/g, '');
-    const parts = v.split('.');
-    if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
-    const m = v.match(/^(v\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
-    if (m) return (m[1] || 'v') + '.' + (m[2] ? m[2].substring(0, 3) : '');
-    const init = v.match(/^(v\d{0,2})/);
-    return init ? init[1] + '.' : 'v.';
+    // Allow alphanumeric and common versioning symbols: . - _ / space
+    v = v.replace(/[^0-9a-zA-Z\s._\/-]/g, '');
+    return v;
   };
   
   // Shared utility: simple axios → setState helper with loading + guard

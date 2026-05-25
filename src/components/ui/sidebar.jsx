@@ -107,20 +107,35 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
   const fetchSupervisorNotificationCount = async () => {
     try {
+      // Get supervisor ID from localStorage
+      const storedUser = localStorage.getItem('user');
+      let supervisorId = null;
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          supervisorId = user.id;
+        } catch (e) {
+          console.error("Error parsing user from local storage", e);
+        }
+      }
+      if (!supervisorId) supervisorId = localStorage.getItem('supervisor_id');
+
       // Fetch all production logs
       const apiUrl = `${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`;
 
       const response = await fetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
-        // Count logs where supervisor hasn't responded yet, produced_quantity > 0, and not acknowledged
-        const pendingLogs = (data || []).filter(
-          log => (log.supervisor_id === null || log.supervisor_id === undefined) &&
+        // Count logs related to supervisor (both responded and not responded)
+        // where produced_quantity > 0 and not acknowledged
+        const supervisorLogs = (data || []).filter(
+          log => ((log.supervisor_id === null || log.supervisor_id === undefined) ||
+                 String(log.supervisor_id) === String(supervisorId)) &&
                  (log.produced_quantity || 0) > 0 &&
                  !log.supervisor_acknowledged_at &&
                  !log.acknowledged
         );
-        setNotificationCount(pendingLogs.length);
+        setNotificationCount(supervisorLogs.length);
       }
     } catch (error) {
       console.error('Error fetching notification count:', error);
