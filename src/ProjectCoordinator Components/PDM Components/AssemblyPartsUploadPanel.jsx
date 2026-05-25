@@ -81,9 +81,6 @@ const AssemblyPartsUploadPanel = ({
   const [submitting, setSubmitting]       = useState(false);
   const [submitResults, setSubmitResults] = useState(null); // { created, duplicates, errors }
 
-  // New state for delete parts functionality
-  const [deletingParts, setDeletingParts] = useState(false);
-
   // ── helpers ───────────────────────────────────────────────────────────────
   const getCurrentUserId = () => {
     try {
@@ -289,30 +286,6 @@ const AssemblyPartsUploadPanel = ({
       message.error(String(msg));
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  // ── BULK DELETE PARTS ─────────────────────────────────────────────────────
-  const handleBulkDeleteParts = async () => {
-    if (!selectedItem || selectedItem.itemType !== "assembly") return;
-    
-    setDeletingParts(true);
-    try {
-      const response = await axios.delete(`${API_BASE_URL}/parts/bulk-by-assembly/${selectedItem.id}`);
-      const { deleted_count, part_ids } = response.data;
-      
-      if (deleted_count > 0) {
-        message.success(`${deleted_count} part(s) deleted successfully`);
-        onPartsCreated?.(); // Refresh parts list if callback exists
-      } else {
-        message.info("No parts found to delete for this assembly");
-      }
-    } catch (e) {
-      console.error("Error bulk deleting parts", e);
-      const errorMsg = e?.response?.data?.detail || e?.message || "Failed to delete parts";
-      message.error(errorMsg);
-    } finally {
-      setDeletingParts(false);
     }
   };
 

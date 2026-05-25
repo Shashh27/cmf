@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined,
   SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined,
-  DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined
+  DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined,
+  CheckCircleOutlined, CloseCircleOutlined
 } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -12,6 +13,7 @@ import PartActionModal from "./PartActionModal";
 import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
 import PartDocumentReport from "../../DownloadReports/PartDocumentReport";
+import ModelViewer3D from "./ModelViewer3D";
 
 const { Text } = Typography;
 const { Dragger } = Upload;
@@ -258,6 +260,14 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const handleDownload = (id) => { const a = document.createElement('a'); a.href = `${API_BASE_URL}/documents/${id}/download`; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); };
   const handlePreview = (doc) => { if (!doc.document_url) { message.error("Document URL not found"); return; } setPreviewDoc(doc); };
 
+  const getPreviewType = (name) => {
+    const ext = (name || '').split('.').pop().toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'svg'].includes(ext)) return 'image';
+    if (ext === 'pdf') return 'pdf';
+    if (['stl', 'step', 'stp', 'obj', '3ds', 'fbx', 'gltf', 'glb'].includes(ext)) return '3d';
+    return 'other';
+  };
+
   const handleUpload = async () => {
     if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
     if (uploadDocType === 'Other' && !uploadDocTypeOther.trim()) { message.warning('Please enter document type'); return; }
@@ -336,6 +346,40 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         e?.response?.data?.detail ||
         e?.response?.data?.message ||
         'Failed to update document';
+      message.error(detail);
+    }
+  };
+
+  const handleAcknowledgeDocument = async (docId, currentStatus) => {
+    try {
+      await axios.put(`${API_BASE_URL}/documents/${docId}/acknowledge`, null, {
+        params: { is_acknowledged: !currentStatus }
+      });
+      message.success('Document acknowledged successfully');
+      // Optimistically update the local state
+      setDocuments(prevDocs => 
+        prevDocs.map(doc => 
+          doc.id === docId ? { ...doc, is_acknowledged: true } : doc
+        )
+      );
+      // Also update selectedVersions to reflect the change immediately
+      setSelectedVersions(prevVersions => {
+        const updated = { ...prevVersions };
+        for (const key in updated) {
+          if (updated[key]?.id === docId) {
+            updated[key] = { ...updated[key], is_acknowledged: true };
+          }
+        }
+        return updated;
+      });
+      // Then fetch to ensure consistency
+      await fetchDocuments();
+    } catch (e) {
+      console.error(e);
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
+        'Failed to update acknowledgment status';
       message.error(detail);
     }
   };
@@ -481,6 +525,33 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             ))}
           </Select>
         );
+      }
+    },
+    { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        if (cur.is_acknowledged) {
+          return <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>;
+        } else {
+          return (
+            <Popconfirm 
+              title="Acknowledge Document"
+              description="Are you sure you want to acknowledge this document?"
+              onConfirm={() => handleAcknowledgeDocument(cur.id, cur.is_acknowledged)}
+              okText="Yes"
+              cancelText="No"
+            >
+              <Button 
+                size="small" 
+                type="primary" 
+                icon={<CheckCircleOutlined />}
+                className="text-xs"
+              >
+                Acknowledge
+              </Button>
+            </Popconfirm>
+          );
+        }
       }
     },
     {
@@ -641,9 +712,22 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       {/* Preview Modal */}
       {previewDoc && (
         <Modal title={previewDoc.document_name || "Document Preview"} open onCancel={() => setPreviewDoc(null)} width="95%" style={{ maxWidth: 1000, top: 20 }} footer={null} destroyOnHidden styles={{ body: { height: '75vh', padding: 0, overflow: 'hidden' } }}>
-          <div className="w-full h-full bg-gray-50 flex items-center justify-center">
-            <iframe src={previewDoc.document_url} className="w-full h-full border-0" title={previewDoc.document_name} />
-          </div>
+          {getPreviewType(getDocumentDisplayName(previewDoc) || previewDoc.document_name) === 'image' ? (
+            <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
+              <img src={previewDoc.document_url} alt={getDocumentDisplayName(previewDoc)} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+            </div>
+          ) : getPreviewType(getDocumentDisplayName(previewDoc) || previewDoc.document_name) === 'pdf' ? (
+            <iframe src={`${previewDoc.document_url}#toolbar=0`} title={getDocumentDisplayName(previewDoc)} width="100%" height="100%" style={{ border: 'none' }} />
+          ) : getPreviewType(getDocumentDisplayName(previewDoc) || previewDoc.document_name) === '3d' ? (
+            <div className="w-full h-full">
+              <ModelViewer3D documentId={previewDoc.id} height={500} showControls={true} />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">
+              <FileTextOutlined className="text-4xl text-gray-300 mb-3" />
+              <Text type="secondary">Preview not available for this file type</Text>
+            </div>
+          )}
         </Modal>
       )}
 

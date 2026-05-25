@@ -301,7 +301,11 @@ const EditOperationModal = ({
       if (onUpdate) onUpdate();
     } catch (e) {
       console.error(e);
-      message.error('Failed to remove tool');
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
+        'Failed to remove tool';
+      message.error(detail);
     }
   };
 
@@ -667,7 +671,17 @@ const EditOperationModal = ({
                 <Col xs={24} sm={12} lg={6}>
                   <Form.Item noStyle shouldUpdate={(p, c) => p.workcenter_id !== c.workcenter_id}>
                     {({ getFieldValue }) => (
-                      <Form.Item name="machine_id" label="Machine">
+                      <Form.Item name="machine_id" label="Machine" rules={[
+                        ({ getFieldValue }) => ({
+                          validator(_, value) {
+                            const workcenterId = getFieldValue('workcenter_id');
+                            if (workcenterId && !value) {
+                              return Promise.reject(new Error('Please select a machine when work center is selected'));
+                            }
+                            return Promise.resolve();
+                          },
+                        }),
+                      ]}>
                         <Select placeholder={getFieldValue('workcenter_id') ? 'Select Machine' : 'Select WC First'} disabled={!getFieldValue('workcenter_id')} allowClear loading={machinesLoading} onOpenChange={o => { if (o) fetchMachines(); }}>
                           {allMachines.filter(m => m.work_center_id === getFieldValue('workcenter_id')).map(m => (
                             <Select.Option key={m.id} value={m.id}>{[m.make, m.model].filter(Boolean).join(' - ')} ({m.type})</Select.Option>

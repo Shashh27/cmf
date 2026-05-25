@@ -168,7 +168,9 @@ const Notifications = () => {
 
       if (response.ok) {
         message.success('Notification acknowledged');
-        // Refresh the notifications list to update the UI
+        // Add to acknowledged set to disable button immediately
+        setAcknowledgedIds(prev => new Set(prev).add(logId));
+        // Refresh from server to ensure data consistency
         fetchNotifications();
       } else {
         const errorData = await response.json();
@@ -573,7 +575,7 @@ const Notifications = () => {
               type="primary"
               icon={<ReloadOutlined />}
               size="large"
-              onClick={() => window.location.reload()}
+              onClick={() => fetchNotifications()}
             >
               Refresh
             </Button>

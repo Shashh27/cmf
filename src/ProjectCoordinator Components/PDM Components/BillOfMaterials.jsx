@@ -141,112 +141,52 @@ const BillOfMaterials = ({
   }, [singleProductId]);
 
   const flattenBOMForExport = (data) => {
-    const assemblies = [];
     const parts = [];
-    const operations = [];
-    const documents = [];
+    const assemblies = [];
 
-    const addPartNode = (wrapper, parentAssembly = null) => {
-      if (!wrapper) return;
-      const part = wrapper.part || wrapper;
-      if (!part) return;
+    const processAssembly = (assembly, path = []) => {
+      const currentPath = [...path, assembly.assembly_name];
+      
+      assemblies.push({
+        id: assembly.id,
+        assembly_number: assembly.assembly_number,
+        assembly_name: assembly.assembly_name,
+        parent_assembly_id: assembly.parent_id || null,
+      });
+
+      const assemblyParts = assembly.parts || [];
+      assemblyParts.forEach(part => {
+        parts.push({
+          part: part,
+          assembly_path: currentPath,
+        });
+      });
+
+      const childAssemblies = assembly.child_assemblies || [];
+      childAssemblies.forEach(child => processAssembly(child, currentPath));
+    };
+
+    (data.assemblies || []).forEach(asm => processAssembly(asm, []));
+    
+    (data.parts || []).forEach(part => {
       parts.push({
-        id: part.id,
-        part_number: part.part_number,
-        part_name: part.part_name,
-        type_name: part.type_name,
-        parent_assembly_id: parentAssembly?.id || null,
-        parent_assembly_number: parentAssembly?.assembly_number || null,
-        parent_assembly_name: parentAssembly?.assembly_name || null,
+        part: part,
+        assembly_path: [],
       });
-      (wrapper.operations || []).forEach((op, index) => {
-        operations.push({
-          id: op.id || `${part.id}-op-${index}`,
-          part_id: part.id,
-          part_number: part.part_number,
-          part_name: part.part_name,
-          operation_number: op.operation_number,
-          operation_name: op.operation_name,
-          setup_time: op.setup_time,
-          cycle_time: op.cycle_time,
-          work_center_name: op.work_center_name || op.workcenter_name || "",
-          workcenter_id: op.workcenter_id || null,
-          machine_name: op.machine_name || "",
-          machine_id: op.machine_id || null,
-          part_type_name: op.part_type_name || "IN-House",
-          work_instructions: op.work_instructions || "",
-          notes: op.notes || "",
-        });
-      });
-      (wrapper.documents || []).forEach((doc, index) => {
-        documents.push({
-          id: doc.id || `${part.id}-doc-${index}`,
-          part_id: part.id,
-          part_number: part.part_number,
-          part_name: part.part_name,
-          document_type: doc.document_type,
-          document_name: doc.document_name,
-          document_version: doc.document_version,
-        });
-      });
-    };
+    });
 
-    const processAssemblyWrapper = (wrapper, parentAssembly = null) => {
-      if (!wrapper) return;
-      const assembly = wrapper.assembly || wrapper;
-      if (assembly) {
-        assemblies.push({
-          id: assembly.id,
-          assembly_number: assembly.assembly_number,
-          assembly_name: assembly.assembly_name,
-          parent_assembly_id: parentAssembly?.id || null,
-          parent_assembly_number: parentAssembly?.assembly_number || null,
-          parent_assembly_name: parentAssembly?.assembly_name || null,
-        });
-      }
-      (wrapper.parts || []).forEach((p) => addPartNode(p, assembly));
-      (wrapper.subassemblies || []).forEach((sub) => processAssemblyWrapper(sub, assembly));
-    };
-
-    (data.assemblies || []).forEach((asm) => processAssemblyWrapper(asm, null));
-    (data.direct_parts || []).forEach((p) => addPartNode(p, null));
-
-    return { assemblies, parts, operations, documents };
+    return { parts, assemblies };
   };
 
   const fetchProductHierarchy = async (productId, forceRefresh = false) => {
     if (!forceRefresh && hierarchicalData[productId]) return hierarchicalData[productId];
     try {
-      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical`);
+      const response = await axios.get(`${API_BASE_URL}/products/${productId}/hierarchical-lightweight`);
       if (response.status >= 200 && response.status < 300) {
         const data = response.data;
         const bomExport = flattenBOMForExport(data);
         const transformedData = {
           ...data,
-          parts: (data.direct_parts || [])
-            .slice()
-            .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
-            .map(item => ({
-              ...item.part,
-              extracted_data: item.extracted_data || [],
-              documents: item.documents || []
-            })),
-          assemblies: (data.assemblies || [])
-            .slice()
-            .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
-            .map(assembly => ({
-              ...assembly.assembly,
-              documents: assembly.documents || [],
-              parts: (assembly.parts || [])
-                .slice()
-                .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
-                .map(part => ({
-                  ...part.part,
-                  extracted_data: part.extracted_data || [],
-                  documents: part.documents || []
-                })),
-              child_assemblies: transformSubassemblies(assembly.subassemblies || [])
-            })),
           bomExport,
         };
         setHierarchicalData(prev => ({ ...prev, [productId]: transformedData }));
@@ -257,25 +197,6 @@ const BillOfMaterials = ({
       console.error("Error fetching product hierarchy:", error);
       message.error("Error fetching product hierarchy");
     }
-  };
-
-  const transformSubassemblies = (subassemblies) => {
-    return (subassemblies || [])
-      .slice()
-      .sort((a, b) => (a.assembly?.id || 0) - (b.assembly?.id || 0))
-      .map(sub => ({
-        ...sub.assembly,
-        documents: sub.documents || [],
-        parts: (sub.parts || [])
-          .slice()
-          .sort((a, b) => (a.part?.id || 0) - (b.part?.id || 0))
-          .map(part => ({
-            ...part.part,
-            extracted_data: part.extracted_data || [],
-            documents: part.documents || []
-          })),
-        child_assemblies: transformSubassemblies(sub.subassemblies || [])
-      }));
   };
 
   const toggleExpand = (key) => {
@@ -368,17 +289,28 @@ const BillOfMaterials = ({
   };
 
   const handleDelete = async (item, type) => {
-    const endpoints = { product: `/products/${item.id}`, assembly: `/assemblies/${item.id}`, part: `/parts/${item.id}` };
+    const endpoints = { product: `/products/${item.id}`, assembly: `/assemblies/${item.id}/soft-delete`, part: `/parts/${item.id}/soft-delete` };
     const names = { product: item.product_name, assembly: item.assembly_name, part: item.part_name };
     modal.confirm({
       title: `Delete ${type}`,
-      content: `Are you sure you want to delete ${type} "${names[type]}"? This cannot be undone.`,
+      content: type === 'part' || type === 'assembly'
+        ? `Are you sure you want to delete ${type} "${names[type]}"? It will be moved to the recycle bin and can be restored later.`
+        : `Are you sure you want to delete ${type} "${names[type]}"? This cannot be undone.`,
       okText: 'Yes',
       okType: 'danger',
       cancelText: 'No',
       onOk: async () => {
         try {
-          await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
+          if (type === 'part') {
+            // Use soft delete for parts (move to recycle bin)
+            await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/soft-delete`);
+          } else if (type === 'assembly') {
+            // Use soft delete for assemblies (move to recycle bin)
+            await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/soft-delete`);
+          } else {
+            // Use permanent delete for products
+            await axios.delete(`${API_BASE_URL}${endpoints[type]}`);
+          }
           message.success(`${type.charAt(0).toUpperCase() + type.slice(1)} "${names[type]}" deleted successfully.`);
           if (type === 'product') {
             setProducts(prev => prev.filter(p => p.id !== item.id));
@@ -480,19 +412,21 @@ const BillOfMaterials = ({
   const ActionButtons = ({ item, type, tagName, tagColor }) => {
     const productHierarchy = type === 'product' ? hierarchicalData[item.id] : null;
     const bomExport = productHierarchy?.bomExport;
+    const isInRecycleBin = (type === 'part' && item.recycle_bin === true) || (type === 'assembly' && item.recycle_bin === true);
+
     const buttons = {
       part: [
-        { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit" },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'part'), danger: true, title: "Delete" }
+        { icon: EditOutlined, onClick: () => handleEditPart(item), title: "Edit", disabled: isInRecycleBin },
+        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'part'), danger: true, title: "Delete", disabled: isInRecycleBin }
       ],
       assembly: [
-        { icon: PartitionOutlined, onClick: () => handleCreateSubAssembly(item), title: "Add Sub-Assembly" },
+        { icon: PartitionOutlined, onClick: () => handleCreateSubAssembly(item), title: "Add Sub-Assembly", disabled: isInRecycleBin },
         { icon: ToolOutlined, onClick: () => {
             const product = products.find(p => p.id === item.product_id);
             if (product) handleCreatePart(product, item);
-          }, title: "Add Part" },
-        { icon: EditOutlined, onClick: () => handleEditAssembly(item), title: "Edit" },
-        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'assembly'), danger: true, title: "Delete" }
+          }, title: "Add Part", disabled: isInRecycleBin },
+        { icon: EditOutlined, onClick: () => handleEditAssembly(item), title: "Edit", disabled: isInRecycleBin },
+        { icon: DeleteOutlined, onClick: () => handleDelete(item, 'assembly'), danger: true, title: "Delete", disabled: isInRecycleBin }
       ],
       product: [
         { icon: PartitionOutlined, onClick: () => handleCreateAssembly(item), title: "Add Assembly" },
@@ -511,13 +445,21 @@ const BillOfMaterials = ({
               </Tag>
             </span>
           )}
-          {buttons[type].map(({ icon: Icon, onClick, danger, title }, idx) => (
-            <Tooltip key={idx} title={title}>
+          {isInRecycleBin && (
+            <span className="hidden lg:inline-block">
+              <Tag color="red" className="text-[10px] leading-[14px] px-1 h-auto m-0 shrink-0">
+                RECYCLE BIN
+              </Tag>
+            </span>
+          )}
+          {buttons[type].map(({ icon: Icon, onClick, danger, title, disabled }, idx) => (
+            <Tooltip key={idx} title={disabled ? "Item in recycle bin" : title}>
               <Button
                 type="text"
                 size="small"
                 danger={danger}
-                onClick={(e) => { e.stopPropagation(); onClick(); }}
+                disabled={disabled}
+                onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
                 icon={<Icon style={{ fontSize: '14px' }} />}
                 style={{ padding: 4, minWidth: 24, height: 24 }}
               />
@@ -534,26 +476,45 @@ const BillOfMaterials = ({
   // ── Part row ──────────────────────────────────────────────────────────────
   const renderPartInTree = (part, level = 0, productId = null) => {
     const isSelected = activeItemId === part.id && activeItemType === 'part';
+    const isInRecycleBin = part.recycle_bin === true;
     const revision = getLatestRevision(part.documents);
     const partNumDisplay = revision ? `${part.part_number} (${revision})` : part.part_number;
 
     return (
       <div
         key={`part-${part.id}`}
-        className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
+        className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${
+          isInRecycleBin
+            ? 'bg-gray-100 border-gray-300 text-gray-400 opacity-60'
+            : isSelected
+            ? 'bg-indigo-50 border-indigo-500 text-indigo-800'
+            : 'hover:bg-slate-100 border-transparent'
+        }`}
         style={{ marginLeft: `${level * 14}px` }}
-        onClick={() => handleItemClick(part, 'part', productId || findProductIdForItem(part.id))}
+        onClick={() => !isInRecycleBin && handleItemClick(part, 'part', productId || findProductIdForItem(part.id))}
       >
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <span className="w-5 flex justify-center text-sm">{getTypeIcon(part.type_name || 'part')}</span>
-          <Tooltip title={`${part.part_name} (${partNumDisplay})`}>
+          <Tooltip title={`${part.part_name} (${partNumDisplay})${isInRecycleBin ? ' - In Recycle Bin' : ''}`}>
             <div className="flex flex-col min-w-0">
               {/* ── Highlighted part name ── */}
-              <Text className={`text-sm font-medium truncate leading-tight ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
+              <Text className={`text-sm font-medium truncate leading-tight ${
+                isInRecycleBin
+                  ? 'text-gray-400'
+                  : isSelected
+                  ? 'text-indigo-800'
+                  : 'text-slate-700'
+              }`}>
                 {searchTerm ? highlightText(part.part_name, searchTerm) : part.part_name}
               </Text>
               {part.part_number && (
-                <Text className={`text-xs truncate ${isSelected ? 'text-indigo-500' : 'text-slate-400'}`}>
+                <Text className={`text-xs truncate ${
+                  isInRecycleBin
+                    ? 'text-gray-400'
+                    : isSelected
+                    ? 'text-indigo-500'
+                    : 'text-slate-400'
+                }`}>
                   {searchTerm ? highlightText(partNumDisplay, searchTerm) : partNumDisplay}
                 </Text>
               )}
@@ -581,36 +542,52 @@ const BillOfMaterials = ({
     const isExpanded = expandedItems[getExpandKey('assembly', assembly.id)];
     const hasChildren = combinedChildren.length > 0;
     const isSelected = activeItemId === assembly.id && activeItemType === 'assembly';
+    const isInRecycleBin = assembly.recycle_bin === true;
     const revision = getLatestRevision(assembly.documents);
     const assemblyNumDisplay = revision ? `${assembly.assembly_number} (${revision})` : assembly.assembly_number;
 
     return (
       <div key={`assembly-${assembly.id}`} className="select-none">
         <div
-          className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${isSelected ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'hover:bg-slate-100 border-transparent'}`}
+          className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${
+            isInRecycleBin
+              ? 'bg-gray-100 border-gray-300 text-gray-400 opacity-60'
+              : isSelected
+              ? 'bg-indigo-50 border-indigo-500 text-indigo-800'
+              : 'hover:bg-slate-100 border-transparent'
+          }`}
           style={{ marginLeft: `${level * 14}px` }}
-          onClick={() => handleItemClick(assembly, 'assembly', productId || findProductIdForItem(assembly.id))}
+          onClick={() => !isInRecycleBin && handleItemClick(assembly, 'assembly', productId || findProductIdForItem(assembly.id))}
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <div className="flex-shrink-0 w-5 flex justify-center">
               {hasChildren ? (
                 <Button type="text" size="small" icon={isExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-                  onClick={(e) => { e.stopPropagation(); toggleExpand(getExpandKey('assembly', assembly.id)); }}
-                  className="w-5 h-5 flex items-center justify-center p-0 text-slate-500 hover:bg-slate-200 rounded" />
+                  onClick={(e) => { e.stopPropagation(); if (!isInRecycleBin) toggleExpand(getExpandKey('assembly', assembly.id)); }}
+                  className="w-5 h-5 flex items-center justify-center p-0 text-slate-500 hover:bg-slate-200 rounded"
+                  disabled={isInRecycleBin}
+                />
               ) : <div className="w-5" />}
             </div>
             <span className="flex-shrink-0 text-sm">{getTypeIcon('assembly', level)}</span>
             <Tooltip title={`${assembly.assembly_name} (${assemblyNumDisplay})`}>
               <div className="flex flex-col min-w-0">
-                {/* ── Highlighted assembly name ── */}
-                <Text className={`text-sm font-medium truncate leading-tight ${isSelected ? 'text-indigo-800' : 'text-slate-700'}`}>
-                  {searchTerm ? highlightText(assembly.assembly_name, searchTerm) : assembly.assembly_name}
+                <Text className={`text-sm font-medium truncate ${
+                  isInRecycleBin
+                    ? 'text-gray-400'
+                    : isSelected
+                    ? 'text-indigo-800'
+                    : 'text-slate-700'
+                }`}>
+                  {assembly.assembly_name}
                 </Text>
-                {assembly.assembly_number && (
-                  <Text className={`text-xs truncate ${isSelected ? 'text-indigo-500' : 'text-slate-400'}`}>
-                    {searchTerm ? highlightText(assemblyNumDisplay, searchTerm) : assemblyNumDisplay}
-                  </Text>
-                )}
+                <Text className={`text-[10px] truncate ${
+                  isInRecycleBin
+                    ? 'text-gray-400'
+                    : 'text-slate-400'
+                }`}>
+                  {assemblyNumDisplay}
+                </Text>
               </div>
             </Tooltip>
           </div>

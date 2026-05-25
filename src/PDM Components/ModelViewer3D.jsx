@@ -60,7 +60,16 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
       const scene = new THREE.Scene();
       sceneRef.current = scene;
 
-      const camera = new THREE.PerspectiveCamera(45, width / heightPx, 0.1, 5000);
+      const aspect = width / heightPx;
+      const frustumSize = 3;
+      const camera = new THREE.OrthographicCamera(
+        frustumSize * aspect / -2,
+        frustumSize * aspect / 2,
+        frustumSize / 2,
+        frustumSize / -2,
+        0.1,
+        5000
+      );
       camera.position.set(0, 0, 3);
       cameraRef.current = camera;
 
@@ -224,35 +233,39 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
               model.position.z -= center.z;
 
               const maxDim = Math.max(size.x, size.y, size.z) || 1;
-              const fov = (cameraLocal.fov * Math.PI) / 180;
 
-              let cameraZ = maxDim / (2 * Math.tan(fov / 2));
-              cameraZ *= 1.5;
+              // Calculate frustum size for orthographic camera
+              const frustumSize = maxDim * 1.5;
+              const aspect = width / heightPx;
 
+              cameraLocal.left = -frustumSize * aspect / 2;
+              cameraLocal.right = frustumSize * aspect / 2;
+              cameraLocal.top = frustumSize / 2;
+              cameraLocal.bottom = -frustumSize / 2;
               cameraLocal.near = maxDim / 100;
               cameraLocal.far = maxDim * 100;
               cameraLocal.updateProjectionMatrix();
 
-              cameraLocal.position.set(0, 0, cameraZ);
+              cameraLocal.position.set(0, 0, maxDim * 2);
               cameraLocal.lookAt(0, 0, 0);
 
               if (controlsRef.current) {
                 controlsRef.current.target.set(0, 0, 0);
                 if (restrictZoom) {
-                  controlsRef.current.minDistance = cameraZ / 2;
-                  controlsRef.current.maxDistance = cameraZ * 2;
+                  controlsRef.current.minZoom = 0.5;
+                  controlsRef.current.maxZoom = 2;
                 } else {
-                  controlsRef.current.minDistance = 0;
-                  controlsRef.current.maxDistance = Infinity;
+                  controlsRef.current.minZoom = 0.1;
+                  controlsRef.current.maxZoom = 10;
                 }
                 controlsRef.current.update();
               }
 
-              baseDistanceRef.current = cameraZ;
+              baseDistanceRef.current = frustumSize;
 
               // Set initial view if specified
               if (initialView !== 'default') {
-                setCameraView(initialView, cameraLocal, controlsRef.current, cameraZ);
+                setCameraView(initialView, cameraLocal, controlsRef.current, frustumSize);
               }
 
               setLoading(false);
@@ -379,40 +392,41 @@ const ModelViewer3D = ({ documentId, height = 160, showControls = false, initial
   }, [showEdges]);
 
   // View presets for different camera positions
-  const setCameraView = (viewType, camera, controls, distance) => {
+  const setCameraView = (viewType, camera, controls, frustumSize) => {
     if (!camera || !controls) return;
 
-    const dist = distance || baseDistanceRef.current;
+    const frustum = frustumSize || baseDistanceRef.current;
+    const aspect = camera.right / camera.top * 2;
 
     // Reset camera up vector before setting new position
     camera.up.set(0, 1, 0);
 
     switch (viewType) {
       case 'front':
-        camera.position.set(0, 0, dist);
+        camera.position.set(0, 0, frustumSize);
         break;
       case 'back':
-        camera.position.set(0, 0, -dist);
+        camera.position.set(0, 0, -frustumSize);
         break;
       case 'left':
-        camera.position.set(-dist, 0, 0);
+        camera.position.set(-frustumSize, 0, 0);
         break;
       case 'right':
-        camera.position.set(dist, 0, 0);
+        camera.position.set(frustumSize, 0, 0);
         break;
       case 'top':
-        camera.position.set(0, dist, 0.01); // Slightly offset Z to avoid gimbal lock
-        camera.up.set(0, 1, 0); // Keep standard up vector for natural rotation
+        camera.position.set(0, frustumSize, 0.01);
+        camera.up.set(0, 1, 0);
         break;
       case 'bottom':
-        camera.position.set(0, -dist, 0.01); // Slightly offset Z to avoid gimbal lock
-        camera.up.set(0, 1, 0); // Keep standard up vector for natural rotation
+        camera.position.set(0, -frustumSize, 0.01);
+        camera.up.set(0, 1, 0);
         break;
       case 'isometric':
-        camera.position.set(dist, dist, dist);
+        camera.position.set(frustumSize, frustumSize, frustumSize);
         break;
       default:
-        camera.position.set(0, 0, dist);
+        camera.position.set(0, 0, frustumSize);
     }
 
     camera.lookAt(0, 0, 0);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { CodepenOutlined, InfoCircleOutlined, EyeOutlined, FileTextOutlined, DeleteOutlined, EditOutlined } from "@ant-design/icons";
-import { Card, Tag, Typography, Empty, Table, Select, Spin, Modal, Tooltip, Button, message, Input, Form } from "antd";
+import { Card, Tag, Typography, Empty, Table, Select, Spin, Modal, Tooltip, Button, message, Form, Input } from "antd";
 import ModelViewer3D from "./ModelViewer3D";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -328,32 +328,6 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
     } else {
       setSelectedView(viewType || 'default');
     }
-  };
-
-  const ViewControls = ({ onOpenModal, size = 'small' }) => {
-    const buttonSize = size === 'small' ? 'small' : 'middle';
-    const spacing = size === 'small' ? 'compact' : 'default';
-    const viewButtons = [
-      { key: 'front', label: 'Front' },
-      { key: 'isometric', label: 'Isometric' },
-      { key: 'top', label: 'Top' },
-      { key: 'bottom', label: 'Bottom' }
-    ];
-    return (
-      <div className="flex gap-2 bg-white/90 backdrop-blur-sm rounded-lg p-2 shadow-md">
-        {viewButtons.map(({ key, label }) => (
-          <Button
-            key={key}
-            size={buttonSize}
-            type={selectedView === key ? 'primary' : 'default'}
-            onClick={() => onOpenModal(key)}
-            title={`${label} View`}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
-    );
   };
 
   const extractedMaterialColumns = [

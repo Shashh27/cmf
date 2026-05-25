@@ -50,8 +50,14 @@ const ProductionLogsHistory = () => {
         const data = await response.json();
         // Filter to show only logs where produced_quantity > 0
         const producedLogs = (data || []).filter(log => (log.produced_quantity || 0) > 0);
-        setProductionLogs(producedLogs || []);
-        setFilteredLogs(producedLogs || []);
+        // Sort by created_at descending so newest logs appear at top
+        const sortedLogs = producedLogs.sort((a, b) => {
+          const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return dateB - dateA;
+        });
+        setProductionLogs(sortedLogs || []);
+        setFilteredLogs(sortedLogs || []);
       } else {
         message.error('Failed to fetch production logs');
         setProductionLogs([]);
@@ -353,7 +359,7 @@ const ProductionLogsHistory = () => {
                   icon={<ReloadOutlined />}
                   size="large"
                   style={{ height: '40px', width: '100%' }}
-                  onClick={() => window.location.reload()}
+                  onClick={() => fetchProductionLogs()}
                 >
                   Refresh
                 </Button>

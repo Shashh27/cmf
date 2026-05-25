@@ -262,7 +262,11 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
         } catch (e) { console.error(e); }
       } catch (e) {
         console.error(e);
-        message.error('Failed to create operations');
+        const detail =
+          e?.response?.data?.detail ||
+          e?.response?.data?.message ||
+          'Failed to create operations';
+        message.error(detail);
       }
     } else {
       for (const item of items) {
@@ -296,7 +300,11 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
         created.forEach(d => results.push(d));
       } catch (e) {
         console.error(e);
-        message.error('Failed to upload documents');
+        const detail =
+          e?.response?.data?.detail ||
+          e?.response?.data?.message ||
+          'Failed to upload documents';
+        message.error(detail);
       }
     }
 
@@ -476,7 +484,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                 <Row gutter={[12, 12]}>
                                   <Col xs={24} sm={12} md={8} lg={6}>
                                     <Form.Item {...restField} name={[name, 'workcenter_id']} label="Workcenter">
-                                      <Select placeholder="Select WC" loading={workCentersLoading} onOpenChange={o => { if (o) fetchWorkCenters(); }}
+                                      <Select placeholder="Select WC" allowClear loading={workCentersLoading} onOpenChange={o => { if (o) fetchWorkCenters(); }}
                                         onChange={() => { const items = form.getFieldValue('items'); if (items?.[index]) { items[index].machine_id = undefined; form.setFieldsValue({ items }); } }}>
                                         {workCenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
                                       </Select>
@@ -487,8 +495,18 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                       {({ getFieldValue }) => {
                                         const wcId = getFieldValue(['items', index, 'workcenter_id']);
                                         return (
-                                          <Form.Item {...restField} name={[name, 'machine_id']} label="Machine">
-                                            <Select placeholder={wcId ? 'Select Machine' : 'Select WC First'} disabled={!wcId} loading={machinesLoading} onOpenChange={o => { if (o) fetchMachines(); }}>
+                                          <Form.Item {...restField} name={[name, 'machine_id']} label="Machine" rules={[
+                                            ({ getFieldValue }) => ({
+                                              validator(_, value) {
+                                                const workcenterId = getFieldValue(['items', index, 'workcenter_id']);
+                                                if (workcenterId && !value) {
+                                                  return Promise.reject(new Error('Please select a machine when work center is selected'));
+                                                }
+                                                return Promise.resolve();
+                                              },
+                                            }),
+                                          ]}>
+                                            <Select placeholder={wcId ? 'Select Machine' : 'Select WC First'} disabled={!wcId} allowClear loading={machinesLoading} onOpenChange={o => { if (o) fetchMachines(); }}>
                                               {allMachines.filter(m => m.work_center_id === wcId).map(m => (
                                                 <Select.Option key={m.id} value={m.id}>{[m.make, m.model].filter(Boolean).join(' - ')} ({m.type})</Select.Option>
                                               ))}

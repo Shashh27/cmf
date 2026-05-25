@@ -157,7 +157,11 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           }
         } catch (error) {
           console.error('Error unlinking material:', error);
-          message.error('Failed to unlink material');
+          const detail =
+            error?.response?.data?.detail ||
+            error?.response?.data?.message ||
+            'Failed to unlink material';
+          message.error(detail);
         }
       }
     });
