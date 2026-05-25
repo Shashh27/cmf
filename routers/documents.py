@@ -9,11 +9,13 @@ import io
 import mimetypes
 
 from DB.database import get_db, SessionLocal
-from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel, Assembly as AssemblyModel
+from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel
+from DB.models.access_control import AccessUser
 from DB.schemas.oms import Document, DocumentUpdate, ExtractedDataUpdate
 from DB.minio_client import get_minio_client
 from .step_converter import StepConverter
 from .rawmaterial_extract import extract_pdf_data
+from services.notification_service import NotificationService
 
 router = APIRouter(
     prefix="/documents",
@@ -361,6 +363,24 @@ async def create_document(
         db.add(db_document)
         db.commit()
         db.refresh(db_document)
+
+        # Log document creation for PC notifications
+        user_name = None
+        user_role = None
+        if user_id:
+            user = db.query(AccessUser).filter(AccessUser.id == user_id).first()
+            user_name = user.user_name if user else None
+            user_role = user.role if user else None
+        
+        NotificationService.log_document_change(
+            db=db,
+            document_id=db_document.id,
+            action="created",
+            user_id=user_id,
+            user_name=user_name,
+            user_role=user_role,
+            details={"document_name": db_document.document_name, "document_type": db_document.document_type}
+        )
 
         # Extract data from PDF if applicable (2D files) - currently only for part documents
         if (
@@ -816,10 +836,54 @@ def update_document(document_id: int, document: DocumentUpdate, db: Session = De
             )
 
     update_data = document.model_dump(exclude_unset=True)
+    
+    # Capture old values before updating
+    old_values = {}
+    for field in update_data.keys():
+        old_values[field] = getattr(db_document, field, None)
+    
     for field, value in update_data.items():
         setattr(db_document, field, value)
 
     db.commit()
+    
+    # Log document update for PC notifications
+    user_name = None
+    user_role = None
+    if db_document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    # Capture changes with old and new values
+    changes = {}
+    for field in update_data.keys():
+        old_value = old_values[field]
+        new_value = update_data[field]
+        
+        # Convert time/datetime objects to strings for JSON serialization
+        if old_value is not None and hasattr(old_value, 'isoformat'):
+            old_value = old_value.isoformat()
+        elif hasattr(old_value, '__str__') and not isinstance(old_value, (str, int, float, bool)):
+            old_value = str(old_value)
+        
+        if new_value is not None and hasattr(new_value, 'isoformat'):
+            new_value = new_value.isoformat()
+        elif hasattr(new_value, '__str__') and not isinstance(new_value, (str, int, float, bool)):
+            new_value = str(new_value)
+        
+        changes[field] = {"old": old_value, "new": new_value}
+    
+    NotificationService.log_document_change(
+        db=db,
+        document_id=db_document.id,
+        action="updated",
+        user_id=db_document.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"document_name": db_document.document_name, "document_type": db_document.document_type, "changes": changes}
+    )
+    
     db.refresh(db_document)
     return db_document
 
@@ -992,6 +1056,24 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Sorry, this document cannot be uploaded/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
             )
+
+    # Log document deletion for PC notifications before deletion
+    user_name = None
+    user_role = None
+    if db_document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_document_change(
+        db=db,
+        document_id=db_document.id,
+        action="deleted",
+        user_id=db_document.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"document_name": db_document.document_name, "document_type": db_document.document_type}
+    )
 
     try:
         # Get object name before deleting from database

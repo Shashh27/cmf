@@ -92,6 +92,8 @@ from notification_routers import (
 
     tool_issues_notification_router,
 
+    pc_notifications_router,
+
 )
 
 
@@ -314,6 +316,8 @@ app.include_router(order_notifications_router, prefix="/api/v1")
 
 app.include_router(tool_issues_notification_router, prefix="/api/v1")
 
+app.include_router(pc_notifications_router, prefix="/api/v1")
+
 
 
 
@@ -524,3 +528,4 @@ if __name__ == "__main__":
 # uvicorn main:app --reload --host 172.18.7.91 --port 3000
 
 #  uvicorn main:app --reload --host 172.18.7.86 --port 8000
+

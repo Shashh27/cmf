@@ -20,6 +20,7 @@ from DB.models.oms import (
 from DB.models.configuration import PokayokeCompletedLog
 from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
 from services.stock_auto_update import StockAutoUpdateService
+from services.notification_service import NotificationService
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartUpdate, Assembly, AssemblyUpdate
 
@@ -237,6 +238,24 @@ def soft_delete_part(part_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(part)
 
+    # Log part soft-delete for PC notifications
+    user_name = None
+    user_role = None
+    if part.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == part.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_part_change(
+        db=db,
+        part_id=part.id,
+        action="soft_deleted",
+        user_id=part.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"part_name": part.part_name, "part_number": part.part_number}
+    )
+
     type_map, rm_map, user_map, vendor_map, product_map, assembly_map, order_map = _build_part_maps(db)
     return _part_to_dict(part, type_map, rm_map, user_map, vendor_map, product_map, assembly_map, order_map)
 
@@ -254,6 +273,24 @@ def restore_part(part_id: int, db: Session = Depends(get_db)):
     part.recycle_bin = False
     db.commit()
     db.refresh(part)
+
+    # Log part restore for PC notifications
+    user_name = None
+    user_role = None
+    if part.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == part.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_part_change(
+        db=db,
+        part_id=part.id,
+        action="restored",
+        user_id=part.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"part_name": part.part_name, "part_number": part.part_number}
+    )
 
     # Check if all parts in the assembly are restored, if so, restore the assembly
     if part.assembly_id:
@@ -291,6 +328,24 @@ def permanent_delete_part(part_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Part with id {part_id} is not in recycle bin. Use soft delete first."
         )
+
+    # Log part permanent delete for PC notifications before deletion
+    user_name = None
+    user_role = None
+    if part.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == part.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_part_change(
+        db=db,
+        part_id=part.id,
+        action="deleted",
+        user_id=part.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"part_name": part.part_name, "part_number": part.part_number, "permanent": True}
+    )
     
     try:
         # 1. Delete pokayoke logs for this part

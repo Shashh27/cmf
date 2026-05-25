@@ -25,6 +25,7 @@ from DB.models.inventory import RawMaterial, RawMaterialStock, RawMaterialUnit, 
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
 from services.stock_auto_update import StockAutoUpdateService
+from services.notification_service import NotificationService
 
 router = APIRouter(
     prefix="/parts",
@@ -190,6 +191,24 @@ def create_part(part: PartCreate, db: Session = Depends(get_db)):
     )
     db.commit()
 
+    # Log part creation for PC notifications
+    user_name = None
+    user_role = None
+    if db_part.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_part.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_part_change(
+        db=db,
+        part_id=db_part.id,
+        action="created",
+        user_id=db_part.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"part_name": db_part.part_name, "part_number": db_part.part_number}
+    )
+
     type_map, rm_map, unit_map, user_map, vendor_map = _build_part_maps(db)
     return _part_to_dict(db_part, type_map, rm_map, unit_map, user_map, vendor_map)
 
@@ -274,6 +293,11 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
         )
 
     update_data = part.model_dump(exclude_unset=True)
+    
+    # Capture old values before updating
+    old_values = {}
+    for field in update_data.keys():
+        old_values[field] = getattr(db_part, field, None)
     
     # Check if we're switching from outsource to in-house
     is_switching_to_inhouse = (
@@ -362,6 +386,43 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
 
     db.commit()
     
+    # Log part update for PC notifications
+    user_name = None
+    user_role = None
+    if db_part.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_part.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    # Capture changes with old and new values
+    changes = {}
+    for field in update_data.keys():
+        old_value = old_values[field]
+        new_value = update_data[field]
+        
+        # Convert time/datetime objects to strings for JSON serialization
+        if old_value is not None and hasattr(old_value, 'isoformat'):
+            old_value = old_value.isoformat()
+        elif hasattr(old_value, '__str__') and not isinstance(old_value, (str, int, float, bool)):
+            old_value = str(old_value)
+        
+        if new_value is not None and hasattr(new_value, 'isoformat'):
+            new_value = new_value.isoformat()
+        elif hasattr(new_value, '__str__') and not isinstance(new_value, (str, int, float, bool)):
+            new_value = str(new_value)
+        
+        changes[field] = {"old": old_value, "new": new_value}
+    
+    NotificationService.log_part_change(
+        db=db,
+        part_id=db_part.id,
+        action="updated",
+        user_id=db_part.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"part_name": db_part.part_name, "part_number": db_part.part_number, "changes": changes}
+    )
+    
     # 🔥 Update stock status based on unit statuses if raw material was cleared
     if is_clearing_raw_material and unit:
         StockAutoUpdateService.update_stock_status_from_units(db, unit.stock_id)
@@ -379,6 +440,24 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {part_id} not found"
         )
+
+    # Log part deletion for PC notifications before deletion
+    user_name = None
+    user_role = None
+    if db_part.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_part.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_part_change(
+        db=db,
+        part_id=db_part.id,
+        action="deleted",
+        user_id=db_part.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"part_name": db_part.part_name, "part_number": db_part.part_number}
+    )
 
     try:
         # 1. Delete pokayoke logs for this part

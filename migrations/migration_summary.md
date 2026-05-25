@@ -1,5 +1,126 @@
 # Database Migration Summary
 
+## Migration Date: 2026-05-23
+
+## New Migration: PC Notification System
+
+### Tables Added:
+
+#### 1. notifications.activity_log
+- **Status**: ✅ Schema defined
+- **Purpose**: Tracks all changes across the system for audit trail and notifications
+- **Columns**:
+  - id (SERIAL PRIMARY KEY)
+  - entity_type (VARCHAR(50) NOT NULL) - Type of entity (part, operation, document, assembly, etc.)
+  - entity_id (INTEGER NOT NULL) - ID of the entity that changed
+  - action (VARCHAR(50) NOT NULL) - Action performed (created, updated, deleted, soft_deleted, restored, schedule_activated, etc.)
+  - order_id (INTEGER) - Related order ID if applicable
+  - user_id (INTEGER) - User who made the change
+  - user_name (VARCHAR(255)) - Cached user name for performance
+  - timestamp (TIMESTAMP WITH TIME ZONE NOT NULL) - When the change occurred
+  - details (JSONB) - Additional details as JSON (field changes, old values, new values)
+  - created_at (TIMESTAMP WITH TIME ZONE NOT NULL) - Record creation time
+- **Indexes**:
+  - idx_activity_log_entity_type
+  - idx_activity_log_entity_id
+  - idx_activity_log_action
+  - idx_activity_log_order_id
+  - idx_activity_log_timestamp (DESC)
+  - idx_activity_log_user_id
+- **Foreign Keys**:
+  - fk_activity_log_order_id → oms.orders(id) ON DELETE SET NULL
+  - fk_activity_log_user_id → accesscontrol.access_users(id) ON DELETE SET NULL
+
+#### 2. notifications.pc_notifications
+- **Status**: ✅ Schema defined
+- **Purpose**: Links activity logs to Project Coordinators for notifications
+- **Columns**:
+  - id (SERIAL PRIMARY KEY)
+  - activity_log_id (INTEGER NOT NULL) - Reference to activity log
+  - pc_user_id (INTEGER NOT NULL) - Project Coordinator user to notify
+  - is_read (BOOLEAN NOT NULL DEFAULT FALSE) - Read status
+  - read_at (TIMESTAMP WITH TIME ZONE) - When notification was read
+  - created_at (TIMESTAMP WITH TIME ZONE NOT NULL) - Notification creation time
+- **Indexes**:
+  - idx_pc_notifications_activity_log_id
+  - idx_pc_notifications_pc_user_id
+  - idx_pc_notifications_is_read
+  - idx_pc_notifications_created_at (DESC)
+- **Foreign Keys**:
+  - fk_pc_notifications_activity_log_id → notifications.activity_log(id) ON DELETE CASCADE
+  - fk_pc_notifications_pc_user_id → accesscontrol.access_users(id) ON DELETE CASCADE
+
+### Migration File:
+- **File**: `migrations/add_pc_notification_system.sql`
+- **Status**: ✅ SQL script created, ready to execute
+
+### Next Steps:
+1. **Execute migration SQL** on the database
+2. **Verify table creation** with verification commands below
+3. **Test foreign key constraints**
+4. **Proceed to Phase 2**: Create NotificationService
+
+### Verification Commands:
+
+```sql
+-- Check activity_log table exists
+SELECT table_name 
+FROM information_schema.tables 
+WHERE table_schema = 'notifications' 
+AND table_name = 'activity_log';
+
+-- Check pc_notifications table exists
+SELECT table_name 
+FROM information_schema.tables 
+WHERE table_schema = 'notifications' 
+AND table_name = 'pc_notifications';
+
+-- Check activity_log columns
+SELECT column_name, data_type, is_nullable 
+FROM information_schema.columns 
+WHERE table_schema = 'notifications' 
+AND table_name = 'activity_log'
+ORDER BY ordinal_position;
+
+-- Check pc_notifications columns
+SELECT column_name, data_type, is_nullable 
+FROM information_schema.columns 
+WHERE table_schema = 'notifications' 
+AND table_name = 'pc_notifications'
+ORDER BY ordinal_position;
+
+-- Check indexes on activity_log
+SELECT indexname, indexdef 
+FROM pg_indexes 
+WHERE schemaname = 'notifications' 
+AND tablename = 'activity_log';
+
+-- Check indexes on pc_notifications
+SELECT indexname, indexdef 
+FROM pg_indexes 
+WHERE schemaname = 'notifications' 
+AND tablename = 'pc_notifications';
+
+-- Check foreign keys
+SELECT
+    tc.table_name,
+    tc.constraint_name,
+    kcu.column_name,
+    ccu.table_name AS foreign_table_name,
+    ccu.column_name AS foreign_column_name
+FROM information_schema.table_constraints AS tc
+JOIN information_schema.key_column_usage AS kcu
+    ON tc.constraint_name = kcu.constraint_name
+JOIN information_schema.constraint_column_usage AS ccu
+    ON ccu.constraint_name = tc.constraint_name
+WHERE tc.constraint_schema = 'notifications'
+    AND tc.constraint_type = 'FOREIGN KEY';
+```
+
+---
+
+## Previous Migrations
+
 ## Migration Date: 2025-03-31
 
 ## Tables Migrated:

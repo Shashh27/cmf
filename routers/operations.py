@@ -23,7 +23,9 @@ from DB.models.oms import (
 )
 from DB.models.configuration import WorkCenter as WorkCenterModel, Machine as MachineModel
 from DB.models.inventory import Vendors
+from DB.models.access_control import AccessUser
 from DB.schemas.oms import Operation, OperationCreate, OperationUpdate
+from services.notification_service import NotificationService
 
 router = APIRouter(
     prefix="/operations",
@@ -275,6 +277,25 @@ def create_operation(operation: OperationCreate, db: Session = Depends(get_db)):
     db.add(db_operation)
     db.commit()
     db.refresh(db_operation)
+
+    # Log operation creation for PC notifications
+    user_name = None
+    user_role = None
+    if db_operation.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_operation.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_operation_change(
+        db=db,
+        operation_id=db_operation.id,
+        action="created",
+        user_id=db_operation.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"operation_name": db_operation.operation_name, "operation_number": db_operation.operation_number}
+    )
+
     db_operation = (
         db.query(OperationModel)
         .options(joinedload(OperationModel.user))
@@ -562,6 +583,11 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
 
     update_data = operation.model_dump(exclude_unset=True)
 
+    # Capture old values before updating
+    old_values = {}
+    for field in update_data.keys():
+        old_values[field] = getattr(db_operation, field, None)
+
     if "operation_number" in update_data:
         new_op_num_raw = update_data.get("operation_number")
         new_op_num = new_op_num_raw.strip() if isinstance(new_op_num_raw, str) else None
@@ -614,6 +640,48 @@ def update_operation(operation_id: int, operation: OperationUpdate, db: Session 
         setattr(db_operation, field, value)
 
     db.commit()
+    
+    # Log operation update for PC notifications with old and new values
+    user_name = None
+    user_role = None
+    if db_operation.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_operation.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    # Capture changes with old and new values
+    changes = {}
+    for field in update_data.keys():
+        old_value = old_values[field]
+        new_value = update_data[field]
+        
+        # Convert time/datetime objects to strings for JSON serialization
+        if old_value is not None and hasattr(old_value, 'isoformat'):
+            old_value = old_value.isoformat()
+        elif hasattr(old_value, '__str__') and not isinstance(old_value, (str, int, float, bool)):
+            old_value = str(old_value)
+        
+        if new_value is not None and hasattr(new_value, 'isoformat'):
+            new_value = new_value.isoformat()
+        elif hasattr(new_value, '__str__') and not isinstance(new_value, (str, int, float, bool)):
+            new_value = str(new_value)
+        
+        changes[field] = {"old": old_value, "new": new_value}
+    
+    NotificationService.log_operation_change(
+        db=db,
+        operation_id=db_operation.id,
+        action="updated",
+        user_id=db_operation.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={
+            "operation_name": db_operation.operation_name,
+            "operation_number": db_operation.operation_number,
+            "changes": changes
+        }
+    )
+    
     db.refresh(db_operation)
     db_operation = (
         db.query(OperationModel)
@@ -683,6 +751,24 @@ def delete_operation(operation_id: int, db: Session = Depends(get_db)):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Sorry, this operation cannot be added/modified/deleted because the part is currently scheduled for production. To make changes, please inactivate the part's schedule status first."
             )
+
+    # Log operation deletion for PC notifications before deletion
+    user_name = None
+    user_role = None
+    if db_operation.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_operation.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_operation_change(
+        db=db,
+        operation_id=db_operation.id,
+        action="deleted",
+        user_id=db_operation.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"operation_name": db_operation.operation_name, "operation_number": db_operation.operation_number}
+    )
 
     try:
         # 1. Delete operation documents from MinIO and database
