@@ -122,9 +122,9 @@ def update_assembly(assembly_id: int, assembly: AssemblyUpdate, db: Session = De
     return db_assembly
 
 
-@router.delete("/{assembly_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{assembly_id}")
 def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
-    """Delete an assembly and all its parts and sub-assemblies (recursive cascade deletion)"""
+    """Soft delete an assembly by moving it to recycle bin (parts will also be moved to recycle bin)"""
     db_assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
     if not db_assembly:
         raise HTTPException(
@@ -132,119 +132,27 @@ def delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
             detail=f"Assembly with id {assembly_id} not found"
         )
 
-    assembly_ids: list[int] = []
-
-    def collect_assembly_ids(assembly_id_to_collect: int) -> None:
-        assembly_ids.append(assembly_id_to_collect)
-        child_assemblies = (
-            db.query(AssemblyModel)
-            .filter(AssemblyModel.parent_id == assembly_id_to_collect)
-            .all()
-        )
-        for child in child_assemblies:
-            collect_assembly_ids(child.id)
-
-    collect_assembly_ids(assembly_id)
-
-    parts_under_assemblies = []
-    if assembly_ids:
-        parts_under_assemblies = (
-            db.query(PartModel)
-            .filter(PartModel.assembly_id.in_(assembly_ids))
-            .all()
-        )
-    part_ids = [p.id for p in parts_under_assemblies]
-
-    if part_ids:
-        # Delete pokayoke logs for parts
-        for pid in part_ids:
-            result = db.execute(
-                text(
-                    "SELECT id FROM configuration.pokayoke_completed_logs "
-                    "WHERE part_id = :pid"
-                ),
-                {"pid": pid},
-            )
-            log_ids = [row[0] for row in result]
-            for log_id in log_ids:
-                log_obj = (
-                    db.query(PokayokeCompletedLog)
-                    .filter(PokayokeCompletedLog.id == log_id)
-                    .first()
-                )
-                if log_obj:
-                    db.delete(log_obj)
-        db.flush()
-
-        # Delete part priorities
-        db.query(OrderPartPriorityModel).filter(
-            OrderPartPriorityModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # Delete out source part status records
-        db.query(OutSourcePartStatusModel).filter(
-            OutSourcePartStatusModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        # Delete from scheduling.part_schedule_status to avoid FK violation
-        db.execute(
-            text("DELETE FROM scheduling.part_schedule_status WHERE part_id IN :pids"),
-            {"pids": tuple(part_ids)}
-        )
-
-        operations = (
-            db.query(OperationModel)
-            .filter(OperationModel.part_id.in_(part_ids))
-            .all()
-        )
-        operation_ids = [op.id for op in operations]
-
-        if operation_ids:
-            # Delete from scheduling.planned_schedule_items to avoid FK violation
-            db.execute(
-                text("DELETE FROM scheduling.planned_schedule_items WHERE operation_id IN :op_ids"),
-                {"op_ids": tuple(operation_ids)}
-            )
-
-            db.query(OperationDocumentModel).filter(
-                OperationDocumentModel.operation_id.in_(operation_ids)
-            ).delete(synchronize_session=False)
-
-        if operation_ids:
-            db.query(OperationModel).filter(
-                OperationModel.id.in_(operation_ids)
-            ).delete(synchronize_session=False)
-
-        db.query(DocumentModel).filter(
-            DocumentModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        db.query(ToolWithPartModel).filter(
-            ToolWithPartModel.part_id.in_(part_ids)
-        ).delete(synchronize_session=False)
-
-        db.query(PartModel).filter(PartModel.id.in_(part_ids)).delete(
-            synchronize_session=False
-        )
-
-    def delete_assembly_recursive(assembly_id_to_delete: int) -> None:
-        child_assemblies = (
-            db.query(AssemblyModel)
-            .filter(AssemblyModel.parent_id == assembly_id_to_delete)
-            .all()
-        )
-        for child_assembly in child_assemblies:
-            delete_assembly_recursive(child_assembly.id)
-
-        assembly_to_delete = (
-            db.query(AssemblyModel)
-            .filter(AssemblyModel.id == assembly_id_to_delete)
-            .first()
-        )
-        if assembly_to_delete:
-            db.delete(assembly_to_delete)
-
-    delete_assembly_recursive(assembly_id)
-
+    # Use soft delete via recycle bin router logic
+    db_assembly.recycle_bin = True
+    
+    # Move all parts in this assembly to recycle bin
+    parts = db.query(PartModel).filter(PartModel.assembly_id == assembly_id).all()
+    for part in parts:
+        part.recycle_bin = True
+    
+    # Also move all sub-assemblies and their parts to recycle bin
+    def cascade_delete_sub_assemblies(parent_id):
+        sub_assemblies = db.query(AssemblyModel).filter(AssemblyModel.parent_id == parent_id).all()
+        for sub_asm in sub_assemblies:
+            sub_asm.recycle_bin = True
+            # Move parts in sub-assembly to recycle bin
+            sub_parts = db.query(PartModel).filter(PartModel.assembly_id == sub_asm.id).all()
+            for sub_part in sub_parts:
+                sub_part.recycle_bin = True
+            # Recursively process nested sub-assemblies
+            cascade_delete_sub_assemblies(sub_asm.id)
+    
+    cascade_delete_sub_assemblies(assembly_id)
+    
     db.commit()
     return None

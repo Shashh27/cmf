@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, text
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -212,6 +212,40 @@ def receive_order_material(stock_id: int, db: Session = Depends(get_db)):
             detail="Order material already received"
         )
     
+    # Check if any parts linked to this stock have active schedule status
+    from DB.models.oms import Part as PartModel
+    part_ids = []
+    if stock.part_id:
+        part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
+    
+    # Also check parts linked via units (raw_material_unit_id)
+    units = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).all()
+    unit_ids = [u.id for u in units]
+    
+    if unit_ids:
+        parts_via_units = db.query(PartModel).filter(PartModel.raw_material_unit_id.in_(unit_ids)).all()
+        for part in parts_via_units:
+            if part.id not in part_ids:
+                part_ids.append(part.id)
+    
+    if part_ids:
+        active_parts = db.execute(
+            text("""
+                SELECT p.id, p.part_name 
+                FROM oms.parts p
+                JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+                WHERE p.id IN :part_ids AND pss.status = 'active'
+            """),
+            {"part_ids": tuple(part_ids)}
+        ).fetchall()
+        
+        if active_parts:
+            part_names = [row[1] for row in active_parts]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, this order material cannot be received because the following parts are currently scheduled for production: {', '.join(part_names)}. To receive this material, please inactivate the schedule status of these parts first."
+            )
+    
     try:
         # Update stock status
         stock.order_status = "received"
@@ -378,6 +412,40 @@ def update_order_material(
             detail="Cannot update received order material"
         )
     
+    # Check if any parts linked to this stock have active schedule status
+    from DB.models.oms import Part as PartModel
+    part_ids = []
+    if stock.part_id:
+        part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
+    
+    # Also check parts linked via units (raw_material_unit_id)
+    units = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).all()
+    unit_ids = [u.id for u in units]
+    
+    if unit_ids:
+        parts_via_units = db.query(PartModel).filter(PartModel.raw_material_unit_id.in_(unit_ids)).all()
+        for part in parts_via_units:
+            if part.id not in part_ids:
+                part_ids.append(part.id)
+    
+    if part_ids:
+        active_parts = db.execute(
+            text("""
+                SELECT p.id, p.part_name 
+                FROM oms.parts p
+                JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+                WHERE p.id IN :part_ids AND pss.status = 'active'
+            """),
+            {"part_ids": tuple(part_ids)}
+        ).fetchall()
+        
+        if active_parts:
+            part_names = [row[1] for row in active_parts]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, this order material cannot be updated because the following parts are currently scheduled for production: {', '.join(part_names)}. To update this material, please inactivate the schedule status of these parts first."
+            )
+    
     try:
         # Update stock fields
         update_data = stock_update.model_dump(exclude_unset=True)
@@ -412,6 +480,30 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only order stock can be deleted"
         )
+    
+    # Check if any parts linked to this stock have active schedule status
+    from DB.models.oms import Part as PartModel
+    part_ids = []
+    if stock.part_id:
+        part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
+    
+    if part_ids:
+        active_parts = db.execute(
+            text("""
+                SELECT p.id, p.part_name 
+                FROM oms.parts p
+                JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+                WHERE p.id IN :part_ids AND pss.status = 'active'
+            """),
+            {"part_ids": tuple(part_ids)}
+        ).fetchall()
+        
+        if active_parts:
+            part_names = [row[1] for row in active_parts]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, this order material cannot be deleted because the following parts are currently scheduled for production: {', '.join(part_names)}. To delete this material, please inactivate the schedule status of these parts first."
+            )
     
     try:
         # Get all units for this stock
@@ -526,6 +618,40 @@ def update_order_parts_raw_material_linked(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only order stock can be updated"
         )
+    
+    # Check if any parts linked to this stock have active schedule status
+    from DB.models.oms import Part as PartModel
+    part_ids = []
+    if stock.part_id:
+        part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
+    
+    # Also check parts linked via units (raw_material_unit_id)
+    units = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).all()
+    unit_ids = [u.id for u in units]
+    
+    if unit_ids:
+        parts_via_units = db.query(PartModel).filter(PartModel.raw_material_unit_id.in_(unit_ids)).all()
+        for part in parts_via_units:
+            if part.id not in part_ids:
+                part_ids.append(part.id)
+    
+    if part_ids:
+        active_parts = db.execute(
+            text("""
+                SELECT p.id, p.part_name 
+                FROM oms.parts p
+                JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+                WHERE p.id IN :part_ids AND pss.status = 'active'
+            """),
+            {"part_ids": tuple(part_ids)}
+        ).fetchall()
+        
+        if active_parts:
+            part_names = [row[1] for row in active_parts]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, this order material cannot be updated because the following parts are currently scheduled for production: {', '.join(part_names)}. To update this material, please inactivate the schedule status of these parts first."
+            )
     
     try:
         from services.raw_material_calculations import RawMaterialCalculationService
@@ -732,6 +858,25 @@ def update_order_parts_status_group(
                 # Find unlinked parts (parts that were in old but not in new)
                 unlinked_part_ids = set(old_part_ids) - set(new_part_ids)
                 
+                # Check if any unlinked parts have active schedule status
+                if unlinked_part_ids:
+                    active_parts = db.execute(
+                        text("""
+                            SELECT p.id, p.part_name 
+                            FROM oms.parts p
+                            JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+                            WHERE p.id IN :part_ids AND pss.status = 'active'
+                        """),
+                        {"part_ids": tuple(unlinked_part_ids)}
+                    ).fetchall()
+                    
+                    if active_parts:
+                        part_names = [row[1] for row in active_parts]
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Sorry, parts cannot be unlinked because the following parts are currently scheduled for production: {', '.join(part_names)}. To unlink these parts, please inactivate their schedule status first."
+                        )
+                
                 # Rule 3: If parts are unlinked, clear their raw material references
                 if unlinked_part_ids:
                     unlinked_parts = db.query(PartModel).filter(PartModel.id.in_(unlinked_part_ids)).all()
@@ -890,6 +1035,39 @@ def delete_order_parts_raw_material_linked(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only order stock can be deleted"
         )
+    
+    # Check if any parts linked to this stock have active schedule status
+    part_ids = []
+    if stock.part_id:
+        part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
+    
+    # Also check parts linked via units (raw_material_unit_id)
+    units = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.stock_id == stock_id).all()
+    unit_ids = [u.id for u in units]
+    
+    if unit_ids:
+        parts_via_units = db.query(PartModel).filter(PartModel.raw_material_unit_id.in_(unit_ids)).all()
+        for part in parts_via_units:
+            if part.id not in part_ids:
+                part_ids.append(part.id)
+    
+    if part_ids:
+        active_parts = db.execute(
+            text("""
+                SELECT p.id, p.part_name 
+                FROM oms.parts p
+                JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+                WHERE p.id IN :part_ids AND pss.status = 'active'
+            """),
+            {"part_ids": tuple(part_ids)}
+        ).fetchall()
+        
+        if active_parts:
+            part_names = [row[1] for row in active_parts]
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Sorry, this order material cannot be deleted because the following parts are currently scheduled for production: {', '.join(part_names)}. To delete this material, please inactivate the schedule status of these parts first."
+            )
     
     # Optional user authorization verification
     # User can delete if: 1) They created the stock, OR 2) They are admin or MC of the associated order

@@ -14,12 +14,14 @@ from DB.models.oms import (
     OperationDocument as OperationDocumentModel,
     Operation as OperationModel
 )
+from DB.models.access_control import AccessUser
 from DB.schemas.oms import (
     OperationDocument,
     OperationDocumentCreate,
     OperationDocumentUpdate,
     OperationDocumentWithDetails
 )
+from services.notification_service import NotificationService
 
 router = APIRouter(
     prefix="/operation-documents",
@@ -109,6 +111,25 @@ def create_operation_document(document: OperationDocumentCreate, db: Session = D
     db.add(db_document)
     db.commit()
     db.refresh(db_document)
+
+    # Log operation document creation for PC notifications
+    user_name = None
+    user_role = None
+    if document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == document.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_document_change(
+        db=db,
+        document_id=db_document.id,
+        action="created",
+        user_id=document.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"document_name": db_document.document_name, "document_type": db_document.document_type, "operation_id": db_document.operation_id}
+    )
+
     return db_document
 
 
@@ -645,10 +666,53 @@ def update_operation_document(document_id: int, document_update: OperationDocume
             )
     
     update_data = document_update.model_dump(exclude_unset=True)
+    
+    # Capture old values before updating
+    old_values = {}
+    for field in update_data.keys():
+        old_values[field] = getattr(db_document, field, None)
+    
     for field, value in update_data.items():
         setattr(db_document, field, value)
     
     db.commit()
+    
+    # Log operation document update for PC notifications
+    user_name = None
+    user_role = None
+    if db_document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    # Capture changes with old and new values
+    changes = {}
+    for field in update_data.keys():
+        old_value = old_values[field]
+        new_value = update_data[field]
+        
+        # Convert time/datetime objects to strings for JSON serialization
+        if old_value is not None and hasattr(old_value, 'isoformat'):
+            old_value = old_value.isoformat()
+        elif hasattr(old_value, '__str__') and not isinstance(old_value, (str, int, float, bool)):
+            old_value = str(old_value)
+        
+        if new_value is not None and hasattr(new_value, 'isoformat'):
+            new_value = new_value.isoformat()
+        elif hasattr(new_value, '__str__') and not isinstance(new_value, (str, int, float, bool)):
+            new_value = str(new_value)
+        
+        changes[field] = {"old": old_value, "new": new_value}
+    
+    NotificationService.log_document_change(
+        db=db,
+        document_id=db_document.id,
+        action="updated",
+        user_id=db_document.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"document_name": db_document.document_name, "document_type": db_document.document_type, "operation_id": db_document.operation_id, "changes": changes}
+    )
 
     refreshed = (
         db.query(OperationDocumentModel)
@@ -668,6 +732,24 @@ def delete_operation_document(document_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation document with id {document_id} not found"
         )
+
+    # Log operation document deletion for PC notifications before deletion
+    user_name = None
+    user_role = None
+    if document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == document.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_document_change(
+        db=db,
+        document_id=document.id,
+        action="deleted",
+        user_id=document.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"document_name": document.document_name, "document_type": document.document_type, "operation_id": document.operation_id}
+    )
     
     try:
         # Get MinIO client and path info before deleting from DB

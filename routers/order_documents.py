@@ -4,8 +4,10 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from DB.database import get_db, MINIO_BUCKET_NAME
 from DB.models.oms import OrderDocument, Order
+from DB.models.access_control import AccessUser
 from DB.minio_client import get_minio_client
 from DB.schemas.oms import OrderDocument as OrderDocumentResponse, OrderDocumentCreate, OrderDocumentUpdate
+from services.notification_service import NotificationService
 import uuid
 import os
 from datetime import datetime, timedelta
@@ -112,6 +114,24 @@ async def upload_order_document(
         db.add(db_document)
         db.commit()
         db.refresh(db_document)
+
+        # Log order document creation for PC notifications
+        user_name = None
+        user_role = None
+        if user_id:
+            user = db.query(AccessUser).filter(AccessUser.id == user_id).first()
+            user_name = user.user_name if user else None
+            user_role = user.role if user else None
+        
+        NotificationService.log_order_document_change(
+            db=db,
+            order_document_id=db_document.id,
+            action="created",
+            user_id=user_id,
+            user_name=user_name,
+            user_role=user_role,
+            details={"document_name": db_document.document_name, "document_type": db_document.document_type, "order_id": order_id}
+        )
 
         return db_document
 
@@ -299,6 +319,24 @@ def delete_order_document(document_id: int, db: Session = Depends(get_db)):
     db_document = db.query(OrderDocument).filter(OrderDocument.id == document_id).first()
     if not db_document:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # Log order document deletion for PC notifications before deletion
+    user_name = None
+    user_role = None
+    if db_document.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == db_document.user_id).first()
+        user_name = user.user_name if user else None
+        user_role = user.role if user else None
+    
+    NotificationService.log_order_document_change(
+        db=db,
+        order_document_id=db_document.id,
+        action="deleted",
+        user_id=db_document.user_id,
+        user_name=user_name,
+        user_role=user_role,
+        details={"document_name": db_document.document_name, "document_type": db_document.document_type, "order_id": db_document.order_id}
+    )
     
     try:
         # Get object name before deleting from DB

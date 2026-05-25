@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, ForeignKey, func, text
+from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, ForeignKey, func, text, JSON
 from ..database import Base
 
 
@@ -67,4 +67,35 @@ class MachineCalibrationNotification(Base):
     ack_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class ActivityLog(Base):
+    """Tracks all changes across the system for audit trail and notifications"""
+    __tablename__ = "activity_log"
+    __table_args__ = {"schema": "notifications"}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    entity_type = Column(String, nullable=False, index=True)  # 'part', 'operation', 'document', 'assembly', etc.
+    entity_id = Column(Integer, nullable=False, index=True)  # ID of the entity that changed
+    action = Column(String, nullable=False, index=True)  # 'created', 'updated', 'deleted', 'soft_deleted', 'restored', 'schedule_activated', etc.
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True, index=True)  # Related order (if applicable)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)  # User who made the change
+    user_name = Column(String, nullable=True)  # Cached user name for performance
+    user_role = Column(String, nullable=True)  # Cached user role for performance
+    timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
+    details = Column(JSON, nullable=True)  # Additional details as JSON (e.g., field changes, old values, new values)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class PCNotification(Base):
+    """Links activity logs to Project Coordinators for notifications"""
+    __tablename__ = "pc_notifications"
+    __table_args__ = {"schema": "notifications"}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    activity_log_id = Column(Integer, ForeignKey("notifications.activity_log.id"), nullable=False, index=True)
+    pc_user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False, index=True)  # PC user to notify
+    is_read = Column(Boolean, nullable=False, server_default=text("false"), index=True)
+    read_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
 

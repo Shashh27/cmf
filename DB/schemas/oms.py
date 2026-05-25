@@ -49,6 +49,7 @@ class AssemblyBase(BaseModel):
     product_id: Optional[int] = None
     parent_id: Optional[int] = None
     user_id: Optional[int] = None
+    recycle_bin: bool = False
 
 
 class AssemblyCreate(AssemblyBase):
@@ -61,6 +62,7 @@ class AssemblyUpdate(BaseModel):
     product_id: Optional[int] = None
     parent_id: Optional[int] = None
     user_id: Optional[int] = None
+    recycle_bin: Optional[bool] = None
 
 
 class Assembly(AssemblyBase):
@@ -116,6 +118,7 @@ class PartBase(BaseModel):
     qty: Optional[int] = None  # Optional quantity field
     size: Optional[str] = None  # Size specification for the part
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
+    recycle_bin: Optional[bool] = False  # Soft delete flag for recycle bin
 
 
 class PartCreate(PartBase):
@@ -136,6 +139,7 @@ class PartUpdate(BaseModel):
     qty: Optional[int] = None  # Optional quantity field
     size: Optional[str] = None  # Size specification for the part
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
+    recycle_bin: Optional[bool] = None  # Soft delete flag for recycle bin
 
 
 class Part(PartBase):
@@ -154,6 +158,7 @@ class Part(PartBase):
     size: Optional[str] = None  # Size specification for the part
     vendor_id: Optional[int] = None  # Vendor for outsourced parts
     vendor_name: Optional[str] = None  # Vendor company name
+    recycle_bin: Optional[bool] = False  # Soft delete flag for recycle bin
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -316,6 +321,7 @@ class DocumentBase(BaseModel):
     assembly_id: Optional[int] = None
     parent_id: Optional[int] = None
     user_id: Optional[int] = None
+    is_acknowledged: bool = False
 
 
 class DocumentCreate(DocumentBase):
@@ -331,6 +337,7 @@ class DocumentUpdate(BaseModel):
     assembly_id: Optional[int] = None
     parent_id: Optional[int] = None
     user_id: Optional[int] = None
+    is_acknowledged: Optional[bool] = None
 
 
 class Document(DocumentBase):
@@ -338,6 +345,7 @@ class Document(DocumentBase):
     document_url: str  # MinIO URL
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    is_acknowledged: bool = False
 
     class Config:
         from_attributes = True
