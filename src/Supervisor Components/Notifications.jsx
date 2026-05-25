@@ -1,18 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Typography, Tag, Spin, message, Button, Row, Col } from 'antd';
+import { Card, Table, Typography, Tag, Spin, message, Button, Row, Col, Tabs, Badge } from 'antd';
 import { BellOutlined, CheckOutlined, ReloadOutlined } from '@ant-design/icons';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
+import config from '../Config/config';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 
 const Notifications = () => {
   const [notifications, setNotifications] = useState([]);
+  const [pokayokeNotifications, setPokayokeNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pokayokeLoading, setPokayokeLoading] = useState(true);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const [pokayokePagination, setPokayokePagination] = useState({ current: 1, pageSize: 10 });
+  const [activeTab, setActiveTab] = useState('production');
+  const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
 
   useEffect(() => {
     fetchNotifications();
+    fetchPokayokeNotifications();
   }, []);
 
   const fetchNotifications = async () => {
@@ -92,8 +99,66 @@ const Notifications = () => {
     }
   };
 
+  const fetchPokayokeNotifications = async () => {
+    setPokayokeLoading(true);
+    try {
+      // Get supervisor ID from localStorage
+      let supervisorId = null;
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          supervisorId = user.id;
+        } catch (e) {
+          console.error("Error parsing user from local storage", e);
+        }
+      }
+      if (!supervisorId) supervisorId = localStorage.getItem('supervisor_id');
+
+      if (!supervisorId) {
+        message.error('Supervisor not found in session. Please log in again.');
+        setPokayokeLoading(false);
+        return;
+      }
+
+      // Fetch all Pokayoke completed logs
+      const apiUrl = `${config.API_BASE_URL}/pokayoke-completed-logs/simple`;
+
+      const response = await fetch(apiUrl);
+      if (response.ok) {
+        const data = await response.json();
+        // Show all logs, sort by acknowledgment status first (unacknowledged at top), then by completed_at descending
+        const sortedLogs = (data || []).sort((a, b) => {
+          const isAckA = a.supervisor_acknowledged;
+          const isAckB = b.supervisor_acknowledged;
+          // Unacknowledged (false) comes before acknowledged (true)
+          if (isAckA !== isAckB) {
+            return isAckA ? 1 : -1;
+          }
+          // Within same acknowledgment status, sort by completed_at descending
+          const dateA = new Date(a.completed_at).getTime();
+          const dateB = new Date(b.completed_at).getTime();
+          return dateB - dateA;
+        });
+        setPokayokeNotifications(sortedLogs || []);
+      } else {
+        message.error('Failed to fetch Pokayoke notifications');
+        setPokayokeNotifications([]);
+      }
+    } catch (error) {
+      console.error('Error fetching Pokayoke notifications:', error);
+      message.error('Failed to fetch Pokayoke notifications');
+      setPokayokeNotifications([]);
+    } finally {
+      setPokayokeLoading(false);
+    }
+  };
+
   const handleAcknowledge = async (logId) => {
     try {
+      // Add to acknowledging set to disable button
+      setAcknowledgingIds(prev => new Set(prev).add(logId));
+
       // Get supervisor ID from localStorage
       const storedUser = localStorage.getItem('user');
       let supervisorId = null;
@@ -133,10 +198,85 @@ const Notifications = () => {
           errorMessage = errorData.error;
         }
         message.error(`Failed to acknowledge notification: ${errorMessage}`);
+        // Remove from acknowledging set on error
+        setAcknowledgingIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(logId);
+          return newSet;
+        });
       }
     } catch (error) {
       console.error('Error acknowledging notification:', error);
       message.error('Failed to acknowledge notification');
+      // Remove from acknowledging set on error
+      setAcknowledgingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(logId);
+        return newSet;
+      });
+    }
+  };
+
+  const handlePokayokeAcknowledge = async (logId) => {
+    try {
+      // Add to acknowledging set to disable button
+      setAcknowledgingIds(prev => new Set(prev).add(logId));
+
+      // Get supervisor ID from localStorage
+      const storedUser = localStorage.getItem('user');
+      let supervisorId = null;
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          supervisorId = user.id;
+        } catch (e) {
+          console.error("Error parsing user from local storage", e);
+        }
+      }
+      if (!supervisorId) supervisorId = localStorage.getItem('supervisor_id');
+
+      // Call the PUT endpoint for Pokayoke acknowledgment with supervisor_id as query parameter
+      const response = await fetch(`${config.API_BASE_URL}/pokayoke-completed-logs/${logId}/acknowledge?supervisor_id=${supervisorId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        message.success('Pokayoke notification acknowledged');
+        // Refresh the Pokayoke notifications list to update the UI
+        fetchPokayokeNotifications();
+      } else {
+        const errorData = await response.json();
+        console.error('Pokayoke acknowledgment error:', errorData);
+        let errorMessage = 'Unknown error';
+        if (Array.isArray(errorData.detail)) {
+          errorMessage = errorData.detail.map(err => err.msg || err.message || err).join(', ');
+        } else if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.error) {
+          errorMessage = errorData.error;
+        }
+        message.error(`Failed to acknowledge Pokayoke notification: ${errorMessage}`);
+        // Remove from acknowledging set on error
+        setAcknowledgingIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(logId);
+          return newSet;
+        });
+      }
+    } catch (error) {
+      console.error('Error acknowledging Pokayoke notification:', error);
+      message.error('Failed to acknowledge Pokayoke notification');
+      // Remove from acknowledging set on error
+      setAcknowledgingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(logId);
+        return newSet;
+      });
     }
   };
 
@@ -323,7 +463,97 @@ const Notifications = () => {
           icon={<CheckOutlined />}
           size="small"
           onClick={() => handleAcknowledge(record.id)}
-          disabled={record.supervisor_acknowledged_at || record.acknowledged}
+          disabled={record.supervisor_acknowledged_at || record.acknowledged || acknowledgingIds.has(record.id)}
+        >
+          Acknowledge
+        </Button>
+      ),
+    },
+  ];
+
+  const pokayokeColumns = [
+    {
+      title: 'Sl\nNo',
+      key: 'slNo',
+      align: 'center',
+      width: 50,
+      render: (text, record, index) => index + 1,
+    },
+    {
+      title: 'Checklist\nName',
+      dataIndex: 'checklist_name',
+      key: 'checklistName',
+      align: 'center',
+      width: 120,
+    },
+    {
+      title: 'Machine\nName',
+      dataIndex: 'machine_name',
+      key: 'machineName',
+      align: 'center',
+      width: 100,
+    },
+    {
+      title: 'Operator\nName',
+      dataIndex: 'operator_name',
+      key: 'operatorName',
+      align: 'center',
+      width: 100,
+    },
+    {
+      title: 'Completed\nAt',
+      dataIndex: 'completed_at',
+      key: 'completedAt',
+      align: 'center',
+      width: 120,
+      render: (text) => {
+        if (!text) return 'N/A';
+        try {
+          const date = new Date(text);
+          return date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          });
+        } catch (error) {
+          return 'N/A';
+        }
+      },
+    },
+    {
+      title: 'Overall\nStatus',
+      dataIndex: 'overall_status',
+      key: 'overallStatus',
+      align: 'center',
+      width: 80,
+      filters: [
+        { text: 'Pending', value: 'pending' },
+        { text: 'Approved', value: 'approved' },
+        { text: 'Rejected', value: 'rejected' },
+      ],
+      onFilter: (value, record) => record.overall_status?.toLowerCase() === value,
+      render: (text) => (
+        <Tag color={getStatusColor(text)}>
+          {(text || 'N/A').toUpperCase()}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      align: 'center',
+      width: 50,
+      fixed: 'right',
+      render: (text, record) => (
+        <Button
+          type="primary"
+          icon={<CheckOutlined />}
+          size="small"
+          onClick={() => handlePokayokeAcknowledge(record.log_id)}
+          disabled={record.supervisor_acknowledged || acknowledgingIds.has(record.log_id)}
         >
           Acknowledge
         </Button>
@@ -345,7 +575,7 @@ const Notifications = () => {
                 <BellOutlined /> Notifications
               </Title>
               <Text type="secondary">
-                View new production logs from operators and acknowledge them
+                View and acknowledge notifications from operators
               </Text>
             </div>
           </Col>
@@ -354,7 +584,7 @@ const Notifications = () => {
               type="primary"
               icon={<ReloadOutlined />}
               size="large"
-              onClick={() => window.location.reload()}
+              onClick={() => fetchNotifications()}
             >
               Refresh
             </Button>
@@ -362,45 +592,101 @@ const Notifications = () => {
         </Row>
       </Card>
 
-      {/* Table Section */}
+      {/* Tabs Section */}
       <Card
         style={{ borderRadius: 8 }}
         styles={{ body: { padding: 0 } }}
       >
-        <Spin spinning={loading}>
-          <Table
-            columns={columns}
-            dataSource={notifications}
-            rowKey="id"
-            pagination={{
-              current: pagination.current,
-              pageSize: pagination.pageSize,
-              pageSizeOptions: [10, 20, 50, 100],
-              showSizeChanger: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-              onChange: (page, pageSize) => {
-                setPagination({ current: page, pageSize });
-              },
-              onShowSizeChange: (current, size) => {
-                setPagination({ current: 1, pageSize: size });
-              },
-            }}
-            variant="outlined"
-            scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-            style={{
-              textAlign: 'center',
-            }}
-            components={{
-              header: {
-                cell: (props) => (
-                  <th {...props} style={{ ...props.style, backgroundColor: '#ffffe0', fontWeight: 'bold' }}>
-                    {props.children}
-                  </th>
-                ),
-              },
-            }}
-          />
-        </Spin>
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key)}
+          items={[
+            {
+              key: 'production',
+              label: 'Production Logs',
+              children: (
+                <Spin spinning={loading}>
+                  <Table
+                    columns={columns}
+                    dataSource={notifications}
+                    rowKey="id"
+                    pagination={{
+                      current: pagination.current,
+                      pageSize: pagination.pageSize,
+                      pageSizeOptions: [10, 20, 50, 100],
+                      showSizeChanger: true,
+                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                      onChange: (page, pageSize) => {
+                        setPagination({ current: page, pageSize });
+                      },
+                      onShowSizeChange: (current, size) => {
+                        setPagination({ current: 1, pageSize: size });
+                      },
+                    }}
+                    variant="outlined"
+                    scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+                    style={{
+                      textAlign: 'center',
+                    }}
+                    components={{
+                      header: {
+                        cell: (props) => (
+                          <th {...props} style={{ ...props.style, backgroundColor: '#e6f7ff', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                            {props.children}
+                          </th>
+                        ),
+                      },
+                    }}
+                  />
+                </Spin>
+              ),
+            },
+            {
+              key: 'pokayoke',
+              label: (
+                <Badge count={pokayokeNotifications.filter(log => !log.supervisor_acknowledged).length} showZero={false}>
+                  Pokayoke Checklists
+                </Badge>
+              ),
+              children: (
+                <Spin spinning={pokayokeLoading}>
+                  <Table
+                    columns={pokayokeColumns}
+                    dataSource={pokayokeNotifications}
+                    rowKey="log_id"
+                    pagination={{
+                      current: pokayokePagination.current,
+                      pageSize: pokayokePagination.pageSize,
+                      pageSizeOptions: [10, 20, 50, 100],
+                      showSizeChanger: true,
+                      showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                      onChange: (page, pageSize) => {
+                        setPokayokePagination({ current: page, pageSize });
+                      },
+                      onShowSizeChange: (current, size) => {
+                        setPokayokePagination({ current: 1, pageSize: size });
+                      },
+                    }}
+                    variant="outlined"
+                    scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
+                    style={{
+                      textAlign: 'center',
+                    }}
+                    components={{
+                      header: {
+                        cell: (props) => (
+                          <th {...props} style={{ ...props.style, backgroundColor: '#e6f7ff', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                            {props.children}
+                          </th>
+                        ),
+                      },
+                    }}
+                  />
+                </Spin>
+              ),
+            },
+          ]}
+        />
       </Card>
     </div>
   );

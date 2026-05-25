@@ -26,6 +26,7 @@ import ProjectCoordinatorDashboard from "./Pages/ProjectCoordinatorDashboard";
 import ProjectCoordinatorProductView from "./ProjectCoordinator Components/ProjectCoordinatorProductView";
 import OrderTrackingSidebar from "./ProjectCoordinator Components/OrderTrackingSidebar";
 import Recyclebin from "./ProjectCoordinator Components/Recyclebin";
+import PCNotifications from "./ProjectCoordinator Components/PCNotifications";
 import AdminRecyclebin from "./Pages/Recyclebin";
 import PPS from "./Pages/PPS";
 import ProductionMonitoring from "./Pages/ProductionMonitoring";
@@ -185,6 +186,8 @@ function App() {
           <Route path="/project_coordinator/order-tracking" element={<OrderTrackingSidebar />} />
 
           <Route path="/project_coordinator/recycle-bin" element={<Recyclebin />} />
+
+          <Route path="/project_coordinator/notifications" element={<PCNotifications />} />
 
          
 

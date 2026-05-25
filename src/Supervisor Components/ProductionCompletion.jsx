@@ -856,6 +856,17 @@ const ProductionCompletion = () => {
     <div style={{ padding: isMobile ? '12px' : '24px' }}>
       {/* Inject row highlight CSS */}
       <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff;
+        }
+        .modern-table .ant-table-tbody > tr:hover > td {
+          background: #f0f8ff !important;
+        }
+        .modern-table .ant-table-tbody > tr > td {
+          border-bottom: 1px solid #f0f0f0;
+        }
         .search-highlight-row > td {
           background-color: #e6f4ff !important;
         }
@@ -887,9 +898,7 @@ const ProductionCompletion = () => {
               value={selectedMachines}
               onChange={setSelectedMachines}
               options={machineOptions}
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
+              optionFilterProp="label"
               size={isMobile ? 'small' : 'middle'}
             />
             <Input
@@ -928,6 +937,7 @@ const ProductionCompletion = () => {
             rowKey="id"
             loading={loading}
             rowClassName={rowClassName}
+            className="modern-table"
             locale={{
               emptyText: (
                 <Empty description={selectedMachines.length > 0 ? "No production logs found for selected machines" : "No production logs found for this supervisor"} />

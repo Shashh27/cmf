@@ -423,12 +423,13 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   }] : [];
 
   const tools = selectedOperation?.tools || selectedOperation?.operation_tools || partData?.tools || [];
+
+  // Doc tabs for Part Documents — Raw Materials is now a separate top-level tab
   const docTabs = [
     { key: 'all', label: 'All Documents' },
     { key: 'mpp', label: 'MPP' },
     { key: '2d', label: '2D' },
     { key: '3d', label: '3D' },
-    // { key: 'cnc', label: 'CNC Program' },
   ];
 
   const handleShowRequestModal = (record) => {
@@ -472,14 +473,12 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
     setActivating(true);
     try {
-      // POST /api/v1/scheduling/operation-status/{operation_id}/activate?operator_id={operator_id}
       const response = await axios.post(
         `${SCHEDULING_API_BASE_URL}/scheduling/operation-status/${opId}/activate?operator_id=${operatorId}`,
         {}
       );
 
       if (response.status === 200 || response.status === 201) {
-        // Mark in-session so button flips immediately without waiting for re-fetch
         setJustActivated(true);
         setSessionActivationTime(dayjs().format('YYYY-MM-DD HH:mm:ss'));
 
@@ -535,8 +534,6 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     setCompleteLoading(true);
     try {
       const now = dayjs();
-      // For simplicity, we assume the work was done in the last hour if no specific time is provided,
-      // but the API requires from/to dates and times. We'll use the current time for both for completion logging.
       const payload = {
         operation_id: parseInt(operationId),
         operator_id: parseInt(operatorId),
@@ -562,12 +559,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         message.success('Production log submitted successfully!');
         setIsCompleteModalVisible(false);
         completeForm.resetFields();
-        
-        // Refresh page or trigger dashboard update if needed
-        // Since we don't have direct access to dashboard's fetchReworkData here, 
-        // we rely on the user seeing the update next time stats are fetched or 
-        // if we have a callback.
-        window.location.reload(); // Quickest way to ensure all stats refresh across components
+        window.location.reload();
       } else {
         const errorData = await response.json();
         message.error(`Failed to submit production log: ${errorData.detail || 'Unknown error'}`);
@@ -625,7 +617,6 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       setPreviewDoc(doc);
       setIsPreviewVisible(true);
     }, 50);
-
   };
 
   const renderDocuments = (docs, filter) => {
@@ -665,6 +656,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     >
       <Spin spinning={loading}>
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
+
+          {/* ── Tab 1: Operations ── */}
           <TabPane tab="Operations" key="operations">
             {operations.length > 0 ? (
               <Table
@@ -679,42 +672,58 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             )}
           </TabPane>
 
+          {/* ── Tab 2: Operation Documents (docs only, no Tools sub-tab) ── */}
           <TabPane tab="Operation Documents" key="op_documents">
             {selectedOperation ? (
               <div>
                 <Title level={5}>{selectedOperation.operation_name} - Documents</Title>
-                <Tabs activeKey={activeOpDocTab} onChange={setActiveOpDocTab} size="small">
-                  <TabPane tab="All Documents" key="docs">
-                    {renderDocuments(operationDocuments, 'all')}
-                  </TabPane>
-                  <TabPane tab="Tools" key="tools">
-                    <Table dataSource={tools} columns={toolColumns}
-                      rowKey={(record) => record.tool?.id || record.id}
-                      size="small" pagination={false} scroll={{ x: true }}
-                    />
-                  </TabPane>
-                </Tabs>
+                {renderDocuments(operationDocuments, 'all')}
               </div>
             ) : (
               <Empty description="Select an operation to view its documents." />
             )}
           </TabPane>
 
+          {/* ── Tab 3: Tools (moved from sub-tab to top-level) ── */}
+          <TabPane tab="Tools" key="tools">
+            {selectedOperation ? (
+              <div>
+                <Title level={5} style={{ marginBottom: 12 }}>{selectedOperation.operation_name} - Tools</Title>
+                <Table
+                  dataSource={tools}
+                  columns={toolColumns}
+                  rowKey={(record) => record.tool?.id || record.id}
+                  size="small"
+                  pagination={false}
+                  scroll={{ x: true }}
+                />
+              </div>
+            ) : (
+              <Empty description="Select an operation to view its tools." />
+            )}
+          </TabPane>
+
+          {/* ── Tab 4: Part Documents (doc sub-tabs only, no Raw Materials) ── */}
           <TabPane tab="Part Documents" key="part_documents">
             <Tabs activeKey={activeDocTab} onChange={setActiveDocTab} size="small">
               {docTabs.map(t => <TabPane tab={t.label} key={t.key} />)}
-              <TabPane tab="Raw Materials" key="raw_materials" />
             </Tabs>
             <div style={{ marginTop: 16 }}>
-              {activeDocTab === 'raw_materials' && (
-                <Table dataSource={rawMaterials} columns={rawMaterialColumns}
-                  rowKey={(record) => record.raw_material_name}
-                  size="small" pagination={false}
-                />
-              )}
               {docTabs.some(t => t.key === activeDocTab) && renderDocuments(partDocuments, activeDocTab)}
             </div>
           </TabPane>
+
+          {/* ── Tab 5: Raw Materials (moved from sub-tab to top-level) ── */}
+          <TabPane tab="Raw Materials" key="raw_materials">
+            <Table
+              dataSource={rawMaterials}
+              columns={rawMaterialColumns}
+              rowKey={(record) => record.raw_material_name}
+              size="small"
+              pagination={false}
+            />
+          </TabPane>
+
         </Tabs>
       </Spin>
 
@@ -851,13 +860,31 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           >
             <InputNumber
               min={0}
+              max={999999}
               style={{ width: '100%' }}
               placeholder="Enter quantity"
               precision={0}
-              parser={value => value ? String(value).replace(/[^\d]/g, '') : ''}
-              formatter={value => value ? String(value).replace(/[^\d]/g, '') : ''}
+              parser={value => {
+                // Strip non-digits then cap at 6 digits
+                const digits = String(value || '').replace(/[^\d]/g, '').slice(0, 6);
+                return digits ? parseInt(digits, 10) : '';
+              }}
+              formatter={value => {
+                if (value === '' || value === null || value === undefined) return '';
+                // Ensure formatted value never exceeds 6 digits
+                return String(value).replace(/[^\d]/g, '').slice(0, 6);
+              }}
               onKeyDown={e => {
-                if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
+                const currentVal = String(completeForm.getFieldValue('produced_quantity') || '');
+                const isDigit = /^\d$/.test(e.key);
+                const isControl = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key);
+                // Block non-digits
+                if (!isDigit && !isControl) {
+                  e.preventDefault();
+                  return;
+                }
+                // Block digit input if already at 6 digits
+                if (isDigit && currentVal.replace(/[^\d]/g, '').length >= 6) {
                   e.preventDefault();
                 }
               }}

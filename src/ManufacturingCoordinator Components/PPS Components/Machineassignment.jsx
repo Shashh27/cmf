@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import dayjs from "dayjs";
 import { SCHEDULING_API_BASE_URL } from "../../Config/schedulingconfig.js";
-import { Card, Table, Button, Modal, Form, Select, Spin, Popconfirm, Calendar, Badge, Tag, Space, Row, Col, message, } from "antd";
+import {Card,Table,Button,Modal,Form,Select,Spin,Popconfirm,Calendar,Badge,Tag,Space,Row,Col,message,} from "antd";
 import { DeleteOutlined, EditOutlined, ReloadOutlined } from "@ant-design/icons";
 
 const { Option } = Select;
@@ -150,7 +150,7 @@ const MachineAssignment = ({ activeTab, machineData }) => {
 
   const getDateCellData = (date) => {
     const dateStr = date.format('YYYY-MM-DD');
-    const config = shiftConfigs.find(config =>
+    const config = shiftConfigs.find(config => 
       dayjs(config.date).format('YYYY-MM-DD') === dateStr
     );
     return config;
@@ -259,7 +259,7 @@ const MachineAssignment = ({ activeTab, machineData }) => {
 
       if (response.ok) {
         message.success('Assignment deleted successfully');
-        fetchAssignments(assignment.shift_config_id);
+        fetchAssignments(currentConfig?.id);
       } else {
         message.error('Failed to delete assignment');
       }
@@ -302,7 +302,7 @@ const MachineAssignment = ({ activeTab, machineData }) => {
       key: "machine_id",
       render: (machineId, record) => {
         const machine = machines.find(m => m.machine_id === machineId);
-        return machine ? `${machine.machine_make} (ID: ${machineId})` : `Machine ID: ${machineId}`;
+        return machine ? `(${machine.machine_make}) ${machine.machine_model || ''}` : `Machine ID: ${machineId}`;
       },
     },
     {
@@ -356,11 +356,11 @@ const MachineAssignment = ({ activeTab, machineData }) => {
       <Row gutter={[24, 24]}>
         {/* Left Side - Calendar */}
         <Col xs={24} lg={16}>
-          <Card
-            title="Machine Assignment Calendar"
+          <Card 
+            title="Machine Assignment Calendar" 
             extra={
-              <Button
-                icon={<ReloadOutlined />}
+              <Button 
+                icon={<ReloadOutlined />} 
                 onClick={handleRefresh}
                 loading={shiftLoading}
                 size={window.innerWidth < 768 ? 'small' : 'middle'}
@@ -375,7 +375,7 @@ const MachineAssignment = ({ activeTab, machineData }) => {
                 <p>Loading shift configurations...</p>
               </div>
             ) : (
-              <Calendar
+              <Calendar 
                 key={JSON.stringify(shiftConfigs)}
                 onSelect={handleDateSelect}
                 dateCellRender={dateCellRender}
@@ -473,13 +473,13 @@ const MachineAssignment = ({ activeTab, machineData }) => {
 
           {/* Selected Date Downtimes */}
           {selectedDateDowntimes.length > 0 && (
-            <Card
-              title="Machine Breakdown"
+            <Card 
+              title="Machine Breakdown" 
               style={{ marginTop: 16, borderColor: "#ff4d4f" }}
               size="small"
             >
               {selectedDateDowntimes.map((m, idx) => (
-                <Card
+                <Card 
                   key={idx}
                   size="small"
                   style={{ marginBottom: 10, background: "#fff1f0", borderColor: "#ffccc7" }}
@@ -518,15 +518,15 @@ const MachineAssignment = ({ activeTab, machineData }) => {
             <Select
               placeholder="Select machine"
               showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
+              optionFilterProp="label"
             >
-              {machines.map(machine => (
-                <Option key={machine.machine_id} value={machine.machine_id}>
-                  {machine.machine_make} (ID: {machine.machine_id})
-                </Option>
-              ))}
+              {machines
+                .filter(machine => machine.status_name?.toLowerCase() !== 'off' && machine.status_id !== 2)
+                .map(machine => (
+                  <Option key={machine.machine_id} value={machine.machine_id} label={`(${machine.machine_make}) ${machine.machine_model || ''}`}>
+                    ({machine.machine_make}) {machine.machine_model || ''}
+                  </Option>
+                ))}
             </Select>
           </Form.Item>
 
@@ -538,13 +538,11 @@ const MachineAssignment = ({ activeTab, machineData }) => {
             <Select
               placeholder="Select operator"
               showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
+              optionFilterProp="label"
             >
               {operators.map(operator => (
-                <Option key={operator.id} value={operator.id}>
-                  {operator.user_name} ({operator.gmail})
+                <Option key={operator.id} value={operator.id} label={`${operator.user_name} (${operator.gmail || ''})`}>
+                  {operator.user_name} ({operator.gmail || ''})
                 </Option>
               ))}
             </Select>
@@ -558,13 +556,11 @@ const MachineAssignment = ({ activeTab, machineData }) => {
             <Select
               placeholder="Select shift configuration"
               showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
+              optionFilterProp="label"
               disabled={!!currentConfig}
             >
               {shiftConfigs.map(config => (
-                <Option key={config.id} value={config.id}>
+                <Option key={config.id} value={config.id} label={`${dayjs(config.date).format('DD MMM YYYY')} — ${config.working_day ? 'Working' : 'Non-Working'} (${config.number_of_shifts} shift${config.number_of_shifts !== 1 ? 's' : ''})${config.selected_shifts?.length ? ` · ${config.selected_shifts.join(', ')}` : ''}`}>
                   {dayjs(config.date).format('DD MMM YYYY')} —{' '}
                   {config.working_day ? 'Working' : 'Non-Working'} ({config.number_of_shifts} shift{config.number_of_shifts !== 1 ? 's' : ''})
                   {config.selected_shifts?.length ? ` · ${config.selected_shifts.join(', ')}` : ''}
@@ -585,16 +581,16 @@ const MachineAssignment = ({ activeTab, machineData }) => {
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space direction={window.innerWidth < 768 ? 'vertical' : 'horizontal'} style={{ width: '100%' }}>
-              <Button
-                onClick={closeAssignmentModal}
+              <Button 
+                onClick={closeAssignmentModal} 
                 style={{ marginRight: window.innerWidth < 768 ? 0 : 8 }}
                 block={window.innerWidth < 768}
               >
                 Cancel
               </Button>
-              <Button
-                type="primary"
-                htmlType="submit"
+              <Button 
+                type="primary" 
+                htmlType="submit" 
                 loading={assignmentLoading}
                 block={window.innerWidth < 768}
               >

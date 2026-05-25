@@ -566,12 +566,12 @@ const Dashboard = () => {
                 <div style={{ fontWeight: 700, color: '#1677FF', marginTop: 6 }}>
                   {selectedJob?.sale_order_number || selectedJob?.production_order || 'None'}
                 </div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                {/* <div style={{ fontSize: 12, color: '#94a3b8' }}>
                   Priority {selectedJob?.priority || '0'}
-                </div>
+                </div> */}
               </div>
               <div style={{ background: '#E6F4FF', borderRadius: 12, padding: 12, border: '1px solid #e6e6e6' }}>
-                <Text style={{ color: '#64748b' }}>Part Number</Text>
+                <Text style={{ color: '#64748b' }}>Part Number & Name</Text>
                 <div style={{ fontWeight: 700, color: '#1677FF', marginTop: 6 }}>
                   {selectedJob?.part_number || 'None'}
                 </div>

@@ -6,6 +6,7 @@ import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCart
 } from "@ant-design/icons";
 import cmtisLogo from "../../assets/cmtis.png";
 import { SCHEDULING_API_BASE_URL } from '../../Config/schedulingconfig';
+import { API_BASE_URL } from '../../Config/auth';
 
 const { Sider } = Layout;
 
@@ -59,13 +60,26 @@ const Sidebar = ({ collapsed, onCollapse }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Fetch notification count for operator
+  // Fetch notification count for operator and project coordinator
   useEffect(() => {
     if (prefix === '/operator') {
       fetchOperatorNotificationCount();
     } else if (prefix === '/supervisor') {
       fetchSupervisorNotificationCount();
+    } else if (prefix === '/project_coordinator') {
+      fetchPCNotificationCount();
     }
+
+    // Poll for notification count every 30 seconds
+    const interval = setInterval(() => {
+      if (prefix === '/operator') {
+        fetchOperatorNotificationCount();
+      } else if (prefix === '/supervisor') {
+        fetchSupervisorNotificationCount();
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, [prefix]);
 
   const fetchOperatorNotificationCount = async () => {
@@ -139,6 +153,24 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       }
     } catch (error) {
       console.error('Error fetching notification count:', error);
+    }
+  };
+
+  const fetchPCNotificationCount = async () => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) return;
+      
+      const user = JSON.parse(storedUser);
+      if (!user.id) return;
+
+      const response = await fetch(`${API_BASE_URL}/pc-notifications/${user.id}/unread-count`);
+      if (response.ok) {
+        const data = await response.json();
+        setNotificationCount(data.unread_count || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching PC notification count:', error);
     }
   };
 
@@ -278,11 +310,13 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       {
         key: `${prefix}/notifications`,
         label: (
-          <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
-            <Badge count={notificationCount} offset={[10, 0]}>
-              Notifications
-            </Badge>
-          </Link>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
+              <Badge count={notificationCount} offset={[10, 0]}>
+                Notifications
+              </Badge>
+            </Link>
+          </div>
         ),
         icon: <BellOutlined />,
       },
@@ -313,6 +347,19 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         key: `${prefix}/recycle-bin`,
         label: <Link to={`${prefix}/recycle-bin`} onClick={() => setMobileDrawerOpen(false)}>Recycle Bin</Link>,
         icon: <DeleteOutlined />,
+      },
+      {
+        key: `${prefix}/notifications`,
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>
+              <Badge count={notificationCount} offset={[10, 0]}>
+                Notifications
+              </Badge>
+            </Link>
+          </div>
+        ),
+        icon: <BellOutlined />,
       },
     ];
   } else if (prefix === '/manufacturing_coordinator') {

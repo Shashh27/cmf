@@ -208,7 +208,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       return;
     }
     setCurrentRecord(record);
-    setReturnQuantity(remaining);
+    setReturnQuantity('');
     setRemarks('');
     setIsModalVisible(true);
   };
@@ -295,7 +295,7 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       return;
     }
     setCurrentRecord(record);
-    setIssueQty(Math.min(1, outstanding) || 1);
+    setIssueQty('');
     setIssueCategory(undefined);
     setIssueDescription('');
     setIssueFiles([]);
@@ -593,16 +593,22 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
           </Form.Item>
           <Form.Item label="Return Quantity">
             <InputNumber
-              min={1}
               value={returnQuantity}
               onChange={(val) => {
                 if (!currentRecord) return;
                 if (typeof val === 'number') {
-                  if (val < 1) setReturnQuantity(1);
-                  else setReturnQuantity(val);
+                  setReturnQuantity(val);
                 }
               }}
               style={{ width: '100%' }}
+              precision={0}
+              parser={value => value.replace(/[^\d]/g, '')}
+              formatter={value => value ? String(value).replace(/[^\d]/g, '') : ''}
+              onKeyDown={e => {
+                if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key)) {
+                  e.preventDefault();
+                }
+              }}
             />
             <div style={{ marginTop: 6, fontSize: 12, color: '#8c8c8c' }}>
               Remaining quantity: {currentRecord ? computeRemaining(currentRecord) : 0}. You cannot return more than this.
@@ -650,15 +656,21 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
           </Form.Item>
           <Form.Item label="Issue Quantity">
             <InputNumber
-              min={1}
               value={issueQty}
               onChange={(val) => {
                 if (typeof val === 'number') {
-                  if (val < 1) setIssueQty(1);
-                  else setIssueQty(val);
+                  setIssueQty(val);
                 }
               }}
               style={{ width: '100%' }}
+              precision={0}
+              parser={value => value.replace(/[^\d]/g, '')}
+              formatter={value => value ? String(value).replace(/[^\d]/g, '') : ''}
+              onKeyDown={e => {
+                if (!/^\d$/.test(e.key) && !['Backspace','Delete','ArrowLeft','ArrowRight','Tab'].includes(e.key)) {
+                  e.preventDefault();
+                }
+              }}
             />
             <div style={{ marginTop: 6, fontSize: 12, color: '#8c8c8c' }}>
               Remaining quantity: {currentRecord ? computeRemaining(currentRecord) : 0}. You cannot report more than this.
