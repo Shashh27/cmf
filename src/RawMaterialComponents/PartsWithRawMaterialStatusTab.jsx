@@ -19,6 +19,7 @@ import {
 } from "@ant-design/icons";
 import DimensionInputs from "./DimensionInputs";
 import ProcureRawMaterialModal from "./ProcureRawMaterialModal";
+import EditLinkedPartsModal from "./EditLinkedPartsModal";
 import { PartsWithRawMaterialsStatusPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
 
 const { Text } = Typography;
@@ -1272,243 +1273,35 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
         </div>
       </Modal>
 
-      {/* Full Edit Modal - for edit icon */}
-      <Modal open={statusEditModalOpen} onCancel={() => setStatusEditModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Edit Linked Parts & Status</span></div>} width={{ xs: '95%', sm: '90%', md: 800, lg: 800 }} centered footer={[<Button key="cancel" onClick={() => setStatusEditModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveStatusEdit} className="w-full sm:w-auto">Save Changes</Button>]}>
-        <div className="py-2 space-y-3" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
-          {/* Form Type */}
-          <div className="space-y-1">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Form Type</Text>
-            <Select
-              style={{ width: '100%' }}
-              placeholder="Select Form Type"
-              value={statusEditRecord?.form_type}
-              disabled
-              size="middle"
-              className="rounded-md"
-            >
-              <Option value="Round">Round</Option>
-              <Option value="Square">Square</Option>
-              <Option value="Pipe">Pipe</Option>
-            </Select>
-          </div>
-
-          {/* Quantity */}
-          <div className="space-y-1">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</Text>
-            <InputNumber 
-              min={1}
-              precision={0}
-              controls={false}
-              onKeyDown={handleInputKeyDown}
-              style={{ width: '100%' }} 
-              value={statusEditOrderQty} 
-              onChange={(value) => {
-                if (value !== null && value >= 1) {
-                  setStatusEditOrderQty(value);
-                }
-              }}
-              size="middle" 
-              className="rounded-md" 
-            />
-          </div>
-
-          {/* Dimensions based on form type */}
-          {statusEditRecord?.form_type === 'Round' && (
-            <>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Diameter (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Diameter"
-                  value={statusEditDimensions.diameter}
-                  onChange={(value) => {
-                    if (value !== null && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, diameter: value }));
-                    }
-                  }}
-                  min={0}
-                  precision={0}
-                  controls={false}
-                  onKeyDown={handleInputKeyDown}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Length"
-                  value={statusEditDimensions.length}
-                  onChange={(value) => {
-                    if (value !== null && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, length: value }));
-                    }
-                  }}
-                  min={0}
-                  precision={0}
-                  controls={false}
-                  onKeyDown={handleInputKeyDown}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-            </>
-          )}
-
-          {statusEditRecord?.form_type === 'Square' && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breadth (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Breadth"
-                    value={statusEditDimensions.breadth}
-                    onChange={(value) => {
-                      if (value !== null && value >= 0) {
-                        setStatusEditDimensions(prev => ({ ...prev, breadth: value }));
-                      }
-                    }}
-                    min={0}
-                    precision={0}
-                    controls={false}
-                    onKeyDown={handleInputKeyDown}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Height (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Height"
-                    value={statusEditDimensions.height}
-                    onChange={(value) => {
-                      if (value !== null && value >= 0) {
-                        setStatusEditDimensions(prev => ({ ...prev, height: value }));
-                      }
-                    }}
-                    min={0}
-                    precision={0}
-                    controls={false}
-                    onKeyDown={handleInputKeyDown}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Length"
-                  value={statusEditDimensions.length}
-                  onChange={(value) => {
-                    if (value !== null && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, length: value }));
-                    }
-                  }}
-                  min={0}
-                  precision={0}
-                  controls={false}
-                  onKeyDown={handleInputKeyDown}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-            </>
-          )}
-
-          {statusEditRecord?.form_type === 'Pipe' && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Inner Diameter (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Inner Diameter"
-                    value={statusEditDimensions.inner_diameter}
-                    onChange={(value) => {
-                      if (value !== null && value >= 0) {
-                        setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }));
-                      }
-                    }}
-                    min={0}
-                    precision={0}
-                    controls={false}
-                    onKeyDown={handleInputKeyDown}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Outer Diameter (mm)</Text>
-                  <InputNumber
-                    style={{ width: '100%' }}
-                    placeholder="Outer Diameter"
-                    value={statusEditDimensions.outer_diameter}
-                    onChange={(value) => {
-                      if (value !== null && value >= 0) {
-                        setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }));
-                      }
-                    }}
-                    min={0}
-                    precision={0}
-                    controls={false}
-                    onKeyDown={handleInputKeyDown}
-                    size="middle"
-                    className="rounded-md"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Length"
-                  value={statusEditDimensions.length}
-                  onChange={(value) => {
-                    if (value !== null && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, length: value }));
-                    }
-                  }}
-                  min={0}
-                  precision={0}
-                  controls={false}
-                  onKeyDown={handleInputKeyDown}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-            </>
-          )}
-          
-          {/* Parts Management - Tree View */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Text className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Parts Hierarchy</Text>
-             
-            </div>
-            <div className="bg-white p-4 rounded-lg border border-gray-200" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-              {loading ? (
-                <div className="flex justify-center py-12">
-                  <Spin size="large" />
-                </div>
-              ) : orderHierarchyMap[statusEditRecord?.source_order_id || statusEditRecord?.order_id] ? (
-                <Tree
-                  showLine={{ showLeafIcon: false }}
-                  treeData={buildTreeData(orderHierarchyMap[statusEditRecord?.source_order_id || statusEditRecord?.order_id])}
-                  titleRender={(nodeData) => renderTreeNode(nodeData)}
-                  className="custom-tree"
-                />
-              ) : (
-                <Empty description="No hierarchy available" />
-              )}
-            </div>
-          </div>
-        </div>
-      </Modal>
+      {/* Edit Linked Parts & Status Modal */}
+      <EditLinkedPartsModal
+        open={statusEditModalOpen}
+        onCancel={() => setStatusEditModalOpen(false)}
+        onSave={handleSaveStatusEdit}
+        statusEditRecord={statusEditRecord}
+        statusEditOrderQty={statusEditOrderQty}
+        setStatusEditOrderQty={setStatusEditOrderQty}
+        statusEditDimensions={statusEditDimensions}
+        setStatusEditDimensions={setStatusEditDimensions}
+        statusEditCurrentLinkages={statusEditCurrentLinkages}
+        statusEditPartQuantities={statusEditPartQuantities}
+        setStatusEditPartQuantities={setStatusEditPartQuantities}
+        statusEditPartRequiredLengths={statusEditPartRequiredLengths}
+        setStatusEditPartRequiredLengths={setStatusEditPartRequiredLengths}
+        statusEditPartRawMaterialUnits={statusEditPartRawMaterialUnits}
+        setStatusEditPartRawMaterialUnits={setStatusEditPartRawMaterialUnits}
+        availableUnits={availableUnits}
+        loadingUnits={loadingUnits}
+        orderHierarchyMap={orderHierarchyMap}
+        statusEditReceivedVendorId={statusEditReceivedVendorId}
+        setStatusEditReceivedVendorId={setStatusEditReceivedVendorId}
+        pendingUnlinks={pendingUnlinks}
+        setPendingUnlinks={setPendingUnlinks}
+        loading={loading}
+        handleInputKeyDown={handleInputKeyDown}
+        handleLinkPart={handleLinkPart}
+        vendors={vendors}
+      />
 
       {/* Procure Raw Material Modal */}
       <ProcureRawMaterialModal

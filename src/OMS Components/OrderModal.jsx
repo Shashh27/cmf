@@ -587,7 +587,11 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                   allowClear
                   showSearch
                   optionFilterProp="children"
-                  disabled={editingOrder && editingOrder.project_coordinator_id}
+                  disabled={
+                    editingOrder && 
+                    editingOrder.project_coordinator_id && 
+                    !(getCurrentUserRole() === 'admin' && editingOrder.user_id === getCurrentUserId())
+                  }
                 >
                   {projectCoordinators.map((u) => (
                     <Option key={u.id} value={u.id.toString()}>

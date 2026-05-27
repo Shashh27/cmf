@@ -258,6 +258,12 @@ const OMS = () => {
       order.admin_id || ""
     ).toLowerCase();
     
+    // Manufacturing Coordinator
+    const mfgCoordinatorName = String(
+      order.manufacturing_coordinator_name || 
+      order.manufacturing_coordinator_id || ""
+    ).toLowerCase();
+    
     return (
       slNo.includes(searchLower) ||
       saleOrderNumber.includes(searchLower) ||
@@ -267,7 +273,8 @@ const OMS = () => {
       formattedOrderDate.includes(searchLower) ||
       formattedDueDate.includes(searchLower) ||
       status.includes(searchLower) ||
-      userName.includes(searchLower)
+      userName.includes(searchLower) ||
+      mfgCoordinatorName.includes(searchLower)
     );
   });
 
