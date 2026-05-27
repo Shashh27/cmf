@@ -450,7 +450,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/production_logs`} onClick={() => setMobileDrawerOpen(false)}>Production logs</Link>,
         icon: <FileTextOutlined />,
       },
-      
       {
         key: `${prefix}/pps/assets-availability`,
         label: <Link to={`${prefix}/pps/assets-availability`} onClick={() => setMobileDrawerOpen(false)}>Assets Availability</Link>,
@@ -461,10 +460,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
         icon: <SafetyCertificateOutlined />,
       },
-            {
+      {
         key: `${prefix}/create-inspection-plan`,
         label: <Link to={`${prefix}/create-inspection-plan`} onClick={() => setMobileDrawerOpen(false)}>Create Inspection Plan</Link>,
         icon: <BuildOutlined />,
+      },
+      {
+        key: `${prefix}/notification`,
+        label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Inspection Notifications</Link>,
+        icon: <BellOutlined />,
       },
       {
         key: `${prefix}/notifications`,

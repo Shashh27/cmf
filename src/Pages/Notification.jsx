@@ -1,6 +1,16 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Tabs, Card, DatePicker, Space, Button, Badge, Typography } from 'antd';
-import { ShoppingCartOutlined, ToolOutlined, AppstoreOutlined, ExperimentOutlined, BellOutlined } from '@ant-design/icons';
+import {
+  ShoppingCartOutlined,
+  ToolOutlined,
+  AppstoreOutlined,
+  ExperimentOutlined,
+  BellOutlined,
+  FileSearchOutlined,
+} from '@ant-design/icons';
+import dayjs from 'dayjs';
+import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
+import InspectionPlanNotifications from '../Notification Components/InspectionPlanNotifications';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Lottie from 'lottie-react';
 import notificationBell from '../assets/Notification bell.json';
@@ -16,24 +26,51 @@ import config from '../Config/config';
 const Notification = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  /** Supervisors only see operator requests for inspection plans (no other notification tabs). */
+  const supervisorInspectionOnly = location.pathname.startsWith('/supervisor');
+
   const [dateRange, setDateRange] = useState([null, null]);
   const [activeKey, setActiveKey] = useState('1');
-  const [counts, setCounts] = useState({ orders: 0, machines: 0, tools: 0, components: 0, calibrations: 0 });
+  const [counts, setCounts] = useState({
+    orders: 0,
+    machines: 0,
+    tools: 0,
+    components: 0,
+    calibrations: 0,
+    inspectionPlans: 0,
+  });
   const setOrdersCount = useCallback((n) => setCounts((c) => ({ ...c, orders: n })), []);
   const setMachinesCount = useCallback((n) => setCounts((c) => ({ ...c, machines: n })), []);
   const setToolsCount = useCallback((n) => setCounts((c) => ({ ...c, tools: n })), []);
   const setComponentsCount = useCallback((n) => setCounts((c) => ({ ...c, components: n })), []);
   const setCalibrationsCount = useCallback((n) => setCounts((c) => ({ ...c, calibrations: n })), []);
+  const setInspectionPlansCount = useCallback((n) => setCounts((c) => ({ ...c, inspectionPlans: n })), []);
 
   useEffect(() => {
+    if (supervisorInspectionOnly) return;
     const params = new URLSearchParams(location.search);
     const t = params.get('tab');
-    if (t && ['1','2','3','4','5'].includes(t)) {
+    if (t && ['1', '2', '3', '4', '5', '6'].includes(t)) {
       setActiveKey(t);
     }
-  }, [location.search]);
+  }, [location.search, supervisorInspectionOnly]);
 
   const fetchCounts = useCallback(async () => {
+    if (supervisorInspectionOnly) {
+      try {
+        const inspRes = await fetch(
+          `${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications?only_pending=true`,
+        );
+        const inspectionPlans = inspRes.ok ? await inspRes.json() : [];
+        setCounts((c) => ({
+          ...c,
+          inspectionPlans: Array.isArray(inspectionPlans) ? inspectionPlans.length : 0,
+        }));
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     try {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
@@ -47,19 +84,24 @@ const Notification = () => {
         `${config.API_BASE_URL}/machine-calibration-notifications/${qs ? `?${qs}` : ''}`,
       ];
       const [orders, machines, tools, components, calibrations] = await Promise.all(
-        endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : [])))
+        endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : []))),
       );
+      const inspRes = await fetch(
+        `${QUALITY_API_BASE_URL}/operator/inspection-plan-notifications?only_pending=true`,
+      );
+      const inspectionPlans = inspRes.ok ? await inspRes.json() : [];
       setCounts({
         orders: Array.isArray(orders) ? orders.filter((n) => !n.is_ack).length : 0,
         machines: Array.isArray(machines) ? machines.filter((n) => !n.is_ack).length : 0,
         tools: Array.isArray(tools) ? tools.filter((n) => !n.is_ack).length : 0,
         components: Array.isArray(components) ? components.filter((n) => !n.is_ack).length : 0,
         calibrations: Array.isArray(calibrations) ? calibrations.filter((n) => !n.is_ack).length : 0,
+        inspectionPlans: Array.isArray(inspectionPlans) ? inspectionPlans.length : 0,
       });
-    } catch (e) {
-      // silent fail; badges will update when tabs are visited
+    } catch {
+      /* silent fail; badges update when tabs are visited */
     }
-  }, [dateRange]);
+  }, [dateRange, supervisorInspectionOnly]);
 
   useEffect(() => {
     fetchCounts();
@@ -76,7 +118,7 @@ const Notification = () => {
           </Badge>
         </span>
       ),
-      children: <OrderNotifications dateRange={dateRange} onCount={setOrdersCount} />
+      children: <OrderNotifications dateRange={dateRange} onCount={setOrdersCount} />,
     },
     {
       key: '2',
@@ -88,7 +130,7 @@ const Notification = () => {
           </Badge>
         </span>
       ),
-      children: <MachineNotifications dateRange={dateRange} onCount={setMachinesCount} />
+      children: <MachineNotifications dateRange={dateRange} onCount={setMachinesCount} />,
     },
     {
       key: '3',
@@ -100,7 +142,7 @@ const Notification = () => {
           </Badge>
         </span>
       ),
-      children: <ToolIssuesNotifications dateRange={dateRange} onCount={setToolsCount} />
+      children: <ToolIssuesNotifications dateRange={dateRange} onCount={setToolsCount} />,
     },
     {
       key: '4',
@@ -112,7 +154,7 @@ const Notification = () => {
           </Badge>
         </span>
       ),
-      children: <ComponentIssuesNotifications dateRange={dateRange} onCount={setComponentsCount} />
+      children: <ComponentIssuesNotifications dateRange={dateRange} onCount={setComponentsCount} />,
     },
     {
       key: '5',
@@ -124,8 +166,20 @@ const Notification = () => {
           </Badge>
         </span>
       ),
-      children: <MachineCalibrationNotifications dateRange={dateRange} onCount={setCalibrationsCount} />
-    }
+      children: <MachineCalibrationNotifications dateRange={dateRange} onCount={setCalibrationsCount} />,
+    },
+    {
+      key: '6',
+      label: (
+        <span>
+          <FileSearchOutlined />
+          <Badge count={counts.inspectionPlans} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+            <span>Inspection plan requests</span>
+          </Badge>
+        </span>
+      ),
+      children: <InspectionPlanNotifications dateRange={dateRange} onCount={setInspectionPlansCount} />,
+    },
   ];
 
   const headerControls = (
@@ -140,25 +194,69 @@ const Notification = () => {
           style={{ width: 300, borderRadius: '6px' }}
         />
       </Space>
-      <Button 
-        type="primary" 
-        onClick={fetchCounts}
-        style={{ borderRadius: '6px', background: '#3b82f6' }}
-      >
+      <Button type="primary" onClick={fetchCounts} style={{ borderRadius: '6px', background: '#3b82f6' }}>
         Refresh
       </Button>
     </div>
   );
 
+  if (supervisorInspectionOnly) {
+    return (
+      <div style={{ padding: '4px' }}>
+        <Card
+          variant="outlined"
+          style={{
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+            borderRadius: '12px',
+            marginBottom: 20,
+            border: '1px solid #e2e8f0',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <Lottie animationData={notificationBell} style={{ width: 60, height: 60 }} />
+            <div>
+              <Title level={2} style={{ margin: 0, fontSize: '24px', fontWeight: 600, color: '#1e293b' }}>
+                <Space>
+                  <span>Inspection plan requests</span>
+                  <Badge
+                    count={counts.inspectionPlans}
+                    showZero
+                    style={{ backgroundColor: counts.inspectionPlans ? '#faad14' : '#cbd5e1' }}
+                  />
+                </Space>
+              </Title>
+              <Text type="secondary" style={{ fontSize: 14, color: '#64748b', display: 'block' }}>
+                Operators request a confirmed plan for an in-progress operation. Acknowledge, then create the plan
+                (Create Inspection Plan / QMS).
+              </Text>
+            </div>
+          </div>
+        </Card>
+
+        <Card
+          variant="outlined"
+          style={{
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+            borderRadius: '12px',
+            border: '1px solid #e2e8f0',
+          }}
+        >
+          {headerControls}
+          <InspectionPlanNotifications dateRange={dateRange} onCount={setInspectionPlansCount} />
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div style={{ padding: '4px' }}>
       <Card
         variant="outlined"
-        style={{ 
+        style={{
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
           borderRadius: '12px',
           marginBottom: 20,
-          border: '1px solid #e2e8f0'
+          border: '1px solid #e2e8f0',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -176,14 +274,14 @@ const Notification = () => {
 
       <Card
         variant="outlined"
-        style={{ 
+        style={{
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
           borderRadius: '12px',
-          border: '1px solid #e2e8f0'
+          border: '1px solid #e2e8f0',
         }}
       >
         {headerControls}
-        <Tabs 
+        <Tabs
           activeKey={activeKey}
           onChange={(k) => {
             setActiveKey(k);
@@ -191,8 +289,8 @@ const Notification = () => {
             params.set('tab', k);
             navigate({ pathname: location.pathname, search: `?${params.toString()}` }, { replace: true });
           }}
-          items={tabItems} 
-          destroyInactiveTabPane 
+          items={tabItems}
+          destroyInactiveTabPane
           style={{ marginTop: -8 }}
         />
       </Card>

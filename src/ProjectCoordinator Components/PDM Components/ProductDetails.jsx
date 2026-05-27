@@ -288,22 +288,22 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
     itemType === "part"
       ? [
         ...baseMaterialColumns,
-        {
-          title: 'Actions',
-          key: 'actions',
-          width: 80,
-          render: (_, record) => (
-            <Tooltip title="Remove from part">
-              <Button
-                type="text"
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleClearRawMaterial(record)}
-              />
-            </Tooltip>
-          ),
-        },
+        // {
+        //   title: 'Actions',
+        //   key: 'actions',
+        //   width: 80,
+        //   render: (_, record) => (
+        //     <Tooltip title="Remove from part">
+        //       <Button
+        //         type="text"
+        //         size="small"
+        //         danger
+        //         icon={<DeleteOutlined />}
+        //         onClick={() => handleClearRawMaterial(record)}
+        //       />
+        //     </Tooltip>
+        //   ),
+        // },
       ]
       : baseMaterialColumns;
 

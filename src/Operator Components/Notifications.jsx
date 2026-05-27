@@ -105,8 +105,27 @@ const Notifications = () => {
         return;
       }
 
-      // Fetch all Pokayoke completed logs
-      const apiUrl = `${config.API_BASE_URL}/pokayoke-completed-logs/simple`;
+      // Get machine ID from localStorage
+      let machineId = null;
+      const storedMachine = localStorage.getItem('selectedMachine');
+      if (storedMachine) {
+        try {
+          const machine = JSON.parse(storedMachine);
+          machineId = machine.id;
+        } catch (e) {
+          console.error("Error parsing machine_id from local storage", e);
+        }
+      }
+      if (!machineId) machineId = localStorage.getItem('machine_id');
+
+      if (!machineId) {
+        message.error('Machine ID not found in session. Please log in again.');
+        setPokayokeLoading(false);
+        return;
+      }
+
+      // Fetch Pokayoke completed logs for specific machine
+      const apiUrl = `${config.API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs/simple`;
 
       const response = await fetch(apiUrl);
       if (response.ok) {
@@ -575,7 +594,10 @@ const Notifications = () => {
               type="primary"
               icon={<ReloadOutlined />}
               size="large"
-              onClick={() => fetchNotifications()}
+              onClick={() => {
+                fetchNotifications();
+                fetchPokayokeNotifications();
+              }}
             >
               Refresh
             </Button>
