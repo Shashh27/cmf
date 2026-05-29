@@ -901,9 +901,12 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <FileTextOutlined />,
 
       },
+<<<<<<< HEAD
 
       
 
+=======
+>>>>>>> fc58fb1a8cf9c782cc6f99f7898114f9759d7c8a
       {
 
         key: `${prefix}/pps/assets-availability`,
@@ -923,9 +926,13 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <SafetyCertificateOutlined />,
 
       },
+<<<<<<< HEAD
 
             {
 
+=======
+      {
+>>>>>>> fc58fb1a8cf9c782cc6f99f7898114f9759d7c8a
         key: `${prefix}/create-inspection-plan`,
 
         label: <Link to={`${prefix}/create-inspection-plan`} onClick={() => setMobileDrawerOpen(false)}>Create Inspection Plan</Link>,
@@ -935,7 +942,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
       },
 
       {
+<<<<<<< HEAD
 
+=======
+        key: `${prefix}/notification`,
+        label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Inspection Notifications</Link>,
+        icon: <BellOutlined />,
+      },
+      {
+>>>>>>> fc58fb1a8cf9c782cc6f99f7898114f9759d7c8a
         key: `${prefix}/notifications`,
 
         label: (

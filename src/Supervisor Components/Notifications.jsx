@@ -584,7 +584,10 @@ const Notifications = () => {
               type="primary"
               icon={<ReloadOutlined />}
               size="large"
-              onClick={() => fetchNotifications()}
+              onClick={() => {
+                fetchNotifications();
+                fetchPokayokeNotifications();
+              }}
             >
               Refresh
             </Button>

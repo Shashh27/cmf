@@ -288,8 +288,6 @@ function App() {
 
           <Route path="/admin/quality-management" element={<QualityManagement />} />
 
-          <Route path="/admin/qms-inspector" element={<QMSInspector />} />
-
 
 
 
@@ -531,11 +529,8 @@ function App() {
           <Route path="/supervisor/create-inspection-plan" element={<CreateInspectionPlan />} />
 
           <Route path="/supervisor/quality-management" element={<QualityManagement />} />
-
-          <Route path="/supervisor/qms-inspector" element={<QMSInspector />} />
-
+          <Route path="/supervisor/notification" element={<Notification />} />
           
-
           {/* Inventory Supervisor */}
 
 
@@ -606,7 +601,14 @@ function App() {
 
       </Layout>
 
-
+      {/* Full-screen routes (outside Layout) */}
+      <Routes>
+        <Route element={<ProtectedRoute><Outlet /></ProtectedRoute>}>
+          <Route path="/admin/qms-inspector" element={<QMSInspector />} />
+          <Route path="/supervisor/qms-inspector" element={<QMSInspector />} />
+          <Route path="/operator/qms-inspector" element={<QMSInspector />} />
+        </Route>
+      </Routes>
 
     </Router>
 

@@ -111,7 +111,6 @@ const FitTable = ({ columns, dataSource, scrollX = 'max-content', ...props }) =>
     const update = () => {
       if (!ref.current) return;
       const h = ref.current.clientHeight || 0;
-      // Subtract header height (approx 40px) to get body height
       setScrollY(Math.max(h - 40, 150));
     };
     const ro = new ResizeObserver(() => window.requestAnimationFrame(update));
@@ -172,6 +171,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const [uploadDocTypeOther, setUploadDocTypeOther] = useState('');
   const [uploadParentId, setUploadParentId] = useState(null);
   const [uploadVersion, setUploadVersion] = useState('v1.0');
+
+  // ── Wizard state ────────────────────────────────────────────────────────
+  const [isWizardMode, setIsWizardMode] = useState(false);   // true when on step 2
+  const [wizardStep, setWizardStep] = useState(1);           // 1 = 2D, 2 = 3D
+  const [wizardPending3D, setWizardPending3D] = useState(null); // the 3D doc row awaiting update
 
   // Edit doc
   const [isEditDocModalOpen, setIsEditDocModalOpen] = useState(false);
@@ -255,7 +259,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (!selectedItem || selectedItem.itemType !== 'part') { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
     setLoading(true);
     try {
-      // Do not filter by user_id: admin, project coordinator, and manufacturing coordinator all see the same operations & documents for the part
       const [dR, oR] = await Promise.all([
         axios.get(`${API_BASE_URL}/documents/part/${selectedItem.id}`),
         axios.get(`${API_BASE_URL}/operations/part/${selectedItem.id}`),
@@ -279,6 +282,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     return 'other';
   };
 
+  // ── Wizard-aware upload handler ─────────────────────────────────────────
   const handleUpload = async () => {
     if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
     if (uploadDocType === 'Other' && !uploadDocTypeOther.trim()) { message.warning('Please enter document type'); return; }
@@ -304,12 +308,51 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (uploadParentId) fd.append('parent_id', uploadParentId.toString());
     const uid = getCurrentUserId();
     if (uid != null) fd.append('user_id', String(uid));
+
     setUploading(true);
     try {
       await axios.post(`${API_BASE_URL}/documents/`, fd);
       message.success('Document uploaded successfully');
+
+      // ── Wizard: after a 2D upload (step 1), look for a 3D doc and force step 2 ──
+      const uploaded2D = (uploadDocType === '2D') && !isWizardMode;
+      if (uploaded2D) {
+        // Fetch the updated document list so we have fresh data
+        await fetchDocuments();
+
+        // Find the latest 3D document from the current list (before fetchDocuments updates state async)
+        const threeDDoc = latestPartDocs.find(d => d.document_type === '3D');
+
+        if (threeDDoc) {
+          // Calculate the next 3D revision
+          let next3DVer = String(threeDDoc.document_version || "");
+          const m = next3DVer.match(/(\d+)$/);
+          if (m) {
+            const n = parseInt(m[1], 10);
+            next3DVer = next3DVer.substring(0, m.index) + String(n + 1).padStart(m[1].length, '0');
+          } else {
+            next3DVer = next3DVer ? next3DVer + "-01" : "01";
+          }
+
+          // Transition modal to Step 2 (3D upload) — modal stays open
+          setSelectedFileList([]);
+          setUploadParentId(threeDDoc.parent_id || threeDDoc.id);
+          setUploadVersion(next3DVer);
+          setUploadDocType('3D');
+          setIsWizardMode(true);
+          setWizardStep(2);
+          setWizardPending3D(threeDDoc);
+          setUploading(false);
+          return; // don't close modal
+        }
+      }
+
+      // Normal completion (no wizard, or step 2 of wizard finished)
       resetUploadState();
       setIsUploadModalOpen(false);
+      setIsWizardMode(false);
+      setWizardStep(1);
+      setWizardPending3D(null);
       await fetchDocuments();
     } catch (e) {
       console.error(e);
@@ -318,11 +361,80 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         e?.response?.data?.message ||
         'Failed to upload document';
       message.error(detail);
+    } finally {
+      setUploading(false);
     }
-    finally { setUploading(false); }
   };
 
-  const resetUploadState = () => { setSelectedFileList([]); setUploadParentId(null); setUploadVersion(''); setUploadDocType('2D'); setUploadDocTypeOther(''); };
+  const resetUploadState = () => {
+    setSelectedFileList([]);
+    setUploadParentId(null);
+    setUploadVersion('');
+    setUploadDocType('2D');
+    setUploadDocTypeOther('');
+  };
+
+  // Helper: compute next version string
+  const computeNextVersion = (currentVer) => {
+    let next = String(currentVer || "");
+    const match = next.match(/(\d+)$/);
+    if (match) {
+      const numStr = match[1];
+      const num = parseInt(numStr, 10);
+      const nextNumStr = String(num + 1).padStart(numStr.length, '0');
+      next = next.substring(0, match.index) + nextNumStr;
+    } else {
+      next = next ? next + "-01" : "01";
+    }
+    return next;
+  };
+
+  // ── Wizard-aware initiateNewVersion ────────────────────────────────────
+  const initiateNewVersion = (doc, latestVer) => {
+    const nextVer = computeNextVersion(latestVer);
+    setUploadParentId(doc.parent_id || doc.id);
+    setUploadVersion(nextVer);
+    setUploadDocType(doc.document_type || '2D');
+    // Reset wizard state for a fresh start
+    setIsWizardMode(false);
+    setWizardStep(1);
+    setWizardPending3D(null);
+    setSelectedFileList([]);
+    setIsUploadModalOpen(true);
+  };
+
+  // Handler for the "Skip" action inside wizard step 2
+  const handleWizardSkip = () => {
+    Modal.confirm({
+      title: 'Skip 3D Update?',
+      content: (
+        <div>
+          <p>The 3D model will be <strong>out of sync</strong> with the updated 2D drawing.</p>
+          <p className="mt-1 text-orange-600 text-sm">Are you sure you want to skip updating the 3D document?</p>
+        </div>
+      ),
+      okText: 'Skip (Not Recommended)',
+      okButtonProps: { danger: true },
+      cancelText: 'Go Back',
+      onOk: () => {
+        setIsUploadModalOpen(false);
+        resetUploadState();
+        setIsWizardMode(false);
+        setWizardStep(1);
+        setWizardPending3D(null);
+      },
+    });
+  };
+
+  // Handler for modal close/cancel — block easy escape during wizard step 2
+  const handleModalClose = () => {
+    if (isWizardMode) {
+      handleWizardSkip();
+    } else {
+      setIsUploadModalOpen(false);
+      resetUploadState();
+    }
+  };
 
   const handleDeleteDocument = async (id) => {
     try {
@@ -367,13 +479,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         params: { is_acknowledged: !currentStatus }
       });
       message.success('Document acknowledged successfully');
-      // Optimistically update the local state
-      setDocuments(prevDocs => 
-        prevDocs.map(doc => 
+      setDocuments(prevDocs =>
+        prevDocs.map(doc =>
           doc.id === docId ? { ...doc, is_acknowledged: true } : doc
         )
       );
-      // Also update selectedVersions to reflect the change immediately
       setSelectedVersions(prevVersions => {
         const updated = { ...prevVersions };
         for (const key in updated) {
@@ -383,7 +493,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         }
         return updated;
       });
-      // Then fetch to ensure consistency
       await fetchDocuments();
     } catch (e) {
       console.error(e);
@@ -393,24 +502,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         'Failed to update acknowledgment status';
       message.error(detail);
     }
-  };
-
-  const initiateNewVersion = (doc, latestVer) => {
-    let nextVer = String(latestVer || "");
-    const match = nextVer.match(/(\d+)$/);
-    if (match) {
-      const numStr = match[1];
-      const num = parseInt(numStr, 10);
-      const nextNumStr = String(num + 1).padStart(numStr.length, '0');
-      nextVer = nextVer.substring(0, match.index) + nextNumStr;
-    } else {
-      nextVer = nextVer ? nextVer + "-01" : "01";
-    }
-
-    setUploadParentId(doc.parent_id || doc.id);
-    setUploadVersion(nextVer);
-    setUploadDocType(doc.document_type || '2D');
-    setIsUploadModalOpen(true);
   };
 
   const handleDeleteOperation = async (opId) => {
@@ -483,20 +574,14 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     if (doc.document_url) {
       const segment = doc.document_url.split('/').filter(Boolean).pop();
       if (segment) {
-        // Remove timestamp (YYYYMMDD_HHMMSS_) from the beginning
         let cleanName = segment.replace(/^\d{8}_\d{6}_/, '');
-
-        // Check if what remains starts with a UUID pattern (8+ alphanumeric chars followed by underscore)
         const uuidMatch = cleanName.match(/^([a-zA-Z0-9]{8,})_/);
         if (uuidMatch) {
-          // Remove the UUID and underscore
           cleanName = cleanName.replace(/^([a-zA-Z0-9]{8,})_/, '');
         }
-
         return cleanName || doc.document_name || '';
       }
     }
-    // Fallback: return document_name as is
     return doc.document_name || '';
   };
 
@@ -538,7 +623,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         );
       }
     },
-    { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
+    {
+      title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         const currentUserId = getCurrentUserId();
@@ -553,16 +639,16 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
           return <span className="text-xs text-gray-400">Not Acknowledged</span>;
         } else {
           return (
-            <Popconfirm 
+            <Popconfirm
               title="Acknowledge Document"
               description="Are you sure you want to acknowledge this document?"
               onConfirm={() => handleAcknowledgeDocument(cur.id, cur.is_acknowledged)}
               okText="Yes"
               cancelText="No"
             >
-              <Button 
-                size="small" 
-                type="primary" 
+              <Button
+                size="small"
+                type="primary"
                 icon={<CheckCircleOutlined />}
                 className="text-xs"
               >
@@ -594,6 +680,24 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
 
   if (!selectedItem) return <div className="flex-1 bg-gray-50" />;
   const isPart = selectedItem.itemType === 'part';
+
+  // ── Upload Modal title ────────────────────────────────────────────────────
+  const uploadModalTitle = () => {
+    if (isWizardMode) {
+      return (
+        <div className="flex items-center gap-2">
+          <SyncOutlined className="text-orange-500" />
+          <span>Update Revision — Step 2 of 2</span>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-2">
+        <PlusOutlined className="text-blue-500" />
+        <span>{uploadParentId ? 'Upload New Revision' : 'Add New Document'}</span>
+      </div>
+    );
+  };
 
   const tabItems = [
     ...(isPart ? [{
@@ -650,39 +754,157 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             />
           </div>
 
-          {/* Upload Modal */}
-          <Modal title={<div className="flex items-center gap-2"><PlusOutlined className="text-blue-500" /><span>{uploadParentId ? 'Upload New Revision' : 'Add New Document'}</span></div>}
-            open={isUploadModalOpen} onCancel={() => { setIsUploadModalOpen(false); resetUploadState(); }} footer={null} destroyOnHidden width="95%" style={{ maxWidth: 450 }}>
+          {/* ── Upload / Wizard Modal ─────────────────────────────────────── */}
+          <Modal
+            title={uploadModalTitle()}
+            open={isUploadModalOpen}
+            onCancel={handleModalClose}
+            footer={null}
+            destroyOnHidden
+            width="95%"
+            style={{ maxWidth: 450 }}
+            closable={!isWizardMode}
+            maskClosable={!isWizardMode}
+          >
             <div className="space-y-4 mt-4">
+
+              {/* ── Step 2 warning banner ─────────────────────────────────── */}
+              {isWizardMode && (
+                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 flex items-start gap-2">
+                  <SyncOutlined className="text-orange-500 mt-0.5 shrink-0" spin />
+                  <div>
+                    <p className="text-sm font-semibold text-orange-700">3D Update Required</p>
+                    <p className="text-xs text-orange-600 mt-0.5">
+                      You just updated the 2D drawing. The 3D model must also be updated to stay in sync.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Step progress tracker ─────────────────────────────────── */}
+              {isWizardMode && (
+                <div className="flex items-center gap-2 justify-center py-1">
+                  {/* Step 1 — done */}
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shadow-sm">
+                      <CheckCircleOutlined className="text-white text-xs" />
+                    </div>
+                    <span className="text-xs text-green-600 font-medium">2D Updated</span>
+                  </div>
+                  {/* Connector line */}
+                  <div className="flex-1 h-0.5 bg-orange-300 mx-1 rounded" />
+                  {/* Step 2 — active */}
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center shadow-sm">
+                      <span className="text-white text-[11px] font-bold">2</span>
+                    </div>
+                    <span className="text-xs text-orange-600 font-medium">Update 3D</span>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Document type selector ────────────────────────────────── */}
               <div>
                 <Text type="secondary" className="text-xs block mb-1">* Document Type</Text>
-                <Select className="w-full" value={uploadDocType} onChange={setUploadDocType}>
-                  {['2D', '3D', 'Other'].map(t => <Select.Option key={t} value={t}>{t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}</Select.Option>)}
+                <Select
+                  className="w-full"
+                  value={uploadDocType}
+                  onChange={setUploadDocType}
+                  disabled={isWizardMode} // locked to 3D on step 2
+                >
+                  {['2D', '3D', 'Other'].map(t => (
+                    <Select.Option key={t} value={t}>
+                      {t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}
+                    </Select.Option>
+                  ))}
                 </Select>
-                {uploadDocType === 'Other' && <Input className="mt-2" placeholder="Enter custom document type" value={uploadDocTypeOther} onChange={e => setUploadDocTypeOther(e.target.value)} />}
+                {uploadDocType === 'Other' && (
+                  <Input
+                    className="mt-2"
+                    placeholder="Enter custom document type"
+                    value={uploadDocTypeOther}
+                    onChange={e => setUploadDocTypeOther(e.target.value)}
+                  />
+                )}
               </div>
+
+              {/* ── Revision input ────────────────────────────────────────── */}
               <div>
                 <Text type="secondary" className="text-[11px] block font-medium">* Revision</Text>
-                <Input value={uploadVersion} onChange={e => setUploadVersion(e.target.value.replace(/[^a-zA-Z0-9.-]/g, ''))} placeholder="e.g. 00, 01" />
-                {uploadParentId && <Text type="warning" className="text-[10px] mt-1 block">Creating a new revision for an existing document.</Text>}
+                <Input
+                  value={uploadVersion}
+                  onChange={e => setUploadVersion(e.target.value.replace(/[^a-zA-Z0-9.-]/g, ''))}
+                  placeholder="e.g. 00, 01"
+                />
+                {uploadParentId && (
+                  <Text type="warning" className="text-[10px] mt-1 block">
+                    Creating a new revision for an existing document.
+                  </Text>
+                )}
               </div>
-              <Dragger multiple={false} fileList={selectedFileList} beforeUpload={f => { setSelectedFileList([f]); return false; }} onRemove={() => setSelectedFileList([])} className="bg-gray-50 border-dashed border-2 py-8">
-                <p className="ant-upload-drag-icon"><InboxOutlined className="text-3xl text-blue-400" /></p>
+
+              {/* ── File dragger ──────────────────────────────────────────── */}
+              <Dragger
+                multiple={false}
+                fileList={selectedFileList}
+                beforeUpload={f => { setSelectedFileList([f]); return false; }}
+                onRemove={() => setSelectedFileList([])}
+                className="bg-gray-50 border-dashed border-2 py-8"
+              >
+                <p className="ant-upload-drag-icon">
+                  <InboxOutlined className="text-3xl text-blue-400" />
+                </p>
                 <p className="ant-upload-text">Click or drag file here</p>
-                <p className="ant-upload-hint text-xs text-gray-400">Supports PDF, STL, STEP, Images...</p>
+                <p className="ant-upload-hint text-xs text-gray-400">
+                  {isWizardMode ? 'Supports STL, STEP...' : 'Supports PDF, STL, STEP, Images...'}
+                </p>
               </Dragger>
+
+              {/* ── Action buttons ────────────────────────────────────────── */}
               <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
-                <Button onClick={() => setIsUploadModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>
-                <Button type="primary" icon={<UploadOutlined />} loading={uploading} disabled={!selectedFileList.length} onClick={handleUpload} className="no-hover-btn w-full sm:w-auto">
-                  {uploadParentId ? 'Upload New Revision' : 'Upload Document'}
+                {/* Step 1: normal cancel */}
+                {!isWizardMode && (
+                  <Button onClick={() => { setIsUploadModalOpen(false); resetUploadState(); }} className="w-full sm:w-auto">
+                    Cancel
+                  </Button>
+                )}
+
+                {/* Step 2: skip (with confirm) */}
+                {isWizardMode && (
+                  <Button
+                    danger
+                    onClick={handleWizardSkip}
+                    className="w-full sm:w-auto"
+                  >
+                    Skip (Not Recommended)
+                  </Button>
+                )}
+
+                {/* Primary upload button */}
+                <Button
+                  type="primary"
+                  icon={isWizardMode ? <SyncOutlined /> : <UploadOutlined />}
+                  loading={uploading}
+                  disabled={!selectedFileList.length}
+                  onClick={handleUpload}
+                  className="no-hover-btn w-full sm:w-auto"
+                >
+                  {isWizardMode ? 'Upload 3D & Complete' : uploadParentId ? 'Upload New Revision' : 'Upload Document'}
                 </Button>
               </div>
             </div>
           </Modal>
 
-          {/* Edit Document Modal */}
-          <Modal title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span>Edit Document Details</span></div>}
-            open={isEditDocModalOpen} onCancel={() => { setIsEditDocModalOpen(false); setEditingDoc(null); }} footer={null} destroyOnHidden width="95%" style={{ maxWidth: 450 }}>
+          {/* ── Edit Document Modal ───────────────────────────────────────── */}
+          <Modal
+            title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span>Edit Document Details</span></div>}
+            open={isEditDocModalOpen}
+            onCancel={() => { setIsEditDocModalOpen(false); setEditingDoc(null); }}
+            footer={null}
+            destroyOnHidden
+            width="95%"
+            style={{ maxWidth: 450 }}
+          >
             <Form form={editForm} layout="vertical" onFinish={handleEditDocument} className="mt-4">
               <Form.Item label="Document Name" name="document_name" rules={[{ required: true, message: 'Please enter document name' }]}>
                 <Input placeholder="Enter document name" />
@@ -728,9 +950,18 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} className="flex-1 flex flex-col min-h-0 overflow-hidden pdm-tabs-full" style={{ height: '100%' }} />
       </div>
 
-      {/* Preview Modal */}
+      {/* ── Preview Modal ─────────────────────────────────────────────────── */}
       {previewDoc && (
-        <Modal title={previewDoc.document_name || "Document Preview"} open onCancel={() => setPreviewDoc(null)} width="95%" style={{ maxWidth: 1000, top: 20 }} footer={null} destroyOnHidden styles={{ body: { height: '75vh', padding: 0, overflow: 'hidden' } }}>
+        <Modal
+          title={previewDoc.document_name || "Document Preview"}
+          open
+          onCancel={() => setPreviewDoc(null)}
+          width="95%"
+          style={{ maxWidth: 1000, top: 20 }}
+          footer={null}
+          destroyOnHidden
+          styles={{ body: { height: '75vh', padding: 0, overflow: 'hidden' } }}
+        >
           {getPreviewType(getDocumentDisplayName(previewDoc) || previewDoc.document_name) === 'image' ? (
             <div className="flex items-center justify-center h-full bg-gray-100 overflow-auto">
               <img src={previewDoc.document_url} alt={getDocumentDisplayName(previewDoc)} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
@@ -755,7 +986,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       <EditOperationModal open={isOperationModalOpen} onCancel={() => { setIsOperationModalOpen(false); setSelectedOperation(null); }} operation={selectedOperation} defaultTab={modalTab} showAddToolForm={showAddToolForm} onUpdate={async () => { await fetchDocuments(); }} />
       <PartDocumentReport partData={{ operations, documents, rawMaterials: selectedItem?.raw_material_status ? [{ material_name: selectedItem.raw_material_name || selectedItem.part_name, material_status: selectedItem.raw_material_status }] : [], partName: selectedItem?.part_name, partNumber: selectedItem?.part_number }} open={showReportModal} onCancel={() => setShowReportModal(false)} />
 
-      {/* Operation View Modal */}
+      {/* ── Operation View Modal ──────────────────────────────────────────── */}
       <Modal
         title={
           <div className="flex items-center gap-2">
