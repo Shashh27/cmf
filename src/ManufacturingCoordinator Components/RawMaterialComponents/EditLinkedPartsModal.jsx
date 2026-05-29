@@ -394,9 +394,17 @@ const EditLinkedPartsModal = ({
               </div>
             )}
           </div>
-          
+
+          {isLinkedToGeneralStock && (
+            <div className="ml-4">
+              <Tag color="green" className="text-xs">
+                Linked to General Stock
+              </Tag>
+            </div>
+          )}
+
           {(isLinkedToOrderStock && !isLinkedToGeneralStock) && (
-            <Button 
+            <Button
               type="primary"
               size="small"
               danger
@@ -525,57 +533,71 @@ const EditLinkedPartsModal = ({
       ]}
     >
       <div className="py-2 space-y-3" style={{ maxHeight: '80vh', overflowY: 'auto' }}>
-        {/* Raw Material Name */}
-        <div className="space-y-1">
-          <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Raw Material Name</Text>
-          <Input
-            value={statusEditRecord?.material_name || ''}
-            disabled
-            size="middle"
-            className="rounded-md"
-          />
+        {/* Material, Process Type, Form Type - Single Row */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="space-y-1">
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Material</Text>
+            <Input
+              value={statusEditRecord?.material_name || ''}
+              disabled
+              size="small"
+              className="rounded-md"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Process Type</Text>
+            <Input
+              value={statusEditRecord?.process_type || ''}
+              disabled
+              size="small"
+              className="rounded-md"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Form Type</Text>
+            <Select
+              style={{ width: '100%' }}
+              placeholder="Form Type"
+              value={statusEditRecord?.form_type}
+              disabled
+              size="small"
+              className="rounded-md"
+            >
+              <Option value="Round">Round</Option>
+              <Option value="Square">Square</Option>
+              <Option value="Pipe">Pipe</Option>
+            </Select>
+          </div>
         </div>
 
-        {/* Form Type */}
-        <div className="space-y-1">
-          <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Form Type</Text>
-          <Select
-            style={{ width: '100%' }}
-            placeholder="Select Form Type"
-            value={statusEditRecord?.form_type}
-            disabled
-            size="middle"
-            className="rounded-md"
-          >
-            <Option value="Round">Round</Option>
-            <Option value="Square">Square</Option>
-            <Option value="Pipe">Pipe</Option>
-          </Select>
+        {/* Costs - 2 columns */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Est. Cost (₹)</Text>
+            <Input
+              value={statusEditRecord?.estimated_cost ? `₹${statusEditRecord.estimated_cost.toFixed(2)}` : ''}
+              disabled
+              size="small"
+              className="rounded-md"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Final Cost (₹)</Text>
+            <Input
+              value={statusEditRecord?.final_cost ? `₹${statusEditRecord.final_cost.toFixed(2)}` : ''}
+              disabled
+              size="small"
+              className="rounded-md"
+            />
+          </div>
         </div>
 
-        {/* Quantity */}
-        <div className="space-y-1">
-          <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</Text>
-          <InputNumber 
-            min={1}
-            precision={0}
-            controls={false}
-            onKeyDown={handleInputKeyDown}
-            style={{ width: '100%' }} 
-            value={statusEditOrderQty} 
-            onChange={(value) => {
-              if (value !== null && value >= 1) {
-                setStatusEditOrderQty(value);
-              }
-            }}
-            size="middle" 
-            className="rounded-md" 
-          />
-        </div>
-
-        {/* Dimensions based on form type */}
+        {/* Dimensions - Compact Horizontal Layout */}
         {statusEditRecord?.form_type === 'Round' && (
-          <>
+          <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Diameter (mm)</Text>
               <InputNumber
@@ -591,7 +613,7 @@ const EditLinkedPartsModal = ({
                 precision={0}
                 controls={false}
                 onKeyDown={handleInputKeyDown}
-                size="middle"
+                size="small"
                 className="rounded-md"
               />
             </div>
@@ -610,54 +632,52 @@ const EditLinkedPartsModal = ({
                 precision={0}
                 controls={false}
                 onKeyDown={handleInputKeyDown}
-                size="middle"
+                size="small"
                 className="rounded-md"
               />
             </div>
-          </>
+          </div>
         )}
 
         {statusEditRecord?.form_type === 'Square' && (
-          <>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breadth (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Breadth"
-                  value={statusEditDimensions.breadth}
-                  onChange={(value) => {
-                    if (value !== null && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, breadth: value }));
-                    }
-                  }}
-                  min={0}
-                  precision={0}
-                  controls={false}
-                  onKeyDown={handleInputKeyDown}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Height (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Height"
-                  value={statusEditDimensions.height}
-                  onChange={(value) => {
-                    if (value !== null && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, height: value }));
-                    }
-                  }}
-                  min={0}
-                  precision={0}
-                  controls={false}
-                  onKeyDown={handleInputKeyDown}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Breadth (mm)</Text>
+              <InputNumber
+                style={{ width: '100%' }}
+                placeholder="Breadth"
+                value={statusEditDimensions.breadth}
+                onChange={(value) => {
+                  if (value !== null && value >= 0) {
+                    setStatusEditDimensions(prev => ({ ...prev, breadth: value }));
+                  }
+                }}
+                min={0}
+                precision={0}
+                controls={false}
+                onKeyDown={handleInputKeyDown}
+                size="small"
+                className="rounded-md"
+              />
+            </div>
+            <div className="space-y-1">
+              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Height (mm)</Text>
+              <InputNumber
+                style={{ width: '100%' }}
+                placeholder="Height"
+                value={statusEditDimensions.height}
+                onChange={(value) => {
+                  if (value !== null && value >= 0) {
+                    setStatusEditDimensions(prev => ({ ...prev, height: value }));
+                  }
+                }}
+                min={0}
+                precision={0}
+                controls={false}
+                onKeyDown={handleInputKeyDown}
+                size="small"
+                className="rounded-md"
+              />
             </div>
             <div className="space-y-1">
               <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
@@ -674,54 +694,52 @@ const EditLinkedPartsModal = ({
                 precision={0}
                 controls={false}
                 onKeyDown={handleInputKeyDown}
-                size="middle"
+                size="small"
                 className="rounded-md"
               />
             </div>
-          </>
+          </div>
         )}
 
         {statusEditRecord?.form_type === 'Pipe' && (
-          <>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Inner Diameter (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Inner Diameter"
-                  value={statusEditDimensions.inner_diameter}
-                  onChange={(value) => {
-                    if (value !== null && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }));
-                    }
-                  }}
-                  min={0}
-                  precision={0}
-                  controls={false}
-                  onKeyDown={handleInputKeyDown}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
-              <div className="space-y-1">
-                <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Outer Diameter (mm)</Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  placeholder="Outer Diameter"
-                  value={statusEditDimensions.outer_diameter}
-                  onChange={(value) => {
-                    if (value !== null && value >= 0) {
-                      setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }));
-                    }
-                  }}
-                  min={0}
-                  precision={0}
-                  controls={false}
-                  onKeyDown={handleInputKeyDown}
-                  size="middle"
-                  className="rounded-md"
-                />
-              </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Inner Dia (mm)</Text>
+              <InputNumber
+                style={{ width: '100%' }}
+                placeholder="Inner Diameter"
+                value={statusEditDimensions.inner_diameter}
+                onChange={(value) => {
+                  if (value !== null && value >= 0) {
+                    setStatusEditDimensions(prev => ({ ...prev, inner_diameter: value }));
+                  }
+                }}
+                min={0}
+                precision={0}
+                controls={false}
+                onKeyDown={handleInputKeyDown}
+                size="small"
+                className="rounded-md"
+              />
+            </div>
+            <div className="space-y-1">
+              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Outer Dia (mm)</Text>
+              <InputNumber
+                style={{ width: '100%' }}
+                placeholder="Outer Diameter"
+                value={statusEditDimensions.outer_diameter}
+                onChange={(value) => {
+                  if (value !== null && value >= 0) {
+                    setStatusEditDimensions(prev => ({ ...prev, outer_diameter: value }));
+                  }
+                }}
+                min={0}
+                precision={0}
+                controls={false}
+                onKeyDown={handleInputKeyDown}
+                size="small"
+                className="rounded-md"
+              />
             </div>
             <div className="space-y-1">
               <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Length (mm)</Text>
@@ -738,13 +756,33 @@ const EditLinkedPartsModal = ({
                 precision={0}
                 controls={false}
                 onKeyDown={handleInputKeyDown}
-                size="middle"
+                size="small"
                 className="rounded-md"
               />
             </div>
-          </>
+          </div>
         )}
-        
+
+        {/* Quantity */}
+        <div className="space-y-1">
+          <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Quantity</Text>
+          <InputNumber
+            min={1}
+            precision={0}
+            controls={false}
+            onKeyDown={handleInputKeyDown}
+            style={{ width: '100%' }}
+            value={statusEditOrderQty}
+            onChange={(value) => {
+              if (value !== null && value >= 1) {
+                setStatusEditOrderQty(value);
+              }
+            }}
+            size="small"
+            className="rounded-md"
+          />
+        </div>
+
         {/* Parts Management */}
         <div className="space-y-3">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">

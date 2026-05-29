@@ -822,13 +822,16 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const renderProductTree = (product) => {
-    if (!hasMatchingItems(product, 'product', activeFilter, product.id)) return null;
-    
     const productHierarchy = hierarchicalData[product.id];
     const hasData = !!productHierarchy;
     const childAssemblies = productHierarchy?.assemblies || [];
     const directParts = productHierarchy?.parts || [];
-    const hasChildren = directParts.length > 0 || childAssemblies.length > 0;
+    
+    // Filter children based on active filter
+    const filteredDirectParts = directParts.filter(p => matchesFilter(p, activeFilter));
+    const filteredChildAssemblies = childAssemblies.filter(asm => hasMatchingItems(asm, 'assembly', activeFilter, product.id));
+    
+    const hasChildren = filteredDirectParts.length > 0 || filteredChildAssemblies.length > 0;
     const isExpanded = expandedItems[getExpandKey('product', product.id)];
     const showArrow = !hasData || hasChildren;
     const isSelected = activeItemId === product.id && activeItemType === 'product';

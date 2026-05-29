@@ -328,7 +328,10 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
         form={form}
         layout="vertical"
         onFinish={handleUpload}
-        initialValues={{ document_version: '' }}
+        initialValues={{ 
+          document_type: "Technical",
+          document_version: ''
+        }}
       >
         <Row gutter={[12, 12]}>
           <Col xs={24} lg={14}>
@@ -461,6 +464,10 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                             rules={[{ required: true, message: "Please select document type" }]}
                           >
                             <Select placeholder="Select type">
+                              <Option value="Technical">Technical Drawing</Option>
+                              <Option value="Invoice">Invoice</Option>
+                              <Option value="Purchase Order">Purchase Order</Option>
+                              <Option value="Quote">Quote</Option>
                               <Option value="Other">Other</Option>
                             </Select>
                           </Form.Item>

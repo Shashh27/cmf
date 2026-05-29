@@ -155,22 +155,22 @@ const ToolsPdfDocument = ({ tools, product }) => {
             <View key={index} style={styles.tableRow}>
               <View style={[styles.tableCol, styles.itemDescCol]}>
                 <Text style={styles.tableCell}>
-                  {tool?.tool?.item_description || "N/A"}
+                  {tool?.tool_name || tool?.tool?.item_description || "N/A"}
                 </Text>
               </View>
               <View style={[styles.tableCol, styles.rangeCol]}>
                 <Text style={styles.tableCell}>
-                  {tool?.tool?.range || "-"}
+                  {tool?.tool_range || tool?.tool?.range || "-"}
                 </Text>
               </View>
               <View style={[styles.tableCol, styles.idCodeCol]}>
                 <Text style={styles.tableCell}>
-                  {tool?.tool?.identification_code || "-"}
+                  {tool?.tool_number || tool?.tool?.identification_code || "-"}
                 </Text>
               </View>
               <View style={[styles.tableCol, styles.makeCol]}>
                 <Text style={styles.tableCell}>
-                  {tool?.tool?.make || "-"}
+                  {tool?.tool_make || tool?.tool?.make || "-"}
                 </Text>
               </View>
               <View style={[styles.tableCol, styles.partNumberCol]}>
@@ -227,10 +227,10 @@ const generateExcel = (tools, product) => {
   // Prepare data for Excel
   const excelData = sortedTools.map((tool, index) => ({
     "S.No": index + 1,
-    "Item Description": tool?.tool?.item_description || "N/A",
-    "Range / Size": tool?.tool?.range || "-",
-    "ID Code": tool?.tool?.identification_code || "-",
-    "Make": tool?.tool?.make || "-",
+    "Item Description": tool?.tool_name || tool?.tool?.item_description || "N/A",
+    "Range / Size": tool?.tool_range || tool?.tool?.range || "-",
+    "ID Code": tool?.tool_number || tool?.tool?.identification_code || "-",
+    "Make": tool?.tool_make || tool?.tool?.make || "-",
     "Part Number": tool?.part_number || "N/A",
     "Part Name": tool?.part_name || "N/A",
     "Assembly Name": tool?.assembly_name || "-",

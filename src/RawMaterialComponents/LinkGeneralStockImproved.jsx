@@ -37,6 +37,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const [linkModalVisible, setLinkModalVisible] = useState(false);
   const [selectedPart, setSelectedPart] = useState(null);
   const [selectedStock, setSelectedStock] = useState(null);
+  const [selectedProcessType, setSelectedProcessType] = useState(null);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [selectedFormType, setSelectedFormType] = useState(null);
   const [requiredQuantity, setRequiredQuantity] = useState(1);
@@ -110,12 +111,14 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     setSelectedPart(part);
     if (part.part.raw_material_unit_id) {
       setSelectedStock(null);
+      setSelectedProcessType(null);
       setSelectedMaterial(null);
       setSelectedFormType(null);
       setSelectedUnit(null);
       setRequiredLength(null);
     } else {
       setSelectedStock(null);
+      setSelectedProcessType(null);
       setSelectedMaterial(null);
       setSelectedFormType(null);
       setSelectedUnit(null);
@@ -225,6 +228,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
 
       message.success('Material assigned successfully');
       setLinkModalVisible(false);
+      setSelectedProcessType(null);
       setSelectedMaterial(null);
       setSelectedFormType(null);
       setSelectedStock(null);
@@ -977,6 +981,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           setLinkModalVisible(false);
           setSelectedPart(null);
           setSelectedStock(null);
+          setSelectedProcessType(null);
           setSelectedMaterial(null);
           setSelectedFormType(null);
           setSelectedUnit(null);
@@ -1010,7 +1015,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
             {/* Warning for existing assignment */}
             {selectedPart.part.raw_material_unit_id && (
               <Alert
-                message="Warning"
+                title="Warning"
                 description={
                   <div>
                     This part is already assigned to Unit #{selectedPart.part.raw_material_unit_id}.
@@ -1025,33 +1030,58 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               />
             )}
 
-            {/* Step 1: Select Raw Material */}
+            {/* Step 1: Select Process Type */}
             <div style={{ marginBottom: '16px' }}>
-              <Text strong>Step 1: Select Raw Material</Text>
+              <Text strong>Step 1: Select Process Type</Text>
               <Select
                 style={{ width: '100%', marginTop: '8px' }}
-                placeholder="Select raw material"
-                showSearch
-                optionFilterProp="children"
-                value={selectedMaterial}
+                placeholder="Select process type"
+                value={selectedProcessType}
                 onChange={(value) => {
-                  setSelectedMaterial(value);
+                  setSelectedProcessType(value);
+                  setSelectedMaterial(null);
                   setSelectedFormType(null);
                   setSelectedStock(null);
                 }}
               >
-                {rawMaterials.map(material => (
-                  <Select.Option key={material.id} value={material.id}>
-                    {material.material_name}
-                  </Select.Option>
-                ))}
+                <Select.Option value="Forging">Forging</Select.Option>
+                <Select.Option value="Barstocks">Barstocks</Select.Option>
+                <Select.Option value="Casting">Casting</Select.Option>
               </Select>
             </div>
 
-            {/* Step 2: Select Form Type */}
-            {selectedMaterial && (
+            {/* Step 2: Select Raw Material */}
+            {selectedProcessType && (
               <div style={{ marginBottom: '16px' }}>
-                <Text strong>Step 2: Select Form Type</Text>
+                <Text strong>Step 2: Select Raw Material</Text>
+                <Select
+                  style={{ width: '100%', marginTop: '8px' }}
+                  placeholder="Select raw material"
+                  showSearch
+                  optionFilterProp="children"
+                  value={selectedMaterial}
+                  onChange={(value) => {
+                    setSelectedMaterial(value);
+                    setSelectedFormType(null);
+                    setSelectedStock(null);
+                  }}
+                >
+                  {[...new Set(generalStock.filter(s => s.process_type === selectedProcessType).map(s => s.material_id))].map(materialId => {
+                    const material = rawMaterials.find(m => m.id === materialId);
+                    return material ? (
+                      <Select.Option key={material.id} value={material.id}>
+                        {material.material_name}
+                      </Select.Option>
+                    ) : null;
+                  })}
+                </Select>
+              </div>
+            )}
+
+            {/* Step 3: Select Form Type */}
+            {selectedProcessType && selectedMaterial && (
+              <div style={{ marginBottom: '16px' }}>
+                <Text strong>Step 3: Select Form Type</Text>
                 <Select
                   style={{ width: '100%', marginTop: '8px' }}
                   placeholder="Select form type"
@@ -1061,7 +1091,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     setSelectedStock(null);
                   }}
                 >
-                  {[...new Set(generalStock.filter(s => s.material_id === selectedMaterial).map(s => s.form_type))].map(formType => (
+                  {[...new Set(generalStock.filter(s => s.material_id === selectedMaterial && s.process_type === selectedProcessType).map(s => s.form_type))].map(formType => (
                     <Select.Option key={formType} value={formType}>
                       {formType}
                     </Select.Option>
@@ -1070,15 +1100,13 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               </div>
             )}
 
-            {/* Step 3: Select Stock */}
-            {selectedMaterial && selectedFormType && (
+            {/* Step 4: Select Stock */}
+            {selectedProcessType && selectedMaterial && selectedFormType && (
               <div style={{ marginBottom: '16px' }}>
-                <Text strong>Step 3: Select Stock</Text>
+                <Text strong>Step 4: Select Stock</Text>
                 <Select
                   style={{ width: '100%', marginTop: '8px' }}
                   placeholder="Select stock"
-                  showSearch
-                  optionFilterProp="children"
                   value={selectedStock?.id}
                   onChange={async (value) => {
                     const stock = generalStock.find(s => s.id === value);
@@ -1092,7 +1120,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   }}
                 >
                   {generalStock
-                    .filter(stock => stock.material_id === selectedMaterial && stock.form_type === selectedFormType)
+                    .filter(stock => stock.material_id === selectedMaterial && stock.form_type === selectedFormType && stock.process_type === selectedProcessType)
                     .map(stock => (
                       <Select.Option key={stock.id} value={stock.id}>
                         <div>
@@ -1119,8 +1147,6 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   <Select
                     style={{ width: '100%', marginTop: '8px' }}
                     placeholder="Select a unit"
-                    showSearch
-                    optionFilterProp="children"
                     value={selectedUnit?.id}
                     onChange={(value) => {
                       const unit = availableUnits.find(u => u.id === value);

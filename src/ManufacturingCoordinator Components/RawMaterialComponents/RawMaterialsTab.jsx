@@ -9,15 +9,18 @@ import {
   DeleteOutlined,
   ShopOutlined,
   DatabaseOutlined,
-  EyeOutlined
+  EyeOutlined,
+  AppstoreOutlined
 } from "@ant-design/icons";
 import { RawMaterialsInventoryPdfDownload } from "../../DownloadReports/RawMaterialsPdfDownload";
+import { StockDetailsPdfDownload } from "../../DownloadReports/StockDetailsPdfDownload";
+import UnitsViewModal from "./UnitsViewModal";
 
 const { Option } = Select;
 const { TabPane } = Tabs;
 
 const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange, onRefresh }) => {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [form] = Form.useForm();
   const [rawMaterials, setRawMaterials] = useState(propRawMaterials || []);
   const [loading, setLoading] = useState(false);
@@ -34,6 +37,15 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const [stockLoading, setStockLoading] = useState(false);
   const [selectedMaterialForStock, setSelectedMaterialForStock] = useState(null);
   const [stockPagination, setStockPagination] = useState({ current: 1, pageSize: 5 });
+  const [stockFilters, setStockFilters] = useState({
+    sourceType: null,
+    formType: null,
+    processType: null,
+    orderNumber: null,
+    partNumber: null,
+  });
+  const [unitsModalOpen, setUnitsModalOpen] = useState(false);
+  const [selectedStockForUnits, setSelectedStockForUnits] = useState(null);
 
   const fetchingRawMaterials = useRef(false);
   const initializedRef = useRef(false);
@@ -118,12 +130,19 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     setSelectedMaterialForStock(material);
     setSelectedMaterialStock(null);
     setStockPagination({ current: 1, pageSize: 5 });
+    setStockFilters({
+      sourceType: null,
+      formType: null,
+      processType: null,
+      orderNumber: null,
+      partNumber: null,
+    });
     setStockModalOpen(true);
     fetchStockForMaterial(material.id);
   };
 
   const handleDeleteStock = async (stockId) => {
-    Modal.confirm({
+    modal.confirm({
       title: 'Delete Stock',
       content: 'This will delete the stock, all its units, usage records, and clear part references. Are you sure?',
       okText: 'Yes, Delete',
@@ -140,6 +159,11 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
         }
       }
     });
+  };
+
+  const openUnitsModal = (stock) => {
+    setSelectedStockForUnits(stock);
+    setUnitsModalOpen(true);
   };
 
   const openCreateRawMaterial = () => {
@@ -295,7 +319,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   };
 
 const handleDeleteRawMaterial = async (material) => {
-  Modal.confirm({
+  modal.confirm({
     title: 'Confirm Delete',
     content: `Are you sure you want to delete raw material "${material.material_name}"?`,
     okText: 'Delete',
@@ -324,6 +348,19 @@ const handleDeleteRawMaterial = async (material) => {
     // Remove special characters but keep alphanumeric, spaces, and decimal points for number search
     const cleanedValue = (value || '').replace(/[^a-zA-Z0-9 .]/g, '');
     setSearchText(cleanedValue.toLowerCase().slice(0, 50));
+  };
+
+  const getFilteredStockData = () => {
+    if (!selectedMaterialStock) return [];
+    
+    return selectedMaterialStock.filter((stock) => {
+      if (stockFilters.sourceType && stock.source_type !== stockFilters.sourceType) return false;
+      if (stockFilters.formType && stock.form_type !== stockFilters.formType) return false;
+      if (stockFilters.processType && stock.process_type !== stockFilters.processType) return false;
+      if (stockFilters.orderNumber && !stock.source_order_number?.includes(stockFilters.orderNumber)) return false;
+      if (stockFilters.partNumber && !stock.part_numbers?.includes(stockFilters.partNumber)) return false;
+      return true;
+    });
   };
 
   const filteredMaterials = (rawMaterials || []).filter((item) => {
@@ -391,6 +428,12 @@ const handleDeleteRawMaterial = async (material) => {
       dataIndex: 'density',
       key: 'density',
       render: (text) => text !== null && text !== undefined ? text : "-",
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Cost (₹/kg)</span>,
+      dataIndex: 'cost_per_kg',
+      key: 'cost_per_kg',
+      render: (text) => text !== null && text !== undefined ? `₹${text.toFixed(2)}` : "-",
     },
     {
       title: <span className="font-semibold text-gray-700">Status</span>,
@@ -489,7 +532,7 @@ const handleDeleteRawMaterial = async (material) => {
             rowKey="id"
             size="small"
             bordered
-            scroll={{ x: 1200 }}
+            scroll={{ x: 1400 }}
             pagination={{
               current: rawMaterialsPagination.current,
               pageSize: rawMaterialsPagination.pageSize,
@@ -580,11 +623,14 @@ const handleDeleteRawMaterial = async (material) => {
         open={stockModalOpen}
         onCancel={() => setStockModalOpen(false)}
         width="95%"
-        style={{ maxWidth: 1000 }}
+        style={{ maxWidth: 1400 }}
         title={
           <div className="flex items-center gap-2">
             <DatabaseOutlined className="text-green-500" />
             <span className="font-bold text-gray-800 text-sm sm:text-base">Stock Details</span>
+            <span className="text-xs text-gray-500 font-medium">
+              {selectedMaterialForStock?.material_name}
+            </span>
           </div>
         }
         footer={null}
@@ -597,59 +643,203 @@ const handleDeleteRawMaterial = async (material) => {
               {
                 key: "1",
                 label: "View Stock",
-                children: stockLoading ? (
-                  <div className="text-center py-8">Loading stock...</div>
-                ) : selectedMaterialStock && selectedMaterialStock.length > 0 ? (
-                  <Table
-                    dataSource={selectedMaterialStock}
-                    rowKey="id"
-                    size="small"
-                    bordered
-                    pagination={{
-                    current: stockPagination.current,
-                    pageSize: stockPagination.pageSize,
-                    showSizeChanger: true,
-                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-                    pageSizeOptions: ['5', '10', '20', '50'],
-                    onChange: (page, pageSize) => setStockPagination({ current: page, pageSize })
-                  }}
-                    columns={[
-                      { title: 'Form Type', dataIndex: 'form_type', key: 'form_type' },
-                      { title: 'Dimensions', key: 'dimensions', render: (_, record) => {
-                        if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
-                        if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
-                        if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
-                        return '-';
-                      }},
-                      { title: 'Quantity', dataIndex: 'quantity', key: 'quantity' },
-                      { title: 'Volume (m³)', dataIndex: 'volume', key: 'volume', render: (v) => v?.toFixed(6) || '-' },
-                      { title: 'Mass (kg)', dataIndex: 'mass', key: 'mass', render: (m) => m?.toFixed(3) },
-                      { title: 'Weight (N)', dataIndex: 'weight', key: 'weight', render: (w) => w?.toFixed(3) },
-                      { title: 'Cost (₹)', dataIndex: 'cost', key: 'cost', render: (c) => c ? `₹${c?.toFixed(2)}` : '-' },
-                      { title: 'Source', dataIndex: 'source_type', key: 'source_type', render: (s) => 
-                        s === 'order' ? 'Order' : 'General'
-                      },
-                      { title: 'Order', dataIndex: 'source_order_number', key: 'source_order_number', render: (order) => order || '-' },
-                      { title: 'Parts', dataIndex: 'part_numbers', key: 'part_numbers', render: (parts) => 
-                        parts?.length > 0 ? parts.join(', ') : '-'
-                      },
-                      { title: 'User Name', dataIndex: 'creator_name', key: 'creator_name', render: (name) => name || '-' },
-                      { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'available' ? 'green' : 'red'}>{s}</Tag> },
-                      { title: 'Actions', key: 'actions', render: (_, record) => (
-                        <Tooltip title="Delete">
-                          <Button
-                            type="text"
+                children: (
+                  <div className="w-full">
+                    {/* Filter Section */}
+                    <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="flex flex-wrap gap-2 items-center mb-2">
+                        <div className="min-w-[120px] flex-1">
+                          <Select
+                            placeholder="Source"
+                            allowClear
+                            value={stockFilters.sourceType}
+                            onChange={(value) => setStockFilters(prev => ({ ...prev, sourceType: value, partNumber: null }))}
+                            className="w-full"
                             size="small"
-                            icon={<DeleteOutlined />}
-                            className="text-red-500 hover:bg-red-50"
-                            onClick={() => handleDeleteStock(record.id)}
-                          />
-                        </Tooltip>
-                      )},
-                    ]}
-                  />
-                ) : (
-                  <Empty description="No stock available for this material" />
+                          >
+                            <Option value="order">Order</Option>
+                            <Option value="general">General</Option>
+                          </Select>
+                        </div>
+                        <div className="min-w-[120px] flex-1">
+                          <Select
+                            placeholder="Process"
+                            allowClear
+                            value={stockFilters.processType}
+                            onChange={(value) => setStockFilters(prev => ({ ...prev, processType: value, orderNumber: null, partNumber: null }))}
+                            className="w-full"
+                            size="small"
+                            showSearch
+                            optionFilterProp="children"
+                          >
+                            {Array.from(new Set(
+                              selectedMaterialStock?.filter(s => 
+                                !stockFilters.sourceType || s.source_type === stockFilters.sourceType
+                              ).map(s => s.process_type).filter(Boolean) || []
+                            )).map(process => (
+                              <Option key={process} value={process}>{process}</Option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="min-w-[120px] flex-1">
+                          <Select
+                            placeholder="Form"
+                            allowClear
+                            value={stockFilters.formType}
+                            onChange={(value) => setStockFilters(prev => ({ ...prev, formType: value, orderNumber: null, partNumber: null }))}
+                            className="w-full"
+                            size="small"
+                          >
+                            <Option value="Round">Round</Option>
+                            <Option value="Square">Square</Option>
+                            <Option value="Pipe">Pipe</Option>
+                          </Select>
+                        </div>
+                        <Button
+                          size="small"
+                          onClick={() => setStockFilters({
+                            sourceType: null,
+                            formType: null,
+                            processType: null,
+                            orderNumber: null,
+                            partNumber: null,
+                          })}
+                        >
+                          Clear
+                        </Button>
+                        <StockDetailsPdfDownload
+                          materialName={selectedMaterialForStock?.material_name}
+                          materialDensity={selectedMaterialForStock?.density}
+                          materialCost={selectedMaterialForStock?.cost_per_kg}
+                          stockData={getFilteredStockData()}
+                          fileName={`stock-details-${selectedMaterialForStock?.material_name?.replace(/\s+/g, '-')}.pdf`}
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <div className="min-w-[120px] flex-1">
+                          <Select
+                            placeholder="Order Number"
+                            allowClear
+                            value={stockFilters.orderNumber}
+                            onChange={(value) => setStockFilters(prev => ({ ...prev, orderNumber: value, partNumber: null }))}
+                            className="w-full"
+                            size="small"
+                          >
+                            {Array.from(new Set(
+                              selectedMaterialStock?.filter(s => 
+                                (!stockFilters.sourceType || s.source_type === stockFilters.sourceType) &&
+                                (!stockFilters.processType || s.process_type === stockFilters.processType) &&
+                                (!stockFilters.formType || s.form_type === stockFilters.formType)
+                              ).flatMap(s => 
+                                s.source_order_number 
+                                  ? s.source_order_number.split(',').map(o => o.trim()).filter(Boolean)
+                                  : []
+                              ) || []
+                            )).map(order => (
+                              <Option key={order} value={order}>{order}</Option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="min-w-[120px] flex-1">
+                          <Select
+                            placeholder="Part Number"
+                            allowClear
+                            value={stockFilters.partNumber}
+                            onChange={(value) => setStockFilters(prev => ({ ...prev, partNumber: value }))}
+                            className="w-full"
+                            size="small"
+                            disabled={!stockFilters.orderNumber}
+                          >
+                            {stockFilters.orderNumber ? (
+                              Array.from(new Set(
+                                selectedMaterialStock?.filter(s => 
+                                  s.source_order_number?.split(',').map(o => o.trim()).includes(stockFilters.orderNumber)
+                                ).flatMap(s => {
+                                  // Use order_parts_mapping if available, otherwise fall back to all part_numbers
+                                  if (s.order_parts_mapping && s.order_parts_mapping[stockFilters.orderNumber]) {
+                                    return s.order_parts_mapping[stockFilters.orderNumber];
+                                  }
+                                  return s.part_numbers || [];
+                                }).filter(Boolean) || []
+                              )).map(part => (
+                                <Option key={part} value={part}>{part}</Option>
+                              ))
+                            ) : (
+                              <Option disabled value="">Select order first</Option>
+                            )}
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {stockLoading ? (
+                      <div className="text-center py-8">Loading stock...</div>
+                    ) : getFilteredStockData().length > 0 ? (
+                      <Table
+                        dataSource={getFilteredStockData()}
+                        rowKey="id"
+                        size="small"
+                        bordered
+                        scroll={{ x: 1400 }}
+                        pagination={{
+                          current: stockPagination.current,
+                          pageSize: stockPagination.pageSize,
+                          showSizeChanger: true,
+                          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                          pageSizeOptions: ['5', '10', '20', '50'],
+                          onChange: (page, pageSize) => setStockPagination({ current: page, pageSize })
+                        }}
+                        columns={[
+                          { title: 'Process Type', dataIndex: 'process_type', key: 'process_type' },
+                          { title: 'Form Type', dataIndex: 'form_type', key: 'form_type' },
+                          { title: 'Dimensions', key: 'dimensions', render: (_, record) => {
+                            if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
+                            if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
+                            if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
+                            return '-';
+                          }},
+                          { title: 'Quantity', dataIndex: 'quantity', key: 'quantity' },
+                          { title: 'Volume (m³)', dataIndex: 'volume', key: 'volume', render: (v) => v?.toFixed(6) || '-' },
+                          { title: 'Mass (kg)', dataIndex: 'mass', key: 'mass', render: (m) => m?.toFixed(3) },
+                          { title: 'Weight (N)', dataIndex: 'weight', key: 'weight', render: (w) => w?.toFixed(3) },
+                          { title: 'Cost (₹)', dataIndex: 'cost', key: 'cost', render: (c) => c ? `₹${c?.toFixed(2)}` : '-' },
+                          { title: 'Source', dataIndex: 'source_type', key: 'source_type', render: (s) => 
+                            s === 'order' ? 'Order' : 'General'
+                          },
+                          { title: 'Order', dataIndex: 'source_order_number', key: 'source_order_number', render: (order) => order || '-' },
+                          { title: 'Parts', dataIndex: 'part_numbers', key: 'part_numbers', render: (parts) => 
+                            parts?.length > 0 ? parts.join(', ') : '-'
+                          },
+                          { title: 'User Name', dataIndex: 'creator_name', key: 'creator_name', render: (name) => name || '-' },
+                          { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'available' ? 'green' : 'red'}>{s}</Tag> },
+                          { title: 'Actions', key: 'actions', render: (_, record) => (
+                            <Space size="small">
+                              <Tooltip title="View Units">
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<AppstoreOutlined />}
+                                  className="text-blue-500 hover:bg-blue-50"
+                                  onClick={() => openUnitsModal(record)}
+                                />
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<DeleteOutlined />}
+                                  className="text-red-500 hover:bg-red-50"
+                                  onClick={() => handleDeleteStock(record.id)}
+                                />
+                              </Tooltip>
+                            </Space>
+                          )},
+                        ]}
+                      />
+                    ) : (
+                      <Empty description={selectedMaterialStock && selectedMaterialStock.length > 0 ? "No stock matches your filters" : "No stock available for this material"} />
+                    )}
+                  </div>
                 )
               },
               {
@@ -659,7 +849,7 @@ const handleDeleteRawMaterial = async (material) => {
                   <div className="w-full">
                     <StockForm 
                       materialId={selectedMaterialForStock?.id}
-                      materialCost={selectedMaterialForStock?.cost}
+                      materialCost={selectedMaterialForStock?.cost_per_kg}
                       onSuccess={() => fetchStockForMaterial(selectedMaterialForStock?.id)}
                     />
                   </div>
@@ -669,11 +859,18 @@ const handleDeleteRawMaterial = async (material) => {
           />
         </div>
       </Modal>
+
+      <UnitsViewModal
+        open={unitsModalOpen}
+        onCancel={() => setUnitsModalOpen(false)}
+        stock={selectedStockForUnits}
+      />
     </div>
   );
 };
 
 const StockForm = ({ materialId, materialCost, onSuccess }) => {
+  const { message } = App.useApp();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
   const [formType, setFormType] = useState("Round");
@@ -695,6 +892,7 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
     try {
       const payload = {
         material_id: materialId,
+        process_type: values.process_type,
         form_type: values.form_type,
         quantity: Number(values.quantity),
         source_type: "general",
@@ -1080,9 +1278,22 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
     <Form form={form} layout="vertical" onFinish={handleSubmit}>
       <Row gutter={[16, 0]}>
         <Col xs={24} sm={8}>
-          <Form.Item 
-            name="form_type" 
-            label="Form Type" 
+          <Form.Item
+            name="process_type"
+            label="Process Type"
+            rules={[{ required: true, message: 'Please select process type' }]}
+          >
+            <Select placeholder="Select Process Type">
+              <Option value="Forging">Forging</Option>
+              <Option value="Barstocks">Barstocks</Option>
+              <Option value="Casting">Casting</Option>
+            </Select>
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={8}>
+          <Form.Item
+            name="form_type"
+            label="Form Type"
             initialValue="Round"
             rules={[{ required: true }]}
           >
@@ -1093,6 +1304,7 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
             </Select>
           </Form.Item>
         </Col>
+        {renderDimensionFields()}
         <Col xs={24} sm={12}>
           <Form.Item name="quantity" label="Quantity" rules={[{ required: true }]}>
             <InputNumber 
@@ -1137,7 +1349,6 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
             />
           </Form.Item>
         </Col>
-        {renderDimensionFields()}
       </Row>
       <div className="flex justify-end gap-3 mt-4">
         <Button onClick={() => form.resetFields()}>Reset</Button>

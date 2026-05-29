@@ -75,6 +75,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
   // Filter states
   const [filterProjectNumber, setFilterProjectNumber] = useState(null);
   const [filterVendorName, setFilterVendorName] = useState(null);
+  const [filterMaterialName, setFilterMaterialName] = useState(null);
   
   // Quick status modal states
   const [quickStatusModalOpen, setQuickStatusModalOpen] = useState(false);
@@ -145,6 +146,13 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
     return Array.from(vendorNames).sort();
   };
 
+  const getUniqueMaterialNames = () => {
+    const materialNames = linkedMaterials
+      .map(item => item.material_name)
+      .filter(mn => mn && mn.trim() !== '');
+    return [...new Set(materialNames)].sort();
+  };
+
   const getStatusColor = (status) => {
     const colors = {
       enquiry: 'cyan',
@@ -188,11 +196,14 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       const updateData = {
         order_status: newStatus
       };
-      
+
       if (newVendor) {
         updateData.received_vendor_id = newVendor;
       }
-      
+
+      // Always include final_cost in updateData (even if null/erased)
+      updateData.final_cost = quickStatusRecord.final_cost;
+
       await axios.put(
         `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${stockId}`,
         updateData,
@@ -916,6 +927,11 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       return;
     }
 
+    if (!procureForm.process_type) {
+      message.error('Please select a process type');
+      return;
+    }
+
     if (!procureForm.form_type) {
       message.error('Please select a form type');
       return;
@@ -923,6 +939,11 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
     if (!procureForm.quantity || procureForm.quantity <= 0) {
       message.error('Please enter a valid quantity');
+      return;
+    }
+
+    if (!procureForm.estimated_cost || procureForm.estimated_cost <= 0) {
+      message.error('Please enter estimated cost');
       return;
     }
 
@@ -940,6 +961,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
     try {
       const requestData = {
         raw_material_id: procureForm.material_id,
+        process_type: procureForm.process_type,
         form_type: procureForm.form_type,
         diameter: procureForm.diameter || null,
         length: procureForm.length,
@@ -952,6 +974,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
         required_lengths: [],
         vendor_id: procureForm.selected_vendor_id || null,
         quantity: procureForm.quantity,
+        estimated_cost: procureForm.estimated_cost,
         user_id: userId
       };
 
@@ -1019,6 +1042,12 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
         return false;
       }
     }
+    // Apply material name filter
+    if (filterMaterialName) {
+      if (item.material_name !== filterMaterialName) {
+        return false;
+      }
+    }
     return true;
   });
 
@@ -1027,7 +1056,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
     {
       title: <span className="font-semibold text-gray-700">SL NO</span>,
       key: 'index',
-      width: 80,
+      width: 50,
       render: (_, __, index) => {
         const { current, pageSize } = pagination;
         return <span className="text-gray-500 font-mono">{(current - 1) * pageSize + index + 1}</span>;
@@ -1040,31 +1069,17 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       render: (text) => <span className="font-mono text-gray-700">{text || '-'}</span>
     },
     {
-      title: <span className="font-semibold text-gray-700">Part Number</span>,
-      dataIndex: 'part_numbers',
-      key: 'part_number',
-      ellipsis: true,
-      render: (values) => {
-        // Handle undefined or empty values
-        if (!values || values.length === 0 || values[0] === undefined) {
-          return <span className="text-gray-400">-</span>;
-        }
-        
-        return (
-          <Space size="small" wrap>
-            {values.map((val, idx) => (
-              <Tag key={idx} color="geekblue">{val}</Tag>
-            ))}
-          </Space>
-        );
-      },
-    },
-    {
       title: <span className="font-semibold text-gray-700">Material Name</span>,
       dataIndex: 'material_name',
       key: 'material_name',
       ellipsis: true,
       render: (text) => <span className="font-medium text-gray-800">{text}</span>,
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Process Type</span>,
+      dataIndex: 'process_type',
+      key: 'process_type',
+      render: (value) => value || <span className="text-gray-400">-</span>,
     },
     {
       title: <span className="font-semibold text-gray-700">Form Type</span>,
@@ -1111,9 +1126,15 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       render: (value) => value != null ? value?.toFixed(3) : <span className="text-gray-400">-</span>,
     },
     {
-      title: <span className="font-semibold text-gray-700">Cost (₹)</span>,
-      dataIndex: 'cost',
-      key: 'cost',
+      title: <span className="font-semibold text-gray-700">Est. Cost (₹)</span>,
+      dataIndex: 'estimated_cost',
+      key: 'estimated_cost',
+      render: (value) => value != null ? `₹${value?.toFixed(2)}` : <span className="text-gray-400">-</span>,
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Final Cost (₹)</span>,
+      dataIndex: 'final_cost',
+      key: 'final_cost',
       render: (value) => value != null ? `₹${value?.toFixed(2)}` : <span className="text-gray-400">-</span>,
     },
     {
@@ -1216,7 +1237,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
 
   return (
     <div className="mt-4">
-      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500 text-lg sm:text-xl" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procure Raw Material</span></div><Space className="w-full lg:w-auto flex flex-col sm:flex-row flex-wrap gap-2" size="small"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-auto min-w-[150px] xs:min-w-[200px]" size="middle" /><Select placeholder="Project" allowClear value={filterProjectNumber} onChange={setFilterProjectNumber} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueProjectNumbers().map(pn => <Option key={pn} value={pn}>{pn}</Option>)}</Select><Select placeholder="Vendor" allowClear value={filterVendorName} onChange={setFilterVendorName} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueVendorNames().map(vname => <Option key={vname} value={vname}>{vname}</Option>)}</Select><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /><Button type="primary" icon={<AppstoreOutlined />} onClick={() => setProcureModalOpen(true)} style={{ backgroundColor: '#2563eb' }} className="w-full sm:w-auto">Procure Raw Material</Button></Space></div>}>
+      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500 text-lg sm:text-xl" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procure Raw Material</span></div><Space className="w-full lg:w-auto flex flex-col sm:flex-row flex-wrap gap-2" size="small"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-auto min-w-[150px] xs:min-w-[200px]" size="middle" /><Select placeholder="Material" allowClear value={filterMaterialName} onChange={setFilterMaterialName} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueMaterialNames().map(mname => <Option key={mname} value={mname}>{mname}</Option>)}</Select><Select placeholder="Project" allowClear value={filterProjectNumber} onChange={setFilterProjectNumber} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueProjectNumbers().map(pn => <Option key={pn} value={pn}>{pn}</Option>)}</Select><Select placeholder="Vendor" allowClear value={filterVendorName} onChange={setFilterVendorName} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueVendorNames().map(vname => <Option key={vname} value={vname}>{vname}</Option>)}</Select><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /><Button type="primary" icon={<AppstoreOutlined />} onClick={() => setProcureModalOpen(true)} style={{ backgroundColor: '#2563eb' }} className="w-full sm:w-auto">Procure Raw Material</Button></Space></div>}>
         <Table columns={columns} dataSource={filtered} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table responsive-table" scroll={{ x: 'max-content' }} loading={loading} />
       </Card>
 
@@ -1269,6 +1290,36 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
               )}
             </Select>
             <Text type="secondary" className="text-xs">Select from vendors contacted during enquiry</Text>
+          </div>
+
+          {/* Final Cost - Always visible */}
+          <div className="space-y-1">
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Final Cost (₹) *</Text>
+            <InputNumber
+              min={0}
+              precision={0}
+              controls={false}
+              style={{ width: '100%' }}
+              placeholder="Enter final cost"
+              value={quickStatusRecord?.final_cost}
+              onChange={(value) => {
+                // Only accept non-negative integers
+                if (value !== null && value >= 0 && Number.isInteger(value)) {
+                  setQuickStatusRecord(prev => ({ ...prev, final_cost: value }));
+                } else if (value === null) {
+                  setQuickStatusRecord(prev => ({ ...prev, final_cost: null }));
+                }
+              }}
+              onKeyPress={(e) => {
+                // Prevent non-numeric characters
+                const charCode = e.which ? e.which : e.keyCode;
+                if (charCode < 48 || charCode > 57) {
+                  e.preventDefault();
+                }
+              }}
+              size="middle"
+              className="rounded-md"
+            />
           </div>
         </div>
       </Modal>

@@ -168,8 +168,6 @@ const Notifications = () => {
 
       if (response.ok) {
         message.success('Notification acknowledged');
-        // Add to acknowledged set to disable button immediately
-        setAcknowledgedIds(prev => new Set(prev).add(logId));
         // Refresh from server to ensure data consistency
         fetchNotifications();
       } else {

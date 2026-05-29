@@ -393,7 +393,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       {
         file: null,
         document_name: "",
-        document_type: "Other",
+        document_type: "Technical",
         document_type_other: "",
         document_version: "",
       },
@@ -805,6 +805,10 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                                 className="text-xs sm:text-sm h-10 custom-select-v2 w-full"
                                 size="middle"
                               >
+                                <Option value="Technical">Technical Drawing</Option>
+                                <Option value="Invoice">Invoice</Option>
+                                <Option value="Purchase Order">Purchase Order</Option>
+                                <Option value="Quote">Quote</Option>
                                 <Option value="Other">Other</Option>
                               </Select>
                             </div>

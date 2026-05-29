@@ -134,23 +134,10 @@ const inventoryColumnWidths = {
   slNo: 40,
   name: 150,
   density: 80,
+  cost: 80,
   status: 80,
 };
 
-const stockColumnWidths = {
-  formType: 60,
-  dimensions: 100,
-  quantity: 50,
-  volume: 60,
-  mass: 60,
-  weight: 60,
-  cost: 60,
-  source: 50,
-  order: 70,
-  parts: 80,
-  userName: 70,
-  status: 50,
-};
 
 const statusColumnWidths = {
   slNo: 25,
@@ -167,7 +154,7 @@ const statusColumnWidths = {
   orderStatus: 90,
 };
 
-const RawMaterialsInventoryPdfDocument = ({ rawMaterials, stockData }) => {
+const RawMaterialsInventoryPdfDocument = ({ rawMaterials }) => {
   const generatedAt = new Date().toLocaleString();
   const total = rawMaterials.length;
 
@@ -198,125 +185,35 @@ const RawMaterialsInventoryPdfDocument = ({ rawMaterials, stockData }) => {
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.density }]}>
               DENSITY(kg/m³)
             </Text>
+            <Text style={[styles.headerCell, { width: inventoryColumnWidths.cost }]}>
+              COST(₹/kg)
+            </Text>
             <Text style={[styles.headerCell, { width: inventoryColumnWidths.status }]}>
               STATUS
             </Text>
           </View>
 
           {rawMaterials.map((m, index) => {
-            const materialStocks = stockData[m.id] || [];
-            const hasAvailableStock = materialStocks.some(stock => stock.status === 'available');
+            const hasAvailableStock = m.has_available_stock;
             const statusText = hasAvailableStock ? "AVAILABLE" : "NOT AVAILABLE";
             
             return (
-              <View key={m.id || index}>
-                <View style={styles.row}>
-                  <Text style={[styles.cell, { width: inventoryColumnWidths.slNo }]}>
-                    {index + 1}
-                  </Text>
-                  <Text style={[styles.cell, { width: inventoryColumnWidths.name }]}>
-                    {m.material_name || "-"}
-                  </Text>
-                  <Text style={[styles.cell, { width: inventoryColumnWidths.density }]}>
-                    {m.density != null ? String(m.density) : "-"}
-                  </Text>
-                  <Text style={[styles.cell, { width: inventoryColumnWidths.status }]}>
-                    {statusText}
-                  </Text>
-                </View>
-                
-                {materialStocks.length > 0 && (
-                  <View>
-                    <View style={styles.stockHeader}>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.formType }]}>
-                        Form Type
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.dimensions }]}>
-                        Dimensions
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.quantity }]}>
-                        Quantity
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.volume }]}>
-                        Volume (m³)
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.mass }]}>
-                        Mass (kg)
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.weight }]}>
-                        Weight (N)
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.cost }]}>
-                        Cost (₹)
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.source }]}>
-                        Source
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.order }]}>
-                        Order
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.parts }]}>
-                        Parts
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.userName }]}>
-                        User Name
-                      </Text>
-                      <Text style={[styles.stockHeaderCell, { width: stockColumnWidths.status }]}>
-                        Status
-                      </Text>
-                    </View>
-                    
-                    {materialStocks.map((stock, stockIndex) => {
-                      const getDimensions = (record) => {
-                        if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
-                        if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
-                        if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
-                        return '-';
-                      };
-                      
-                      return (
-                        <View key={stock.id || stockIndex} style={styles.stockRow}>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.formType }]}>
-                            {stock.form_type || "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.dimensions }]}>
-                            {getDimensions(stock)}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.quantity }]}>
-                            {stock.quantity != null ? String(stock.quantity) : "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.volume }]}>
-                            {stock.volume != null ? String(stock.volume.toFixed(6)) : "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.mass }]}>
-                            {stock.mass != null ? String(stock.mass.toFixed(3)) : "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.weight }]}>
-                            {stock.weight != null ? String(stock.weight.toFixed(3)) : "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.cost }]}>
-                            {stock.cost != null ? `₹${stock.cost.toFixed(2)}` : "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.source }]}>
-                            {stock.source_type === 'order' ? 'Order' : 'General'}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.order }]}>
-                            {stock.source_order_number || "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.parts }]}>
-                            {stock.part_numbers?.length > 0 ? stock.part_numbers.join(', ') : "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.userName }]}>
-                            {stock.creator_name || "-"}
-                          </Text>
-                          <Text style={[styles.stockCell, { width: stockColumnWidths.status }]}>
-                            {stock.status || "-"}
-                          </Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
+              <View key={m.id || index} style={styles.row}>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.slNo }]}>
+                  {index + 1}
+                </Text>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.name }]}>
+                  {m.material_name || "-"}
+                </Text>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.density }]}>
+                  {m.density != null ? String(m.density) : "-"}
+                </Text>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.cost }]}>
+                  {m.cost_per_kg != null ? `₹${m.cost_per_kg.toFixed(2)}` : "-"}
+                </Text>
+                <Text style={[styles.cell, { width: inventoryColumnWidths.status }]}>
+                  {statusText}
+                </Text>
               </View>
             );
           })}
@@ -492,39 +389,6 @@ export const RawMaterialsInventoryPdfDownload = ({
   fileName = "raw-materials-inventory.pdf",
 }) => {
   const [isModalVisible, setIsModalVisible] = useState(false);
-  const [stockData, setStockData] = useState({});
-  const [loadingStock, setLoadingStock] = useState(false);
-
-  const fetchAllStockData = async () => {
-    if (!rawMaterials || rawMaterials.length === 0) return;
-    
-    setLoadingStock(true);
-    try {
-      const stockPromises = rawMaterials.map(async (material) => {
-        try {
-          const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/`, {
-            params: { material_id: material.id }
-          });
-          return { materialId: material.id, stocks: response.data || [] };
-        } catch (error) {
-          console.error(`Error fetching stock for material ${material.id}:`, error);
-          return { materialId: material.id, stocks: [] };
-        }
-      });
-      
-      const results = await Promise.all(stockPromises);
-      const stockMap = {};
-      results.forEach(({ materialId, stocks }) => {
-        stockMap[materialId] = stocks;
-      });
-      
-      setStockData(stockMap);
-    } catch (error) {
-      console.error('Error fetching stock data:', error);
-    } finally {
-      setLoadingStock(false);
-    }
-  };
 
   const handleDownloadExcel = () => {
     if (!rawMaterials || rawMaterials.length === 0) return;
@@ -548,6 +412,7 @@ export const RawMaterialsInventoryPdfDownload = ({
       "SL NO",
       "MATERIAL NAME",
       "DENSITY(kg/m³)",
+      "COST(₹/kg)",
       "STATUS"
     ];
 
@@ -582,72 +447,19 @@ export const RawMaterialsInventoryPdfDownload = ({
     // Prepare and add table data for raw materials
     let currentRow = 8;
     rawMaterials.forEach((m, index) => {
-      const materialStocks = stockData[m.id] || [];
-      const hasAvailableStock = materialStocks.some(stock => stock.status === 'available');
+      const hasAvailableStock = m.has_available_stock;
       const statusText = hasAvailableStock ? "AVAILABLE" : "NOT AVAILABLE";
       
       const rowData = [
         index + 1,
         m.material_name || "-",
         m.density != null ? m.density : "-",
+        m.cost_per_kg != null ? `₹${m.cost_per_kg.toFixed(2)}` : "-",
         statusText
       ];
       
       XLSX.utils.sheet_add_aoa(ws, [rowData], { origin: `A${currentRow}` });
       currentRow++;
-      
-      // Add stock details if available
-      if (materialStocks.length > 0) {
-        // Add stock headers
-        const stockHeaders = [
-          "Form Type",
-          "Dimensions",
-          "Quantity",
-          "Volume (m³)",
-          "Mass (kg)",
-          "Weight (N)",
-          "Cost (₹)",
-          "Source",
-          "Order",
-          "Parts",
-          "User Name",
-          "Status"
-        ];
-        
-        XLSX.utils.sheet_add_aoa(ws, [stockHeaders], { origin: `A${currentRow}` });
-        currentRow++;
-        
-        // Add stock rows
-        materialStocks.forEach((stock) => {
-          const getDimensions = (record) => {
-            if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
-            if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
-            if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
-            return '-';
-          };
-          
-          const stockRowData = [
-            stock.form_type || "-",
-            getDimensions(stock),
-            stock.quantity != null ? stock.quantity : "-",
-            stock.volume != null ? stock.volume.toFixed(6) : "-",
-            stock.mass != null ? stock.mass.toFixed(3) : "-",
-            stock.weight != null ? stock.weight.toFixed(3) : "-",
-            stock.cost != null ? `₹${stock.cost.toFixed(2)}` : "-",
-            stock.source_type === 'order' ? 'Order' : 'General',
-            stock.source_order_number || "-",
-            stock.part_numbers?.length > 0 ? stock.part_numbers.join(', ') : "-",
-            stock.creator_name || "-",
-            stock.status || "-"
-          ];
-          
-          XLSX.utils.sheet_add_aoa(ws, [stockRowData], { origin: `A${currentRow}` });
-          currentRow++;
-        });
-        
-        // Add empty row for spacing
-        currentRow++;
-      }
     });
 
     // Set column widths
@@ -655,6 +467,7 @@ export const RawMaterialsInventoryPdfDownload = ({
       { wch: 8 },   // SL NO
       { wch: 25 },  // MATERIAL NAME
       { wch: 15 },  // DENSITY(kg/m³)
+      { wch: 15 },  // COST(₹/kg)
       { wch: 15 }   // STATUS
     ];
     ws['!cols'] = colWidths;
@@ -684,10 +497,7 @@ export const RawMaterialsInventoryPdfDownload = ({
       <Button 
         icon={<DownloadOutlined />} 
         size="middle"
-        onClick={() => {
-          setIsModalVisible(true);
-          fetchAllStockData();
-        }}
+        onClick={() => setIsModalVisible(true)}
       >
         Download Raw Materials
       </Button>
@@ -707,7 +517,7 @@ export const RawMaterialsInventoryPdfDownload = ({
           
           <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
             <PDFDownloadLink
-              document={<RawMaterialsInventoryPdfDocument rawMaterials={rawMaterials} stockData={stockData} />}
+              document={<RawMaterialsInventoryPdfDocument rawMaterials={rawMaterials} />}
               fileName={fileName}
               style={{ textDecoration: "none", width: "100%" }}
             >
@@ -718,7 +528,7 @@ export const RawMaterialsInventoryPdfDownload = ({
                   style={{ width: "100%", height: "50px" }}
                   type="default"
                 >
-                  {loading ? "Preparing PDF..." : (loadingStock ? "Loading Stock Data..." : "Download PDF")}
+                  {loading ? "Preparing PDF..." : "Download PDF"}
                 </Button>
               )}
             </PDFDownloadLink>
