@@ -1,6 +1,7 @@
 from bisect import insort_right
 from threading import active_count
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -30,6 +31,11 @@ from DB.schemas.oms import OrderPartPrioritySwap
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Tuple
 import calendar
+from io import BytesIO
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
 
 
 
@@ -4236,3 +4242,231 @@ def run_dynamic_reschedule(
 ):
     result = dynamic_reschedule(db, triggered_by_part_id=part_id, triggered_by_op_id=op_id)
     return result
+
+
+# =============================================================================
+# PDF Download Endpoints
+# =============================================================================
+
+@router.get("/planned-schedule/pdf")
+def download_planned_schedule_pdf(
+    schedule_history_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Download the planned schedule as a PDF.
+    If schedule_history_id is provided, downloads that specific version.
+    Otherwise, downloads the latest schedule.
+    """
+    try:
+        # Fetch schedule data
+        if schedule_history_id:
+            history = db.query(ScheduleHistory).filter(ScheduleHistory.id == schedule_history_id).first()
+            if not history:
+                raise HTTPException(404, f"Schedule history ID {schedule_history_id} not found")
+        else:
+            history = db.query(ScheduleHistory).order_by(ScheduleHistory.generated_at.desc()).first()
+            if not history:
+                raise HTTPException(404, "No schedule found. Please generate a schedule first.")
+
+        rows = (
+            db.query(PlannedScheduleItem, Operation, Machine, WorkCenter, Part)
+            .join(Operation, Operation.id == PlannedScheduleItem.operation_id)
+            .outerjoin(Machine, Machine.id == PlannedScheduleItem.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Part, Part.id == PlannedScheduleItem.part_id)
+            .filter(PlannedScheduleItem.schedule_history_id == history.id)
+            .order_by(PlannedScheduleItem.planned_start_time)
+            .all()
+        )
+
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), topMargin=30, bottomMargin=30, leftMargin=30, rightMargin=30)
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Title
+        title = f"Planned Schedule - Version {history.version}"
+        elements.append(Paragraph(title, styles['Title']))
+        elements.append(Spacer(1, 12))
+
+        # Metadata
+        meta = f"Generated: {history.generated_at.strftime('%Y-%m-%d %H:%M:%S')} | Total Operations: {len(rows)}"
+        elements.append(Paragraph(meta, styles['Normal']))
+        elements.append(Spacer(1, 12))
+
+        # Table data
+        data = [
+            ['Order', 'Part', 'Op #', 'Op Name', 'Type', 'Machine', 'Duration (Setup/Cycle)', 'Planned Start', 'Planned End', 'Total Qty', 'Planned Produced Qty', 'Rem Qty', 'Status']
+        ]
+        for item, op, machine, wc, part in rows:
+            machine_name = f"{machine.make} {machine.model}" if machine else "N/A"
+            wc_name = wc.work_center_name if wc else ""
+            op_type = 'Out-Source' if op.part_type_id == 2 else 'IN-House'
+            start = item.planned_start_time.strftime('%Y-%m-%d %H:%M')
+            end = item.planned_end_time.strftime('%Y-%m-%d %H:%M')
+            # Duration: setup_time + cycle_time
+            setup = op.setup_time.strftime('%H:%M') if op.setup_time else '00:00'
+            cycle = op.cycle_time.strftime('%H:%M') if op.cycle_time else '00:00'
+            duration = f"{setup}/{cycle}"
+            # Planned produced qty = total - remaining
+            planned_produced = item.total_quantity - item.remaining_quantity
+            rem_qty = item.remaining_quantity
+            data.append([
+                item.sale_order_number,
+                item.part_number,
+                str(op.operation_number),
+                op.operation_name,
+                op_type,
+                machine_name,
+                duration,
+                start,
+                end,
+                str(item.total_quantity),
+                str(planned_produced),
+                str(rem_qty),
+                item.status,
+            ])
+
+        # Create table
+        table = Table(data, colWidths=[55, 55, 28, 85, 38, 65, 65, 80, 80, 32, 32, 32, 45])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ]))
+        elements.append(table)
+
+        doc.build(elements)
+        buffer.seek(0)
+
+        return Response(
+            content=buffer.getvalue(),
+            media_type='application/pdf',
+            headers={'Content-Disposition': f'attachment; filename=planned_schedule_v{history.version}.pdf'}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to generate PDF: {str(e)}")
+
+
+@router.get("/dynamic-schedule/pdf")
+def download_dynamic_schedule_pdf(
+    db: Session = Depends(get_db),
+):
+    """
+    Download the dynamic (live) schedule as a PDF.
+    This is the current rescheduling data from rescheduling_items table.
+    """
+    try:
+        # Subquery to get latest schedule_version for each operation
+        latest_versions = (
+            db.query(
+                Rescheduling.operation_id,
+                func.max(Rescheduling.schedule_version).label('max_version')
+            )
+            .filter(Rescheduling.status.in_(['scheduled', 'rescheduled']))
+            .group_by(Rescheduling.operation_id)
+            .subquery()
+        )
+
+        rows = (
+            db.query(Rescheduling, Operation, Part, Machine, WorkCenter)
+            .join(Operation, Operation.id == Rescheduling.operation_id)
+            .join(Part, Part.id == Rescheduling.part_id)
+            .outerjoin(Machine, Machine.id == Rescheduling.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(
+                latest_versions,
+                (Rescheduling.operation_id == latest_versions.c.operation_id) &
+                (Rescheduling.schedule_version == latest_versions.c.max_version)
+            )
+            .filter(Rescheduling.status.in_(['scheduled', 'rescheduled']))
+            .order_by(Rescheduling.start_time)
+            .all()
+        )
+
+        if not rows:
+            raise HTTPException(404, "No dynamic schedule data found. Run dynamic reschedule first.")
+
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), topMargin=30, bottomMargin=30, leftMargin=30, rightMargin=30)
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Title
+        elements.append(Paragraph("Dynamic Schedule (Live)", styles['Title']))
+        elements.append(Spacer(1, 12))
+
+        # Metadata
+        meta = f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Total Operations: {len(rows)}"
+        elements.append(Paragraph(meta, styles['Normal']))
+        elements.append(Spacer(1, 12))
+
+        # Table data
+        data = [
+            ['Order', 'Part', 'Op #', 'Op Name', 'Type', 'Machine', 'Duration (Setup/Cycle)', 'Actual Start', 'Actual End', 'Total Qty', 'Completed Qty', 'Rem Qty to be Produced', 'Status']
+        ]
+        for item, op, part, machine, wc in rows:
+            machine_name = f"{machine.make} {machine.model}" if machine else "N/A"
+            op_type = 'Out-Source' if op.part_type_id == 2 else 'IN-House'
+            start = item.start_time.strftime('%Y-%m-%d %H:%M')
+            end = item.end_time.strftime('%Y-%m-%d %H:%M')
+            # Duration: setup_time + cycle_time
+            setup = op.setup_time.strftime('%H:%M') if op.setup_time else '00:00'
+            cycle = op.cycle_time.strftime('%H:%M') if op.cycle_time else '00:00'
+            duration = f"{setup}/{cycle}"
+            data.append([
+                item.order_number,
+                item.part_number,
+                str(item.operation_number),
+                op.operation_name,
+                op_type,
+                machine_name,
+                duration,
+                start,
+                end,
+                str(item.total_qty),
+                str(item.completed_qty),
+                str(item.remaining_qty),
+                item.status,
+            ])
+
+        # Create table
+        table = Table(data, colWidths=[55, 55, 28, 85, 38, 65, 65, 80, 80, 32, 32, 32, 45])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ]))
+        elements.append(table)
+
+        doc.build(elements)
+        buffer.seek(0)
+
+        return Response(
+            content=buffer.getvalue(),
+            media_type='application/pdf',
+            headers={'Content-Disposition': 'attachment; filename=dynamic_schedule.pdf'}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to generate PDF: {str(e)}")
