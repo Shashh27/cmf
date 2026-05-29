@@ -355,6 +355,8 @@ class OrderBase(BaseModel):
     customer_id: int
     product_id: int
     user_id: int
+    project_coordinator_id: Optional[int] = None
+    manufacturing_coordinator_id: Optional[int] = None
     quantity: int
     due_date: datetime
     status: str
@@ -371,6 +373,8 @@ class OrderUpdate(BaseModel):
     customer_id: Optional[int] = None
     product_id: Optional[int] = None
     user_id: Optional[int] = None
+    project_coordinator_id: Optional[int] = None
+    manufacturing_coordinator_id: Optional[int] = None
     quantity: Optional[int] = None
     due_date: Optional[datetime] = None
     status: Optional[str] = None

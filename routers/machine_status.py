@@ -63,6 +63,7 @@ async def get_machine_status(db: Session = Depends(get_db)):
                 machine_status = MachineStatusOut(
                     work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
                     machine_make=machine.make or "Unknown",
+                    machine_model=machine.model or None,
                     machine_id=machine.id,
                     status_id=status.id,
                     status_name=status.name,
@@ -261,6 +262,7 @@ async def get_machine_downtime(
                 work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
                 machine_id=record.machine_id,
                 machine_name=machine.make or f"Machine {record.machine_id}",
+                machine_model=machine.model or None,
                 status_id=record.status_id,
                 status_name=record.status_name,
                 description=record.description,
@@ -336,6 +338,7 @@ async def get_all_downtime_records(
                 work_center_name=machine.work_center.work_center_name if machine.work_center else "Unknown",
                 machine_id=record.machine_id,
                 machine_name=machine.make or f"Machine {record.machine_id}",
+                machine_model=machine.model or None,
                 status_id=record.status_id,
                 status_name=record.status_name,
                 description=record.description,

@@ -415,6 +415,33 @@ def update_operator_shift_for_machine(
     )
 
 
+@router.delete("/machine/{machine_id}/operator/{operator_id}/shifts/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_operator_shift_for_machine(
+    machine_id: int,
+    operator_id: int,
+    assignment_id: int,
+    db: Session = Depends(get_db)
+):
+    """Delete shift assignment for a specific operator on a specific machine"""
+    
+    # Get existing assignment
+    assignment = db.query(MachineOperatorShiftAssignment).filter(
+        MachineOperatorShiftAssignment.id == assignment_id,
+        MachineOperatorShiftAssignment.machine_id == machine_id,
+        MachineOperatorShiftAssignment.operator_id == operator_id
+    ).first()
+    
+    if not assignment:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Shift assignment not found for assignment_id {assignment_id}, machine {machine_id}, and operator {operator_id}"
+        )
+    
+    db.delete(assignment)
+    db.commit()
+    return None
+
+
 @router.get("/assignments/{shift_config_id}", response_model=List[MachineOperatorShiftAssignmentResponse])
 def get_assignments_by_shift_config(
     shift_config_id: int,
@@ -573,10 +600,24 @@ def create_shift_config(data: ShiftHoursConfigCreate, db: Session = Depends(get_
 
 # ---------------- GET ALL ----------------
 @router.get("/", response_model=list[ShiftHoursConfigResponse])
-def get_all_shift_configs(db: Session = Depends(get_db)):
+def get_all_shift_configs(year: int = None, db: Session = Depends(get_db)):
+    today = datetime.today()
+    
+    # Default to current year if not provided
+    if year is None:
+        year = today.year
+    
+    # Calculate start and end dates for the year
+    start_date = date(year, 1, 1)
+    end_date = date(year + 1, 1, 1)
+    
     configs = (
         db.query(ShiftHoursConfiguration)
-        .order_by(ShiftHoursConfiguration.date.asc())   # sort by date
+        .filter(
+            ShiftHoursConfiguration.date >= start_date,
+            ShiftHoursConfiguration.date < end_date
+        )
+        .order_by(ShiftHoursConfiguration.date.asc())
         .all()
     )
 

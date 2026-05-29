@@ -9,17 +9,22 @@ from sqlalchemy import func
 # from sqlalchemy import cast, Integer  
 
 
-from sqlalchemy import exists, text
+from sqlalchemy import exists, text, and_
 from DB.database import get_db
 
 from DB.models.oms import Order, Part, Product
 from DB.models.scheduling import PartScheduleStatus, OrderScheduleStatus, MachineSchedule, ScheduleHistory, PlannedScheduleItem, EfficiencyFactor, ShiftHoursConfiguration, OperationStatus, Rescheduling
 from DB.models.oms import Order, Part, Product
 from DB.models.configuration import Machine, WorkCenter
-from DB.models.oms import Operation, Part, Order, PartType, OrderPartPriority
+from DB.models.oms import Operation, Part, Order, PartType, OrderPartPriority, OutSourceOperationStatus
 from DB.models.inventory import RawMaterialUsage
 
-from DB.schemas.machine_scheduling import PartStatusUpdate, UpdatePartStatusResponse, OrderScheduleStatusResponse, OperationStatusResponse, OperationStatusUpdate, OperationStatusWithDetails
+from DB.schemas.machine_scheduling import (
+    PartStatusUpdate, UpdatePartStatusResponse, OrderScheduleStatusResponse,
+    OperationStatusResponse, OperationStatusUpdate, OperationStatusWithDetails,
+    OutSourceOperationStatusCreate, OutSourceOperationStatusUpdate,
+    OutSourceOperationStatusResponse, OutSourceOperationWithDetails,
+)
 from DB.schemas.oms import OrderPartPrioritySwap
 
 from datetime import datetime, timedelta, timezone
@@ -1182,6 +1187,55 @@ def get_order_summary(sale_order_id: int, db: Session = Depends(get_db)):
 
 
 # =========================================================
+# GET ORDERS BY PROJECT COORDINATOR
+# =========================================================
+@router.get("/orders-by-project-coordinator")
+def get_orders_by_project_coordinator(
+    project_coordinator_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Get orders grouped by project coordinator.
+    If project_coordinator_id is provided, returns only orders for that coordinator.
+    """
+    from DB.models.access_control import AccessUser
+    from DB.models.configuration import Customer
+    from DB.models.oms import Product
+    
+    query = db.query(Order).order_by(Order.id.asc())
+    
+    if project_coordinator_id is not None:
+        query = query.filter(Order.project_coordinator_id == project_coordinator_id)
+    
+    orders = query.all()
+    
+    result = []
+    for order in orders:
+        customer = db.query(Customer).filter(Customer.id == order.customer_id).first()
+        product = db.query(Product).filter(Product.id == order.product_id).first()
+        project_coordinator = db.query(AccessUser).filter(AccessUser.id == order.project_coordinator_id).first() if order.project_coordinator_id else None
+        
+        result.append({
+            "order_id": order.id,
+            "sale_order_number": order.sale_order_number,
+            "project_name": order.project_name,
+            "order_date": order.order_date,
+            "customer_id": order.customer_id,
+            "customer_name": customer.company_name if customer else None,
+            "product_id": order.product_id,
+            "product_name": product.product_name if product else None,
+            "quantity": order.quantity,
+            "due_date": order.due_date,
+            "status": order.status,
+            "project_coordinator_id": order.project_coordinator_id,
+            "project_coordinator_name": project_coordinator.user_name if project_coordinator else None,
+            "project_coordinator_email": project_coordinator.gmail if project_coordinator else None
+        })
+    
+    return {"orders": result}
+
+
+# =========================================================
 # SCHEDULE GENERATION ENDPOINT
 # =========================================================
 @router.post("/generate-schedule")
@@ -1825,6 +1879,576 @@ def get_gantt_data(db: Session = Depends(get_db)):
 
 
 # =========================================================
+# PLANNED GANTT DATA BY PROJECT COORDINATOR
+# =========================================================
+@router.get("/gantt-data/project-coordinator/{project_coordinator_id}")
+def get_gantt_data_by_project_coordinator(
+    project_coordinator_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Planned schedule Gantt data filtered by project coordinator.
+    Returns only orders assigned to the specified project coordinator.
+    """
+    try:
+        # First, get all orders for this project coordinator
+        orders = db.query(Order).filter(
+            Order.project_coordinator_id == project_coordinator_id
+        ).all()
+        order_ids = [order.id for order in orders]
+        
+        if not order_ids:
+            return {
+                "message": "No orders found for this project coordinator",
+                "schedule_history_id": None,
+                "generated_at": None,
+                "gantt": []
+            }
+        
+        latest = (
+            db.query(ScheduleHistory)
+            .order_by(ScheduleHistory.generated_at.desc())
+            .first()
+        )
+        
+        if not latest:
+            unscheduled_order_ids = [order.id for order in orders]
+            return {
+                "message": "No schedule found. Please generate a schedule first.",
+                "unscheduled_orders": [f"Order id {order_id} not scheduled for this project coordinator {project_coordinator_id}" for order_id in unscheduled_order_ids],
+                "schedule_history_id": None,
+                "generated_at": None,
+                "gantt": []
+            }
+        
+        items = (
+            db.query(PlannedScheduleItem, Machine, WorkCenter, Operation, Part)
+            .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .join(Part,       Part.id       == PlannedScheduleItem.part_id)
+            .filter(
+                PlannedScheduleItem.schedule_history_id == latest.id,
+                PlannedScheduleItem.sale_order_id.in_(order_ids)
+            )
+            .order_by(PlannedScheduleItem.machine_id, PlannedScheduleItem.planned_start_time)
+            .all()
+        )
+        
+        # Find which orders are not scheduled
+        scheduled_order_ids = {item[0].sale_order_id for item in items}
+        unscheduled_order_ids = [order_id for order_id in order_ids if order_id not in scheduled_order_ids]
+        
+        machines_map: Dict[int, dict] = {}
+        OUT_SOURCE_KEY = "out_source"
+        
+        for item, machine, wc, op, part in items:
+            if machine is None:
+                if OUT_SOURCE_KEY not in machines_map:
+                    machines_map[OUT_SOURCE_KEY] = {
+                        "machine_id": None,
+                        "machine_type": "Out-Source",
+                        "machine_make": None,
+                        "machine_model": None,
+                        "work_center_id": None,
+                        "work_center_name": "Out-Source",
+                        "work_center_code": "OS",
+                        "tasks": []
+                    }
+                machines_map[OUT_SOURCE_KEY]["tasks"].append({
+                    "schedule_item_id": item.id,
+                    "sale_order_id": item.sale_order_id,
+                    "sale_order_number": item.sale_order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "part_name": part.part_name,
+                    "operation_id": item.operation_id,
+                    "operation_number": op.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time": item.planned_end_time,
+                    "duration_hours": round(
+                        (item.planned_end_time - item.planned_start_time).total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity": item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
+                    "status": item.status,
+                })
+            else:
+                mid = machine.id
+                if mid not in machines_map:
+                    machines_map[mid] = {
+                        "machine_id": machine.id,
+                        "machine_type": machine.type,
+                        "machine_make": machine.make,
+                        "machine_model": machine.model,
+                        "work_center_id": wc.id if wc else None,
+                        "work_center_name": wc.work_center_name if wc else None,
+                        "work_center_code": wc.code if wc else None,
+                        "tasks": []
+                    }
+                machines_map[mid]["tasks"].append({
+                    "schedule_item_id": item.id,
+                    "sale_order_id": item.sale_order_id,
+                    "sale_order_number": item.sale_order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "part_name": part.part_name,
+                    "operation_id": item.operation_id,
+                    "operation_number": op.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time": item.planned_end_time,
+                    "duration_hours": round(
+                        (item.planned_end_time - item.planned_start_time).total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity": item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
+                    "status": item.status,
+                })
+        
+        response_data = {
+            "message": f"Planned Gantt data for project coordinator {project_coordinator_id}",
+            "schedule_history_id": latest.id,
+            "schedule_version": latest.version,
+            "generated_at": latest.generated_at,
+            "is_active": latest.is_active,
+            "total_machines": len(machines_map),
+            "total_tasks": sum(len(v["tasks"]) for v in machines_map.values()),
+            "gantt": list(machines_map.values()),
+        }
+        
+        if unscheduled_order_ids:
+            response_data["unscheduled_orders"] = [
+                f"Order id {order_id} not scheduled for this project coordinator {project_coordinator_id}" 
+                for order_id in unscheduled_order_ids
+            ]
+        
+        return response_data
+    except Exception as e:
+        raise HTTPException(500, f"Failed to build planned Gantt data: {str(e)}")
+
+
+# =========================================================
+# DYNAMIC/RESCHEDULING GANTT DATA BY PROJECT COORDINATOR
+# =========================================================
+@router.get("/gantt-data-rescheduling/project-coordinator/{project_coordinator_id}")
+def get_rescheduling_gantt_data_by_project_coordinator(
+    project_coordinator_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Dynamic/rescheduling Gantt data filtered by project coordinator.
+    Returns only orders assigned to the specified project coordinator.
+    """
+    try:
+        # First, get all orders for this project coordinator
+        orders = db.query(Order).filter(
+            Order.project_coordinator_id == project_coordinator_id
+        ).all()
+        order_ids = [order.id for order in orders]
+        
+        if not order_ids:
+            return {
+                "message": "No orders found for this project coordinator",
+                "gantt": []
+            }
+        
+        items = (
+            db.query(Rescheduling, Machine, WorkCenter, Operation, Part)
+            .outerjoin(Machine,    Machine.id    == Rescheduling.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Operation,  Operation.id  == Rescheduling.operation_id)
+            .join(Part,       Part.id       == Rescheduling.part_id)
+            .filter(Rescheduling.order_id.in_(order_ids))
+            .order_by(Rescheduling.machine_id, Rescheduling.start_time)
+            .all()
+        )
+        
+        # Find which orders are not scheduled
+        scheduled_order_ids = {item[0].order_id for item in items}
+        unscheduled_order_ids = [order_id for order_id in order_ids if order_id not in scheduled_order_ids]
+        
+        machines_map: Dict[int, dict] = {}
+        OUT_SOURCE_KEY = "out_source"
+        
+        for item, machine, wc, op, part in items:
+            if machine is None:
+                if OUT_SOURCE_KEY not in machines_map:
+                    machines_map[OUT_SOURCE_KEY] = {
+                        "machine_id": None,
+                        "machine_type": "Out-Source",
+                        "machine_make": None,
+                        "machine_model": None,
+                        "work_center_id": None,
+                        "work_center_name": "Out-Source",
+                        "work_center_code": "OS",
+                        "tasks": []
+                    }
+                machines_map[OUT_SOURCE_KEY]["tasks"].append({
+                    "schedule_item_id": item.id,
+                    "sale_order_id": item.order_id,
+                    "sale_order_number": item.order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "part_name": part.part_name,
+                    "operation_id": item.operation_id,
+                    "operation_number": item.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.start_time,
+                    "planned_end_time": item.end_time,
+                    "duration_hours": round(
+                        (item.end_time - item.start_time).total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity": item.total_qty,
+                    "completed_quantity": item.completed_qty,
+                    "remaining_quantity": item.remaining_qty,
+                    "status": item.status,
+                    "schedule_version": item.schedule_version,
+                })
+            else:
+                mid = machine.id
+                if mid not in machines_map:
+                    machines_map[mid] = {
+                        "machine_id": machine.id,
+                        "machine_type": machine.type,
+                        "machine_make": machine.make,
+                        "machine_model": machine.model,
+                        "work_center_id": wc.id if wc else None,
+                        "work_center_name": wc.work_center_name if wc else None,
+                        "work_center_code": wc.code if wc else None,
+                        "tasks": []
+                    }
+                machines_map[mid]["tasks"].append({
+                    "schedule_item_id": item.id,
+                    "sale_order_id": item.order_id,
+                    "sale_order_number": item.order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "part_name": part.part_name,
+                    "operation_id": item.operation_id,
+                    "operation_number": item.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.start_time,
+                    "planned_end_time": item.end_time,
+                    "duration_hours": round(
+                        (item.end_time - item.start_time).total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity": item.total_qty,
+                    "completed_quantity": item.completed_qty,
+                    "remaining_quantity": item.remaining_qty,
+                    "status": item.status,
+                    "schedule_version": item.schedule_version,
+                })
+        
+        response_data = {
+            "message": f"Dynamic/rescheduling Gantt data for project coordinator {project_coordinator_id}",
+            "total_machines": len(machines_map),
+            "total_tasks": sum(len(v["tasks"]) for v in machines_map.values()),
+            "gantt": list(machines_map.values()),
+        }
+        
+        if unscheduled_order_ids:
+            response_data["unscheduled_orders"] = [
+                f"Order id {order_id} not scheduled for this project coordinator {project_coordinator_id}" 
+                for order_id in unscheduled_order_ids
+            ]
+        
+        return response_data
+    except Exception as e:
+        raise HTTPException(500, f"Failed to build dynamic Gantt data: {str(e)}")
+
+
+# =========================================================
+# PLANNED GANTT DATA BY MANUFACTURING COORDINATOR
+# =========================================================
+@router.get("/gantt-data/manufacturing-coordinator/{manufacturing_coordinator_id}")
+def get_gantt_data_by_manufacturing_coordinator(
+    manufacturing_coordinator_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Planned schedule Gantt data filtered by manufacturing coordinator.
+    Returns only orders assigned to the specified manufacturing coordinator.
+    """
+    try:
+        # First, get all orders for this manufacturing coordinator
+        orders = db.query(Order).filter(
+            Order.manufacturing_coordinator_id == manufacturing_coordinator_id
+        ).all()
+        order_ids = [order.id for order in orders]
+        
+        if not order_ids:
+            return {
+                "message": "No orders found for this manufacturing coordinator",
+                "schedule_history_id": None,
+                "generated_at": None,
+                "gantt": []
+            }
+        
+        latest = (
+            db.query(ScheduleHistory)
+            .order_by(ScheduleHistory.generated_at.desc())
+            .first()
+        )
+        
+        if not latest:
+            unscheduled_order_ids = [order.id for order in orders]
+            return {
+                "message": "No schedule found. Please generate a schedule first.",
+                "unscheduled_orders": [f"Order id {order_id} not scheduled for this manufacturing coordinator {manufacturing_coordinator_id}" for order_id in unscheduled_order_ids],
+                "schedule_history_id": None,
+                "generated_at": None,
+                "gantt": []
+            }
+        
+        items = (
+            db.query(PlannedScheduleItem, Machine, WorkCenter, Operation, Part)
+            .outerjoin(Machine,    Machine.id    == PlannedScheduleItem.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Operation,  Operation.id  == PlannedScheduleItem.operation_id)
+            .join(Part,       Part.id       == PlannedScheduleItem.part_id)
+            .filter(
+                PlannedScheduleItem.schedule_history_id == latest.id,
+                PlannedScheduleItem.sale_order_id.in_(order_ids)
+            )
+            .order_by(PlannedScheduleItem.machine_id, PlannedScheduleItem.planned_start_time)
+            .all()
+        )
+        
+        # Find which orders are not scheduled
+        scheduled_order_ids = {item[0].sale_order_id for item in items}
+        unscheduled_order_ids = [order_id for order_id in order_ids if order_id not in scheduled_order_ids]
+        
+        machines_map: Dict[int, dict] = {}
+        OUT_SOURCE_KEY = "out_source"
+        
+        for item, machine, wc, op, part in items:
+            if machine is None:
+                if OUT_SOURCE_KEY not in machines_map:
+                    machines_map[OUT_SOURCE_KEY] = {
+                        "machine_id": None,
+                        "machine_type": "Out-Source",
+                        "machine_make": None,
+                        "machine_model": None,
+                        "work_center_id": None,
+                        "work_center_name": "Out-Source",
+                        "work_center_code": "OS",
+                        "tasks": []
+                    }
+                machines_map[OUT_SOURCE_KEY]["tasks"].append({
+                    "schedule_item_id": item.id,
+                    "sale_order_id": item.sale_order_id,
+                    "sale_order_number": item.sale_order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "part_name": part.part_name,
+                    "operation_id": item.operation_id,
+                    "operation_number": op.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time": item.planned_end_time,
+                    "duration_hours": round(
+                        (item.planned_end_time - item.planned_start_time).total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity": item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
+                    "status": item.status,
+                })
+            else:
+                mid = machine.id
+                if mid not in machines_map:
+                    machines_map[mid] = {
+                        "machine_id": machine.id,
+                        "machine_type": machine.type,
+                        "machine_make": machine.make,
+                        "machine_model": machine.model,
+                        "work_center_id": wc.id if wc else None,
+                        "work_center_name": wc.work_center_name if wc else None,
+                        "work_center_code": wc.code if wc else None,
+                        "tasks": []
+                    }
+                machines_map[mid]["tasks"].append({
+                    "schedule_item_id": item.id,
+                    "sale_order_id": item.sale_order_id,
+                    "sale_order_number": item.sale_order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "part_name": part.part_name,
+                    "operation_id": item.operation_id,
+                    "operation_number": op.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.planned_start_time,
+                    "planned_end_time": item.planned_end_time,
+                    "duration_hours": round(
+                        (item.planned_end_time - item.planned_start_time).total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity": item.total_quantity,
+                    "remaining_quantity": item.remaining_quantity,
+                    "status": item.status,
+                })
+        
+        response_data = {
+            "message": f"Planned Gantt data for manufacturing coordinator {manufacturing_coordinator_id}",
+            "schedule_history_id": latest.id,
+            "schedule_version": latest.version,
+            "generated_at": latest.generated_at,
+            "is_active": latest.is_active,
+            "total_machines": len(machines_map),
+            "total_tasks": sum(len(v["tasks"]) for v in machines_map.values()),
+            "gantt": list(machines_map.values()),
+        }
+        
+        if unscheduled_order_ids:
+            response_data["unscheduled_orders"] = [
+                f"Order id {order_id} not scheduled for this manufacturing coordinator {manufacturing_coordinator_id}" 
+                for order_id in unscheduled_order_ids
+            ]
+        
+        return response_data
+    except Exception as e:
+        raise HTTPException(500, f"Failed to build planned Gantt data: {str(e)}")
+
+
+# =========================================================
+# DYNAMIC/RESCHEDULING GANTT DATA BY MANUFACTURING COORDINATOR
+# =========================================================
+@router.get("/gantt-data-rescheduling/manufacturing-coordinator/{manufacturing_coordinator_id}")
+def get_rescheduling_gantt_data_by_manufacturing_coordinator(
+    manufacturing_coordinator_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Dynamic/rescheduling Gantt data filtered by manufacturing coordinator.
+    Returns only orders assigned to the specified manufacturing coordinator.
+    """
+    try:
+        # First, get all orders for this manufacturing coordinator
+        orders = db.query(Order).filter(
+            Order.manufacturing_coordinator_id == manufacturing_coordinator_id
+        ).all()
+        order_ids = [order.id for order in orders]
+        
+        if not order_ids:
+            return {
+                "message": "No orders found for this manufacturing coordinator",
+                "gantt": []
+            }
+        
+        items = (
+            db.query(Rescheduling, Machine, WorkCenter, Operation, Part)
+            .outerjoin(Machine,    Machine.id    == Rescheduling.machine_id)
+            .outerjoin(WorkCenter, WorkCenter.id == Machine.work_center_id)
+            .join(Operation,  Operation.id  == Rescheduling.operation_id)
+            .join(Part,       Part.id       == Rescheduling.part_id)
+            .filter(Rescheduling.order_id.in_(order_ids))
+            .order_by(Rescheduling.machine_id, Rescheduling.start_time)
+            .all()
+        )
+        
+        # Find which orders are not scheduled
+        scheduled_order_ids = {item[0].order_id for item in items}
+        unscheduled_order_ids = [order_id for order_id in order_ids if order_id not in scheduled_order_ids]
+        
+        machines_map: Dict[int, dict] = {}
+        OUT_SOURCE_KEY = "out_source"
+        
+        for item, machine, wc, op, part in items:
+            if machine is None:
+                if OUT_SOURCE_KEY not in machines_map:
+                    machines_map[OUT_SOURCE_KEY] = {
+                        "machine_id": None,
+                        "machine_type": "Out-Source",
+                        "machine_make": None,
+                        "machine_model": None,
+                        "work_center_id": None,
+                        "work_center_name": "Out-Source",
+                        "work_center_code": "OS",
+                        "tasks": []
+                    }
+                machines_map[OUT_SOURCE_KEY]["tasks"].append({
+                    "schedule_item_id": item.id,
+                    "sale_order_id": item.order_id,
+                    "sale_order_number": item.order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "part_name": part.part_name,
+                    "operation_id": item.operation_id,
+                    "operation_number": item.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.start_time,
+                    "planned_end_time": item.end_time,
+                    "duration_hours": round(
+                        (item.end_time - item.start_time).total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity": item.total_qty,
+                    "completed_quantity": item.completed_qty,
+                    "remaining_quantity": item.remaining_qty,
+                    "status": item.status,
+                    "schedule_version": item.schedule_version,
+                })
+            else:
+                mid = machine.id
+                if mid not in machines_map:
+                    machines_map[mid] = {
+                        "machine_id": machine.id,
+                        "machine_type": machine.type,
+                        "machine_make": machine.make,
+                        "machine_model": machine.model,
+                        "work_center_id": wc.id if wc else None,
+                        "work_center_name": wc.work_center_name if wc else None,
+                        "work_center_code": wc.code if wc else None,
+                        "tasks": []
+                    }
+                machines_map[mid]["tasks"].append({
+                    "schedule_item_id": item.id,
+                    "sale_order_id": item.order_id,
+                    "sale_order_number": item.order_number,
+                    "part_id": item.part_id,
+                    "part_number": item.part_number,
+                    "part_name": part.part_name,
+                    "operation_id": item.operation_id,
+                    "operation_number": item.operation_number,
+                    "operation_name": op.operation_name,
+                    "operation_type": ('Out-Source' if op.part_type_id == 2 else 'IN-House'),
+                    "planned_start_time": item.start_time,
+                    "planned_end_time": item.end_time,
+                    "duration_hours": round(
+                        (item.end_time - item.start_time).total_seconds() / 3600.0, 4
+                    ),
+                    "total_quantity": item.total_qty,
+                    "completed_quantity": item.completed_qty,
+                    "remaining_quantity": item.remaining_qty,
+                    "status": item.status,
+                    "schedule_version": item.schedule_version,
+                })
+        
+        response_data = {
+            "message": f"Dynamic/rescheduling Gantt data for manufacturing coordinator {manufacturing_coordinator_id}",
+            "total_machines": len(machines_map),
+            "total_tasks": sum(len(v["tasks"]) for v in machines_map.values()),
+            "gantt": list(machines_map.values()),
+        }
+        
+        if unscheduled_order_ids:
+            response_data["unscheduled_orders"] = [
+                f"Order id {order_id} not scheduled for this manufacturing coordinator {manufacturing_coordinator_id}" 
+                for order_id in unscheduled_order_ids
+            ]
+        
+        return response_data
+    except Exception as e:
+        raise HTTPException(500, f"Failed to build dynamic Gantt data: {str(e)}")
+
+
+# =========================================================
 # GANTT CHART DATA  (specific history version)
 # =========================================================
 
@@ -2212,6 +2836,7 @@ def get_machine_operations(
                 )
 
                 blocking_ops = []
+                seen_blocking_op_ids = set()
 
                 for (
                     prev_reschedule,
@@ -2244,6 +2869,11 @@ def get_machine_operations(
                     )
 
                     if prev_status_value != "completed":
+
+                        if prev_reschedule.operation_id in seen_blocking_op_ids:
+                            continue
+
+                        seen_blocking_op_ids.add(prev_reschedule.operation_id)
 
                         blocking_ops.append({
                             "operation_id":
@@ -2944,6 +3574,392 @@ def cleanup_all_operation_status(
         raise
     except Exception as e:
         raise HTTPException(500, f"Failed to perform comprehensive cleanup: {str(e)}")
+
+
+# =============================================================================
+# Out-Source Operation Status — CRUD
+# =============================================================================
+OUT_SOURCE_TYPE_ID = 2                              # oms.part_types.id for Out-Source
+VALID_OS_STATUSES  = {"pending", "in_transit", "delivered"}
+
+
+def _serialize_os_row(
+    operation: Operation,
+    part: Part,
+    order: Order,
+    status_row: Optional[OutSourceOperationStatus],
+) -> Dict:
+    """Build the per-row dict for the list / single-detail responses."""
+    return {
+        "operation_id":      operation.id,
+        "operation_number":  operation.operation_number,
+        "operation_name":    operation.operation_name,
+        "from_date":         operation.from_date,
+        "to_date":           operation.to_date,
+        "part_id":           part.id,
+        "part_number":       part.part_number,
+        "part_name":         getattr(part, "part_name", None),
+        "order_id":          order.id,
+        "sale_order_number": order.sale_order_number,
+        "status_id":         status_row.id            if status_row else None,
+        "status":            status_row.status        if status_row else None,
+        "sent_date":         status_row.sent_date     if status_row else None,
+        "delivered_date":    status_row.delivered_date if status_row else None,
+        "created_at":        status_row.created_at    if status_row else None,
+        "updated_at":        status_row.updated_at    if status_row else None,
+    }
+
+
+@router.get(
+    "/out-source-operations",
+    response_model=List[OutSourceOperationWithDetails],
+)
+def list_out_source_operations(
+    order_id: Optional[int] = None,
+    part_id:  Optional[int] = None,
+    status:   Optional[str] = None,
+    active_only: bool = True,
+    db: Session = Depends(get_db),
+):
+    """
+    List Out-Source operations across orders, joined with their status row (if any).
+
+    Filters:
+        order_id     – restrict to a single order
+        part_id      – restrict to a single part
+        status       – pending | in_transit | delivered | none (no status row)
+        active_only  – if True (default), only parts with active PartScheduleStatus
+    """
+    try:
+        q = (
+            db.query(Operation, Part, Order, OutSourceOperationStatus, PartScheduleStatus)
+            .join(Part, Part.id == Operation.part_id)
+            .join(PartScheduleStatus, PartScheduleStatus.part_id == Part.id)
+            .join(Order, Order.id == PartScheduleStatus.sale_order_id)
+            .outerjoin(
+                OutSourceOperationStatus,
+                and_(
+                    OutSourceOperationStatus.operation_id == Operation.id,
+                    OutSourceOperationStatus.part_id      == Part.id,
+                    OutSourceOperationStatus.order_id     == Order.id,
+                ),
+            )
+            .filter(Operation.part_type_id == OUT_SOURCE_TYPE_ID)
+        )
+
+        if active_only:
+            q = q.filter(PartScheduleStatus.status == "active")
+        if order_id is not None:
+            q = q.filter(Order.id == order_id)
+        if part_id is not None:
+            q = q.filter(Part.id == part_id)
+        if status is not None:
+            s = status.lower()
+            if s == "none":
+                q = q.filter(OutSourceOperationStatus.id.is_(None))
+            else:
+                if s not in VALID_OS_STATUSES:
+                    raise HTTPException(
+                        400,
+                        f"Invalid status '{status}'. Valid: {', '.join(VALID_OS_STATUSES)} or 'none'.",
+                    )
+                q = q.filter(OutSourceOperationStatus.status == s)
+
+        results = q.order_by(Order.id, Part.id, Operation.id).all()
+
+        return [
+            _serialize_os_row(op, part, order, st)
+            for op, part, order, st, _pss in results
+        ]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to list out-source operations: {str(e)}")
+
+
+@router.get(
+    "/out-source-operations/{order_id}/{operation_id}",
+    response_model=OutSourceOperationWithDetails,
+)
+def get_out_source_operation(
+    order_id: int,
+    operation_id: int,
+    db: Session = Depends(get_db),
+):
+    """Get a single out-source operation + status detail for (order, operation)."""
+    try:
+        operation = db.query(Operation).filter(Operation.id == operation_id).first()
+        if not operation:
+            raise HTTPException(404, f"Operation {operation_id} not found")
+        if operation.part_type_id != OUT_SOURCE_TYPE_ID:
+            raise HTTPException(400, f"Operation {operation_id} is not an Out-Source operation")
+
+        part  = db.query(Part).filter(Part.id == operation.part_id).first()
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not part:
+            raise HTTPException(404, f"Part {operation.part_id} not found")
+        if not order:
+            raise HTTPException(404, f"Order {order_id} not found")
+
+        status_row = (
+            db.query(OutSourceOperationStatus)
+            .filter(
+                OutSourceOperationStatus.operation_id == operation_id,
+                OutSourceOperationStatus.part_id      == part.id,
+                OutSourceOperationStatus.order_id     == order_id,
+            )
+            .first()
+        )
+
+        return _serialize_os_row(operation, part, order, status_row)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch out-source operation: {str(e)}")
+
+
+@router.post(
+    "/out-source-operations/{order_id}/{operation_id}/status",
+    response_model=OutSourceOperationStatusResponse,
+)
+def upsert_out_source_status(
+    order_id: int,
+    operation_id: int,
+    payload: OutSourceOperationStatusCreate,
+    db: Session = Depends(get_db),
+):
+    """
+    Create (or upsert) the status row for (order, operation).
+    Idempotent — if a row already exists for this triple it is updated in place.
+
+    When `status='delivered'` and `delivered_date` is not supplied, it defaults to now().
+    On delivered → triggers dynamic_reschedule for the part.
+    """
+    try:
+        new_status = payload.status.lower()
+        if new_status not in VALID_OS_STATUSES:
+            raise HTTPException(
+                400,
+                f"Invalid status '{payload.status}'. Valid: {', '.join(VALID_OS_STATUSES)}",
+            )
+
+        operation = db.query(Operation).filter(Operation.id == operation_id).first()
+        if not operation:
+            raise HTTPException(404, f"Operation {operation_id} not found")
+        if operation.part_type_id != OUT_SOURCE_TYPE_ID:
+            raise HTTPException(400, f"Operation {operation_id} is not an Out-Source operation")
+
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            raise HTTPException(404, f"Order {order_id} not found")
+
+        part_id = operation.part_id
+
+        # Default delivered_date when marking delivered
+        sent_date      = payload.sent_date or (datetime.now() if new_status in ("in_transit", "delivered") else None)
+        delivered_date = payload.delivered_date or (datetime.now() if new_status == "delivered" else None)
+
+        # if new_status == "delivered" and delivered_date is None:
+        #     delivered_date = datetime.now(timezone.utc)
+        # if new_status in ("in_transit", "delivered") and sent_date is None:
+        #     # If we're already past 'pending' and sent_date wasn't supplied, default to now
+        #     sent_date = datetime.now(timezone.utc)
+
+        if new_status == "delivered" and sent_date and delivered_date and delivered_date < sent_date:
+            raise HTTPException(400, "delivered_date cannot be earlier than sent_date")
+
+        # Upsert
+        row = (
+            db.query(OutSourceOperationStatus)
+            .filter(
+                OutSourceOperationStatus.operation_id == operation_id,
+                OutSourceOperationStatus.part_id      == part_id,
+                OutSourceOperationStatus.order_id     == order_id,
+            )
+            .first()
+        )
+
+        if row is None:
+            row = OutSourceOperationStatus(
+                part_id        = part_id,
+                order_id       = order_id,
+                operation_id   = operation_id,
+                sent_date      = sent_date,
+                delivered_date = delivered_date,
+                status         = new_status,
+            )
+            db.add(row)
+        else:
+            row.sent_date      = sent_date      if sent_date      is not None else row.sent_date
+            row.delivered_date = delivered_date if delivered_date is not None else row.delivered_date
+            row.status         = new_status
+
+        db.commit()
+        db.refresh(row)
+
+        # Side-effect: on delivered, trigger a dynamic reschedule so downstream
+        # ops snap to the actual delivered_date (respecting shift boundaries).
+        if new_status == "delivered":
+            try:
+                from algorithm import dynamic_reschedule
+                resched_result = dynamic_reschedule(
+                    db,
+                    triggered_by_part_id=part_id,
+                    triggered_by_op_id=operation_id,
+                )
+                print(f"[OS-CRUD] Auto-reschedule after delivered: {resched_result.get('message')}")
+            except Exception as resched_err:
+                # Do not fail the status update if reschedule has problems; just log
+                print(f"[OS-CRUD] WARNING: auto-reschedule failed: {resched_err}")
+
+        return row
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to upsert out-source status: {str(e)}")
+
+
+@router.patch(
+    "/out-source-operations/{order_id}/{operation_id}/status",
+    response_model=OutSourceOperationStatusResponse,
+)
+def update_out_source_status(
+    order_id: int,
+    operation_id: int,
+    payload: OutSourceOperationStatusUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    Partial update for the status row. Any subset of {sent_date, delivered_date, status} may be sent.
+
+    If `status` transitions to 'delivered':
+        - If `delivered_date` is not supplied, defaults to now().
+        - Triggers dynamic_reschedule for the part.
+    """
+    try:
+        operation = db.query(Operation).filter(Operation.id == operation_id).first()
+        if not operation:
+            raise HTTPException(404, f"Operation {operation_id} not found")
+        if operation.part_type_id != OUT_SOURCE_TYPE_ID:
+            raise HTTPException(400, f"Operation {operation_id} is not an Out-Source operation")
+
+        row = (
+            db.query(OutSourceOperationStatus)
+            .filter(
+                OutSourceOperationStatus.operation_id == operation_id,
+                OutSourceOperationStatus.part_id      == operation.part_id,
+                OutSourceOperationStatus.order_id     == order_id,
+            )
+            .first()
+        )
+        if not row:
+            raise HTTPException(
+                404,
+                f"No status row exists for order={order_id}, operation={operation_id}. "
+                f"Use POST to create one.",
+            )
+
+        previous_status = row.status
+
+        if payload.status is not None:
+            s = payload.status.lower()
+            if s not in VALID_OS_STATUSES:
+                raise HTTPException(400, f"Invalid status '{payload.status}'.")
+            row.status = s
+            if s in ("in_transit", "delivered") and row.sent_date is None:
+                row.sent_date = payload.sent_date or datetime.now()
+            if s == "delivered":
+                row.delivered_date = payload.delivered_date or datetime.now()
+
+        # if payload.sent_date is not None:
+        #     row.sent_date = payload.sent_date
+        # if payload.delivered_date is not None:
+        #     row.delivered_date = payload.delivered_date
+        # if payload.status is not None:
+        #     s = payload.status.lower()
+        #     if s not in VALID_OS_STATUSES:
+        #         raise HTTPException(
+        #             400,
+        #             f"Invalid status '{payload.status}'. Valid: {', '.join(VALID_OS_STATUSES)}",
+        #         )
+        #     row.status = s
+        #     if s == "delivered" and row.delivered_date is None:
+        #         row.delivered_date = datetime.now(timezone.utc)
+
+        # Final sanity
+        if row.sent_date and row.delivered_date and row.delivered_date < row.sent_date:
+            raise HTTPException(400, "delivered_date cannot be earlier than sent_date")
+
+        db.commit()
+        db.refresh(row)
+
+        # Side-effect on delivered transition
+        if row.status == "delivered" and previous_status != "delivered":
+            try:
+                from algorithm import dynamic_reschedule
+                resched_result = dynamic_reschedule(
+                    db,
+                    triggered_by_part_id=operation.part_id,
+                    triggered_by_op_id=operation_id,
+                )
+                print(f"[OS-CRUD] Auto-reschedule after delivered: {resched_result.get('message')}")
+            except Exception as resched_err:
+                print(f"[OS-CRUD] WARNING: auto-reschedule failed: {resched_err}")
+
+        return row
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to update out-source status: {str(e)}")
+
+
+@router.delete("/out-source-operations/{order_id}/{operation_id}/status")
+def delete_out_source_status(
+    order_id: int,
+    operation_id: int,
+    db: Session = Depends(get_db),
+):
+    """Delete the status row for (order, operation). Reverts the op to 'no status'."""
+    try:
+        operation = db.query(Operation).filter(Operation.id == operation_id).first()
+        if not operation:
+            raise HTTPException(404, f"Operation {operation_id} not found")
+
+        row = (
+            db.query(OutSourceOperationStatus)
+            .filter(
+                OutSourceOperationStatus.operation_id == operation_id,
+                OutSourceOperationStatus.part_id      == operation.part_id,
+                OutSourceOperationStatus.order_id     == order_id,
+            )
+            .first()
+        )
+        if not row:
+            raise HTTPException(
+                404,
+                f"No status row to delete for order={order_id}, operation={operation_id}",
+            )
+
+        db.delete(row)
+        db.commit()
+
+        return {
+            "message": "Out-source operation status deleted.",
+            "order_id": order_id,
+            "operation_id": operation_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, f"Failed to delete out-source status: {str(e)}")
 
 
 @router.get("/inprogress-operations/{machine_id}")

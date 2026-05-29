@@ -301,9 +301,16 @@ class ProductionLog(Base):
     to_date = Column(DATE)
     to_time = Column(TIME)
     status = Column(String, default='pending', nullable=False)
-    operator_status = Column(String, default='inactive', nullable=False)
+    operator_status = Column(String, nullable=False, default='inprogress')
     produced_quantity = Column(Integer)
     approved_quantity = Column(Integer, nullable=True)
+    supervisor_acknowledged = Column(Boolean, default=False, nullable=False)
+    supervisor_acknowledged_at = Column(DateTime, nullable=True)
+    operator_acknowledged = Column(Boolean, default=False, nullable=False)
+    operator_acknowledged_at = Column(DateTime, nullable=True)
+    rework_quantity = Column(Integer, nullable=True)
+    rejected_quantity = Column(Integer, nullable=True)
+    remaining_quantity_to_be_produced = Column(Integer, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
 
     # Relationships
@@ -342,7 +349,7 @@ class Rescheduling(Base):
     part_number = Column(String, ForeignKey("oms.parts.part_number"), nullable=False)
     operation_id = Column(Integer, ForeignKey('oms.operations.id'), nullable=False)
     operation_number = Column(String, nullable=False)
-    machine_id = Column(Integer, ForeignKey('configuration.machines.id'), nullable=False)
+    machine_id = Column(Integer, ForeignKey('configuration.machines.id'), nullable=True)
 
     start_time = Column(DateTime, nullable=False)
     end_time = Column(DateTime, nullable=False)

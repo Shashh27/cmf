@@ -14,7 +14,8 @@ from DB.schemas import (
     ProductionLogWithDetails,
     ProductionLogStatusUpdate,
     ProductionLogStatus,
-    ProductionLogSubmit
+    ProductionLogSubmit,
+    ProductionLogBulkDelete
 )
 
 router = APIRouter(
@@ -63,12 +64,23 @@ def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db
         WHERE operation_id = :op_id AND approved_quantity IS NOT NULL
     """), {"op_id": log.operation_id}).scalar()
 
-    # Calculate total produced quantity (including pending logs)
-    total_produced = db.execute(text("""
-        SELECT COALESCE(SUM(produced_quantity), 0)
-        FROM scheduling.production_logs
-        WHERE operation_id = :op_id
-    """), {"op_id": log.operation_id}).scalar()
+    # Check if production is already complete (based on approved quantity)
+    if total_approved >= total_quantity:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Production already completed. Total approved: {total_approved}, Total quantity: {total_quantity}. No more production allowed."
+        )
+    
+    # Check if there's a previous log with remaining_quantity_to_be_produced
+    last_log = db.query(ProductionLog).filter(
+        ProductionLog.operation_id == log.operation_id
+    ).order_by(ProductionLog.created_at.desc()).first()
+
+    # Determine remaining quantity
+    if last_log and last_log.remaining_quantity_to_be_produced is not None:
+        remaining_quantity = last_log.remaining_quantity_to_be_produced
+    else:
+        remaining_quantity = total_quantity - total_approved
 
     # Validate that produced_quantity is greater than 0
     if log.produced_quantity <= 0:
@@ -77,78 +89,57 @@ def create_production_log(log: ProductionLogCreate, db: Session = Depends(get_db
             detail=f"Produced quantity must be greater than 0. Provided: {log.produced_quantity}"
         )
 
-    # Check if production is already complete (based on approved quantity)
-    if total_approved >= total_quantity:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Production already completed. Total approved: {total_approved}, Total quantity: {total_quantity}. No more production allowed."
-        )
-    
-    # NEW CONSTRAINT: Block duplicate production when total produced already matches required quantity
-    # AND supervisor hasn't responded yet (logs are still pending)
-    # SMART EXCEPTION: Only allow new production if there are rework logs AND no pending logs
-    # This prevents operators from sending multiple logs while waiting for approval
-    
-    # Check if there are any rework logs
-    has_rework_logs = db.execute(text("""
-        SELECT COUNT(*) FROM scheduling.production_logs
-        WHERE operation_id = :op_id AND status = 'rework'
-    """), {"op_id": log.operation_id}).scalar() > 0
-    
-    # Check if there are any pending logs (waiting for supervisor approval)
-    has_pending_logs = db.execute(text("""
-        SELECT COUNT(*) FROM scheduling.production_logs
-        WHERE operation_id = :op_id AND status = 'pending'
-    """), {"op_id": log.operation_id}).scalar() > 0
-    
-    # Block if:
-    # 1. Total produced meets required quantity
-    # 2. Total approved is less than required (not completed yet)
-    # 3. Either no rework logs, OR there are pending logs waiting for approval
-    if total_produced >= total_quantity and total_approved < total_quantity and (not has_rework_logs or has_pending_logs):
-        if has_rework_logs and has_pending_logs:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot create new production log. You have rework items and pending logs waiting for approval. Total produced: {total_produced}, Total approved: {total_approved}. Please wait for supervisor to approve existing logs before sending more."
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot create new production log. Total produced quantity ({total_produced}) already matches required quantity ({total_quantity}). Please wait for supervisor approval (total approved: {total_approved}) or delete existing logs."
-            )
-    
-    # Calculate remaining quantity based on what's effectively approved (not produced)
-    # This handles rework scenarios where produced > approved
-    remaining_quantity = total_quantity - total_approved
-    
-    # Validate that the new production doesn't exceed what's still needed
+    # Validate that the new production doesn't exceed remaining quantity
     if log.produced_quantity > remaining_quantity:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot produce {log.produced_quantity} items. Only {remaining_quantity} items remaining to reach total quantity of {total_quantity}. Total approved: {total_approved}, Total produced: {total_produced}."
+            detail=f"Cannot produce {log.produced_quantity} items. Only {remaining_quantity} items remaining to be produced."
         )
 
     db_log = ProductionLog(**log.model_dump())
     db_log.supervisor_id = None  # Force supervisor_id to null on creation
+    db_log.remaining_quantity_to_be_produced = remaining_quantity
     db.add(db_log)
     db.commit()
     db.refresh(db_log)
 
-    # Calculate rework_quantity for response
-    if db_log.produced_quantity and db_log.approved_quantity:
-        db_log.rework_quantity = db_log.produced_quantity - db_log.approved_quantity
-    elif db_log.produced_quantity and not db_log.approved_quantity:
-        db_log.rework_quantity = db_log.produced_quantity
-    else:
-        db_log.rework_quantity = 0
+    # Build response data dictionary
+    response_data = {
+        "id": db_log.id,
+        "operation_id": db_log.operation_id,
+        "operator_id": db_log.operator_id,
+        "supervisor_id": db_log.supervisor_id,
+        "notes": db_log.notes,
+        "remarks": db_log.remarks,
+        "from_date": db_log.from_date,
+        "from_time": db_log.from_time,
+        "to_date": db_log.to_date,
+        "to_time": db_log.to_time,
+        "status": db_log.status,
+        "operator_status": db_log.operator_status,
+        "produced_quantity": db_log.produced_quantity,
+        "approved_quantity": db_log.approved_quantity,
+        "rework_quantity": db_log.rework_quantity,
+        "rejected_quantity": db_log.rejected_quantity,
+        "remaining_quantity_to_be_produced": db_log.remaining_quantity_to_be_produced,
+        "created_at": db_log.created_at,
+        "supervisor_acknowledged": db_log.supervisor_acknowledged,
+        "supervisor_acknowledged_at": db_log.supervisor_acknowledged_at,
+        "operator_acknowledged": db_log.operator_acknowledged,
+        "operator_acknowledged_at": db_log.operator_acknowledged_at
+    }
 
-    return db_log
+    # Build response manually
+    response = ProductionLogResponse(**response_data)
+
+    return response
 
 @router.get("/", response_model=List[ProductionLogWithDetails])
 def get_all_production_logs(
     status: Optional[ProductionLogStatus] = None,
     operator_id: Optional[int] = None,
     operation_id: Optional[int] = None,
+    hierarchical: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
     query = db.query(ProductionLog)
@@ -171,30 +162,33 @@ def get_all_production_logs(
         operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
         supervisor = db.query(AccessUser).filter(AccessUser.id == log.supervisor_id).first() if log.supervisor_id else None
 
-        # Calculate rework_quantity
-        rework_quantity = 0
-        if log.produced_quantity and log.approved_quantity:
-            rework_quantity = log.produced_quantity - log.approved_quantity
-        elif log.produced_quantity and not log.approved_quantity:
-            rework_quantity = log.produced_quantity
+        # Build response data dictionary
+        response_data = {
+            "id": log.id,
+            "operation_id": log.operation_id,
+            "operator_id": log.operator_id,
+            "supervisor_id": log.supervisor_id,
+            "notes": log.notes,
+            "remarks": log.remarks,
+            "from_date": log.from_date,
+            "from_time": log.from_time,
+            "to_date": log.to_date,
+            "to_time": log.to_time,
+            "status": log.status,
+            "operator_status": log.operator_status,
+            "produced_quantity": log.produced_quantity,
+            "approved_quantity": log.approved_quantity,
+            "rework_quantity": log.rework_quantity,
+            "rejected_quantity": log.rejected_quantity,
+            "remaining_quantity_to_be_produced": log.remaining_quantity_to_be_produced,
+            "created_at": log.created_at,
+            "supervisor_acknowledged": log.supervisor_acknowledged,
+            "supervisor_acknowledged_at": log.supervisor_acknowledged_at,
+            "operator_acknowledged": log.operator_acknowledged,
+            "operator_acknowledged_at": log.operator_acknowledged_at
+        }
 
-        response = ProductionLogWithDetails(
-            id=log.id,
-            operation_id=log.operation_id,
-            operator_id=log.operator_id,
-            supervisor_id=log.supervisor_id,
-            notes=log.notes,
-            remarks=log.remarks,
-            from_date=log.from_date,
-            from_time=log.from_time,
-            to_date=log.to_date,
-            to_time=log.to_time,
-            status=log.status,
-            produced_quantity=log.produced_quantity,
-            approved_quantity=log.approved_quantity,
-            created_at=log.created_at,
-            rework_quantity=rework_quantity
-        )
+        response = ProductionLogWithDetails(**response_data)
 
         # Add operation details
         if operation:
@@ -317,31 +311,33 @@ def get_production_log(log_id: int, db: Session = Depends(get_db)):
     operator = db.query(AccessUser).filter(AccessUser.id == log.operator_id).first()
     supervisor = db.query(AccessUser).filter(AccessUser.id == log.supervisor_id).first() if log.supervisor_id else None
 
-    # Calculate rework_quantity
-    rework_quantity = 0
-    if log.produced_quantity and log.approved_quantity:
-        rework_quantity = log.produced_quantity - log.approved_quantity
-    elif log.produced_quantity and not log.approved_quantity:
-        rework_quantity = log.produced_quantity
-
     # Build response manually to avoid ORM mapping issues
-    response = ProductionLogWithDetails(
-        id=log.id,
-        operation_id=log.operation_id,
-        operator_id=log.operator_id,
-        supervisor_id=log.supervisor_id,
-        notes=log.notes,
-        remarks=log.remarks,
-        from_date=log.from_date,
-        from_time=log.from_time,
-        to_date=log.to_date,
-        to_time=log.to_time,
-        status=log.status,
-        produced_quantity=log.produced_quantity,
-        approved_quantity=log.approved_quantity,
-        created_at=log.created_at,
-        rework_quantity=rework_quantity
-    )
+    response_data = {
+        "id": log.id,
+        "operation_id": log.operation_id,
+        "operator_id": log.operator_id,
+        "supervisor_id": log.supervisor_id,
+        "notes": log.notes,
+        "remarks": log.remarks,
+        "from_date": log.from_date,
+        "from_time": log.from_time,
+        "to_date": log.to_date,
+        "to_time": log.to_time,
+        "status": log.status,
+        "operator_status": log.operator_status,
+        "produced_quantity": log.produced_quantity,
+        "approved_quantity": log.approved_quantity,
+        "rework_quantity": log.rework_quantity,
+        "rejected_quantity": log.rejected_quantity,
+        "remaining_quantity_to_be_produced": log.remaining_quantity_to_be_produced,
+        "created_at": log.created_at,
+        "supervisor_acknowledged": log.supervisor_acknowledged,
+        "supervisor_acknowledged_at": log.supervisor_acknowledged_at,
+        "operator_acknowledged": log.operator_acknowledged,
+        "operator_acknowledged_at": log.operator_acknowledged_at
+    }
+    
+    response = ProductionLogWithDetails(**response_data)
 
     # Add operation details
     if operation:
@@ -508,18 +504,63 @@ def delete_production_log(log_id: int, db: Session = Depends(get_db)):
     
     return None
 
+
+@router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
+def bulk_delete_production_logs(
+    bulk_delete: ProductionLogBulkDelete = ProductionLogBulkDelete(),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete multiple production logs at once.
+    If log_ids is not provided, deletes ALL production logs.
+    """
+    if bulk_delete.log_ids:
+        # Find all existing logs to delete by specific IDs
+        logs_to_delete = db.query(ProductionLog).filter(
+            ProductionLog.id.in_(bulk_delete.log_ids)
+        ).all()
+        
+        if not logs_to_delete:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No production logs found with the provided IDs"
+            )
+    else:
+        # Delete all production logs
+        logs_to_delete = db.query(ProductionLog).all()
+        
+        if not logs_to_delete:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No production logs found to delete"
+            )
+    
+    # Delete the logs
+    for log in logs_to_delete:
+        db.delete(log)
+    
+    db.commit()
+    
+    return None
+
 @router.put("/{log_id}/status", response_model=ProductionLogResponse)
 def update_production_log_status(
     log_id: int,
     status_update: ProductionLogStatusUpdate,
     db: Session = Depends(get_db)
 ):
+    from sqlalchemy import text
+    from DB.models.oms import Operation, Part
+
     db_log = db.query(ProductionLog).filter(ProductionLog.id == log_id).first()
     if not db_log:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Production log with id {log_id} not found"
         )
+
+    # Store original status to detect changes that should notify the operator
+    original_status = db_log.status
     
     # Prevent changing status from completed to any other status
     if db_log.status == "completed" and status_update.status != "completed":
@@ -542,72 +583,105 @@ def update_production_log_status(
     if status_update.remarks is not None:
         db_log.remarks = status_update.remarks
     
-    # Handle approved_quantity validation and automatic status determination
+    # Get operation and part details for total quantity
+    operation = db.query(Operation).filter(Operation.id == db_log.operation_id).first()
+    part = db.query(Part).filter(Part.id == operation.part_id).first()
+    total_quantity = part.qty or 0
+
+    # Calculate total approved quantity across all logs for this operation
+    total_approved = db.execute(text("""
+        SELECT COALESCE(SUM(approved_quantity), 0)
+        FROM scheduling.production_logs
+        WHERE operation_id = :op_id AND approved_quantity IS NOT NULL AND id != :log_id
+    """), {"op_id": db_log.operation_id, "log_id": log_id}).scalar()
+
+    # Handle the new scenario: approve, rework, rejected together
+    approved_qty = status_update.approved_quantity or 0
+    rework_qty = status_update.rework_quantity or 0
+    rejected_qty = status_update.rejected_quantity or 0
+
+    # Validate that the sum of approved, rework, rejected equals produced quantity
+    total_assigned = approved_qty + rework_qty + rejected_qty
+    
     if status_update.status == "completed":
-        # If status is completed, user should not provide approved_quantity at all
-        # Check if approved_quantity is in the request (even if it's 0)
-        if "approved_quantity" in status_update.model_dump(exclude_unset=True):
+        # If status is completed, approved should equal produced
+        if approved_qty != db_log.produced_quantity:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Approved quantity should not be provided when status is set to 'completed'. It will be automatically set to equal the produced quantity."
+                detail=f"For 'completed' status, approved quantity ({approved_qty}) must equal produced quantity ({db_log.produced_quantity})"
             )
-        # Automatically set approved_quantity = produced_quantity
-        db_log.approved_quantity = db_log.produced_quantity
-        db_log.status = "completed"
-    elif status_update.status == "rework":
-        # If status is rework, approved_quantity is optional
-        # If not provided, assume 0 (no approval)
-        if status_update.approved_quantity is None:
-            # Supervisor is not approving anything - set approved_quantity to 0
-            db_log.approved_quantity = 0
-        else:
-            # If approved_quantity is provided, validate it
-            # Validate that approved_quantity is never greater than produced_quantity
-            if status_update.approved_quantity > db_log.produced_quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Approved quantity ({status_update.approved_quantity}) cannot be greater than produced quantity ({db_log.produced_quantity})"
-                )
-            
-            # For rework, approved_quantity must be less than produced_quantity
-            if status_update.approved_quantity >= db_log.produced_quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"For rework status, approved quantity ({status_update.approved_quantity}) must be less than produced quantity ({db_log.produced_quantity})"
-                )
-            
-            db_log.approved_quantity = status_update.approved_quantity
-        
-        db_log.status = "rework"
+    elif status_update.status == "pending":
+        # If status is pending, we don't need to assign anything
+        pass
     else:
-        # For other statuses (like pending), handle approved_quantity if provided
-        if status_update.approved_quantity is not None:
-            # Validate that approved_quantity is never greater than produced_quantity
-            if status_update.approved_quantity > db_log.produced_quantity:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Approved quantity ({status_update.approved_quantity}) cannot be greater than produced quantity ({db_log.produced_quantity})"
-                )
-            db_log.approved_quantity = status_update.approved_quantity
-        
+        # For all other statuses, sum of approved, rework, rejected must equal produced
+        if total_assigned != db_log.produced_quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Total of approved ({approved_qty}) + rework ({rework_qty}) + rejected ({rejected_qty}) must equal produced quantity ({db_log.produced_quantity}). Got total {total_assigned} instead."
+            )
+
+    # Update the production log fields
+    db_log.approved_quantity = approved_qty
+    db_log.rework_quantity = rework_qty
+    db_log.rejected_quantity = rejected_qty
+
+    # Calculate remaining quantity to be produced
+    total_approved_now = total_approved + approved_qty
+    remaining_to_produce = total_quantity - total_approved_now
+    db_log.remaining_quantity_to_be_produced = remaining_to_produce
+
+    # Determine the status
+    if remaining_to_produce <= 0:
+        db_log.status = "completed"
+    elif rework_qty > 0 or rejected_qty > 0:
+        db_log.status = "inprogress"
+    else:
         db_log.status = status_update.status
+
+    # If supervisor reviewed (status changed or quantities assigned), reset operator_acknowledged
+    # so the operator gets notified and can acknowledge the supervisor's response
+    if db_log.status != original_status or approved_qty > 0 or rework_qty > 0 or rejected_qty > 0:
+        db_log.operator_acknowledged = False
+        db_log.operator_acknowledged_at = None
     
     db.commit()
     db.refresh(db_log)
 
-    # Calculate rework_quantity for response
-    if db_log.produced_quantity and db_log.approved_quantity:
-        db_log.rework_quantity = db_log.produced_quantity - db_log.approved_quantity
-    elif db_log.produced_quantity and not db_log.approved_quantity:
-        db_log.rework_quantity = db_log.produced_quantity
-    else:
-        db_log.rework_quantity = 0
+    # Build response data dictionary
+    response_data = {
+        "id": db_log.id,
+        "operation_id": db_log.operation_id,
+        "operator_id": db_log.operator_id,
+        "supervisor_id": db_log.supervisor_id,
+        "notes": db_log.notes,
+        "remarks": db_log.remarks,
+        "from_date": db_log.from_date,
+        "from_time": db_log.from_time,
+        "to_date": db_log.to_date,
+        "to_time": db_log.to_time,
+        "status": db_log.status,
+        "operator_status": db_log.operator_status,
+        "produced_quantity": db_log.produced_quantity,
+        "approved_quantity": db_log.approved_quantity,
+        "rework_quantity": db_log.rework_quantity,
+        "rejected_quantity": db_log.rejected_quantity,
+        "remaining_quantity_to_be_produced": db_log.remaining_quantity_to_be_produced,
+        "created_at": db_log.created_at,
+        "supervisor_acknowledged": db_log.supervisor_acknowledged,
+        "supervisor_acknowledged_at": db_log.supervisor_acknowledged_at,
+        "operator_acknowledged": db_log.operator_acknowledged,
+        "operator_acknowledged_at": db_log.operator_acknowledged_at
+    }
+
+    # Build response manually
+    response = ProductionLogResponse(**response_data)
 
 
     # ── TRIGGER DYNAMIC RESCHEDULE ──────────────────────────────────────── #
-    # After supervisor approves (completed) or marks rework, re-plan remaining
+    # After supervisor approves (completed), marks rework, or rejects, re-plan remaining
     # quantity for this part's entire operation chain in rescheduling_items.
-    if status_update.status in ["completed", "rework"]:
+    if db_log.status in ["completed", "inprogress", "rework", "rejected"]:
         try:
             from algorithm import dynamic_reschedule
             from DB.models.scheduling import Rescheduling
@@ -632,14 +706,14 @@ def update_production_log_status(
             print(
                 f"[DYNAMIC] Triggered after supervisor action on log {log_id} "
                 f"(op={db_log.operation_id}, part={part_id}, "
-                f"status={status_update.status})"
+                f"status={db_log.status})"
             )
         except Exception as e:
             # Non-fatal: log the error but don't fail the approval
             print(f"[WARN] dynamic_reschedule after supervisor approval failed: {e}")
     # ─────────────────────────────────────────────────────────────────────── #
  
-    return db_log
+    return response
 
 @router.get("/operator/{operator_id}", response_model=List[ProductionLogResponse])
 def get_production_logs_by_operator(
@@ -663,16 +737,40 @@ def get_production_logs_by_operator(
     
     logs = query.offset(skip).all()
     
-    # Calculate rework_quantity for each log
+    # Build response objects manually
+    response_logs = []
     for log in logs:
-        if log.produced_quantity and log.approved_quantity:
-            log.rework_quantity = log.produced_quantity - log.approved_quantity
-        elif log.produced_quantity and not log.approved_quantity:
-            log.rework_quantity = log.produced_quantity
-        else:
-            log.rework_quantity = 0
+        # Build response data dictionary
+        response_data = {
+            "id": log.id,
+            "operation_id": log.operation_id,
+            "operator_id": log.operator_id,
+            "supervisor_id": log.supervisor_id,
+            "notes": log.notes,
+            "remarks": log.remarks,
+            "from_date": log.from_date,
+            "from_time": log.from_time,
+            "to_date": log.to_date,
+            "to_time": log.to_time,
+            "status": log.status,
+            "operator_status": log.operator_status,
+            "produced_quantity": log.produced_quantity,
+            "approved_quantity": log.approved_quantity,
+            "rework_quantity": log.rework_quantity,
+            "rejected_quantity": log.rejected_quantity,
+            "remaining_quantity_to_be_produced": log.remaining_quantity_to_be_produced,
+            "created_at": log.created_at,
+            "supervisor_acknowledged": log.supervisor_acknowledged,
+            "supervisor_acknowledged_at": log.supervisor_acknowledged_at,
+            "operator_acknowledged": log.operator_acknowledged,
+            "operator_acknowledged_at": log.operator_acknowledged_at
+        }
+        
+        response_log = ProductionLogResponse(**response_data)
+        response_logs.append(response_log)
     
-    return logs
+    return response_logs
+
 
 @router.get("/operation/{operation_id}", response_model=List[ProductionLogResponse])
 def get_production_logs_by_operation(
@@ -696,16 +794,39 @@ def get_production_logs_by_operation(
 
     logs = query.offset(skip).all()
 
-    # Calculate rework_quantity for each log
+    # Build response objects manually
+    response_logs = []
     for log in logs:
-        if log.produced_quantity and log.approved_quantity:
-            log.rework_quantity = log.produced_quantity - log.approved_quantity
-        elif log.produced_quantity and not log.approved_quantity:
-            log.rework_quantity = log.produced_quantity
-        else:
-            log.rework_quantity = 0
+        # Build response data dictionary
+        response_data = {
+            "id": log.id,
+            "operation_id": log.operation_id,
+            "operator_id": log.operator_id,
+            "supervisor_id": log.supervisor_id,
+            "notes": log.notes,
+            "remarks": log.remarks,
+            "from_date": log.from_date,
+            "from_time": log.from_time,
+            "to_date": log.to_date,
+            "to_time": log.to_time,
+            "status": log.status,
+            "operator_status": log.operator_status,
+            "produced_quantity": log.produced_quantity,
+            "approved_quantity": log.approved_quantity,
+            "rework_quantity": log.rework_quantity,
+            "rejected_quantity": log.rejected_quantity,
+            "remaining_quantity_to_be_produced": log.remaining_quantity_to_be_produced,
+            "created_at": log.created_at,
+            "supervisor_acknowledged": log.supervisor_acknowledged,
+            "supervisor_acknowledged_at": log.supervisor_acknowledged_at,
+            "operator_acknowledged": log.operator_acknowledged,
+            "operator_acknowledged_at": log.operator_acknowledged_at
+        }
 
-    return logs
+        response_log = ProductionLogResponse(**response_data)
+        response_logs.append(response_log)
+
+    return response_logs
 
 @router.post("/operation/{operation_id}/submit", response_model=ProductionLogResponse)
 def submit_production_log(
@@ -763,14 +884,23 @@ def submit_production_log(
             detail=f"Production already completed. Total approved: {total_approved}, Total quantity: {total_quantity}."
         )
     
-    # Calculate remaining quantity
-    remaining_quantity = total_quantity - total_approved
+    # Check if there's a previous log with remaining_quantity_to_be_produced
+    last_log = db.query(ProductionLog).filter(
+        ProductionLog.operation_id == operation_id,
+        ProductionLog.id != db_log.id
+    ).order_by(ProductionLog.created_at.desc()).first()
+
+    # Determine remaining quantity
+    if last_log and last_log.remaining_quantity_to_be_produced is not None:
+        remaining_quantity = last_log.remaining_quantity_to_be_produced
+    else:
+        remaining_quantity = total_quantity - total_approved
     
     # Validate that produced quantity doesn't exceed remaining quantity
     if submit_data.produced_quantity > remaining_quantity:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot produce {submit_data.produced_quantity} items. Only {remaining_quantity} items remaining to reach total quantity of {total_quantity}. Total approved: {total_approved}."
+            detail=f"Cannot produce {submit_data.produced_quantity} items. Only {remaining_quantity} items remaining to be produced."
         )
     
     # Get current time for to_date/to_time
@@ -782,19 +912,41 @@ def submit_production_log(
     db_log.to_date = current_time.date()
     db_log.to_time = current_time.time()
     db_log.operator_status = "completed"
+    db_log.remaining_quantity_to_be_produced = remaining_quantity
     
     db.commit()
     db.refresh(db_log)
     
-    # Calculate rework_quantity for response
-    if db_log.produced_quantity and db_log.approved_quantity:
-        db_log.rework_quantity = db_log.produced_quantity - db_log.approved_quantity
-    elif db_log.produced_quantity and not db_log.approved_quantity:
-        db_log.rework_quantity = db_log.produced_quantity
-    else:
-        db_log.rework_quantity = 0
+    # Build response data dictionary
+    response_data = {
+        "id": db_log.id,
+        "operation_id": db_log.operation_id,
+        "operator_id": db_log.operator_id,
+        "supervisor_id": db_log.supervisor_id,
+        "notes": db_log.notes,
+        "remarks": db_log.remarks,
+        "from_date": db_log.from_date,
+        "from_time": db_log.from_time,
+        "to_date": db_log.to_date,
+        "to_time": db_log.to_time,
+        "status": db_log.status,
+        "operator_status": db_log.operator_status,
+        "produced_quantity": db_log.produced_quantity,
+        "approved_quantity": db_log.approved_quantity,
+        "rework_quantity": db_log.rework_quantity,
+        "rejected_quantity": db_log.rejected_quantity,
+        "remaining_quantity_to_be_produced": db_log.remaining_quantity_to_be_produced,
+        "created_at": db_log.created_at,
+        "supervisor_acknowledged": db_log.supervisor_acknowledged,
+        "supervisor_acknowledged_at": db_log.supervisor_acknowledged_at,
+        "operator_acknowledged": db_log.operator_acknowledged,
+        "operator_acknowledged_at": db_log.operator_acknowledged_at
+    }
+
+    # Build response manually
+    response = ProductionLogResponse(**response_data)
     
-    return db_log
+    return response
 
 
 @router.get("/operation/{operation_id}/status-summary")
@@ -822,8 +974,8 @@ def get_operation_production_status(operation_id: int, db: Session = Depends(get
             COUNT(*) as total_logs,
             COALESCE(SUM(produced_quantity), 0) as total_produced,
             COALESCE(SUM(approved_quantity), 0) as total_approved,
-            COALESCE(SUM(CASE WHEN approved_quantity IS NOT NULL AND approved_quantity < produced_quantity 
-                        THEN (produced_quantity - approved_quantity) ELSE 0 END), 0) as total_rework
+            COALESCE(SUM(rework_quantity), 0) as total_rework,
+            COALESCE(SUM(rejected_quantity), 0) as total_rejected
         FROM scheduling.production_logs
         WHERE operation_id = :op_id
     """), {"op_id": operation_id}).fetchone()
@@ -914,6 +1066,7 @@ def get_operation_production_status(operation_id: int, db: Session = Depends(get
         "total_produced": stats.total_produced,
         "total_approved": stats.total_approved,
         "total_rework": stats.total_rework,
+        "total_rejected": stats.total_rejected,
         "completion_percentage": round(completion_percentage, 2),
         "is_completed": stats.total_approved >= required_quantity,
         "status": current_status,
@@ -922,3 +1075,96 @@ def get_operation_production_status(operation_id: int, db: Session = Depends(get
         "machine_make": machine_make,
         "machine_model": machine_model
     }
+
+
+@router.put("/{log_id}/acknowledge", response_model=ProductionLogResponse)
+def acknowledge_production_log(
+    log_id: int,
+    operator_id: Optional[int] = None,
+    supervisor_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Acknowledge a production log - operator or supervisor marks that they've seen the response
+    """
+    db_log = db.query(ProductionLog).filter(ProductionLog.id == log_id).first()
+    
+    if not db_log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Production log with id {log_id} not found"
+        )
+    
+    # Verify the user has permission to acknowledge
+    if operator_id and db_log.operator_id != operator_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the operator who created this log can acknowledge it"
+        )
+    
+    if supervisor_id and db_log.supervisor_id and db_log.supervisor_id != supervisor_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the supervisor who reviewed this log can acknowledge it"
+        )
+    
+    if not operator_id and not supervisor_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either operator_id or supervisor_id must be provided"
+        )
+    
+    # Verify the log status based on who is acknowledging
+    if operator_id:
+        if db_log.status not in ["completed", "rework", "rejected", "inprogress"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Operator can only acknowledge logs with status 'completed', 'rework', 'rejected', or 'inprogress'"
+            )
+    elif supervisor_id:
+        if db_log.status not in ["pending", "completed", "rework", "rejected", "inprogress"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Supervisor can only acknowledge logs with status 'pending', 'completed', 'rework', 'rejected', or 'inprogress'"
+            )
+    
+    # Update acknowledgment fields based on who is acknowledging
+    if operator_id:
+        db_log.operator_acknowledged = True
+        db_log.operator_acknowledged_at = datetime.now()
+    elif supervisor_id:
+        db_log.supervisor_acknowledged = True
+        db_log.supervisor_acknowledged_at = datetime.now()
+    
+    db.commit()
+    db.refresh(db_log)
+    
+    # Build response manually
+    response_data = {
+        "id": db_log.id,
+        "operation_id": db_log.operation_id,
+        "operator_id": db_log.operator_id,
+        "supervisor_id": db_log.supervisor_id,
+        "notes": db_log.notes,
+        "remarks": db_log.remarks,
+        "from_date": db_log.from_date,
+        "from_time": db_log.from_time,
+        "to_date": db_log.to_date,
+        "to_time": db_log.to_time,
+        "status": db_log.status,
+        "operator_status": db_log.operator_status,
+        "produced_quantity": db_log.produced_quantity,
+        "approved_quantity": db_log.approved_quantity,
+        "rework_quantity": db_log.rework_quantity,
+        "rejected_quantity": db_log.rejected_quantity,
+        "remaining_quantity_to_be_produced": db_log.remaining_quantity_to_be_produced,
+        "created_at": db_log.created_at,
+        "supervisor_acknowledged": db_log.supervisor_acknowledged,
+        "supervisor_acknowledged_at": db_log.supervisor_acknowledged_at,
+        "operator_acknowledged": db_log.operator_acknowledged,
+        "operator_acknowledged_at": db_log.operator_acknowledged_at
+    }
+    
+    response = ProductionLogResponse(**response_data)
+    
+    return response

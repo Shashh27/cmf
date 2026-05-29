@@ -63,7 +63,8 @@ from .production_logs import (
     ProductionLogStatusUpdate,
     ProductionLogStatus,
     ProductionLogSubmit,
-    OperatorStatus
+    OperatorStatus,
+    ProductionLogBulkDelete
 )
 # from .inventory import (
 #     RawMaterial,
@@ -136,6 +137,7 @@ __all__ = [
     "ProductionLogStatus",
     "ProductionLogSubmit",
     "OperatorStatus",
+    "ProductionLogBulkDelete",
     "RawMaterial",
     "RawMaterialCreate",
     "RawMaterialUpdate",

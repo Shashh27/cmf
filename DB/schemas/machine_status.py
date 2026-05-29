@@ -9,6 +9,7 @@ from pydantic import BaseModel
 class MachineStatusBase(BaseModel):
     work_center_name: str
     machine_make: str
+    machine_model: Optional[str] = None
     machine_id: int
     status_id: int
     status_name: str

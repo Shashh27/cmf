@@ -37,6 +37,16 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    # Check if project coordinator exists if provided
+    if order.project_coordinator_id is not None:
+        project_coordinator = db.query(AccessUser).filter(AccessUser.id == order.project_coordinator_id).first()
+        if not project_coordinator:
+            raise HTTPException(status_code=404, detail="Project coordinator not found")
+    # Check if manufacturing coordinator exists if provided
+    if order.manufacturing_coordinator_id is not None:
+        manufacturing_coordinator = db.query(AccessUser).filter(AccessUser.id == order.manufacturing_coordinator_id).first()
+        if not manufacturing_coordinator:
+            raise HTTPException(status_code=404, detail="Manufacturing coordinator not found")
     
     db_order = Order(**order.dict())
     db.add(db_order)
@@ -77,6 +87,8 @@ def get_orders(skip: int = 0, limit: int = 100, user_id: int | None = None, db: 
         product_name = product.product_name if product else None
         user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
         user_name = user.user_name if user else None
+        project_coordinator = db.query(AccessUser).filter(AccessUser.id == order.project_coordinator_id).first() if order.project_coordinator_id else None
+        manufacturing_coordinator = db.query(AccessUser).filter(AccessUser.id == order.manufacturing_coordinator_id).first() if order.manufacturing_coordinator_id else None
         order_dict = {
             "id": order.id,
             "sale_order_number": order.sale_order_number,
@@ -85,12 +97,16 @@ def get_orders(skip: int = 0, limit: int = 100, user_id: int | None = None, db: 
             "customer_id": order.customer_id,
             "product_id": order.product_id,
             "user_id": order.user_id or 0,
+            "project_coordinator_id": order.project_coordinator_id,
+            "manufacturing_coordinator_id": order.manufacturing_coordinator_id,
             "quantity": order.quantity,
             "due_date": order.due_date,
             "status": order.status,
             "company_name": company_name,
             "product_name": product_name,
-            "user_name": user_name
+            "user_name": user_name,
+            "project_coordinator_name": project_coordinator.user_name if project_coordinator else None,
+            "manufacturing_coordinator_name": manufacturing_coordinator.user_name if manufacturing_coordinator else None
         }
         result.append(order_dict)
     return result
@@ -193,6 +209,8 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
     product_name = product.product_name if product else None
     user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
     user_name = user.user_name if user else None
+    project_coordinator = db.query(AccessUser).filter(AccessUser.id == order.project_coordinator_id).first() if order.project_coordinator_id else None
+    manufacturing_coordinator = db.query(AccessUser).filter(AccessUser.id == order.manufacturing_coordinator_id).first() if order.manufacturing_coordinator_id else None
     order_dict = {
         "id": order.id,
         "sale_order_number": order.sale_order_number,
@@ -201,12 +219,16 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
         "customer_id": order.customer_id,
         "product_id": order.product_id,
         "user_id": order.user_id or 0,
+        "project_coordinator_id": order.project_coordinator_id,
+        "manufacturing_coordinator_id": order.manufacturing_coordinator_id,
         "quantity": order.quantity,
         "due_date": order.due_date,
         "status": order.status,
         "company_name": company_name,
         "product_name": product_name,
-        "user_name": user_name
+        "user_name": user_name,
+        "project_coordinator_name": project_coordinator.user_name if project_coordinator else None,
+        "manufacturing_coordinator_name": manufacturing_coordinator.user_name if manufacturing_coordinator else None
     }
     return order_dict
 
@@ -475,6 +497,14 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
                     priority=max_priority + 1 + index
                 )
                 db.add(priority_entry)
+    if order_update.project_coordinator_id is not None:
+        project_coordinator = db.query(AccessUser).filter(AccessUser.id == order_update.project_coordinator_id).first()
+        if not project_coordinator:
+            raise HTTPException(status_code=404, detail="Project coordinator not found")
+    if order_update.manufacturing_coordinator_id is not None:
+        manufacturing_coordinator = db.query(AccessUser).filter(AccessUser.id == order_update.manufacturing_coordinator_id).first()
+        if not manufacturing_coordinator:
+            raise HTTPException(status_code=404, detail="Manufacturing coordinator not found")
             
     update_data = order_update.dict(exclude_unset=True)
     for field, value in update_data.items():
@@ -485,6 +515,10 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
     company_name = customer.company_name if customer else None
     product = db.query(Product).filter(Product.id == order.product_id).first()
     product_name = product.product_name if product else None
+    user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
+    user_name = user.user_name if user else None
+    project_coordinator = db.query(AccessUser).filter(AccessUser.id == order.project_coordinator_id).first() if order.project_coordinator_id else None
+    manufacturing_coordinator = db.query(AccessUser).filter(AccessUser.id == order.manufacturing_coordinator_id).first() if order.manufacturing_coordinator_id else None
     order_dict = {
         "id": order.id,
         "sale_order_number": order.sale_order_number,
@@ -493,11 +527,16 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
         "customer_id": order.customer_id,
         "product_id": order.product_id,
         "user_id": order.user_id,
+        "project_coordinator_id": order.project_coordinator_id,
+        "manufacturing_coordinator_id": order.manufacturing_coordinator_id,
         "quantity": order.quantity,
         "due_date": order.due_date,
         "status": order.status,
         "company_name": company_name,
-        "product_name": product_name
+        "product_name": product_name,
+        "user_name": user_name,
+        "project_coordinator_name": project_coordinator.user_name if project_coordinator else None,
+        "manufacturing_coordinator_name": manufacturing_coordinator.user_name if manufacturing_coordinator else None
     }
     return order_dict
 

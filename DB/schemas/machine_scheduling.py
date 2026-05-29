@@ -135,3 +135,58 @@ class OperationStatusWithDetails(OperationStatusResponse):
     model_config = {
         "from_attributes": True
     }
+
+
+# =======================
+# Out-Source Operation Status Schemas
+# =======================
+class OutSourceOperationStatusBase(BaseModel):
+    sent_date:      Optional[datetime] = Field(None, description="When the part was sent to the vendor")
+    delivered_date: Optional[datetime] = Field(None, description="When the part was received back from the vendor")
+    status:         str = Field(..., description="pending | in_transit | delivered")
+
+
+class OutSourceOperationStatusCreate(OutSourceOperationStatusBase):
+    pass
+
+
+class OutSourceOperationStatusUpdate(BaseModel):
+    sent_date:      Optional[datetime] = Field(None, description="When the part was sent to the vendor")
+    delivered_date: Optional[datetime] = Field(None, description="When the part was received back from the vendor")
+    status:         Optional[str]      = Field(None, description="pending | in_transit | delivered")
+
+
+class OutSourceOperationStatusResponse(BaseModel):
+    id:             int
+    part_id:        int
+    order_id:       int
+    operation_id:   int
+    sent_date:      Optional[datetime] = None
+    delivered_date: Optional[datetime] = None
+    status:         str
+    created_at:     datetime
+    updated_at:     datetime
+
+    model_config = {"from_attributes": True}
+
+
+class OutSourceOperationWithDetails(BaseModel):
+    operation_id:      int
+    operation_number:  str
+    operation_name:    str
+    from_date:         Optional[datetime] = None
+    to_date:           Optional[datetime] = None
+    part_id:           int
+    part_number:       str
+    part_name:         Optional[str] = None
+    order_id:          int
+    sale_order_number: str
+    # Status fields (None when no status row exists yet)
+    status_id:         Optional[int]      = None
+    status:            Optional[str]      = None
+    sent_date:         Optional[datetime] = None
+    delivered_date:    Optional[datetime] = None
+    created_at:        Optional[datetime] = None
+    updated_at:        Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
