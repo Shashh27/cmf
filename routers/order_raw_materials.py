@@ -109,6 +109,7 @@ def link_material_to_order(request: OrderMaterialLinkRequest, db: Session = Depe
         # Create stock entry with status='not_available' and order_status='enquiry'
         stock = RawMaterialStockModel(
             material_id=request.raw_material_id,
+            process_type=request.process_type if hasattr(request, 'process_type') else None,
             form_type=request.form_type,
             diameter=request.diameter,
             length=request.length,
@@ -117,6 +118,7 @@ def link_material_to_order(request: OrderMaterialLinkRequest, db: Session = Depe
             inner_diameter=request.inner_diameter,
             outer_diameter=request.outer_diameter,
             quantity=request.quantity,
+            estimated_cost=request.estimated_cost if hasattr(request, 'estimated_cost') else None,
             source_type="order",
             source_order_id=request.order_id,
             order_status="enquiry",  # Initial status
@@ -182,15 +184,16 @@ def link_material_to_order(request: OrderMaterialLinkRequest, db: Session = Depe
 
 
 @router.put("/order-materials/{stock_id}/receive")
-def receive_order_material(stock_id: int, db: Session = Depends(get_db)):
+def receive_order_material(stock_id: int, final_cost: Optional[float] = None, db: Session = Depends(get_db)):
     """
     Receive order material - updates unit status and links parts.
-    
+
     When order is received:
     1. Stock status changes to 'available'
     2. Order status changes to 'received'
     3. Units status changes to 'available' (units created immediately on stock creation)
     4. Parts are linked to units
+    5. Final cost is saved if provided
     """
     # Get stock
     stock = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
@@ -250,6 +253,10 @@ def receive_order_material(stock_id: int, db: Session = Depends(get_db)):
         # Update stock status
         stock.order_status = "received"
         stock.status = "available"
+        
+        # Save final cost if provided
+        if final_cost is not None:
+            stock.final_cost = final_cost
         
         # Check if units already exist
         existing_units = db.query(RawMaterialUnitModel).filter(

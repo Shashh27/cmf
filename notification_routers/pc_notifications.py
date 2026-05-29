@@ -96,7 +96,7 @@ def enrich_details_with_names(db: Session, details: Dict[str, Any], entity_type:
     vendor_names = {}
     if vendor_ids:
         vendors = db.query(VendorModel).filter(VendorModel.id.in_(vendor_ids)).all()
-        vendor_names = {v.id: v.name for v in vendors}
+        vendor_names = {v.id: v.company_name for v in vendors}
     
     part_type_names = {}
     if part_type_ids:

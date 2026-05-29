@@ -321,6 +321,7 @@ class DocumentBase(BaseModel):
     assembly_id: Optional[int] = None
     parent_id: Optional[int] = None
     user_id: Optional[int] = None
+    user_name: Optional[str] = None
     is_acknowledged: bool = False
 
 

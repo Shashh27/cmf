@@ -97,5 +97,18 @@ def delete_access_user(user_id: int, db: Session = Depends(get_db)):
             detail=f"User with id {user_id} not found"
         )
     
+    # Delete from notifications.pc_notifications (pc_user_id)
+    from sqlalchemy import text
+    db.execute(
+        text("DELETE FROM notifications.pc_notifications WHERE pc_user_id = :user_id"),
+        {"user_id": user_id}
+    )
+    
+    # Delete from notifications.activity_log (user_id)
+    db.execute(
+        text("DELETE FROM notifications.activity_log WHERE user_id = :user_id"),
+        {"user_id": user_id}
+    )
+    
     db.delete(db_user)
     db.commit()

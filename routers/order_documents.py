@@ -20,13 +20,14 @@ def get_file_extension(filename: str) -> str:
     return os.path.splitext(filename)[1].lower()
 
 def _can_upload_order_document(order, user_id: Optional[int]) -> bool:
-    """Only project_coordinator, admin, or manufacturing_coordinator for this order can upload."""
+    """Only project_coordinator, admin, manufacturing_coordinator, or order creator can upload."""
     if user_id is None:
         return False
     return (
         order.project_coordinator_id == user_id
         or order.admin_id == user_id
         or order.manufacturing_coordinator_id == user_id
+        or order.user_id == user_id  # Allow order creator to upload
     )
 
 
@@ -52,7 +53,7 @@ async def upload_order_document(
     if not _can_upload_order_document(order, user_id):
         raise HTTPException(
             status_code=403,
-            detail="Only project coordinator, admin, or manufacturing coordinator for this order can upload order documents."
+            detail="Only project coordinator, admin, manufacturing coordinator, or order creator can upload order documents."
         )
 
     # Check if parent exists if provided
