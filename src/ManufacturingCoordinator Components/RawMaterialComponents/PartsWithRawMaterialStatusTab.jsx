@@ -248,12 +248,43 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       // Validate that if unit is selected, required length must be entered
       for (const linkage of statusEditCurrentLinkages) {
         const partId = linkage.part_id;
+
+        // Skip validation for parts that are pending unlink
+        if (pendingUnlinks.has(partId)) {
+          continue;
+        }
+
         const unitId = statusEditPartRawMaterialUnits[partId];
         const requiredLength = statusEditPartRequiredLengths[partId];
-        
+
         if (unitId && !requiredLength) {
           message.error('Please enter required length for all linked parts');
           return;
+        }
+
+        // Validate that required length does not exceed available unit length
+        if (unitId && requiredLength) {
+          const selectedUnit = availableUnits.find(u => u.id === unitId);
+          if (selectedUnit) {
+            const lengthValue = parseFloat(requiredLength);
+            if (lengthValue > selectedUnit.remaining_length) {
+              message.error(`Required length (${lengthValue}mm) exceeds available length of selected unit (${selectedUnit.remaining_length}mm)`);
+              return;
+            }
+
+            // Calculate total required length for this unit across all parts (excluding pending unlinks)
+            let totalForUnit = lengthValue;
+            Object.entries(statusEditPartRawMaterialUnits).forEach(([otherPartId, otherUnitId]) => {
+              if (otherUnitId === unitId && otherPartId !== partId.toString() && !pendingUnlinks.has(parseInt(otherPartId))) {
+                totalForUnit += (parseFloat(statusEditPartRequiredLengths[otherPartId]) || 0);
+              }
+            });
+
+            if (totalForUnit > selectedUnit.remaining_length) {
+              message.error(`Total required length (${totalForUnit}mm) exceeds available unit length (${selectedUnit.remaining_length}mm)`);
+              return;
+            }
+          }
         }
       }
 

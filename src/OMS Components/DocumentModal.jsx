@@ -318,7 +318,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
           </Badge>
         </div>
       }
-      destroyOnClose
+      destroyOnHidden
     >
       <style>{`
         @media (max-width: 768px) {

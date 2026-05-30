@@ -403,7 +403,7 @@ const EditLinkedPartsModal = ({
             </div>
           )}
 
-          {(isLinkedToOrderStock && !isLinkedToGeneralStock) && (
+          {(isLinkedToOrderStock && !isLinkedToGeneralStock && isLinkedToCurrentStock) && (
             <Button
               type="primary"
               size="small"
@@ -468,22 +468,30 @@ const EditLinkedPartsModal = ({
                 onKeyDown={handleInputKeyDown}
                 onChange={(value) => {
                   const selectedUnitId = statusEditPartRawMaterialUnits[part.id];
-                  
+
+                  // Always update the state so the value remains in the input field
+                  setStatusEditPartRequiredLengths(prev => ({ ...prev, [part.id]: value }));
+
+                  if (!isLinkedToCurrentStock) {
+                    handleLinkPart(part);
+                  }
+
+                  // Validate length against available unit length (only show warning, don't block input)
                   if (value && selectedUnitId) {
                     const selectedUnit = availableUnits.find(u => u.id === selectedUnitId);
                     if (selectedUnit) {
                       if (value > selectedUnit.remaining_length) {
-                        message.error(`Required length cannot exceed available length (${selectedUnit.remaining_length}mm)`);
+                        message.warning(`Required length (${value}mm) exceeds available length (${selectedUnit.remaining_length}mm). Save will be blocked.`);
                         return;
                       }
-                      
+
                       let totalForUnit = value;
                       Object.entries(statusEditPartRawMaterialUnits).forEach(([partId, unitId]) => {
                         if (unitId === selectedUnitId && partId !== part.id.toString()) {
-                          totalForUnit += (statusEditPartRequiredLengths[partId] || 0);
+                          totalForUnit += (parseFloat(statusEditPartRequiredLengths[partId]) || 0);
                         }
                       });
-                      
+
                       if (statusEditRecord && statusEditRecord.id === selectedUnit.stock_id) {
                         statusEditCurrentLinkages.forEach(linkage => {
                           if (linkage.raw_material_unit_id === selectedUnitId && linkage.part_id !== part.id) {
@@ -491,17 +499,12 @@ const EditLinkedPartsModal = ({
                           }
                         });
                       }
-                      
+
                       if (totalForUnit > selectedUnit.remaining_length) {
-                        message.error(`Total required length (${totalForUnit}mm) exceeds available unit length (${selectedUnit.remaining_length}mm)`);
+                        message.warning(`Total required length (${totalForUnit}mm) exceeds available unit length (${selectedUnit.remaining_length}mm). Save will be blocked.`);
                         return;
                       }
                     }
-                  }
-                  
-                  setStatusEditPartRequiredLengths(prev => ({ ...prev, [part.id]: value }));
-                  if (!isLinkedToCurrentStock) {
-                    handleLinkPart(part);
                   }
                 }}
                 style={{ width: '80px' }}

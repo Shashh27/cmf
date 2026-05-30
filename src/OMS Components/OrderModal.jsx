@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber, App } from "antd";
-import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined } from "@ant-design/icons";
+import { Modal, Form, Input, Select, Button, Typography, Space, Row, Col, Collapse, DatePicker, InputNumber, App, Tooltip } from "antd";
+import { FileTextOutlined, UploadOutlined, CloseOutlined, PlusOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 
 // Shared utility: normalise a revision string as the user types
@@ -207,6 +207,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             user_id: editingOrder.user_id?.toString() ?? "",
             project_coordinator_id: editingOrder.project_coordinator_id?.toString() ?? undefined,
             manufacturing_coordinator_id: editingOrder.manufacturing_coordinator_id?.toString() ?? undefined,
+            approval_status: editingOrder.approval_status || "Pending Approval",
+            approval_remarks: editingOrder.approval_remarks || "",
           });
         } else {
           form.resetFields();
@@ -316,6 +318,12 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             ? null
             : parseInt(values.manufacturing_coordinator_id),
       };
+
+      // Include approval fields when editing as admin
+      if (editingOrder && getCurrentUserRole() === 'admin') {
+        payload.approval_status = values.approval_status;
+        payload.approval_remarks = values.approval_remarks || null;
+      }
 
       // Admin id is required by backend; use current logged-in user as admin.
       try {
@@ -522,7 +530,13 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 className="mb-4"
                 getValueFromEvent={(e) => e.target.value.replace(/[^a-zA-Z0-9]/g, '').slice(0, 30)}
               >
-                <Input placeholder="Enter Project Number" className="rounded-md border-gray-300 h-10" autoComplete="off" maxLength={30} />
+                <Input
+                  placeholder="Enter Project Number"
+                  className="rounded-md border-gray-300 h-10"
+                  autoComplete="off"
+                  maxLength={30}
+                  disabled={editingOrder && getCurrentUserRole() === 'admin' && editingOrder.user_id !== getCurrentUserId()}
+                />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={9}>
@@ -532,9 +546,10 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-4"
               >
-                <Input 
-                  placeholder="Enter project name" 
+                <Input
+                  placeholder="Enter project name"
                   className="h-10"
+                  disabled={editingOrder && getCurrentUserRole() === 'admin' && editingOrder.user_id !== getCurrentUserId()}
                 />
               </Form.Item>
             </Col>
@@ -545,12 +560,13 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 rules={[{ required: true, message: 'Required' }]}
                 className="mb-4"
               >
-                <Select 
-                  placeholder="Select customer" 
+                <Select
+                  placeholder="Select customer"
                   className="h-10 custom-select-v2"
                   onOpenChange={handleCustomerDropdown}
                   showSearch
                   optionFilterProp="children"
+                  disabled={editingOrder && getCurrentUserRole() === 'admin' && editingOrder.user_id !== getCurrentUserId()}
                 >
                   {customers.map((customer) => {
                     const label = customer.branch
@@ -588,8 +604,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                   showSearch
                   optionFilterProp="children"
                   disabled={
-                    editingOrder && 
-                    editingOrder.project_coordinator_id && 
+                    editingOrder &&
+                    editingOrder.project_coordinator_id &&
                     !(getCurrentUserRole() === 'admin' && editingOrder.user_id === getCurrentUserId())
                   }
                 >
@@ -631,13 +647,14 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 validateStatus={decimalWarnings['quantity'] ? 'warning' : ''}
                 help={decimalWarnings['quantity']}
               >
-                <InputNumber 
-                  placeholder="Qty" 
-                  className="h-10 rounded-md border-gray-300 w-full" 
-                  min={1} 
+                <InputNumber
+                  placeholder="Qty"
+                  className="h-10 rounded-md border-gray-300 w-full"
+                  min={1}
                   max={99999}
                   precision={0}
                   stringMode
+                  disabled={editingOrder && getCurrentUserRole() === 'admin' && editingOrder.user_id !== getCurrentUserId()}
                   parser={(val) => limitDecimals(val, 'quantity', 0)}
                   onKeyDown={(e) => blockExtraDecimals(e, 'quantity', 0)}
                 />
@@ -649,11 +666,12 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Order Date</span>}
                 className="mb-0"
               >
-                <DatePicker 
-                  className="h-10 rounded-md border-gray-300 w-full" 
+                <DatePicker
+                  className="h-10 rounded-md border-gray-300 w-full"
                   format="DD-MM-YYYY"
                   placeholder="DD-MM-YYYY"
                   inputReadOnly
+                  disabled={editingOrder && getCurrentUserRole() === 'admin' && editingOrder.user_id !== getCurrentUserId()}
                 />
               </Form.Item>
             </Col>
@@ -675,8 +693,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 ]}
                 className="mb-0"
               >
-                <DatePicker 
-                  className="h-10 rounded-md border-gray-300 w-full" 
+                <DatePicker
+                  className="h-10 rounded-md border-gray-300 w-full"
                   format="DD-MM-YYYY"
                   placeholder="DD-MM-YYYY"
                   inputReadOnly
@@ -687,7 +705,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                     }
                   }}
                   allowClear
-                  disabled={!orderDateWatch}
+                  disabled={!orderDateWatch || (editingOrder && getCurrentUserRole() === 'admin' && editingOrder.user_id !== getCurrentUserId())}
                   disabledDate={(current) => {
                     const od = form.getFieldValue('order_date');
                     if (!od) return true;
@@ -708,6 +726,49 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             </Col>
           </Row>
         </div>
+
+        {/* Approval Section - Only for Admin when editing */}
+        {editingOrder && getCurrentUserRole() === 'admin' && (
+          <div className="bg-blue-50 p-3 sm:p-4 rounded-lg lg:rounded-xl border border-blue-200 mb-4 sm:mb-6 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <InfoCircleOutlined className="text-blue-500" />
+              <h4 className="text-sm sm:text-base font-bold text-gray-800 m-0">Approval Status</h4>
+            </div>
+            <Row gutter={[12, 0]}>
+              <Col xs={24} sm={12} md={8}>
+                <Form.Item
+                  name="approval_status"
+                  label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Approval Status</span>}
+                  className="mb-0"
+                >
+                  <Select
+                    placeholder="Select status"
+                    className="h-10"
+                  >
+                    <Select.Option value="Approved">Approved</Select.Option>
+                    <Select.Option value="Rejected">Rejected</Select.Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={16}>
+                <Form.Item
+                  name="approval_remarks"
+                  label={
+                    <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">
+                      Remarks
+                    </span>
+                  }
+                  className="mb-0"
+                >
+                  <Input
+                    placeholder="Enter approval/rejection remarks..."
+                    className="h-10 rounded-md border-gray-300 w-full"
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+          </div>
+        )}
         
         {/* Document Upload Section - Only for new orders */}
         {!editingOrder && (

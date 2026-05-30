@@ -118,6 +118,8 @@ const PCNotifications = () => {
       soft_deleted: "orange",
       restored: "cyan",
       schedule_activated: "purple",
+      order_approved: "green",
+      order_rejected: "red",
     };
     return colors[action] || "default";
   };
@@ -130,6 +132,8 @@ const PCNotifications = () => {
       soft_deleted: "Moved to Recycle Bin",
       restored: "Restored",
       schedule_activated: "Schedule Activated",
+      order_approved: "Order Approved",
+      order_rejected: "Order Rejected",
     };
     return labels[action] || action;
   };

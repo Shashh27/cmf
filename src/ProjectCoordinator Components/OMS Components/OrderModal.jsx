@@ -361,13 +361,14 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         customer_id: parseInt(values.customer_id),
         product_id: productId,
         status: values.status,
+        approval_status: editingOrder ? editingOrder.approval_status : "Pending Approval",
         // user_id always represents whoever is logged in (project coordinator for this screen)
         user_id: values.user_id ? parseInt(values.user_id, 10) : getCurrentUserId(),
         // Admin selected in dropdown - required field
         admin_id: values.admin_id ? parseInt(values.admin_id, 10) : null,
         // Set project_coordinator_id to current user (PC) when creating new order
-        project_coordinator_id: editingOrder 
-          ? editingOrder.project_coordinator_id 
+        project_coordinator_id: editingOrder
+          ? editingOrder.project_coordinator_id
           : (values.user_id ? parseInt(values.user_id, 10) : getCurrentUserId()),
         manufacturing_coordinator_id:
           values.manufacturing_coordinator_id === undefined || values.manufacturing_coordinator_id === ""

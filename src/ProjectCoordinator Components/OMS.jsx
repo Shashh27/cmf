@@ -5,7 +5,7 @@ import { API_BASE_URL } from "../Config/auth";
 import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
 import {
   ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined, UserOutlined, CalendarOutlined,
-  SearchOutlined, ClockCircleOutlined, CheckCircleOutlined, FilterOutlined, SyncOutlined } from "@ant-design/icons";
+  SearchOutlined, ClockCircleOutlined, CheckCircleOutlined, FilterOutlined, SyncOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import OrderModal from "./OMS Components/OrderModal";
 import DocumentModal from "./OMS Components/DocumentModal";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
@@ -121,6 +121,17 @@ const OMS = () => {
     };
 
     const config = statusConfig[status] || { color: "default", text: status };
+    return <Tag color={config.color}>{config.text?.toUpperCase()}</Tag>;
+  };
+
+  const getApprovalStatusBadge = (approvalStatus) => {
+    const statusConfig = {
+      'Pending Approval': { color: "orange", text: "Pending Approval" },
+      'Approved': { color: "green", text: "Approved" },
+      'Rejected': { color: "red", text: "Rejected" },
+    };
+
+    const config = statusConfig[approvalStatus] || { color: "default", text: approvalStatus };
     return <Tag color={config.color}>{config.text?.toUpperCase()}</Tag>;
   };
 
@@ -313,16 +324,24 @@ const OMS = () => {
         <Space className="text-gray-700">
           <AppstoreOutlined className="text-blue-500" />
           {pid != null ? (
-            <Link
-              to={`/project_coordinator/oms/product/${pid}`}
-              state={{ 
-                projectName: getProductName(pid, record), 
-                projectNumber: record.sale_order_number 
-              }}
-              className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
-            >
-              {getProductName(pid, record)}
-            </Link>
+            record.approval_status === "Rejected" ? (
+              <Tooltip title="Order rejected - cannot access project">
+                <span className="text-gray-400 font-medium cursor-not-allowed">
+                  {getProductName(pid, record)}
+                </span>
+              </Tooltip>
+            ) : (
+              <Link
+                to={`/project_coordinator/oms/product/${pid}`}
+                state={{
+                  projectName: getProductName(pid, record),
+                  projectNumber: record.sale_order_number
+                }}
+                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+              >
+                {getProductName(pid, record)}
+              </Link>
+            )
           ) : (
             <span>{getProductName(pid, record)}</span>
           )}
@@ -375,6 +394,8 @@ const OMS = () => {
       key: "status",
       render: (status) => getStatusBadge(status),
     },
+   
+   
     {
       title: <span className="font-semibold text-gray-700">Admin</span>,
       dataIndex: "admin_name",
@@ -401,6 +422,36 @@ const OMS = () => {
         </Space>
       ),
     },
+
+     {
+      title: <span className="font-semibold text-gray-700">Approval Status</span>,
+      dataIndex: "approval_status",
+      key: "approval_status",
+      render: (approvalStatus) => getApprovalStatusBadge(approvalStatus),
+    },
+
+
+     {
+      title: <span className="font-semibold text-gray-700">Approval Remarks</span>,
+      dataIndex: "approval_remarks",
+      key: "approval_remarks",
+      render: (remarks) => (
+        <span className="text-gray-600 text-sm">
+          {remarks || "-"}
+        </span>
+      ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Approved At</span>,
+      dataIndex: "approved_at",
+      key: "approved_at",
+      render: (date) => (
+        <span className="text-gray-600 text-sm">
+          {date ? formatDate(date) : "-"}
+        </span>
+      ),
+    },
+
     {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: "actions",
@@ -416,24 +467,26 @@ const OMS = () => {
               onClick={() => handleEditOrder(record)}
             />
           </Tooltip>
-          <Tooltip title="Documents">
+          <Tooltip title={record.approval_status === "Rejected" ? "Cannot add documents to rejected order" : "Documents"}>
             <Button
               type="text"
               size="small"
               icon={<FileTextOutlined />}
               className="text-purple-500 hover:bg-purple-50"
+              disabled={record.approval_status === "Rejected"}
               onClick={() => {
                 setSelectedOrderId(record.id);
                 setDocumentModalOpen(true);
               }}
             />
           </Tooltip>
-          <Tooltip title="Delete Order">
+          <Tooltip title={record.approval_status === "Rejected" ? "Cannot delete rejected order" : "Delete Order"}>
             <Button
               type="text"
               size="small"
               icon={<DeleteOutlined />}
               className="text-red-500 hover:bg-red-50"
+              disabled={record.approval_status === "Rejected"}
               onClick={() => handleDeleteOrder(record)}
             />
           </Tooltip>

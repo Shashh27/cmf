@@ -280,6 +280,15 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     setRequiredLength(value);
   };
 
+  // Helper function to get latest extracted data
+  const getLatestExtractedData = (extractedDataArray) => {
+    if (!extractedDataArray || !Array.isArray(extractedDataArray) || extractedDataArray.length === 0) {
+      return null;
+    }
+    const sorted = [...extractedDataArray].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return sorted[0];
+  };
+
   const getAllParts = (hierarchy) => {
     const parts = [];
 
@@ -359,7 +368,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     const linkedMaterialName = part.part.raw_material_name;
     const linkedMaterialDimensions = part.part.raw_material_stock_dimensions;
     const linkedMaterialFormType = part.part.raw_material_unit_details?.form_type || part.part.raw_material_form_type;
-    const stockSourceType = part.part.raw_material_stock_details?.source_type || null;
+    const stockSourceType = part.part.raw_material_stock_details?.source_type || part.part.raw_material_unit_details?.source_type || null;
     const linkedUnitId = part.part.raw_material_unit_id;
     const linkedRequiredLength = part.part.required_length;
     const partType = part.part.type_name || 'N/A';
@@ -434,30 +443,31 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
 
           {/* Extracted Raw Materials */}
           <Col xs={24} sm={4} md={5}>
-            {part.extracted_data && part.extracted_data.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {part.extracted_data.map((item, index) => (
-                  <div key={index}>
+            {(() => {
+              const latestExtractedData = getLatestExtractedData(part.extracted_data);
+              return latestExtractedData ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div>
                     <div style={{ display: 'flex', gap: '4px' }}>
                       <Text style={{ fontSize: '11px', color: '#595959', fontWeight: '500' }}>Material:</Text>
                       <Text strong style={{ fontSize: '11px', color: '#000', lineHeight: '1.2' }}>
-                        {item.material || 'N/A'}
+                        {latestExtractedData.material || 'N/A'}
                       </Text>
                     </div>
-                    {item.stock_size && (
+                    {latestExtractedData.stock_size && (
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <Text style={{ fontSize: '10px', color: '#8c8c8c' }}>Stock Size:</Text>
                         <Text style={{ fontSize: '10px', color: '#595959', lineHeight: '1.2' }}>
-                          {item.stock_size}
+                          {latestExtractedData.stock_size}
                         </Text>
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <Text style={{ fontSize: '11px', color: '#bfbfbf' }}>N/A</Text>
-            )}
+                </div>
+              ) : (
+                <Text style={{ fontSize: '11px', color: '#bfbfbf' }}>N/A</Text>
+              );
+            })()}
           </Col>
 
           {/* Material Details */}
@@ -773,7 +783,8 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                             const isOutsource = !isInHouse;
                             const isStandard = partType.toLowerCase().includes('standard');
                             const hasRawMaterial = partDetail === 'WITH_RAW_MATERIAL';
-                            const isOrderStock = part.part.raw_material_stock_details?.source_type === 'order';
+                            const stockSourceType = part.part.raw_material_stock_details?.source_type || part.part.raw_material_unit_details?.source_type || null;
+                            const isOrderStock = stockSourceType === 'order';
                             const canLinkMaterial = (isInHouse || (isOutsource && hasRawMaterial) || isStandard || (isOutsource && !hasRawMaterial) || isOrderStock);
                             return (
                               <tr key={part.part.id} style={{ borderBottom: '1px solid #f0f0f0', backgroundColor: isLinked ? '#f6ffed' : '#fff' }}>
@@ -807,18 +818,19 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                   <span style={{ fontSize: '11px', fontWeight: '600', color: '#000' }}>{part.part.qty}</span>
                                 </td>
                                 <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
-                                  {part.extracted_data && part.extracted_data.length > 0 ? (
-                                    <div style={{ fontSize: '9px', lineHeight: '1.3' }}>
-                                      {part.extracted_data.map((item, index) => (
-                                        <div key={index} style={{ marginBottom: index < part.extracted_data.length - 1 ? '4px' : 0 }}>
-                                          <div style={{ color: '#000', fontWeight: '600' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Material: </span>{item.material || 'N/A'}</div>
-                                          {item.stock_size && <div style={{ color: '#595959' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Stock Size: </span>{item.stock_size}</div>}
+                                  {(() => {
+                                    const latestExtractedData = getLatestExtractedData(part.extracted_data);
+                                    return latestExtractedData ? (
+                                      <div style={{ fontSize: '9px', lineHeight: '1.3' }}>
+                                        <div>
+                                          <div style={{ color: '#000', fontWeight: '600' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Material: </span>{latestExtractedData.material || 'N/A'}</div>
+                                          {latestExtractedData.stock_size && <div style={{ color: '#595959' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Stock Size: </span>{latestExtractedData.stock_size}</div>}
                                         </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span style={{ fontSize: '9px', color: '#bfbfbf' }}>N/A</span>
-                                  )}
+                                      </div>
+                                    ) : (
+                                      <span style={{ fontSize: '9px', color: '#bfbfbf' }}>N/A</span>
+                                    );
+                                  })()}
                                 </td>
                                 <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
                                   {isLinked ? (
