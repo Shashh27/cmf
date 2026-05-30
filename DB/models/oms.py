@@ -481,6 +481,12 @@ class Order(Base):
 
     status = Column(String, nullable=False)
 
+    approval_status = Column(String, nullable=False, server_default="Pending Approval")
+
+    approval_remarks = Column(Text, nullable=True)
+
+    approved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

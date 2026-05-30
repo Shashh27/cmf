@@ -46,6 +46,8 @@ from DB.schemas.oms import (
 
     OrderAssign,
 
+    OrderApproval,
+
     OrderWithCustomer,
 
     OrderWithCustomerAndProduct,
@@ -1037,6 +1039,12 @@ def _order_to_response(order, db: Session):
         "admin_name": order.admin.user_name if order.admin else None,
 
         "manufacturing_coordinator_name": order.manufacturing_coordinator.user_name if order.manufacturing_coordinator else None,
+
+        "approval_status": order.approval_status,
+
+        "approval_remarks": order.approval_remarks,
+
+        "approved_at": order.approved_at,
 
         "has_raw_materials": has_raw_materials,
 
@@ -2306,11 +2314,31 @@ def update_order(order_id: int, order_update: OrderUpdate, db: Session = Depends
 
     update_data = order_update.model_dump(exclude_unset=True, exclude={"project_name"})
 
+    # Check if approval_status is being changed
+    old_approval_status = order.approval_status
+    new_approval_status = update_data.get("approval_status")
+    approval_remarks = update_data.get("approval_remarks")
+
     for field, value in update_data.items():
 
         setattr(order, field, value)
 
     db.commit()
+
+    # Log approval change and send notification to PC if status changed
+    if new_approval_status and new_approval_status != old_approval_status:
+        # Get admin user info from the order
+        admin_user = db.query(AccessUser).filter(AccessUser.id == order.admin_id).first() if order.admin_id else None
+        from services.notification_service import NotificationService
+        NotificationService.log_order_approval_change(
+            db=db,
+            order_id=order_id,
+            approval_status=new_approval_status,
+            approval_remarks=approval_remarks,
+            user_id=admin_user.id if admin_user else None,
+            user_name=admin_user.user_name if admin_user else None,
+            user_role=admin_user.role if admin_user else None
+        )
 
     from sqlalchemy.orm import joinedload
 
@@ -3040,6 +3068,64 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
 
     }
 
+
+@router.put("/{order_id}/approve", response_model=OrderResponse)
+def approve_order(order_id: int, approval: OrderApproval, db: Session = Depends(get_db)):
+    """
+    Approve or reject an order.
+    Valid approval_status values: "Approved", "Rejected"
+    """
+    # Validate approval status
+    valid_statuses = ["Approved", "Rejected"]
+    if approval.approval_status not in valid_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid approval_status. Must be one of: {', '.join(valid_statuses)}"
+        )
+
+    # Get the order
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Update approval fields
+    order.approval_status = approval.approval_status
+    order.approval_remarks = approval.approval_remarks
+    order.approved_at = func.now()
+
+    db.commit()
+    db.refresh(order)
+
+    # Log approval change and send notification to PC
+    # Get admin user info from the order
+    admin_user = db.query(AccessUser).filter(AccessUser.id == order.admin_id).first() if order.admin_id else None
+    from services.notification_service import NotificationService
+    NotificationService.log_order_approval_change(
+        db=db,
+        order_id=order_id,
+        approval_status=approval.approval_status,
+        approval_remarks=approval.approval_remarks,
+        user_id=admin_user.id if admin_user else None,
+        user_name=admin_user.user_name if admin_user else None,
+        user_role=admin_user.role if admin_user else None
+    )
+
+    # Reload with relationships for response
+    order_with_relations = (
+        db.query(Order)
+        .options(
+            joinedload(Order.customer),
+            joinedload(Order.product),
+            joinedload(Order.user),
+            joinedload(Order.project_coordinator),
+            joinedload(Order.admin),
+            joinedload(Order.manufacturing_coordinator),
+        )
+        .filter(Order.id == order_id)
+        .first()
+    )
+
+    return _order_to_response(order_with_relations, db)
 
 
 # @router.get("/sale-order/{sale_order_number}/parts", response_model=List[PartResponse])

@@ -475,6 +475,8 @@ class OrderBase(BaseModel):
     quantity: int
     due_date: Optional[datetime] = None
     status: str
+    approval_status: Optional[str] = "Pending Approval"
+    approval_remarks: Optional[str] = None
 
 
 class OrderCreate(OrderBase):
@@ -494,10 +496,17 @@ class OrderUpdate(BaseModel):
     quantity: Optional[int] = None
     due_date: Optional[datetime] = None
     status: Optional[str] = None
+    approval_status: Optional[str] = None
+    approval_remarks: Optional[str] = None
 
 
 class OrderAssign(BaseModel):
     manufacturing_coordinator_id: int
+
+
+class OrderApproval(BaseModel):
+    approval_status: str
+    approval_remarks: Optional[str] = None
 
 
 class Order(OrderBase):
@@ -508,6 +517,7 @@ class Order(OrderBase):
     project_coordinator_name: Optional[str] = None
     admin_name: Optional[str] = None
     manufacturing_coordinator_name: Optional[str] = None
+    approved_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
