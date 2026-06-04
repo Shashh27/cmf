@@ -29,6 +29,9 @@ def get_admin_username(db: Session) -> str:
 
 @router.get("/", response_model=List[ComponentIssuesNotificationWithDetails])
 def list_component_issues_notifications(
+    mc_id: int | None = None,
+    pc_id: int | None = None,
+    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     db: Session = Depends(get_db),
@@ -81,6 +84,17 @@ def list_component_issues_notifications(
         o = order_map.get(issue.get("production_order_id"))
         p = part_map.get(issue.get("part_id"))
         op = operator_map.get(issue.get("reported_by"))
+        # Filter based on role IDs - for component issues, filter by related order's role IDs
+        # Skip if order not found and role filtering is requested
+        if (mc_id or pc_id or admin_id) and not o:
+            continue
+        if o:
+            if mc_id and o.manufacturing_coordinator_id != mc_id:
+                continue
+            if pc_id and o.project_coordinator_id != pc_id:
+                continue
+            if admin_id and o.admin_id != admin_id:
+                continue
         response.append(ComponentIssuesNotificationWithDetails(
             id=n.id,
             comp_issues_id=n.comp_issues_id,
@@ -101,8 +115,45 @@ def list_component_issues_notifications(
 
 
 @router.get("/pending", response_model=List[ComponentIssuesNotificationSchema])
-def list_pending_component_issues_notifications(db: Session = Depends(get_db)):
-    return db.query(ComponentIssuesNotificationModel).filter(ComponentIssuesNotificationModel.is_ack == False).order_by(ComponentIssuesNotificationModel.id.desc()).all()  # noqa: E712
+def list_pending_component_issues_notifications(
+    mc_id: int | None = None,
+    pc_id: int | None = None,
+    admin_id: int | None = None,
+    db: Session = Depends(get_db)
+):
+    q = db.query(ComponentIssuesNotificationModel).filter(ComponentIssuesNotificationModel.is_ack == False)  # noqa: E712
+    notifications = q.order_by(ComponentIssuesNotificationModel.id.desc()).all()
+    comp_issue_ids = [n.comp_issues_id for n in notifications]
+    if not comp_issue_ids:
+        return []
+    stmt = text("""
+        SELECT id, production_order_id
+        FROM maintenance.component_issues
+        WHERE id IN :ids
+    """).bindparams(bindparam("ids", expanding=True))
+    rows = db.execute(stmt, {"ids": comp_issue_ids}).fetchall()
+    issue_map = {int(r[0]): r[1] for r in rows}
+    order_ids = [oid for oid in issue_map.values() if oid is not None]
+    if not order_ids:
+        return []
+    orders = db.query(Order).filter(Order.id.in_(order_ids)).all()
+    order_map = {o.id: o for o in orders}
+    result = []
+    for n in notifications:
+        order_id = issue_map.get(n.comp_issues_id)
+        o = order_map.get(order_id)
+        # Filter based on role IDs - skip if order not found and role filtering is requested
+        if (mc_id or pc_id or admin_id) and not o:
+            continue
+        if o:
+            if mc_id and o.manufacturing_coordinator_id != mc_id:
+                continue
+            if pc_id and o.project_coordinator_id != pc_id:
+                continue
+            if admin_id and o.admin_id != admin_id:
+                continue
+        result.append(n)
+    return result
 
 
 

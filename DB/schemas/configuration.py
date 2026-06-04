@@ -157,7 +157,10 @@ class PokayokeChecklistItemBase(BaseModel):
 
 
 class PokayokeMachineAssignmentBase(BaseModel):
-    machine_id: int
+    machine_id: Optional[int] = None  # Single machine (for backward compatibility)
+    machine_ids: Optional[List[int]] = None  # Multiple machines
+    checklist_id: Optional[int] = None  # Single checklist (for backward compatibility)
+    checklist_ids: Optional[List[int]] = None  # Multiple checklists
     frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
     shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
     scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
