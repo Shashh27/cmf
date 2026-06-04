@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Layout, Drawer, Button, Tabs } from "antd";
-import { MenuOutlined } from "@ant-design/icons";
+import { MenuOutlined, BellOutlined } from "@ant-design/icons";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import BillOfMaterials from "../PDM Components/BillOfMaterials";
 import ProductDetails from "../PDM Components/ProductDetails";
@@ -10,6 +10,7 @@ import AssemblyDocumentsPanel from "../PDM Components/AssemblyDocumentsPanel";
 import ProcessPlanning from "../PPS Components/ProcessPlanning";
 import QualityManagement from "../Quality Management Components/QualityManagement";
 import Recyclebin from "./Recyclebin";
+import AdminDocumentNotifications from "./AdminDocumentNotifications";
 
 const { Sider, Content } = Layout;
 
@@ -88,9 +89,12 @@ const PDM = () => {
                 { key: "recycle-bin", label: "Recycle Bin" },
               ]}
             />
-            <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
-              Back to Orders
-            </Button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <AdminDocumentNotifications orderId={initialOrderId} />
+              <Button size="small" onClick={() => navigate("/admin/oms/orders")}>
+                Back to Orders
+              </Button>
+            </div>
           </div>
         )}
 

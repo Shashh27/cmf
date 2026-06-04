@@ -33,6 +33,8 @@ const EditLinkedPartsModal = ({
   handleLinkPart,
   vendors
 }) => {
+  // Check if this is auto-extracted stock
+  const isAutoExtract = statusEditRecord?.creation_source === 'auto_extract';
   // Parts management state
   const [partSearchText, setPartSearchText] = useState('');
   const [viewMode, setViewMode] = useState('tree');
@@ -44,6 +46,15 @@ const EditLinkedPartsModal = ({
   useEffect(() => {
     setFlatPage(1);
   }, [partSearchText, linkFilter]);
+
+  // For auto-extracted stock, force tree view and disable search/filter
+  useEffect(() => {
+    if (isAutoExtract) {
+      setViewMode('tree');
+      setPartSearchText('');
+      setLinkFilter('all');
+    }
+  }, [isAutoExtract]);
 
   // Reset state when modal opens
   useEffect(() => {
@@ -121,22 +132,29 @@ const EditLinkedPartsModal = ({
   // Filter parts based on search and link status
   const filterParts = (partsList) => {
     if (!partsList) return [];
-    
+
     return partsList.filter(partNode => {
       if (partNode.type !== 'part') return true;
-      
+
       const part = partNode.part;
+
+      // For auto-extracted stock, show only the linked part
+      if (isAutoExtract) {
+        const isLinkedToCurrentStock = statusEditCurrentLinkages.some(l => l.part_id === part.id);
+        return isLinkedToCurrentStock;
+      }
+
       const searchTerm = partSearchText.toLowerCase();
-      
+
       if (searchTerm) {
-        const matchesSearch = 
+        const matchesSearch =
           (part.part_number && part.part_number.toLowerCase().includes(searchTerm)) ||
           (part.part_name && part.part_name.toLowerCase().includes(searchTerm)) ||
           (partNode.extractedData?.material && partNode.extractedData.material.toLowerCase().includes(searchTerm));
-        
+
         if (!matchesSearch) return false;
       }
-      
+
       if (linkFilter === 'unlinked') {
         const isLinked = partNode.isLinkedToGeneralStock || partNode.isLinkedToOrderStock;
         if (isLinked) return false;
@@ -144,7 +162,7 @@ const EditLinkedPartsModal = ({
         const isLinked = partNode.isLinkedToGeneralStock || partNode.isLinkedToOrderStock;
         if (!isLinked) return false;
       }
-      
+
       return true;
     });
   };
@@ -152,9 +170,129 @@ const EditLinkedPartsModal = ({
   // Build tree data for hierarchy
   const buildTreeData = (hierarchy) => {
     if (!hierarchy || !hierarchy.product_hierarchy) return [];
-    
+
     const { assemblies = [], direct_parts = [] } = hierarchy.product_hierarchy;
     const treeData = [];
+
+    // For auto-extracted stock, find and show only the assembly path for the linked part
+    if (isAutoExtract && statusEditCurrentLinkages.length > 0) {
+      const linkedPartId = statusEditCurrentLinkages[0].part_id;
+      const foundAssemblyPath = [];
+
+      // Search for the part in assemblies
+      const findPartInAssemblies = (assemblyList, path = []) => {
+        for (const assembly of assemblyList) {
+          const newPath = [...path, assembly.assembly?.assembly_name];
+
+          if (assembly.parts) {
+            const foundPart = assembly.parts.find(p => p.part?.id === linkedPartId);
+            if (foundPart) {
+              foundAssemblyPath.push({
+                assembly: assembly.assembly,
+                parts: [foundPart],
+                subassemblies: [],
+                path: newPath
+              });
+              return true;
+            }
+          }
+
+          if (assembly.subassemblies) {
+            if (findPartInAssemblies(assembly.subassemblies, newPath)) {
+              foundAssemblyPath.push({
+                assembly: assembly.assembly,
+                subassemblies: foundAssemblyPath.slice(0, -1),
+                parts: [],
+                path: newPath
+              });
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      const foundInAssembly = findPartInAssemblies(assemblies);
+
+      if (foundInAssembly) {
+        // Reconstruct the tree with only the relevant path
+        const buildPathTree = (pathParts) => {
+          if (pathParts.length === 0) return [];
+
+          const current = pathParts[0];
+          const node = {
+            title: current.assembly?.assembly_name || 'Unknown Assembly',
+            key: `assembly-${current.assembly?.id}`,
+            type: 'assembly',
+            children: []
+          };
+
+          if (current.parts && current.parts.length > 0) {
+            current.parts.forEach(partDetail => {
+              if (partDetail.part && partDetail.part.id) {
+                const part = partDetail.part;
+                const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
+                const isAlreadyLinked = part.raw_material_id !== null || part.raw_material_unit_id !== null;
+                const isLinkedToGeneralStock = sourceType === 'general';
+                const isLinkedToOrderStock = sourceType === 'order';
+                const latestExtractedData = part.extracted_data;
+
+                const partNode = {
+                  title: `${part.part_number} - ${part.part_name}`,
+                  key: `part-${part.id}`,
+                  type: 'part',
+                  part: part,
+                  isAlreadyLinked: isAlreadyLinked,
+                  isLinkedToGeneralStock: isLinkedToGeneralStock,
+                  isLinkedToOrderStock: isLinkedToOrderStock,
+                  sourceType: sourceType,
+                  extractedData: latestExtractedData
+                };
+                node.children.push(partNode);
+              }
+            });
+          }
+
+          if (current.subassemblies && current.subassemblies.length > 0) {
+            const subTree = buildPathTree(current.subassemblies);
+            node.children.push(...subTree);
+          }
+
+          return node.children.length > 0 ? [node] : [];
+        };
+
+        return buildPathTree(foundAssemblyPath);
+      } else if (direct_parts) {
+        // Check if it's a direct part
+        const foundDirect = direct_parts.find(p => p.part?.id === linkedPartId);
+        if (foundDirect) {
+          const part = foundDirect.part;
+          const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
+          const isAlreadyLinked = part.raw_material_id !== null || part.raw_material_unit_id !== null;
+          const isLinkedToGeneralStock = sourceType === 'general';
+          const isLinkedToOrderStock = sourceType === 'order';
+          const latestExtractedData = part.extracted_data;
+
+          const directNode = {
+            title: 'Direct Parts',
+            key: 'direct-parts',
+            type: 'assembly',
+            children: [{
+              title: `${part.part_number} - ${part.part_name}`,
+              key: `part-${part.id}`,
+              type: 'part',
+              part: part,
+              isAlreadyLinked: isAlreadyLinked,
+              isLinkedToGeneralStock: isLinkedToGeneralStock,
+              isLinkedToOrderStock: isLinkedToOrderStock,
+              sourceType: sourceType,
+              extractedData: latestExtractedData
+            }]
+          };
+          return [directNode];
+        }
+      }
+    }
     
     assemblies.forEach(assembly => {
       const assemblyNode = {
@@ -349,7 +487,13 @@ const EditLinkedPartsModal = ({
       const isLinkedToCurrentStock = statusEditCurrentLinkages.some(l => l.part_id === part.id);
       const hasUnitAndLength = statusEditPartRawMaterialUnits[part.id] && statusEditPartRequiredLengths[part.id];
       const isPendingUnlink = pendingUnlinks.has(part.id);
-      
+
+      // Get order number from hierarchy if available
+      let orderNumber = null;
+      if (part.product_id && orderHierarchyMap[part.product_id]) {
+        orderNumber = orderHierarchyMap[part.product_id].sale_order_number;
+      }
+
       return (
         <div className="flex items-center justify-between w-full pr-4 py-2 border-b border-gray-100 hover:bg-gray-50">
           <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -359,6 +503,11 @@ const EditLinkedPartsModal = ({
               <span className="text-xs text-gray-600 truncate">{part.part_name}</span>
               {assemblyName && viewMode === 'flat' && (
                 <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded whitespace-nowrap">{assemblyName}</span>
+              )}
+              {orderNumber && (
+                <span className="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded whitespace-nowrap border border-blue-200">
+                  Order: {orderNumber}
+                </span>
               )}
             </div>
             
@@ -386,7 +535,7 @@ const EditLinkedPartsModal = ({
               <div className="flex items-center gap-2 ml-3 whitespace-nowrap">
                 <span className="text-xs text-gray-500">Current Link:</span>
                 <span className="text-xs text-gray-700 bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
-                  Unit #{part.raw_material_unit_id}
+                  {part.raw_material_stock_dimensions || part.raw_material_unit_details?.stock_dimensions || '—'}
                 </span>
                 <span className="text-xs text-gray-600">
                   ({part.required_length}mm)
@@ -446,17 +595,30 @@ const EditLinkedPartsModal = ({
                 style={{ width: '200px' }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {availableUnits.map(unit => (
-                  <Option key={unit.id} value={unit.id} disabled={unit.status === 'exhausted'}>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-semibold">Unit #{unit.id}</span>
-                      <span className="text-[10px] text-gray-600">Total: {unit.total_length}mm | Remaining: {unit.remaining_length}mm</span>
-                      {unit.status === 'exhausted' && (
-                        <span className="text-[10px] text-red-500">Exhausted</span>
-                      )}
-                    </div>
-                  </Option>
-                ))}
+                {availableUnits.map(unit => {
+                    // Build dimensions string if stock is available
+                    let dimensions = `Unit #${unit.id}`;
+                    if (unit.stock) {
+                      if (unit.stock.form_type === 'Round') {
+                        dimensions = `Ø${unit.stock.diameter} × ${unit.stock.length}mm`;
+                      } else if (unit.stock.form_type === 'Square') {
+                        dimensions = `${unit.stock.breadth} × ${unit.stock.height} × ${unit.stock.length}mm`;
+                      } else if (unit.stock.form_type === 'Pipe') {
+                        dimensions = `Ø${unit.stock.outer_diameter}/${unit.stock.inner_diameter} × ${unit.stock.length}mm`;
+                      }
+                    }
+                    return (
+                      <Option key={unit.id} value={unit.id} disabled={unit.status === 'exhausted'}>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-semibold">{dimensions}</span>
+                          <span className="text-[10px] text-gray-600">Total: {unit.total_length}mm | Remaining: {unit.remaining_length}mm</span>
+                          {unit.status === 'exhausted' && (
+                            <span className="text-[10px] text-red-500">Exhausted</span>
+                          )}
+                        </div>
+                      </Option>
+                    );
+                  })}
               </Select>
               <InputNumber
                 size="small"

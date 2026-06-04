@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Form, Input as TextArea } from "antd";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Form, Input as TextArea, App } from "antd";
 import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
   SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined, SyncOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
@@ -18,7 +18,7 @@ const { RangePicker } = DatePicker;
 const OMS = () => {
   const navigate = useNavigate();
   const { productId } = useParams();
-  const [messageApi, contextHolder] = message.useMessage();
+  const { message: messageApi, modal } = App.useApp();
   const [orders, setOrders] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -132,6 +132,7 @@ const OMS = () => {
       'Pending Approval': { color: "orange", text: "Pending Approval" },
       'Approved': { color: "green", text: "Approved" },
       'Rejected': { color: "red", text: "Rejected" },
+      'Auto-Approved': { color: "blue", text: "Auto-Approved" },
     };
 
     const config = statusConfig[approvalStatus] || { color: "default", text: approvalStatus };
@@ -159,7 +160,7 @@ const OMS = () => {
   };
 
   const handleDeleteOrder = (order) => {
-    Modal.confirm({
+    modal.confirm({
       title: "Delete Order",
       content: `Are you sure you want to delete order "${order.sale_order_number}"?`,
       okText: "Delete",
@@ -482,7 +483,7 @@ const OMS = () => {
       width: 200,
       render: (_, record) => (
         <Space size="small">
-          {record.approval_status === "Pending Approval" && (
+          {record.approval_status === "Pending Approval" && record.user_role !== 'admin' && (
             <>
               <Tooltip title="Approve Order">
                 <Button
@@ -601,8 +602,6 @@ const OMS = () => {
           }
         }
       `}</style>
-
-      {contextHolder}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 mb-4 lg:mb-6">

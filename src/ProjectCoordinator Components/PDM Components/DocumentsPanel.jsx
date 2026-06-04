@@ -54,7 +54,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
   );
 
   const grouped = docs.reduce((acc, d) => { const r = d.parent_id || d.id; (acc[r] = acc[r] || []).push(d); return acc; }, {});
-  const latest = Object.values(grouped).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]);
+  const latest = Object.values(grouped).map(g => [...g].sort((a, b) => b.id - a.id)[0]);
 
   const columns = [
     { title: 'Type', dataIndex: 'document_type', width: 120, render: t => <Tag color="blue" variant="filled" className="mr-0">{t || 'DOC'}</Tag> },
@@ -197,7 +197,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     [documents]);
 
   const latestPartDocs = useMemo(() =>
-    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]),
+    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => b.id - a.id)[0]),
     [groupedPartDocs]);
 
   useEffect(() => {
@@ -265,8 +265,24 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       ]);
       const docs = dR.data;
       const ops = oR.data;
-      setDocuments(docs); setOperations(ops);
-      if (onDocumentsLoaded) onDocumentsLoaded(docs);
+      
+      // Get current user info
+      const currentUserId = getCurrentUserId();
+      const currentUserRole = getCurrentUserRole();
+      
+      // Filter documents: PC uploads visible to PC without acknowledgment, require acknowledgment for others
+      const filteredDocs = docs.filter(doc => {
+        const uploaderRole = doc.user_role;
+        // If uploaded by same user (PC by PC), show without acknowledgment requirement
+        if (doc.user_id === currentUserId && currentUserRole === 'project_coordinator') return true;
+        // If uploaded by PC, require acknowledgment and not rejected
+        if (uploaderRole === 'project_coordinator') return doc.is_acknowledged && !doc.mc_is_rejected;
+        // Admin/MC uploads are visible to everyone without acknowledgment
+        return true;
+      });
+      
+      setDocuments(filteredDocs); setOperations(ops);
+      if (onDocumentsLoaded) onDocumentsLoaded(filteredDocs);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -473,36 +489,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     }
   };
 
-  const handleAcknowledgeDocument = async (docId, currentStatus) => {
-    try {
-      await axios.put(`${API_BASE_URL}/documents/${docId}/acknowledge`, null, {
-        params: { is_acknowledged: !currentStatus }
-      });
-      message.success('Document acknowledged successfully');
-      setDocuments(prevDocs =>
-        prevDocs.map(doc =>
-          doc.id === docId ? { ...doc, is_acknowledged: true } : doc
-        )
-      );
-      setSelectedVersions(prevVersions => {
-        const updated = { ...prevVersions };
-        for (const key in updated) {
-          if (updated[key]?.id === docId) {
-            updated[key] = { ...updated[key], is_acknowledged: true };
-          }
-        }
-        return updated;
-      });
-      await fetchDocuments();
-    } catch (e) {
-      console.error(e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        'Failed to update acknowledgment status';
-      message.error(detail);
-    }
-  };
 
   const handleDeleteOperation = async (opId) => {
     try {
@@ -595,6 +581,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
       render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
     },
+    
     {
       title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
       render: (_, r) => {
@@ -608,7 +595,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             styles={{ popup: { root: { minWidth: 180, padding: 4 } } }}
             labelRender={({ value }) => { const v = group.find(d => d.id === value); const ver = v?.document_version || '1.0'; return <div className="flex items-center gap-2"><span className="font-bold text-blue-600">{fmtV(ver)}</span><span className="text-[10px] text-gray-400">{new Date(v?.created_at || Date.now()).toLocaleDateString()}</span></div>; }}
           >
-            {[...group].sort((a, b) => parseV(b.document_version) - parseV(a.document_version)).map(ver => (
+            {[...group].sort((a, b) => b.id - a.id).map(ver => (
               <Select.Option key={ver.id} value={ver.id}>
                 <div className="flex justify-between items-center w-full py-1">
                   <div className="flex items-center gap-2">
@@ -624,39 +611,45 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       }
     },
     {
+      title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 150,
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
+      }
+    },
+    {
       title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
-        const currentUserId = getCurrentUserId();
-        const currentUserRole = getCurrentUserRole();
         
-        // If document was uploaded by PC and current user is PC, don't show acknowledge button
-        const isUploadedByPC = cur.user_id === currentUserId && currentUserRole === 'project_coordinator';
-        
-        if (cur.is_acknowledged) {
-          return <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>;
-        } else if (isUploadedByPC) {
-          return <span className="text-xs text-gray-400">Not Acknowledged</span>;
-        } else {
+        // Check if MC has handled this document (acknowledged or rejected)
+        if (cur.mc_is_rejected) {
           return (
-            <Popconfirm
-              title="Acknowledge Document"
-              description="Are you sure you want to acknowledge this document?"
-              onConfirm={() => handleAcknowledgeDocument(cur.id, cur.is_acknowledged)}
-              okText="Yes"
-              cancelText="No"
-            >
-              <Button
-                size="small"
-                type="primary"
-                icon={<CheckCircleOutlined />}
-                className="text-xs"
-              >
-                Acknowledge
-              </Button>
-            </Popconfirm>
+            <Tooltip title={cur.mc_reject_remarks || 'Rejected by MC'}>
+              <Tag color="red" icon={<CloseCircleOutlined />} className="m-0 text-xs">Rejected</Tag>
+            </Tooltip>
           );
+        } else if (cur.is_acknowledged) {
+          return (
+            <Tooltip title={cur.mc_ack_remarks || 'Acknowledged by MC'}>
+              <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>
+            </Tooltip>
+          );
+        } else {
+          return <span className="text-xs text-gray-400">Pending</span>;
         }
+      }
+    },
+    {
+      title: <span className="text-xs font-semibold">MC REMARKS</span>, key: 'mc_remarks', width: 200,
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        if (cur.mc_is_rejected) {
+          return <span className="text-xs text-red-600">{cur.mc_reject_remarks || '-'}</span>;
+        } else if (cur.is_acknowledged) {
+          return <span className="text-xs text-green-600">{cur.mc_ack_remarks || '-'}</span>;
+        }
+        return <span className="text-xs text-gray-400">-</span>;
       }
     },
     {

@@ -48,7 +48,7 @@ const OperationDocumentsList = ({ docs = [], loading = false, onPreview }) => {
   );
 
   const grouped = docs.reduce((acc, d) => { const r = d.parent_id || d.id; (acc[r] = acc[r] || []).push(d); return acc; }, {});
-  const latest  = Object.values(grouped).map(g => [...g].sort((a, b) => a.id - b.id)[0]);
+  const latest  = Object.values(grouped).map(g => [...g].sort((a, b) => b.id - a.id)[0]);
 
   const columns = [
     { title: 'Type', dataIndex: 'document_type', width: 120, render: t => <Tag color="blue" variant="filled" className="mr-0">{t || 'DOC'}</Tag> },
@@ -189,7 +189,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   [documents]);
 
   const latestPartDocs = useMemo(() =>
-    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => a.id - b.id)[0]),
+    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => b.id - a.id)[0]),
   [groupedPartDocs]);
 
   useEffect(() => {
@@ -241,15 +241,27 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     if (!selectedItem || selectedItem.itemType !== 'part') { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
     setLoading(true);
     try {
-      // Do not filter by user_id: admin, project coordinator, and manufacturing coordinator all see the same operations & documents for the part
+      // Get current user role
+      const currentUserRole = getCurrentUserRole();
+      
       const [dR, oR] = await Promise.all([
         axios.get(`${API_BASE_URL}/documents/part/${selectedItem.id}`),
         axios.get(`${API_BASE_URL}/operations/part/${selectedItem.id}`),
       ]);
       const docs = dR.data;
       const ops = oR.data;
-      setDocuments(docs); setOperations(ops.sort((a, b) => a.operation_number - b.operation_number));
-      if (onDocumentsLoaded) onDocumentsLoaded(docs);
+      
+      // Filter documents: PC uploads require acknowledgment, admin/MC uploads visible to all
+      const filteredDocs = docs.filter(doc => {
+        const uploaderRole = doc.user_role;
+        // If uploaded by PC, require acknowledgment and not rejected
+        if (uploaderRole === 'project_coordinator') return doc.is_acknowledged && !doc.mc_is_rejected;
+        // Admin/MC uploads are visible to everyone without acknowledgment
+        return true;
+      });
+      
+      setDocuments(filteredDocs); setOperations(ops.sort((a, b) => a.operation_number - b.operation_number));
+      if (onDocumentsLoaded) onDocumentsLoaded(filteredDocs);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -400,6 +412,30 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         e?.response?.data?.detail ||
         e?.response?.data?.message ||
         "Failed to delete operation";
+      message.error(detail);
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/operations/template/download`, {
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'Operations_Template.docx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      message.success('Template downloaded successfully');
+    } catch (e) {
+      console.error(e);
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
+        'Failed to download template';
       message.error(detail);
     }
   };
@@ -562,7 +598,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
               return <span className="font-bold text-blue-600">{ver}</span>;
             }}
             options={[...group]
-              .sort((a, b) => a.id - b.id)
+              .sort((a, b) => b.id - a.id)
               .map((ver) => ({ value: ver.id, label: ver.document_version || '1.0' }))
             }
           />
@@ -578,35 +614,22 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
-        const currentUserId = getCurrentUserId();
-        const currentUserRole = getCurrentUserRole();
         
-        // If document was uploaded by MC and current user is MC, don't show acknowledge button
-        const isUploadedByMC = cur.user_id === currentUserId && currentUserRole === 'manufacturing_coordinator';
-        
-        if (cur.is_acknowledged) {
-          return <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>;
-        } else if (isUploadedByMC) {
-          return <span className="text-xs text-gray-400">Not Acknowledged</span>;
-        } else {
+        // Check if MC has handled this document (acknowledged or rejected)
+        if (cur.mc_is_rejected) {
           return (
-            <Popconfirm 
-              title="Acknowledge Document"
-              description="Are you sure you want to acknowledge this document?"
-              onConfirm={() => handleAcknowledgeDocument(cur.id, cur.is_acknowledged)}
-              okText="Yes"
-              cancelText="No"
-            >
-              <Button 
-                size="small" 
-                type="primary" 
-                icon={<CheckCircleOutlined />}
-                className="text-xs"
-              >
-                Acknowledge
-              </Button>
-            </Popconfirm>
+            <Tooltip title={cur.mc_reject_remarks || 'Rejected by MC'}>
+              <Tag color="red" icon={<CloseCircleOutlined />} className="m-0 text-xs">Rejected</Tag>
+            </Tooltip>
           );
+        } else if (cur.is_acknowledged) {
+          return (
+            <Tooltip title={cur.mc_ack_remarks || 'Acknowledged by MC'}>
+              <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>
+            </Tooltip>
+          );
+        } else {
+          return <span className="text-xs text-gray-400">-</span>;
         }
       }
     },
@@ -639,6 +662,9 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-1.5 shrink-0 gap-2">
             <span className="text-xs text-slate-500">Drag rows to reorder operations</span>
             <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+              <Button size="small" icon={<DownloadOutlined />} onClick={handleDownloadTemplate} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
+                <span className="hidden sm:inline">Download Template</span><span className="sm:hidden">Template</span>
+              </Button>
               <Button size="small" icon={<UploadOutlined />} onClick={() => setShowImportModal(true)} disabled={!isPart} className="primary-btn-sm flex-1 sm:flex-initial">
                 <span className="hidden sm:inline">Upload MPP</span><span className="sm:hidden">MPP</span>
               </Button>

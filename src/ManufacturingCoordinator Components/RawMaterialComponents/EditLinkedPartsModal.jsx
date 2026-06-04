@@ -386,7 +386,7 @@ const EditLinkedPartsModal = ({
               <div className="flex items-center gap-2 ml-3 whitespace-nowrap">
                 <span className="text-xs text-gray-500">Current Link:</span>
                 <span className="text-xs text-gray-700 bg-gray-50 px-2 py-0.5 rounded border border-gray-200">
-                  Unit #{part.raw_material_unit_id}
+                  {part.raw_material_stock_dimensions || part.raw_material_unit_details?.stock_dimensions || '—'}
                 </span>
                 <span className="text-xs text-gray-600">
                   ({part.required_length}mm)
@@ -446,17 +446,30 @@ const EditLinkedPartsModal = ({
                 style={{ width: '200px' }}
                 onClick={(e) => e.stopPropagation()}
               >
-                {availableUnits.map(unit => (
-                  <Option key={unit.id} value={unit.id} disabled={unit.status === 'exhausted'}>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-semibold">Unit #{unit.id}</span>
-                      <span className="text-[10px] text-gray-600">Total: {unit.total_length}mm | Remaining: {unit.remaining_length}mm</span>
-                      {unit.status === 'exhausted' && (
-                        <span className="text-[10px] text-red-500">Exhausted</span>
-                      )}
-                    </div>
-                  </Option>
-                ))}
+                {availableUnits.map(unit => {
+                    // Build dimensions string if stock is available
+                    let dimensions = `Unit #${unit.id}`;
+                    if (unit.stock) {
+                      if (unit.stock.form_type === 'Round') {
+                        dimensions = `Ø${unit.stock.diameter} × ${unit.stock.length}mm`;
+                      } else if (unit.stock.form_type === 'Square') {
+                        dimensions = `${unit.stock.breadth} × ${unit.stock.height} × ${unit.stock.length}mm`;
+                      } else if (unit.stock.form_type === 'Pipe') {
+                        dimensions = `Ø${unit.stock.outer_diameter}/${unit.stock.inner_diameter} × ${unit.stock.length}mm`;
+                      }
+                    }
+                    return (
+                      <Option key={unit.id} value={unit.id} disabled={unit.status === 'exhausted'}>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-semibold">{dimensions}</span>
+                          <span className="text-[10px] text-gray-600">Total: {unit.total_length}mm | Remaining: {unit.remaining_length}mm</span>
+                          {unit.status === 'exhausted' && (
+                            <span className="text-[10px] text-red-500">Exhausted</span>
+                          )}
+                        </div>
+                      </Option>
+                    );
+                  })}
               </Select>
               <InputNumber
                 size="small"

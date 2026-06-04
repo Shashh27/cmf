@@ -39,17 +39,17 @@ const ProductDetails = ({ selectedItem }) => {
     if (selectedItem) {
       // 1. Extract Raw Materials
       let materials = [];
-      
+
       // Check for array format (existing logic)
       if (selectedItem.raw_materials && Array.isArray(selectedItem.raw_materials) && selectedItem.raw_materials.length > 0) {
           materials = [...selectedItem.raw_materials];
-      } 
+      }
       // Check for single raw material field (from user snippet)
       else if (selectedItem.raw_material_name) {
           materials = [{
               id: selectedItem.raw_material_id || 'N/A',
               material_name: selectedItem.raw_material_name,
-              
+              stock_dimensions: selectedItem.stock_dimensions || null,
           }];
       }
 
@@ -297,33 +297,6 @@ const ProductDetails = ({ selectedItem }) => {
     setEditingRecord(null);
   };
 
-  const baseMaterialColumns = [
-    { title: 'Material', dataIndex: 'material_name', key: 'name', ellipsis: true },
-  ];
-
-  const materialColumns =
-    itemType === "part"
-      ? [
-          ...baseMaterialColumns,
-          {
-            title: 'Actions',
-            key: 'actions',
-            width: 80,
-            render: (_, record) => (
-              <Tooltip title="Remove from part">
-                <Button
-                  type="text"
-                  size="small"
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={() => handleClearRawMaterial(record)}
-                />
-              </Tooltip>
-            ),
-          },
-        ]
-      : baseMaterialColumns;
-
   const headerNoWrap = () => ({ style: { whiteSpace: 'nowrap' } });
 
   const cellWithTooltip = (text, fallback = 'N/A') => {
@@ -411,19 +384,40 @@ const ProductDetails = ({ selectedItem }) => {
               <div className="bg-slate-50/80 rounded-lg p-2 border border-slate-200 h-full">
                 <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 mb-2">
                   <FileTextOutlined className="text-slate-500" />
-                  <span>Raw Materials ({rawMaterials.length})</span>
+                  <span>Assigned Raw Material ({rawMaterials.length})</span>
                 </div>
                 <div style={{ height: 'calc(100% - 24px)', overflow: 'auto' }}>
                   {rawMaterials.length > 0 ? (
-                    <Table 
-                      dataSource={rawMaterials} 
-                      columns={materialColumns} 
-                      rowKey="id" 
-                      size="small" 
-                      pagination={false} 
-                      scroll={{ y: 'calc(100% - 20px)' }} 
-                      bordered 
-                    />
+                    <div className="flex flex-col gap-2">
+                      {rawMaterials.map((material) => (
+                        <div key={material.id} className="bg-white border border-slate-200 rounded p-2">
+                          <div className="flex flex-col gap-2">
+                            <div className="border-b border-slate-200 pb-2">
+                              <div className="flex items-center gap-2">
+                                <Text className="text-xs font-medium text-slate-600">Material:</Text>
+                                <Tooltip title={material.material_name}>
+                                  <Tag color="blue" style={{ margin: 0, fontSize: '11px', fontWeight: 500 }}>
+                                    {material.material_name}
+                                  </Tag>
+                                </Tooltip>
+                              </div>
+                            </div>
+                            {material.stock_dimensions && (
+                              <div className="pt-1">
+                                <div className="flex items-center gap-2">
+                                  <Text className="text-xs font-medium text-slate-600">Stock Dimensions:</Text>
+                                  <Tooltip title={material.stock_dimensions}>
+                                    <Tag color="cyan" style={{ margin: 0, fontSize: '11px', fontWeight: 500 }}>
+                                      {material.stock_dimensions}
+                                    </Tag>
+                                  </Tooltip>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   ) : (
                     <div className="py-4 text-center border border-dashed border-gray-300 rounded-md bg-gray-50 h-full flex items-center justify-center">
                       <Text className="text-sm font-medium text-gray-500">No raw materials assigned</Text>
