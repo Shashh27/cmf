@@ -48,6 +48,9 @@ def _generate_due_calibration_notifications(db: Session):
 
 @router.get("/", response_model=List[MachineCalibrationNotificationWithDetails])
 def list_machine_calibration_notifications(
+    mc_id: int | None = None,
+    pc_id: int | None = None,
+    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     db: Session = Depends(get_db),
@@ -69,6 +72,14 @@ def list_machine_calibration_notifications(
     for n in notifications:
         m = machine_map.get(n.machine_id)
         wc = wc_map.get(getattr(m, "work_center_id", None)) if m else None
+        # Filter based on role IDs - for machine calibration, filter by machine's user_id
+        machine_user_id = getattr(m, "user_id", None) if m else None
+        if mc_id and machine_user_id != mc_id:
+            continue
+        if pc_id and machine_user_id != pc_id:
+            continue
+        if admin_id and machine_user_id != admin_id:
+            continue
         response.append(MachineCalibrationNotificationWithDetails(
             id=n.id,
             machine_id=n.machine_id,
@@ -89,8 +100,32 @@ def list_machine_calibration_notifications(
 
 
 @router.get("/pending", response_model=List[MachineCalibrationNotificationSchema])
-def list_pending_machine_calibration_notifications(db: Session = Depends(get_db)):
-    return db.query(MachineCalibrationNotificationModel).filter(MachineCalibrationNotificationModel.is_ack == False).order_by(MachineCalibrationNotificationModel.id.desc()).all()  # noqa: E712
+def list_pending_machine_calibration_notifications(
+    mc_id: int | None = None,
+    pc_id: int | None = None,
+    admin_id: int | None = None,
+    db: Session = Depends(get_db)
+):
+    q = db.query(MachineCalibrationNotificationModel).filter(MachineCalibrationNotificationModel.is_ack == False)  # noqa: E712
+    notifications = q.order_by(MachineCalibrationNotificationModel.id.desc()).all()
+    machine_ids = [n.machine_id for n in notifications]
+    if not machine_ids:
+        return []
+    machines = db.query(Machine).filter(Machine.id.in_(machine_ids)).all()
+    machine_map = {m.id: m for m in machines}
+    result = []
+    for n in notifications:
+        m = machine_map.get(n.machine_id)
+        machine_user_id = getattr(m, "user_id", None) if m else None
+        # Filter based on role IDs
+        if mc_id and machine_user_id != mc_id:
+            continue
+        if pc_id and machine_user_id != pc_id:
+            continue
+        if admin_id and machine_user_id != admin_id:
+            continue
+        result.append(n)
+    return result
 
 
 

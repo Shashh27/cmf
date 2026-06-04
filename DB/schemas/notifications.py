@@ -16,10 +16,25 @@ class OrderNotificationUpdate(BaseModel):
     is_ack: Optional[bool] = None
 
 
+class OrderNotificationAcknowledge(BaseModel):
+    """Schema for acknowledging order notifications with role information"""
+    role: str  # 'admin', 'pc', or 'mc'
+    user_name: str  # username of the person acknowledging
+
+
 class OrderNotification(OrderNotificationBase):
     id: int
-    ack_by: Optional[str] = None
-    ack_at: Optional[datetime] = None
+    # Role-specific acknowledgment status fields
+    mc_is_ack: Optional[bool] = None
+    pc_is_ack: Optional[bool] = None
+    admin_is_ack: Optional[bool] = None
+    # Role-specific acknowledgment fields
+    mc_ack_by: Optional[str] = None
+    mc_ack_at: Optional[datetime] = None
+    pc_ack_by: Optional[str] = None
+    pc_ack_at: Optional[datetime] = None
+    admin_ack_by: Optional[str] = None
+    admin_ack_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

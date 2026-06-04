@@ -27,6 +27,9 @@ def get_admin_username(db: Session) -> str:
 
 @router.get("/", response_model=List[ToolIssuesNotificationWithDetails])
 def list_tool_issues_notifications(
+    mc_id: int | None = None,
+    pc_id: int | None = None,
+    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     db: Session = Depends(get_db),
@@ -73,6 +76,16 @@ def list_tool_issues_notifications(
         issue = issues_map.get(n.tool_issues_id, {})
         tool = tool_map.get(issue.get("tool_id"))
         op = operator_map.get(issue.get("operator_id"))
+        # Filter based on role IDs - for tool issues, filter by operator_id
+        # Skip if issue not found and role filtering is requested
+        if (mc_id or pc_id or admin_id) and not issue:
+            continue
+        if mc_id and issue.get("operator_id") != mc_id:
+            continue
+        if pc_id and issue.get("operator_id") != pc_id:
+            continue
+        if admin_id and issue.get("operator_id") != admin_id:
+            continue
         response.append(ToolIssuesNotificationWithDetails(
             id=n.id,
             tool_issues_id=n.tool_issues_id,
@@ -90,8 +103,38 @@ def list_tool_issues_notifications(
 
 
 @router.get("/pending", response_model=List[ToolIssuesNotificationSchema])
-def list_pending_tool_issues_notifications(db: Session = Depends(get_db)):
-    return db.query(ToolIssuesNotificationModel).filter(ToolIssuesNotificationModel.is_ack == False).order_by(ToolIssuesNotificationModel.id.desc()).all()  # noqa: E712
+def list_pending_tool_issues_notifications(
+    mc_id: int | None = None,
+    pc_id: int | None = None,
+    admin_id: int | None = None,
+    db: Session = Depends(get_db)
+):
+    q = db.query(ToolIssuesNotificationModel).filter(ToolIssuesNotificationModel.is_ack == False)  # noqa: E712
+    notifications = q.order_by(ToolIssuesNotificationModel.id.desc()).all()
+    issue_ids = [n.tool_issues_id for n in notifications]
+    if not issue_ids:
+        return []
+    stmt = text("""
+        SELECT id, operator_id
+        FROM inventory.tool_issues
+        WHERE id IN :ids
+    """).bindparams(bindparam("ids", expanding=True))
+    rows = db.execute(stmt, {"ids": issue_ids}).fetchall()
+    issue_map = {int(r[0]): r[1] for r in rows}
+    result = []
+    for n in notifications:
+        operator_id = issue_map.get(n.tool_issues_id)
+        # Filter based on role IDs - skip if issue not found and role filtering is requested
+        if (mc_id or pc_id or admin_id) and operator_id is None:
+            continue
+        if mc_id and operator_id != mc_id:
+            continue
+        if pc_id and operator_id != pc_id:
+            continue
+        if admin_id and operator_id != admin_id:
+            continue
+        result.append(n)
+    return result
 
 
 
