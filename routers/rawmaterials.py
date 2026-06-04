@@ -1262,6 +1262,7 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
     result = {
         "id": stock.id,
         "material_id": stock.material_id,
+        "process_type": stock.process_type,
         "form_type": stock.form_type,
         "diameter": stock.diameter,
         "length": stock.length,
@@ -1276,6 +1277,8 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
         "mass": stock.mass,
         "weight": stock.weight,
         "cost": stock.cost,
+        "estimated_cost": stock.estimated_cost,
+        "final_cost": stock.final_cost,
         "source_type": stock.source_type,
         "source_order_id": stock.source_order_id,
         "order_status": stock.order_status,
@@ -1302,12 +1305,14 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
             result["source_order_number"] = f"Order #{stock.source_order_id} (Not Found)"
     
     # Add part details (handle comma-separated part IDs)
+    all_parts = []
     if stock.part_id:
         try:
             # Split comma-separated part IDs and fetch part details
             part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
             parts = db.query(PartModel).filter(PartModel.id.in_(part_ids)).all()
             if parts:
+                all_parts.extend(parts)
                 result["part_numbers"] = [part.part_number for part in parts]
                 result["part_names"] = [f"{part.part_number} - {part.part_name}" for part in parts]
                 result["part_ids"] = stock.part_id  # Keep original string format
@@ -1329,6 +1334,10 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
     # Fetch parts linked through unit-based tracking
     from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
     units = db.query(RawMaterialUnit).filter(RawMaterialUnit.stock_id == stock.id).all()
+    
+    # Create order-to-part mapping
+    order_parts_mapping = {}
+    
     if units:
         unit_ids = [u.id for u in units]
         usages = db.query(RawMaterialUsage).filter(RawMaterialUsage.raw_material_unit_id.in_(unit_ids)).all()
@@ -1336,6 +1345,7 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
             linked_part_ids = [usage.part_id for usage in usages]
             linked_parts = db.query(PartModel).filter(PartModel.id.in_(linked_part_ids)).all()
             if linked_parts:
+                all_parts.extend(linked_parts)
                 existing_part_numbers = result.get("part_numbers", [])
                 existing_part_names = result.get("part_names", [])
                 existing_part_ids = result.get("part_ids", "")
@@ -1350,21 +1360,23 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
                 else:
                     result["part_ids"] = new_part_ids
                 
-                # 🔥 NEW: Fetch order information from linked parts
-                product_ids = [part.product_id for part in linked_parts if part.product_id]
-                if product_ids:
-                    orders = db.query(OrderModel).filter(OrderModel.product_id.in_(product_ids)).all()
-                    if orders:
-                        existing_order_numbers = result.get("source_order_number", "")
-                        # Split existing order numbers into a set to avoid duplicates
-                        existing_set = set()
-                        if existing_order_numbers:
-                            existing_set = set([num.strip() for num in existing_order_numbers.split(',') if num.strip()])
-                        # Add new order numbers to the set
+                # 🔥 NEW: Fetch order information from linked parts and build order-to-part mapping
+                for part in linked_parts:
+                    if part.product_id:
+                        # Get orders for this part's product
+                        orders = db.query(OrderModel).filter(OrderModel.product_id == part.product_id).all()
                         for order in orders:
-                            existing_set.add(order.sale_order_number)
-                        # Join unique order numbers back together
-                        result["source_order_number"] = ", ".join(sorted(existing_set))
+                            order_number = order.sale_order_number
+                            if order_number not in order_parts_mapping:
+                                order_parts_mapping[order_number] = []
+                            order_parts_mapping[order_number].append(part.part_number)
+                
+                # Build source_order_number from the mapping
+                if order_parts_mapping:
+                    result["source_order_number"] = ", ".join(sorted(order_parts_mapping.keys()))
+    
+    # Add order-to-part mapping to result
+    result["order_parts_mapping"] = order_parts_mapping
     
     # Add vendor details (handle both comma-separated vendor IDs and received vendor)
     # Always handle comma-separated vendor IDs for enquiry phase (all vendors)
@@ -1427,6 +1439,31 @@ def get_raw_material_units(
     
     units = query.order_by(RawMaterialUnitModel.stock_id.asc(), RawMaterialUnitModel.id.asc()).all()
     
+    # Get all unit IDs
+    unit_ids = [unit.id for unit in units]
+    
+    # Fetch usage data for all units in one query
+    usages_by_unit = {}
+    if unit_ids:
+        usages = db.query(RawMaterialUsageModel).options(
+            joinedload(RawMaterialUsageModel.part)
+        ).filter(RawMaterialUsageModel.raw_material_unit_id.in_(unit_ids)).all()
+        
+        for usage in usages:
+            if usage.raw_material_unit_id not in usages_by_unit:
+                usages_by_unit[usage.raw_material_unit_id] = []
+            usages_by_unit[usage.raw_material_unit_id].append({
+                "id": usage.id,
+                "part_id": usage.part_id,
+                "used_length": usage.used_length,
+                "created_at": usage.created_at,
+                "part_name": usage.part.part_name if usage.part else None,
+                "part_number": usage.part.part_number if usage.part else None,
+                "part": {
+                    "product_id": usage.part.product_id if usage.part else None
+                } if usage.part else None
+            })
+    
     result = []
     for unit in units:
         unit_dict = {
@@ -1444,12 +1481,18 @@ def get_raw_material_units(
             "material_name": unit.stock.material.material_name if unit.stock and unit.stock.material else None,
             "stock_details": {
                 "form_type": unit.stock.form_type,
+                "process_type": unit.stock.process_type,
                 "diameter": unit.stock.diameter,
                 "length": unit.stock.length,
                 "breadth": unit.stock.breadth,
                 "height": unit.stock.height,
-                "quantity": unit.stock.quantity
-            } if unit.stock else None
+                "inner_diameter": unit.stock.inner_diameter,
+                "outer_diameter": unit.stock.outer_diameter,
+                "quantity": unit.stock.quantity,
+                "estimated_cost": unit.stock.estimated_cost,
+                "final_cost": unit.stock.final_cost
+            } if unit.stock else None,
+            "usages": usages_by_unit.get(unit.id, [])
         }
         result.append(unit_dict)
     

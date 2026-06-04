@@ -80,19 +80,27 @@ class NotificationService:
         order = db.query(Order).filter(Order.id == order_id).first()
         if not order:
             return []
-        
+
         pc_user_ids = []
-        
+
         # Add project_coordinator_id if set
         if order.project_coordinator_id:
             pc_user_ids.append(order.project_coordinator_id)
-        
+
         # Add user_id if the creator is a PC
         if order.user_id:
             user = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
             if user and ('project_coordinator' in user.role.lower() or 'pc' in user.role.lower()):
                 pc_user_ids.append(order.user_id)
-        
+
+        # If no PC users found yet, try to find any PC users in the system
+        # This ensures notifications are sent even if no specific PC is assigned to the order
+        if not pc_user_ids:
+            all_pcs = db.query(AccessUser).filter(
+                AccessUser.role.ilike('%project_coordinator%') | AccessUser.role.ilike('%pc%')
+            ).all()
+            pc_user_ids = [pc.id for pc in all_pcs]
+
         return list(set(pc_user_ids))  # Remove duplicates
     
     @staticmethod
@@ -364,9 +372,9 @@ class NotificationService:
         """Log a schedule status change and create PC notifications"""
         try:
             order_id = NotificationService._get_order_id_for_part(db, part_id)
-            
+
             action = "schedule_activated" if status == "active" else "schedule_deactivated"
-            
+
             activity_log = NotificationService._create_activity_log(
                 db=db,
                 entity_type="part",
@@ -377,16 +385,65 @@ class NotificationService:
                 order_id=order_id,
                 details={"schedule_status": status}
             )
-            
+
             if order_id:
                 pc_user_ids = NotificationService._get_pc_users_for_order(db, order_id)
                 if pc_user_ids:
                     NotificationService._create_pc_notifications(db, activity_log.id, pc_user_ids)
-            
+
             db.commit()
             return {"success": True, "activity_log_id": activity_log.id}
-            
+
         except Exception as e:
             db.rollback()
             print(f"Error logging schedule change: {e}")
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def log_order_approval_change(
+        db: Session,
+        order_id: int,
+        approval_status: str,
+        approval_remarks: Optional[str],
+        user_id: Optional[int],
+        user_name: Optional[str],
+        user_role: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Log an order approval/rejection change and create PC notifications"""
+        try:
+            order = db.query(Order).filter(Order.id == order_id).first()
+            if not order:
+                return {"success": False, "error": "Order not found"}
+
+            action = "order_approved" if approval_status == "Approved" else "order_rejected"
+
+            # Create activity log with approval details
+            activity_log = NotificationService._create_activity_log(
+                db=db,
+                entity_type="order",
+                entity_id=order_id,
+                action=action,
+                user_id=user_id,
+                user_name=user_name,
+                user_role=user_role,
+                order_id=order_id,
+                details={
+                    "approval_status": approval_status,
+                    "approval_remarks": approval_remarks,
+                    "sale_order_number": order.sale_order_number,
+                    "project_name": order.project_name
+                }
+            )
+
+            # Create PC notifications for this order
+            pc_user_ids = NotificationService._get_pc_users_for_order(db, order_id)
+            if pc_user_ids:
+                NotificationService._create_pc_notifications(db, activity_log.id, pc_user_ids)
+
+            db.commit()
+            return {"success": True, "activity_log_id": activity_log.id}
+
+        except Exception as e:
+            db.rollback()
+            print(f"Error logging order approval change: {e}")
             return {"success": False, "error": str(e)}

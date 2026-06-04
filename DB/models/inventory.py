@@ -86,6 +86,8 @@ class RawMaterialStock(Base):
 
     material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=False)
 
+    process_type = Column(String, nullable=True)  # "Forging", "Barstocks", "Casting"
+
     form_type = Column(String, nullable=False)  # "Round", "Square", "Pipe"
 
     # Dimensions (nullable based on form_type)
@@ -111,6 +113,10 @@ class RawMaterialStock(Base):
     weight = Column(Float, nullable=True)    # Single unit weight in N
 
     cost = Column(Float, nullable=True)      # Single unit cost
+
+    estimated_cost = Column(Float, nullable=True)  # Estimated cost when procuring
+
+    final_cost = Column(Float, nullable=True)      # Final cost when received
 
     source_type = Column(String, nullable=False, default="general")  # "general" or "order"
 

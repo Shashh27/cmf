@@ -778,10 +778,19 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
 @router.get("/part/{part_id}", response_model=List[Document])
 def get_documents_by_part(part_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
     """Get all documents for a specific part. Filter by user_id (uploader) for module-specific views."""
-    query = db.query(DocumentModel).filter(DocumentModel.part_id == part_id)
+    query = db.query(DocumentModel).outerjoin(AccessUser, DocumentModel.user_id == AccessUser.id).filter(DocumentModel.part_id == part_id)
     if user_id is not None:
         query = query.filter(DocumentModel.user_id == user_id)
-    return query.all()
+    
+    # Add user_name to each document
+    documents = query.all()
+    for doc in documents:
+        if doc.user and hasattr(doc.user, 'user_name'):
+            doc.user_name = doc.user.user_name
+        else:
+            doc.user_name = None
+    
+    return documents
 
 
 @router.get("/assembly/{assembly_id}", response_model=List[Document])

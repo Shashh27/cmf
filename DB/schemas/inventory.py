@@ -77,6 +77,8 @@ class RawMaterialStockBase(BaseModel):
 
     material_id: int
 
+    process_type: Optional[str] = None  # "Forging", "Barstocks", "Casting"
+
     form_type: str  # "Round", "Square", "Pipe"
 
     diameter: Optional[float] = None  # For Round & Pipe
@@ -101,6 +103,10 @@ class RawMaterialStockBase(BaseModel):
 
     cost: Optional[float] = None      # Single unit cost
 
+    estimated_cost: Optional[float] = None  # Estimated cost when procuring
+
+    final_cost: Optional[float] = None      # Final cost when received
+
     source_type: str = "general"  # "general" or "order"
 
     source_order_id: Optional[int] = None
@@ -121,6 +127,20 @@ class RawMaterialStockBase(BaseModel):
     allocated_quantity: int = 0  # Quantity allocated to parts
     
     available_quantity: int = 0  # Quantity available for use
+
+
+
+    @field_validator('process_type')
+
+    @classmethod
+
+    def validate_process_type(cls, v):
+
+        if v not in ["Forging", "Barstocks", "Casting"]:
+
+            raise ValueError('process_type must be "Forging", "Barstocks", or "Casting"')
+
+        return v
 
 
 
@@ -162,6 +182,8 @@ class RawMaterialStockUpdate(BaseModel):
 
     material_id: Optional[int] = None
 
+    process_type: Optional[str] = None
+
     form_type: Optional[str] = None
 
     diameter: Optional[float] = None
@@ -185,6 +207,10 @@ class RawMaterialStockUpdate(BaseModel):
     weight: Optional[float] = None
 
     cost: Optional[float] = None
+
+    estimated_cost: Optional[float] = None
+
+    final_cost: Optional[float] = None
 
     source_type: Optional[str] = None
 
@@ -239,6 +265,8 @@ class RawMaterialStockWithDetails(RawMaterialStock):
 
     creator_name: Optional[str] = None
 
+    order_parts_mapping: Optional[dict] = None  # Maps order numbers to their associated parts
+
     total_volume: Optional[float] = None  # volume * quantity
 
     total_mass: Optional[float] = None    # mass * quantity
@@ -260,6 +288,8 @@ class OrderMaterialLinkRequest(BaseModel):
     """Request model for linking materials to an order"""
 
     raw_material_id: int
+
+    process_type: Optional[str] = None  # "Forging", "Barstocks", "Casting"
 
     form_type: str
 
@@ -284,6 +314,8 @@ class OrderMaterialLinkRequest(BaseModel):
     vendor_id: Optional[List[int]] = None  # Multiple vendors for enquiry
 
     quantity: int = 1
+
+    estimated_cost: Optional[float] = None  # Estimated cost when procuring
 
     user_id: Optional[int] = None
 
@@ -896,6 +928,7 @@ class RawMaterialUnit(RawMaterialUnitBase):
 class RawMaterialUnitWithDetails(RawMaterialUnit):
     material_name: Optional[str] = None
     stock_details: Optional[dict] = None
+    usages: Optional[List[dict]] = []
 
     class Config:
         from_attributes = True
