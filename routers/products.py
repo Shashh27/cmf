@@ -618,6 +618,17 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
         raw_material_source_type = None
         if part.raw_material_unit_id and part.raw_material_unit_id in unit_map:
             unit = unit_map[part.raw_material_unit_id]
+            stock = unit.stock
+            # Build stock dimensions string
+            stock_dimensions = None
+            if stock:
+                if stock.form_type == 'Round':
+                    stock_dimensions = f'Ø{stock.diameter} × {stock.length}mm'
+                elif stock.form_type == 'Square':
+                    stock_dimensions = f'{stock.breadth} × {stock.height} × {stock.length}mm'
+                elif stock.form_type == 'Pipe':
+                    stock_dimensions = f'Ø{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm'
+            
             unit_details = {
                 'id': unit.id,
                 'total_length': unit.total_length,
@@ -627,11 +638,12 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
                 'weight': unit.weight,
                 'cost': unit.cost,
                 'status': unit.status,
-                'form_type': unit.stock.form_type if unit.stock else None,
-                'material_name': unit.stock.material.material_name if unit.stock and unit.stock.material else None,
-                'source_type': unit.stock.source_type if unit.stock else None,
+                'form_type': stock.form_type if stock else None,
+                'material_name': stock.material.material_name if stock and stock.material else None,
+                'source_type': stock.source_type if stock else None,
+                'stock_dimensions': stock_dimensions,
             }
-            raw_material_source_type = unit.stock.source_type if unit.stock else None
+            raw_material_source_type = stock.source_type if stock else None
 
         # Create a new Part model with the type_name included (uses pre-fetched map)
         part_dict = {
@@ -934,10 +946,72 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
         ).fetchall()
         part_schedule_status_map = {row[0]: row[1] for row in schedule_statuses}
 
+    # Get document acknowledgment status for all parts
+    from DB.models.oms import Document as DocumentModel
+    from DB.models.notifications import MCNotification as MCNotificationModel
+    from DB.models.access_control import AccessUser
+    part_document_ack_map = {}
+    if part_ids:
+        # Get all documents for these parts with user information
+        documents = db.query(DocumentModel).outerjoin(AccessUser, DocumentModel.user_id == AccessUser.id).filter(
+            DocumentModel.part_id.in_(part_ids)
+        ).all()
+        
+        # Get MC notifications for these documents to check rejection status
+        document_ids = [d.id for d in documents]
+        mc_notifications = {}
+        if document_ids:
+            notifications = db.query(MCNotificationModel).filter(
+                MCNotificationModel.document_id.in_(document_ids)
+            ).all()
+            mc_notifications = {notif.document_id: notif for notif in notifications}
+        
+        # For each part, check if it has any unacknowledged documents
+        for part_id in part_ids:
+            part_docs = [d for d in documents if d.part_id == part_id]
+            if part_docs:
+                # Part has documents - check if any are unacknowledged and not rejected (only for PC uploads)
+                has_unacknowledged = False
+                acknowledged_count = 0
+                for doc in part_docs:
+                    mc_notif = mc_notifications.get(doc.id)
+                    # Only require acknowledgment for documents uploaded by PC
+                    uploader_role = doc.user.role if doc.user else None
+                    is_pc_upload = uploader_role and 'project_coordinator' in uploader_role.lower()
+                    
+                    if is_pc_upload:
+                        # Document is considered "handled" if acknowledged OR rejected by MC
+                        is_handled = doc.is_acknowledged or (mc_notif and mc_notif.is_rejected)
+                        if is_handled:
+                            acknowledged_count += 1
+                        else:
+                            has_unacknowledged = True
+                    else:
+                        # Admin/MC uploads don't require acknowledgment
+                        acknowledged_count += 1
+                
+                part_document_ack_map[part_id] = {
+                    'has_documents': True,
+                    'has_unacknowledged': has_unacknowledged,
+                    'total_documents': len(part_docs),
+                    'acknowledged_count': acknowledged_count
+                }
+            else:
+                part_document_ack_map[part_id] = {
+                    'has_documents': False,
+                    'has_unacknowledged': False,
+                    'total_documents': 0,
+                    'acknowledged_count': 0
+                }
+
     # Get all raw materials for mapping (name only)
     all_raw_materials = db.query(RawMaterialModel).all()
     raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
     raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
+
+    # Get all raw material units with stock for stock dimensions
+    all_units = db.query(RawMaterialUnit).options(joinedload(RawMaterialUnit.stock)).all()
+    unit_map = {unit.id: unit for unit in all_units}
 
     # Get all part types for mapping
     all_part_types = db.query(PartTypeModel).all()
@@ -965,6 +1039,27 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
         else:
             raw_material_status = raw_material_status_map.get(part.raw_material_id, "Not Available")
 
+        # Get unit details if part has a unit assigned
+        stock_dimensions = None
+        if part.raw_material_unit_id and part.raw_material_unit_id in unit_map:
+            unit = unit_map[part.raw_material_unit_id]
+            stock = unit.stock
+            # Build stock dimensions string
+            if stock:
+                if stock.form_type == 'Round':
+                    stock_dimensions = f'Ø{stock.diameter} × {stock.length}mm'
+                elif stock.form_type == 'Square':
+                    stock_dimensions = f'{stock.breadth} × {stock.height} × {stock.length}mm'
+                elif stock.form_type == 'Pipe':
+                    stock_dimensions = f'Ø{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm'
+
+        doc_ack_status = part_document_ack_map.get(part.id, {
+            'has_documents': False,
+            'has_unacknowledged': False,
+            'total_documents': 0,
+            'acknowledged_count': 0
+        })
+
         return {
             'id': part.id,
             'part_name': part.part_name,
@@ -978,6 +1073,7 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             'raw_material_id': part.raw_material_id,
             'raw_material_name': raw_material_map.get(part.raw_material_id),
             'raw_material_status': raw_material_status,
+            'stock_dimensions': stock_dimensions,
             'schedule_status': part_schedule_status_map.get(part.id, None),
             'vendor_id': part.vendor_id,
             'vendor_name': getattr(part.vendor, 'company_name', None) if part.vendor else None,
@@ -986,6 +1082,8 @@ def get_product_hierarchical_lightweight(product_id: int, db: Session = Depends(
             'recycle_bin': getattr(part, 'recycle_bin', False),
             'created_at': part.created_at,
             'updated_at': part.updated_at,
+            'has_unacknowledged_documents': doc_ack_status['has_unacknowledged'],
+            'document_info': doc_ack_status,
         }
 
     def build_assembly_lightweight(assembly_id: int) -> dict:

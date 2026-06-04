@@ -94,6 +94,10 @@ from notification_routers import (
 
     pc_notifications_router,
 
+    mc_notifications_router,
+
+    admin_document_notifications_router,
+
 )
 
 
@@ -101,6 +105,8 @@ from notification_routers import (
 # Import Pokayoke checklists router
 
 from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
+
+from routers.raw_material_summary import router as raw_material_summary_router
 
 
 
@@ -298,6 +304,8 @@ app.include_router(monitoring_router, prefix="/api/v1")
 
 app.include_router(production_analytics_router, prefix="/api/v1")
 
+app.include_router(raw_material_summary_router, prefix="/api/v1")
+
 app.include_router(recycle_bin_router, prefix="/api/v1")
 
 # app.include_router(production_logs_router, prefix="/api/v1")
@@ -317,6 +325,10 @@ app.include_router(order_notifications_router, prefix="/api/v1")
 app.include_router(tool_issues_notification_router, prefix="/api/v1")
 
 app.include_router(pc_notifications_router, prefix="/api/v1")
+
+app.include_router(mc_notifications_router, prefix="/api/v1")
+
+app.include_router(admin_document_notifications_router, prefix="/api/v1")
 
 
 

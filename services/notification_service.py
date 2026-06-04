@@ -447,3 +447,47 @@ class NotificationService:
             db.rollback()
             print(f"Error logging order approval change: {e}")
             return {"success": False, "error": str(e)}
+    
+    @staticmethod
+    def log_mc_document_acknowledgment(
+        db: Session,
+        document_id: int,
+        action: str,
+        mc_user_id: Optional[int],
+        mc_user_name: Optional[str],
+        mc_user_role: Optional[str] = None,
+        remarks: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Log MC document acknowledgment/rejection and create PC notifications"""
+        try:
+            order_id = NotificationService._get_order_id_for_document(db, document_id)
+            
+            # Create activity log
+            activity_log = NotificationService._create_activity_log(
+                db=db,
+                entity_type="document",
+                entity_id=document_id,
+                action=f"mc_{action}",  # "mc_acknowledged" or "mc_rejected"
+                user_id=mc_user_id,
+                user_name=mc_user_name,
+                user_role=mc_user_role,
+                order_id=order_id,
+                details={
+                    "action": action,
+                    "remarks": remarks
+                }
+            )
+            
+            # Create PC notifications if order exists
+            if order_id:
+                pc_user_ids = NotificationService._get_pc_users_for_order(db, order_id)
+                if pc_user_ids:
+                    NotificationService._create_pc_notifications(db, activity_log.id, pc_user_ids)
+            
+            db.commit()
+            return {"success": True, "activity_log_id": activity_log.id}
+            
+        except Exception as e:
+            db.rollback()
+            print(f"Error logging MC document acknowledgment: {e}")
+            return {"success": False, "error": str(e)}

@@ -1034,6 +1034,8 @@ def _order_to_response(order, db: Session):
 
         "user_name": order.user.user_name if order.user else None,
 
+        "user_role": order.user.role if order.user else None,
+
         "project_coordinator_name": order.project_coordinator.user_name if order.project_coordinator else None,
 
         "admin_name": order.admin.user_name if order.admin else None,
@@ -1151,6 +1153,13 @@ def create_order(order: OrderCreate, db: Session = Depends(get_db)):
     data = order.model_dump(exclude={"project_name"})
 
     db_order = Order(**data)
+
+    # If order is created by admin, set approval_status to "Auto-Approved" instead of "Pending Approval"
+    if order.user_id:
+        creator = db.query(AccessUser).filter(AccessUser.id == order.user_id).first()
+        if creator and 'admin' in creator.role.lower():
+            db_order.approval_status = "Auto-Approved"
+            db_order.approved_at = func.now()
 
     db.add(db_order)
 

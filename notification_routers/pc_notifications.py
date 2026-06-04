@@ -182,6 +182,10 @@ def get_pc_notifications(
         
         # Get entity name based on entity_type
         entity_name = None
+        part_name = None
+        part_number = None
+        document_version = None
+        
         if activity_log.entity_type == "part":
             part = db.query(PartModel).filter(PartModel.id == activity_log.entity_id).first()
             entity_name = part.part_name if part else None
@@ -191,6 +195,15 @@ def get_pc_notifications(
         elif activity_log.entity_type == "document":
             document = db.query(DocumentModel).filter(DocumentModel.id == activity_log.entity_id).first()
             entity_name = document.document_name if document else None
+            # Fetch part details for document
+            if document and document.part_id:
+                part = db.query(PartModel).filter(PartModel.id == document.part_id).first()
+                if part:
+                    part_name = part.part_name
+                    part_number = part.part_number
+            # Get document version
+            if document:
+                document_version = document.document_version
         elif activity_log.entity_type == "order_document":
             order_doc = db.query(OrderDocumentModel).filter(OrderDocumentModel.id == activity_log.entity_id).first()
             entity_name = order_doc.document_name if order_doc else None
@@ -216,6 +229,9 @@ def get_pc_notifications(
             "user_role": activity_log.user_role,
             "timestamp": activity_log.timestamp,
             "details": enriched_details,
+            "part_name": part_name,
+            "part_number": part_number,
+            "document_version": document_version,
         })
     
     return result
