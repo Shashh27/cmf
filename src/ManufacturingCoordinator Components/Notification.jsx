@@ -6,11 +6,11 @@ import Lottie from 'lottie-react';
 import notificationBell from '../assets/Notification bell.json';
 
 const { Title, Text } = Typography;
-import OrderNotifications from '../Notification Components/OrderNotifications';
-import MachineNotifications from '../Notification Components/MachineNotifications';
-import ToolIssuesNotifications from '../Notification Components/ToolIssuesNotifications';
-import ComponentIssuesNotifications from '../Notification Components/ComponentIssuesNotifications';
-import MachineCalibrationNotifications from '../Notification Components/MachineCalibrationNotifications';
+import OrderNotifications from './Notification Components/OrderNotifications';
+import MachineNotifications from './Notification Components/MachineNotifications';
+import ToolIssuesNotifications from './Notification Components/ToolIssuesNotifications';
+import ComponentIssuesNotifications from './Notification Components/ComponentIssuesNotifications';
+import MachineCalibrationNotifications from './Notification Components/MachineCalibrationNotifications';
 import config from '../Config/config';
 
 const Notification = () => {
@@ -38,6 +38,26 @@ const Notification = () => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
+      
+      // Add role-based filtering based on user's role
+      const storedUser = localStorage.getItem('user');
+      let userRole = '';
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          userRole = (user.role || user.user_role || '').toLowerCase();
+          if (userRole.includes('manufacturing') || userRole === 'mc') {
+            if (user.id) params.set('mc_id', user.id);
+          } else if (userRole.includes('project') || userRole === 'pc') {
+            if (user.id) params.set('pc_id', user.id);
+          } else if (userRole.includes('admin')) {
+            if (user.id) params.set('admin_id', user.id);
+          }
+        } catch (e) {
+          console.error('Error parsing user from localStorage', e);
+        }
+      }
+      
       const qs = params.toString();
       const endpoints = [
         `${config.API_BASE_URL}/order-notifications/${qs ? `?${qs}` : ''}`,
@@ -49,12 +69,24 @@ const Notification = () => {
       const [orders, machines, tools, components, calibrations] = await Promise.all(
         endpoints.map((url) => fetch(url).then((r) => (r.ok ? r.json() : [])))
       );
+      
+      // Count pending notifications based on role-specific acknowledgment status
+      const countPending = (notifications) => {
+        if (!Array.isArray(notifications)) return 0;
+        return notifications.filter((n) => {
+          if (userRole.includes('manufacturing')) return !n.mc_is_ack;
+          if (userRole.includes('project')) return !n.pc_is_ack;
+          if (userRole.includes('admin')) return !n.admin_is_ack;
+          return !n.is_ack; // fallback for other roles
+        }).length;
+      };
+      
       setCounts({
-        orders: Array.isArray(orders) ? orders.filter((n) => !n.is_ack).length : 0,
-        machines: Array.isArray(machines) ? machines.filter((n) => !n.is_ack).length : 0,
-        tools: Array.isArray(tools) ? tools.filter((n) => !n.is_ack).length : 0,
-        components: Array.isArray(components) ? components.filter((n) => !n.is_ack).length : 0,
-        calibrations: Array.isArray(calibrations) ? calibrations.filter((n) => !n.is_ack).length : 0,
+        orders: countPending(orders),
+        machines: countPending(machines),
+        tools: countPending(tools),
+        components: countPending(components),
+        calibrations: countPending(calibrations),
       });
     } catch (e) {
       // silent fail; badges will update when tabs are visited

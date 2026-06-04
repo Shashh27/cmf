@@ -466,11 +466,6 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <BuildOutlined />,
       },
       {
-        key: `${prefix}/notification`,
-        label: <Link to={`${prefix}/notification`} onClick={() => setMobileDrawerOpen(false)}>Inspection Notifications</Link>,
-        icon: <BellOutlined />,
-      },
-      {
         key: `${prefix}/notifications`,
         label: (
           <Link to={`${prefix}/notifications`} onClick={() => setMobileDrawerOpen(false)}>

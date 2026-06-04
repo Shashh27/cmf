@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
-import config from '../Config/config';
+import config from '../../Config/config';
 import dayjs from 'dayjs';
 
 const MachineCalibrationNotifications = ({ dateRange, onCount }) => {

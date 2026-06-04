@@ -19,32 +19,6 @@ const FONT_STACK = '"JetBrains Mono", "JetBrains Mono NL", ui-monospace, "Cascad
 
 const monoStyle = { fontFamily: FONT_STACK };
 
-const themeInspectionQueue = {
-  token: {
-    fontFamily: FONT_STACK,
-    borderRadiusLG: 12,
-    colorPrimary: '#2563eb',
-    colorSuccess: '#059669',
-    colorWarning: '#d97706',
-  },
-  components: {
-    Table: {
-      headerBg: '#f1f5f9',
-      headerColor: '#334155',
-      rowHoverBg: '#f8fafc',
-      fontSize: 12,
-      cellPaddingBlockMD: 12,
-      cellPaddingInlineMD: 14,
-    },
-    Card: {
-      colorBgContainer: '#ffffff',
-    },
-    Tag: {
-      defaultBg: '#f1f5f9',
-    },
-  },
-};
-
 const fmtTol = (value) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return '—';
@@ -424,194 +398,76 @@ const InspectionResults = () => {
   );
 
   return (
-    <ConfigProvider theme={themeInspectionQueue}>
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '100%',
-          boxSizing: 'border-box',
-          margin: 0,
-          padding: '8px 0 24px',
-          fontFamily: FONT_STACK,
-          minHeight: '100%',
-        }}
+    <div style={{ padding: '16px' }}>
+      <Card
+        style={{ borderRadius: 8, marginBottom: '16px' }}
+        styles={{ body: { padding: '16px' } }}
       >
-        <Card
-          bordered={false}
-          style={{
-            borderRadius: 16,
-            marginBottom: 20,
-            border: '1px solid rgba(226, 232, 240, 0.95)',
-            boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04)',
-            background: 'linear-gradient(145deg, #f8fafc 0%, #ffffff 48%, #f1f5f9 100%)',
-            overflow: 'hidden',
-          }}
-          bodyStyle={{ padding: '22px 26px 20px' }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-start',
-              gap: 20,
-              marginBottom: 14,
-              flexWrap: 'wrap',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18 }}>
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 14,
-                  background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)',
-                  flexShrink: 0,
-                }}
-              >
-                <ExperimentOutlined style={{ fontSize: 26, color: '#fff' }} />
-              </div>
-              <div>
-                <Title
-                  level={3}
-                  style={{
-                    margin: 0,
-                    fontSize: 22,
-                    fontWeight: 700,
-                    letterSpacing: '-0.03em',
-                    color: '#0f172a',
-                    fontFamily: FONT_STACK,
-                  }}
-                >
-                  Inspection Queue
-                </Title>
-                <Text type="secondary" style={{ fontSize: 13, display: 'block', marginTop: 6, lineHeight: 1.5 }}>
-                  In-progress operations — open the plan or measure characteristics on the drawing.
-                </Text>
-              </div>
-            </div>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => void load()}
-              style={{ borderRadius: 10, fontWeight: 600, height: 38 }}
-            >
-              Refresh
-            </Button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div>
+            <Title level={3} style={{ margin: 0, marginBottom: '8px' }}>
+              Inspection Queue
+            </Title>
+            <Text type="secondary">
+              In-progress operations — open the plan or measure characteristics on the drawing.
+            </Text>
           </div>
-          <Space size={10} wrap>
-            {machineLabel ? (
-              <Tag
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 999,
-                  border: '1px solid #bfdbfe',
-                  background: '#eff6ff',
-                  color: '#1e40af',
-                  fontWeight: 600,
-                  fontSize: 12,
-                  margin: 0,
-                }}
-              >
-                <ToolOutlined style={{ marginRight: 8 }} />
-                {machineLabel}
-              </Tag>
-            ) : null}
-            <Tag
-              style={{
-                padding: '6px 14px',
-                borderRadius: 999,
-                border: '1px solid #e2e8f0',
-                background: '#f8fafc',
-                color: '#475569',
-                fontWeight: 600,
-                fontSize: 12,
-                margin: 0,
-              }}
-            >
-              Active · {total}
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => void load()}
+          >
+            Refresh
+          </Button>
+        </div>
+        <Space size={10} wrap>
+          {machineLabel ? (
+            <Tag>
+              <ToolOutlined style={{ marginRight: 8 }} />
+              {machineLabel}
             </Tag>
-          </Space>
-        </Card>
+          ) : null}
+          <Tag>Active · {total}</Tag>
+        </Space>
+      </Card>
 
         <Spin spinning={loading}>
           {machineId == null && !loading ? (
-            <Card
-              style={{
-                borderRadius: 16,
-                border: '1px solid #e2e8f0',
-                boxShadow: '0 2px 12px rgba(15, 23, 42, 0.04)',
-              }}
-              bodyStyle={{ padding: 48 }}
-            >
-              <Empty
-                description={
-                  <span style={{ color: '#64748b', fontSize: 13 }}>
-                    Log in with a machine first (operator login) to see in-progress operations.
-                  </span>
-                }
-              />
+            <Card style={{ borderRadius: 8 }}>
+              <Empty description="Log in with a machine first (operator login) to see in-progress operations." />
             </Card>
           ) : null}
 
           {machineId != null && error ? (
-            <Card
-              style={{ borderRadius: 16, border: '1px solid #fecaca', background: '#fef2f2' }}
-              bodyStyle={{ padding: 24 }}
-            >
-              <Text type="danger" style={{ fontSize: 13 }}>
-                {error}
-              </Text>
+            <Card style={{ borderRadius: 8 }}>
+              <Text type="danger">{error}</Text>
               <div style={{ marginTop: 14 }}>
-                <Button onClick={() => void load()} style={{ borderRadius: 10, fontWeight: 600 }}>
-                  Retry
-                </Button>
+                <Button onClick={() => void load()}>Retry</Button>
               </div>
             </Card>
           ) : null}
 
           {machineId != null && !error && !loading && total === 0 ? (
-            <Card
-              style={{
-                borderRadius: 16,
-                border: '1px dashed #cbd5e1',
-                background: '#fafafa',
-              }}
-              bodyStyle={{ padding: 48 }}
-            >
-              <Empty
-                description={
-                  <span style={{ color: '#64748b', fontSize: 13 }}>No in-progress operations for this machine.</span>
-                }
-              />
+            <Card style={{ borderRadius: 8 }}>
+              <Empty description="No in-progress operations for this machine." />
             </Card>
           ) : null}
 
           {machineId != null && !error && !loading && total > 0 ? (
-            <Card
-              bordered={false}
-              style={{
-                borderRadius: 16,
-                border: '1px solid rgba(226, 232, 240, 0.95)',
-                boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06)',
-                overflow: 'hidden',
-              }}
-              bodyStyle={{ padding: 0 }}
-            >
+            <Card style={{ borderRadius: 8 }}>
               <Table
                 columns={columns}
                 dataSource={tableData}
                 pagination={false}
-                style={{ width: '100%' }}
                 scroll={{ x: 'max-content' }}
-                size="middle"
-                onRow={(_, index) => ({
-                  style: {
-                    background: index % 2 === 0 ? '#ffffff' : '#f8fafc',
+                components={{
+                  header: {
+                    cell: (props) => (
+                      <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                        {props.children}
+                      </th>
+                    ),
                   },
-                })}
+                }}
               />
             </Card>
           ) : null}
@@ -688,8 +544,7 @@ const InspectionResults = () => {
           </div>
         </div>
       </Modal>
-      </div>
-    </ConfigProvider>
+    </div>
   );
 };
 

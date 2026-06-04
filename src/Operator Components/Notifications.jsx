@@ -187,10 +187,14 @@ const Notifications = () => {
 
       if (response.ok) {
         message.success('Notification acknowledged');
-        // Add to acknowledged set to disable button immediately
-        setAcknowledgedIds(prev => new Set(prev).add(logId));
         // Refresh from server to ensure data consistency
-        fetchNotifications();
+        await fetchNotifications();
+        // Remove from acknowledging set after refresh completes
+        setAcknowledgingIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(logId);
+          return newSet;
+        });
       } else {
         const errorData = await response.json();
         console.error('Acknowledgment error:', errorData);
@@ -253,7 +257,13 @@ const Notifications = () => {
       if (response.ok) {
         message.success('Pokayoke notification acknowledged');
         // Refresh the Pokayoke notifications list to update the UI
-        fetchPokayokeNotifications();
+        await fetchPokayokeNotifications();
+        // Remove from acknowledging set after refresh completes
+        setAcknowledgingIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(logId);
+          return newSet;
+        });
       } else {
         const errorData = await response.json();
         console.error('Pokayoke acknowledgment error:', errorData);
@@ -534,7 +544,7 @@ const Notifications = () => {
       },
     },
     {
-      title: 'Overall Status',
+      title: 'Status',
       dataIndex: 'overall_status',
       key: 'overallStatus',
       align: 'center',
@@ -644,7 +654,7 @@ const Notifications = () => {
                     components={{
                       header: {
                         cell: (props) => (
-                          <th {...props} style={{ ...props.style, backgroundColor: '#e6f7ff', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                          <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
                             {props.children}
                           </th>
                         ),
@@ -688,7 +698,7 @@ const Notifications = () => {
                     components={{
                       header: {
                         cell: (props) => (
-                          <th {...props} style={{ ...props.style, backgroundColor: '#e6f7ff', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                          <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
                             {props.children}
                           </th>
                         ),

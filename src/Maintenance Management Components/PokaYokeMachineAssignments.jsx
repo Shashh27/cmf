@@ -301,7 +301,7 @@ const AssignmentCard = ({ assignment, onViewItems, onDelete }) => (
           cancelText="Cancel"
           okButtonProps={{ danger: true }}
         >
-          <Button
+          {/* <Button
             type="text"
             size="small"
             icon={<DeleteOutlined />}
@@ -317,7 +317,7 @@ const AssignmentCard = ({ assignment, onViewItems, onDelete }) => (
             onMouseLeave={e => {
               e.currentTarget.style.background = 'transparent';
             }}
-          />
+          /> */}
         </Popconfirm>
       </div>
     </div>
@@ -410,7 +410,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
     const d = dayjs(new Date(year, month, day));
     setSelectedDate(d);
     const dow = d.day();
-    const isWeekend = dow === 0 || dow === 6;
+    const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
     setSelectedDateAssignments(isWeekend ? [] : getAssignmentsForDate(year, month, day, false, dow));
   };
 
@@ -456,7 +456,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       // Update selected date assignments if needed
       if (selectedDate) {
         const dow = selectedDate.day();
-        const isWeekend = dow === 0 || dow === 6;
+        const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
         if (!isWeekend) {
           const updatedAssignments = getAssignmentsForDate(
             selectedDate.year(),
@@ -481,7 +481,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   const renderCell = ({ day, cur }, idx) => {
     const date = new Date(viewYear, cur ? viewMonth : (idx < 7 ? viewMonth - 1 : viewMonth + 1), day);
     const dow = date.getDay();
-    const isWeekend = dow === 0 || dow === 6;
+    const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
     const isToday = cur && day === today.date() && viewMonth === today.month() && viewYear === today.year();
     const isSelected = selectedDate && cur
       && selectedDate.date() === day
@@ -615,7 +615,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
             loading={loading}
             style={{ borderRadius: 8 }}
           >Refresh</Button>
-          <Button
+          {/* <Button
             type="primary" icon={<PlusOutlined />}
             onClick={() => {
               if (!selectedMachine) { message.warning('Select a machine first'); return; }
@@ -623,7 +623,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
               setAssignModalVisible(true);
             }}
             style={{ background: T.primary, borderColor: T.primary, borderRadius: 8, fontWeight: 600 }}
-          >New Assignment</Button>
+          >New Assignment</Button> */}
         </div>
       </div>
 
@@ -749,7 +749,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                   <div style={{ fontSize: 13, fontWeight: 500 }}>Select a date</div>
                   <div style={{ fontSize: 12, marginTop: 4 }}>Click any weekday to see its assignments</div>
                 </div>
-              ) : (selectedDate.day() === 0 || selectedDate.day() === 6) ? (
+              ) : selectedDate.day() === 0 ? (
                 <div style={{ textAlign: 'center', padding: '36px 16px' }}>
                   <div style={{ fontSize: 36, marginBottom: 10 }}>🏖️</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: T.warning }}>Weekend</div>
@@ -823,7 +823,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
               if (freq === 'Weekly') return (
                 <Form.Item name="dayOfWeek" label="Day of Week" rules={[{ required: true }]}>
                   <Select placeholder="Select day">
-                    {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d => (
+                    {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d => (
                       <Option key={d} value={d}>{d}</Option>
                     ))}
                   </Select>

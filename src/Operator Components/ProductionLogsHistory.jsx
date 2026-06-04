@@ -1,38 +1,48 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Table, Typography, Tag, Spin, message, Input, Row, Col, DatePicker, Button } from 'antd';
-import { HistoryOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Card, Table, Typography, Tag, message, Input, DatePicker, Button, Space, Select, Tooltip } from 'antd';
+import { SearchOutlined, ReloadOutlined, CheckCircleOutlined, ClockCircleOutlined, SyncOutlined } from '@ant-design/icons';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
-const { Search } = Input;
 const { RangePicker } = DatePicker;
 
+const highlightText = (text, query) => {
+  if (!query || !text) return text ?? '-';
+  const str = String(text);
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = str.split(new RegExp(`(${escaped})`, 'gi'));
+  if (parts.length === 1) return str;
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} style={{ backgroundColor: '#bae0ff', color: 'inherit', padding: '0 1px', borderRadius: 2 }}>
+            {part}
+          </mark>
+        ) : part
+      )}
+    </>
+  );
+};
+
 const ProductionLogsHistory = () => {
-  const [productionLogs, setProductionLogs] = useState([]);
-  const [filteredLogs, setFilteredLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [dateRange, setDateRange] = useState(null);
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+  const [selectedMachines, setSelectedMachines] = useState([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
-  useEffect(() => {
-    fetchProductionLogs();
-  }, []);
-
-  const fetchProductionLogs = async () => {
+  const fetchProductionLogs = useCallback(async () => {
     setLoading(true);
     try {
-      // Get operator ID from localStorage
       let operatorId = null;
       const storedUser = localStorage.getItem('user');
       if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          operatorId = user.id;
-        } catch (e) {
-          console.error("Error parsing user from local storage", e);
-        }
+        try { operatorId = JSON.parse(storedUser).id; }
+        catch (e) { console.error('Error parsing user from localStorage', e); }
       }
       if (!operatorId) operatorId = localStorage.getItem('operator_id');
 
@@ -42,372 +52,359 @@ const ProductionLogsHistory = () => {
         return;
       }
 
-      // Fetch production logs with hierarchical data - only operator_id
-      const apiUrl = `${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`;
+      const response = await fetch(
+        `${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`
+      );
 
-      const response = await fetch(apiUrl);
-      if (response.ok) {
-        const data = await response.json();
-        // Filter to show only logs where produced_quantity > 0
-        const producedLogs = (data || []).filter(log => (log.produced_quantity || 0) > 0);
-        // Sort by created_at descending so newest logs appear at top
-        const sortedLogs = producedLogs.sort((a, b) => {
-          const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-          const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-          return dateB - dateA;
-        });
-        setProductionLogs(sortedLogs || []);
-        setFilteredLogs(sortedLogs || []);
-      } else {
-        message.error('Failed to fetch production logs');
-        setProductionLogs([]);
-        setFilteredLogs([]);
-      }
+      if (!response.ok) throw new Error('Failed to fetch production logs');
+
+      const data = await response.json();
+      const produced = (data || [])
+        .filter(log => (log.produced_quantity || 0) > 0)
+        .sort((a, b) =>
+          (b.created_at ? dayjs(b.created_at).valueOf() : 0) -
+          (a.created_at ? dayjs(a.created_at).valueOf() : 0)
+        );
+
+      setLogs(produced);
     } catch (error) {
       console.error('Error fetching production logs:', error);
       message.error('Failed to fetch production logs');
-      setProductionLogs([]);
+      setLogs([]);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => { fetchProductionLogs(); }, [fetchProductionLogs]);
+
+  const machineOptions = useMemo(() => {
+    const names = new Set();
+    logs.forEach(log => {
+      const name = log.machine?.make && log.machine?.model
+        ? `(${log.machine.make}) ${log.machine.model}`
+        : log.machine?.make || log.machine?.model || log.machine?.name;
+      if (name) names.add(name);
+    });
+    return Array.from(names).sort().map(name => ({ label: name, value: name }));
+  }, [logs]);
+
+  const filteredLogs = useMemo(() => {
+    let result = logs;
+
+    if (selectedMachines.length > 0) {
+      result = result.filter(log => {
+        const name = log.machine?.make && log.machine?.model
+          ? `(${log.machine.make}) ${log.machine.model}`
+          : log.machine?.make || log.machine?.model || log.machine?.name || '';
+        return selectedMachines.includes(name);
+      });
+    }
+
+    if (dateRange && dateRange.length === 2) {
+      const [start, end] = dateRange;
+      result = result.filter(log => {
+        const d = log.from_date ? dayjs(log.from_date) : null;
+        return d && d.isAfter(start.startOf('day')) && d.isBefore(end.endOf('day'));
+      });
+    }
+
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      result = result.filter(log => [
+        log.operation?.operation_number,
+        log.operation?.operation_name,
+        log.operation?.order?.sale_order_number,
+        log.operation?.product?.product_name,
+        log.operation?.part?.part_name,
+        log.operation?.part?.part_number,
+        log.operation?.part?.quantity,
+        log.machine?.make,
+        log.machine?.model,
+        log.from_date,
+        log.to_date,
+        log.produced_quantity,
+        log.approved_quantity,
+        log.rework_quantity,
+        log.rejected_quantity,
+        log.status,
+        log.supervisor?.user_name,
+        log.remarks,
+      ].some(f => f && String(f).toLowerCase().includes(q)));
+    }
+
+    return result;
+  }, [logs, selectedMachines, dateRange, searchText]);
+
+  const rowClassName = (record) => {
+    if (!searchText) return '';
+    const q = searchText.toLowerCase();
+    const matches = [
+      record.operation?.operation_number,
+      record.operation?.operation_name,
+      record.operation?.order?.sale_order_number,
+      record.operation?.product?.product_name,
+      record.operation?.part?.part_name,
+      record.operation?.part?.part_number,
+      record.machine?.make,
+      record.machine?.model,
+      record.status,
+      record.supervisor?.user_name,
+      record.remarks,
+    ].some(f => f && String(f).toLowerCase().includes(q));
+    return matches ? 'search-highlight-row' : '';
   };
 
-  const getStatusColor = (status) => {
-    const s = (status || '').toLowerCase();
-    if (s === 'approved') return 'success';
-    if (s === 'pending') return 'processing';
-    if (s === 'rework') return 'warning';
-    if (s === 'rejected') return 'error';
-    if (s === 'in_progress') return 'blue';
-    if (s === 'completed') return 'green';
-    if (s === 'submitted') return 'cyan';
-    return 'default';
+  const getStatusTag = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'completed':   return <Tag color="success" icon={<CheckCircleOutlined />}>Completed</Tag>;
+      case 'pending':     return <Tag color="processing" icon={<SyncOutlined spin />}>Pending</Tag>;
+      case 'rework':      return <Tag color="warning" icon={<ClockCircleOutlined />}>Rework</Tag>;
+      case 'approved':    return <Tag color="success">Approved</Tag>;
+      case 'rejected':    return <Tag color="error">Rejected</Tag>;
+      case 'submitted':   return <Tag color="cyan">Submitted</Tag>;
+      case 'in_progress': return <Tag color="blue">In Progress</Tag>;
+      default:            return <Tag color="default">{status || 'Unknown'}</Tag>;
+    }
   };
 
   const formatDateTime = (date, time) => {
-    if (!date || !time) return 'N/A';
-    try {
-      // Parse the date and time
-      const dateStr = date;
-      const timeStr = time.replace('.000Z', '');
-      const dateTimeStr = `${dateStr} ${timeStr}`;
-      const dateTime = new Date(dateTimeStr);
-      if (isNaN(dateTime.getTime())) return 'N/A';
-
-      return dateTime.toLocaleString('en-GB', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-      });
-    } catch (error) {
-      return 'N/A';
-    }
+    if (!date) return 'N/A';
+    const datePart = dayjs(date).format('DD-MM-YYYY');
+    const timePart = time ? time.replace('.000Z', '').substring(0, 8) : '';
+    return timePart ? `${datePart}, ${timePart}` : datePart;
   };
 
-  const handleSearch = (value) => {
-    setSearchText(value);
-    applyFilters(value, dateRange);
-  };
-
-  const handleDateRangeChange = (dates) => {
-    setDateRange(dates);
-    applyFilters(searchText, dates);
-  };
-
-  const applyFilters = (searchValue, dates) => {
-    let filtered = [...productionLogs];
-
-    // Apply search filter
-    if (searchValue && searchValue.trim() !== '') {
-      const searchLower = searchValue.toLowerCase();
-      filtered = filtered.filter((log) => {
-        return (
-          (log.operation?.operation_number?.toString() || '').toLowerCase().includes(searchLower) ||
-          (log.operation?.operation_name || '').toLowerCase().includes(searchLower) ||
-          (log.operation?.part?.quantity?.toString() || '').toLowerCase().includes(searchLower) ||
-          (log.operation?.order?.sale_order_number || '').toLowerCase().includes(searchLower) ||
-          (log.operation?.product?.product_name || '').toLowerCase().includes(searchLower) ||
-          (log.operation?.part?.part_name || '').toLowerCase().includes(searchLower) ||
-          (log.operation?.part?.part_number || '').toLowerCase().includes(searchLower) ||
-          (log.machine?.make || '').toLowerCase().includes(searchLower) ||
-          (log.machine?.model || '').toLowerCase().includes(searchLower) ||
-          (log.from_date || '').toLowerCase().includes(searchLower) ||
-          (log.to_date || '').toLowerCase().includes(searchLower) ||
-          (log.produced_quantity?.toString() || '').toLowerCase().includes(searchLower) ||
-          (log.approved_quantity?.toString() || '').toLowerCase().includes(searchLower) ||
-          (log.rework_quantity?.toString() || '').toLowerCase().includes(searchLower) ||
-          (log.rejected_quantity?.toString() || '').toLowerCase().includes(searchLower) ||
-          (log.status || '').toLowerCase().includes(searchLower) ||
-          (log.supervisor?.user_name || '').toLowerCase().includes(searchLower) ||
-          (log.remarks || '').toLowerCase().includes(searchLower)
-        );
-      });
-    }
-
-    // Apply date range filter
-    if (dates && dates.length === 2) {
-      const [startDate, endDate] = dates;
-      filtered = filtered.filter((log) => {
-        const logDate = dayjs(log.from_date);
-        return logDate.isAfter(startDate.startOf('day')) && logDate.isBefore(endDate.endOf('day'));
-      });
-    }
-
-    setFilteredLogs(filtered);
-  };
+  const getMachineName = (log) =>
+    log.machine?.make && log.machine?.model
+      ? `(${log.machine.make}) ${log.machine.model}`
+      : log.machine?.make || log.machine?.model || log.machine?.name || 'N/A';
 
   const columns = [
     {
-      title: 'Sl\nNo',
-      key: 'slNo',
+      title: 'SL No',
+      key: 'sl_no',
       align: 'center',
-      width: 50,
-      render: (text, record, index) => index + 1,
+      width: 60,
+      render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
     },
     {
-      title: 'Operation\nNo',
-      key: 'operationNumber',
-      align: 'center',
-      width: 80,
-      render: (text, record) => record.operation?.operation_number || 'N/A',
-    },
-    {
-      title: 'Operation\nName',
-      key: 'operationName',
-      align: 'center',
-      width: 100,
-      render: (text, record) => record.operation?.operation_name || 'N/A',
-    },
-    {
-      title: 'Project\nDetails',
-      key: 'projectDetails',
-      align: 'center',
-      width: 100,
-      render: (text, record) => (
-        <div>
-          <div style={{ fontWeight: 'bold' }}>{record.operation?.order?.sale_order_number || 'N/A'}</div>
-          <div style={{ fontSize: '12px', color: '#666' }}>{record.operation?.product?.product_name || 'N/A'}</div>
-        </div>
+      title: 'Project Details',
+      key: 'project_details',
+      fixed: 'left',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{highlightText(record.operation?.order?.sale_order_number, searchText)}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{highlightText(record.operation?.product?.product_name, searchText)}</Text>
+        </Space>
       ),
     },
     {
-      title: 'Part\nDetails',
-      key: 'partDetails',
-      align: 'center',
-      width: 80,
-      render: (text, record) => (
-        <div>
-          <div style={{ fontWeight: 'bold' }}>{record.operation?.part?.part_name || 'N/A'}</div>
-          <div style={{ fontSize: '12px', color: '#666' }}>{record.operation?.part?.part_number || 'N/A'}</div>
-        </div>
+      title: 'Part Details',
+      key: 'part_details',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{highlightText(record.operation?.part?.part_name, searchText)}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{highlightText(record.operation?.part?.part_number, searchText)}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'Operation Details',
+      key: 'operation_details',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Text strong>{highlightText(record.operation?.operation_name, searchText)}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>#{highlightText(record.operation?.operation_number, searchText)}</Text>
+        </Space>
       ),
     },
     {
       title: 'Machine',
       key: 'machine',
-      align: 'center',
-      width: 100,
-      render: (text, record) => (
-        <div>
-          <div style={{ fontWeight: 'bold' }}>{record.machine?.make || 'N/A'}</div>
-          <div style={{ fontSize: '12px', color: '#666' }}>{record.machine?.model || 'N/A'}</div>
-        </div>
+      render: (_, record) => (
+        <Text style={{ fontSize: 12 }}>{highlightText(getMachineName(record), searchText)}</Text>
       ),
     },
     {
-      title: 'From Date\n& Time',
-      key: 'fromDateTime',
-      align: 'center',
-      width: 100,
-      render: (text, record) => formatDateTime(record.from_date, record.from_time),
-    },
-    {
-      title: 'To Date\n& Time',
-      key: 'toDateTime',
-      align: 'center',
-      width: 100,
-      render: (text, record) => formatDateTime(record.to_date, record.to_time),
-    },
-    {
-      title: 'Part\nQty',
-      key: 'partQuantity',
-      align: 'center',
-      width: 60,
-      render: (text, record) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{record.operation?.part?.quantity || 0}</span>
+      title: 'From Time',
+      key: 'from',
+      sorter: (a, b) => {
+        const dA = a.from_date && a.from_time ? dayjs(`${a.from_date} ${a.from_time}`).valueOf() : a.from_date ? dayjs(a.from_date).valueOf() : 0;
+        const dB = b.from_date && b.from_time ? dayjs(`${b.from_date} ${b.from_time}`).valueOf() : b.from_date ? dayjs(b.from_date).valueOf() : 0;
+        return dA - dB;
+      },
+      sortDirections: ['ascend', 'descend'],
+      render: (_, record) => (
+        <Text style={{ fontSize: 12 }}>{formatDateTime(record.from_date, record.from_time)}</Text>
       ),
     },
     {
-      title: 'Produced\nQty',
+      title: 'To Time',
+      key: 'to',
+      sorter: (a, b) => {
+        const dA = a.to_date && a.to_time ? dayjs(`${a.to_date} ${a.to_time}`).valueOf() : a.to_date ? dayjs(a.to_date).valueOf() : 0;
+        const dB = b.to_date && b.to_time ? dayjs(`${b.to_date} ${b.to_time}`).valueOf() : b.to_date ? dayjs(b.to_date).valueOf() : 0;
+        return dA - dB;
+      },
+      sortDirections: ['ascend', 'descend'],
+      render: (_, record) => (
+        <Text style={{ fontSize: 12 }}>{formatDateTime(record.to_date, record.to_time)}</Text>
+      ),
+    },
+    {
+      title: 'Part Qty',
+      key: 'part_qty',
+      width: 80,
+      align: 'center',
+      render: (_, record) => <Text>{record.operation?.part?.quantity || 0} {record.operation?.part?.unit || ''}</Text>,
+    },
+    {
+      title: 'Produced Qty',
       dataIndex: 'produced_quantity',
-      key: 'producedQuantity',
+      key: 'produced_quantity',
+      width: 100,
       align: 'center',
-      width: 80,
-      render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
-      ),
+      render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
-      title: 'Approved\nQty',
+      title: 'Approved Qty',
       dataIndex: 'approved_quantity',
-      key: 'approvedQuantity',
+      key: 'approved_quantity',
+      width: 100,
       align: 'center',
-      width: 80,
-      render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
-      ),
+      render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
-      title: 'Rework\nQty',
+      title: 'Rework Qty',
       dataIndex: 'rework_quantity',
-      key: 'reworkQuantity',
+      key: 'rework_quantity',
+      width: 100,
       align: 'center',
-      width: 80,
-      render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
-      ),
+      render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
-      title: 'Rejected\nQty',
+      title: 'Rejected Qty',
       dataIndex: 'rejected_quantity',
-      key: 'rejectedQuantity',
+      key: 'rejected_quantity',
+      width: 100,
       align: 'center',
-      width: 80,
-      render: (text) => (
-        <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
-      ),
+      render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      align: 'center',
-      render: (text) => (
-        <Tag color={getStatusColor(text)}>
-          {(text || 'N/A').toUpperCase()}
-        </Tag>
-      ),
+      filters: [
+        { text: 'Pending',     value: 'pending' },
+        { text: 'Completed',   value: 'completed' },
+        { text: 'Rework',      value: 'rework' },
+        { text: 'Approved',    value: 'approved' },
+        { text: 'Rejected',    value: 'rejected' },
+        { text: 'In Progress', value: 'in_progress' },
+      ],
+      onFilter: (value, record) => record.status?.toLowerCase() === value,
+      render: (status) => getStatusTag(status),
     },
     {
       title: 'Supervisor',
-      key: 'supervisorName',
-      align: 'center',
-      width: 100,
-      render: (text, record) => record.supervisor?.user_name || 'N/A',
+      key: 'supervisor',
+      width: 110,
+      render: (_, record) => (
+        <Text style={{ fontSize: 12 }}>{highlightText(record.supervisor?.user_name, searchText) || 'N/A'}</Text>
+      ),
     },
     {
       title: 'Remarks',
       dataIndex: 'remarks',
       key: 'remarks',
-      align: 'center',
       width: 120,
-      render: (text) => text || '-',
+      render: (remarks) => {
+        const display = remarks ? (remarks.length > 20 ? `${remarks.substring(0, 20)}...` : remarks) : '-';
+        return (
+          <Tooltip title={remarks || ''}>
+            <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {highlightText(display, searchText)}
+            </Text>
+          </Tooltip>
+        );
+      },
     },
   ];
 
   return (
-    <div style={{ padding: '16px' }}>
-      {/* Header Card with Filters */}
-      <Card
-        style={{ borderRadius: 8, marginBottom: '16px' }}
-        styles={{ body: { padding: '16px' } }}
-      >
-        <Row justify="space-between" align="middle" gutter={[16, 16]}>
-          <Col xs={24} sm={24} md={12} lg={10}>
-            <div>
-              <Title level={3} style={{ margin: 0, marginBottom: '8px' }}>
-                Production Logs History
-              </Title>
-              <Text type="secondary">
-                View your production log history with details on operations, quantities, and status
-              </Text>
-            </div>
-          </Col>
-          <Col xs={24} sm={24} md={12} lg={14}>
-            <Row gutter={[8, 8]} justify="end">
-              <Col xs={24} sm={12} md={8} lg={6}>
-                <RangePicker
-                  style={{ width: '100%', height: '40px' }}
-                  size="large"
-                  onChange={handleDateRangeChange}
-                  placeholder={['Start Date', 'End Date']}
-                />
-              </Col>
-              <Col xs={24} sm={12} md={8} lg={6}>
-                <Search
-                  placeholder="Search by any field..."
-                  allowClear
-                  enterButton={<SearchOutlined />}
-                  size="large"
-                  style={{ height: '40px' }}
-                  onSearch={handleSearch}
-                  onChange={(e) => {
-                    if (!e.target.value) {
-                      setFilteredLogs(productionLogs);
-                      setSearchText('');
-                    }
-                  }}
-                />
-              </Col>
-              <Col xs={24} sm={24} md={8} lg={4}>
-                <Button
-                  type="primary"
-                  icon={<ReloadOutlined />}
-                  size="large"
-                  style={{ height: '40px', width: '100%' }}
-                  onClick={() => fetchProductionLogs()}
-                >
-                  Refresh
-                </Button>
-              </Col>
-            </Row>
-          </Col>
-        </Row>
-      </Card>
+    <div style={{ padding: 24 }}>
+      <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff;
+        }
+        .modern-table .ant-table-tbody > tr:hover > td { background: #f0f8ff !important; }
+        .modern-table .ant-table-tbody > tr > td { border-bottom: 1px solid #f0f0f0; }
+        .search-highlight-row > td { background-color: #e6f4ff !important; }
+        .search-highlight-row:hover > td { background-color: #bae0ff !important; }
+      `}</style>
 
-      {/* Table Section */}
       <Card
-        style={{ borderRadius: 8 }}
-        styles={{ body: { padding: 0 } }}
+        title={<Title level={4} style={{ margin: 0 }}>Production Logs History</Title>}
+        className="shadow-sm"
       >
-        <Spin spinning={loading}>
-          <Table
-            columns={columns}
-            dataSource={filteredLogs}
-            rowKey="id"
-            pagination={{
-              current: pagination.current,
-              pageSize: pagination.pageSize,
-              pageSizeOptions: [10, 20, 50, 100],
-              showSizeChanger: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-              onChange: (page, pageSize) => {
-                setPagination({ current: page, pageSize });
-              },
-              onShowSizeChange: (current, size) => {
-                setPagination({ current: 1, pageSize: size });
-              },
-            }}
-            variant="outlined"
-            scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-            style={{
-              textAlign: 'center',
-            }}
-            components={{
-              header: {
-                cell: (props) => (
-                  <th {...props} style={{ ...props.style, backgroundColor: '#ffffe0', fontWeight: 'bold' }}>
-                    {props.children}
-                  </th>
-                ),
-              },
-            }}
-          />
-        </Spin>
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+          <Space wrap>
+            <Select
+              mode="multiple"
+              allowClear
+              showSearch
+              placeholder="Filter by machines..."
+              style={{ minWidth: 250, maxWidth: 400 }}
+              value={selectedMachines}
+              onChange={(val) => { setSelectedMachines(val); setCurrentPage(1); }}
+              options={machineOptions}
+              optionFilterProp="label"
+            />
+            <Input
+              placeholder="Search any field..."
+              allowClear
+              prefix={<SearchOutlined />}
+              value={searchText}
+              onChange={(e) => { setSearchText(e.target.value); setCurrentPage(1); }}
+              style={{ minWidth: 200, maxWidth: 300 }}
+            />
+            <RangePicker
+              allowClear
+              placeholder={['Start Date', 'End Date']}
+              value={dateRange}
+              onChange={(dates) => { setDateRange(dates); setCurrentPage(1); }}
+              format="DD-MM-YYYY"
+              style={{ minWidth: 250 }}
+            />
+          </Space>
+          <Button icon={<ReloadOutlined />} onClick={fetchProductionLogs} loading={loading}>
+            Refresh
+          </Button>
+        </div>
+
+        <Table
+          columns={columns}
+          dataSource={filteredLogs}
+          rowKey="id"
+          loading={loading}
+          rowClassName={rowClassName}
+          className="modern-table"
+          pagination={{
+            current: currentPage,
+            pageSize,
+            total: filteredLogs.length,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            onChange: (page, size) => { setCurrentPage(page); setPageSize(size); },
+            onShowSizeChange: (_, size) => { setCurrentPage(1); setPageSize(size); },
+          }}
+          scroll={{ x: 'max-content' }}
+        />
       </Card>
     </div>
   );

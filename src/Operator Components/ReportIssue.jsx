@@ -54,7 +54,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
   const operatorId = useMemo(() => getUserId(), []);
   useEffect(() => {
     if (open) {
-      fetch(`${API_BASE_URL}/orders/?skip=0&limit=1000`).then(async (r) => {
+      fetch(`${API_BASE_URL}/orders/`).then(async (r) => {
         if (r.ok) {
           const data = await r.json();
           setOrders(Array.isArray(data) ? data : []);

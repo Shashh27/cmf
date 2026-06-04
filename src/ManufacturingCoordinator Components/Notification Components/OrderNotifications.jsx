@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Table, Button, message, Spin, Empty, Tag, Input } from 'antd';
 import { CheckCircleOutlined } from '@ant-design/icons';
-import config from '../Config/config';
+import config from '../../Config/config';
 import dayjs from 'dayjs';
 
 const OrderNotifications = ({ dateRange, onCount }) => {
@@ -11,6 +11,22 @@ const OrderNotifications = ({ dateRange, onCount }) => {
   const [pageSize, setPageSize] = useState(10);
   const [query, setQuery] = useState('');
 
+  const getCurrentUser = () => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const user = JSON.parse(storedUser);
+        return {
+          username: user.username || user.user_name || user.name,
+          role: user.role || user.user_role
+        };
+      } catch (e) {
+        console.error('Error parsing user from localStorage', e);
+      }
+    }
+    return { username: null, role: null };
+  };
+
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
     try {
@@ -18,7 +34,35 @@ const OrderNotifications = ({ dateRange, onCount }) => {
       const params = new URLSearchParams();
       if (dateRange?.[0]) params.set('start_date', dayjs(dateRange[0]).startOf('day').toISOString());
       if (dateRange?.[1]) params.set('end_date', dayjs(dateRange[1]).endOf('day').toISOString());
+      
+      // Add role-based filtering based on user's role
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          const userRole = (user.role || user.user_role || '').toLowerCase();
+          console.log('User role:', userRole, 'User ID:', user.id);
+          
+          // Pass the appropriate role ID based on the user's role
+          if (userRole.includes('manufacturing') || userRole === 'mc') {
+            if (user.id) params.set('mc_id', user.id);
+            console.log('Setting mc_id:', user.id);
+          } else if (userRole.includes('project') || userRole === 'pc') {
+            if (user.id) params.set('pc_id', user.id);
+            console.log('Setting pc_id:', user.id);
+          } else if (userRole.includes('admin')) {
+            if (user.id) params.set('admin_id', user.id);
+            console.log('Setting admin_id:', user.id);
+          } else {
+            console.log('No role match found for:', userRole);
+          }
+        } catch (e) {
+          console.error('Error parsing user from localStorage', e);
+        }
+      }
+      
       const url = `${base}?${params.toString()}`;
+      console.log('Fetching notifications from:', url);
 
       const response = await fetch(url);
       if (!response.ok) {
@@ -40,8 +84,31 @@ const OrderNotifications = ({ dateRange, onCount }) => {
 
   const handleAcknowledge = async (id) => {
     try {
+      const currentUser = getCurrentUser();
+      if (!currentUser.username || !currentUser.role) {
+        message.error('User information not found. Please log in again.');
+        return;
+      }
+
+      // Normalize role to match backend expectations
+      let normalizedRole = currentUser.role.toLowerCase();
+      if (normalizedRole.includes('manufacturing')) {
+        normalizedRole = 'mc';
+      } else if (normalizedRole.includes('project')) {
+        normalizedRole = 'pc';
+      } else if (normalizedRole.includes('admin')) {
+        normalizedRole = 'admin';
+      }
+
       const response = await fetch(`${config.API_BASE_URL}/order-notifications/${id}/ack`, {
         method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          role: normalizedRole,
+          user_name: currentUser.username,
+        }),
       });
       if (!response.ok) {
         throw new Error('Failed to acknowledge notification');
@@ -69,13 +136,6 @@ const OrderNotifications = ({ dateRange, onCount }) => {
       responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
     },
     {
-      title: 'Project',
-      dataIndex: 'project_name',
-      key: 'project_name',
-      render: (text) => text || '-',
-      responsive: ['sm', 'md', 'lg', 'xl'],
-    },
-    {
       title: 'Product',
       dataIndex: 'product_name',
       key: 'product_name',
@@ -91,18 +151,44 @@ const OrderNotifications = ({ dateRange, onCount }) => {
     },
     {
       title: 'Status',
-      dataIndex: 'is_ack',
-      key: 'is_ack',
-      render: (is_ack) => (
-        <Tag color={is_ack ? 'green' : 'orange'}>
-          {is_ack ? 'Acknowledged' : 'Pending'}
-        </Tag>
-      ),
+      key: 'status',
+      render: (_, record) => {
+        const currentUser = getCurrentUser();
+        const userRole = (currentUser.role || '').toLowerCase();
+        
+        // Check if current user's role has acknowledged
+        let isAcknowledgedByCurrentRole = false;
+        if (userRole.includes('manufacturing') && record.mc_is_ack) {
+          isAcknowledgedByCurrentRole = true;
+        } else if (userRole.includes('project') && record.pc_is_ack) {
+          isAcknowledgedByCurrentRole = true;
+        } else if (userRole.includes('admin') && record.admin_is_ack) {
+          isAcknowledgedByCurrentRole = true;
+        }
+
+        return (
+          <Tag color={isAcknowledgedByCurrentRole ? 'green' : 'orange'}>
+            {isAcknowledgedByCurrentRole ? 'Acknowledged' : 'Pending'}
+          </Tag>
+        );
+      },
       filters: [
         { text: 'Acknowledged', value: true },
         { text: 'Pending', value: false },
       ],
-      onFilter: (value, record) => record.is_ack === value,
+      onFilter: (value, record) => {
+        const currentUser = getCurrentUser();
+        const userRole = (currentUser.role || '').toLowerCase();
+        
+        if (userRole.includes('manufacturing')) {
+          return value ? record.mc_is_ack : !record.mc_is_ack;
+        } else if (userRole.includes('project')) {
+          return value ? record.pc_is_ack : !record.pc_is_ack;
+        } else if (userRole.includes('admin')) {
+          return value ? record.admin_is_ack : !record.admin_is_ack;
+        }
+        return false;
+      },
       responsive: ['xs', 'sm', 'md', 'lg', 'xl'],
     },
     {
@@ -115,26 +201,31 @@ const OrderNotifications = ({ dateRange, onCount }) => {
     {
       title: 'Acknowledged',
       key: 'acknowledged',
-      render: (_, record) => (
-        record.is_ack ? (
-          <div>
-            <CheckCircleOutlined style={{ color: 'green' }} /> By: {record.ack_by}
-          </div>
-        ) : (
-          <div>
-            <span style={{ color: 'red', marginRight: 8 }}>●</span>
-            <span>By:</span>
-            <Button
-              type="primary"
-              onClick={() => handleAcknowledge(record.id)}
-              size="small"
-              style={{ marginLeft: 8 }}
-            >
-              Acknowledge
-            </Button>
-          </div>
-        )
-      ),
+      render: (_, record) => {
+        const currentUser = getCurrentUser();
+        const userRole = (currentUser.role || '').toLowerCase();
+        
+        // Check if current user's role has already acknowledged using role-specific status
+        let isAcknowledgedByCurrentRole = false;
+        if (userRole.includes('manufacturing') && record.mc_is_ack) {
+          isAcknowledgedByCurrentRole = true;
+        } else if (userRole.includes('project') && record.pc_is_ack) {
+          isAcknowledgedByCurrentRole = true;
+        } else if (userRole.includes('admin') && record.admin_is_ack) {
+          isAcknowledgedByCurrentRole = true;
+        }
+
+        return (
+          <Button
+            type="primary"
+            onClick={() => handleAcknowledge(record.id)}
+            size="small"
+            disabled={isAcknowledgedByCurrentRole}
+          >
+            {isAcknowledgedByCurrentRole ? 'Acknowledged' : 'Acknowledge'}
+          </Button>
+        );
+      },
       filters: [
         { text: 'Acknowledged', value: true },
         { text: 'Unacknowledged', value: false },
