@@ -4,6 +4,7 @@ import { HistoryOutlined, FilterOutlined, ReloadOutlined, StockOutlined, LinkOut
 import axios from 'axios';
 import { API_BASE_URL } from '../../Config/auth';
 import dayjs from 'dayjs';
+import RawMaterialHistoryDownload from '../../DownloadReports/RawMaterialHistoryDownload';
 
 const { RangePicker } = DatePicker;
 const { Title, Text } = Typography;
@@ -433,13 +434,18 @@ const RawMaterialHistoryTab = ({ materials }) => {
     <div style={{ padding: '16px', height: '100%', minHeight: 'calc(100vh - 120px)' }}>
       <Row gutter={12} style={{ height: '100%' }}>
         {/* Left Sidebar - Materials Only */}
-        <Col xs={24} sm={24} md={6} lg={6} xl={6} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Col xs={24} sm={24} md={4} lg={4} xl={4} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           {/* Materials List */}
-          <Card 
+          <Card
             title={
-              <span>
-                <AppstoreOutlined /> Materials
-              </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>
+                  <AppstoreOutlined /> Materials
+                </span>
+                <Button size="small" onClick={handleResetFilters}>
+                  Reset
+                </Button>
+              </div>
             }
             size="small"
             style={{ height: '100%' }}
@@ -452,21 +458,21 @@ const RawMaterialHistoryTab = ({ materials }) => {
                 materials.map((material) => (
                   <div
                     key={material.id}
-                    style={{ 
-                      cursor: 'pointer', 
+                    style={{
+                      cursor: 'pointer',
                       backgroundColor: selectedMaterial?.id === material.id ? '#e6f7ff' : 'transparent',
                       borderRadius: '4px',
-                      padding: '8px 12px',
+                      padding: '6px 8px',
                       marginBottom: '4px',
                       border: selectedMaterial?.id === material.id ? '1px solid #1890ff' : '1px solid transparent'
                     }}
                     onClick={() => handleMaterialSelect(material)}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <Avatar size="small" icon={<StockOutlined />} />
                       <div>
-                        <Text strong style={{ fontSize: '12px', display: 'block' }}>{material.material_name}</Text>
-                        <Text type="secondary" style={{ fontSize: '11px' }}>{material.material_code}</Text>
+                        <Text strong style={{ fontSize: '11px', display: 'block' }}>{material.material_name}</Text>
+                        <Text type="secondary" style={{ fontSize: '10px' }}>{material.material_code}</Text>
                       </div>
                     </div>
                   </div>
@@ -477,13 +483,14 @@ const RawMaterialHistoryTab = ({ materials }) => {
         </Col>
 
         {/* Main Content - History */}
-        <Col xs={24} sm={24} md={18} lg={18} xl={18} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Col xs={24} sm={24} md={20} lg={20} xl={20} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           {/* Header with Filters */}
           <Card size="small" style={{ marginBottom: 16, flex: '0 0 auto' }} styles={{ body: { padding: '12px' } }}>
             <Space size="small" wrap>
               <Text strong style={{ fontSize: '12px' }}>Date Range:</Text>
-              <RangePicker 
+              <RangePicker
                 size="small"
+                style={{ width: 200 }}
                 value={[startDate, endDate]}
                 onChange={(dates) => {
                   setStartDate(dates ? dates[0] : null);
@@ -567,9 +574,7 @@ const RawMaterialHistoryTab = ({ materials }) => {
                 })()}
               />
               
-              <Button size="small" onClick={handleResetFilters}>
-                Reset
-              </Button>
+              <RawMaterialHistoryDownload historyData={history} selectedMaterial={selectedMaterial} />
             </Space>
             
             {/* Selected Material Info */}

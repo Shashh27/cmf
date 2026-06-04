@@ -17,6 +17,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   const [projectCoordinators, setProjectCoordinators] = useState([]);
   const [manufacturingCoordinators, setManufacturingCoordinators] = useState([]);
   const [decimalWarnings, setDecimalWarnings] = useState({});
+  const [isAdminOrder, setIsAdminOrder] = useState(false);
+
   const getCurrentUserId = () => {
     try {
       const stored = localStorage.getItem("user");
@@ -49,6 +51,18 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
     } catch {
       return null;
     }
+  };
+
+  // Revision normalization function
+  const normalizeRevision = (raw) => {
+    let v = raw || '';
+    // Allow alphanumeric and common revisioning symbols: . - _ / space
+    v = v.replace(/[^0-9a-zA-Z\s._\/]/g, '');
+    return v;
+  };
+
+  const handleRevisionChange = (e, index) => {
+    handleDocumentChange(index, 'document_version', normalizeRevision(e.target.value));
   };
 
   const orderDateWatch = Form.useWatch('order_date', form);
@@ -209,6 +223,10 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       if (isOpen) {
         fetchUsersForRoles();
         if (editingOrder) {
+          // Check if order was created by admin (using user_role if available, otherwise check user_name)
+          const createdByAdmin = editingOrder.user_role === 'admin' || editingOrder.user_name === 'admin';
+          setIsAdminOrder(createdByAdmin);
+
           // Ensure customer name is available even if the array is empty
           const customerValue = editingOrder.customer_id?.toString() ?? "";
           
@@ -237,23 +255,24 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
             manufacturing_coordinator_id: editingOrder.manufacturing_coordinator_id?.toString() ?? undefined,
             user_name_display: getCurrentUsername() || "",
           });
-      } else {
-        form.resetFields();
-        form.setFieldsValue({
-          status: "Pending",
-        });
-        const userId = getCurrentUserId();
-        const username = getCurrentUsername();
-        if (userId) {
-          form.setFieldsValue({ 
-            user_id: userId,
-            project_coordinator_id: userId 
+        } else {
+          setIsAdminOrder(false);
+          form.resetFields();
+          form.setFieldsValue({
+            status: "Pending",
           });
-        }
-        if (username) {
-          form.setFieldsValue({ user_name_display: username });
-        }
-        const userRole = getCurrentUserRole();
+          const userId = getCurrentUserId();
+          const username = getCurrentUsername();
+          if (userId) {
+            form.setFieldsValue({ 
+              user_id: userId,
+              project_coordinator_id: userId 
+            });
+          }
+          if (username) {
+            form.setFieldsValue({ user_name_display: username });
+          }
+          const userRole = getCurrentUserRole();
         if (userRole) {
           form.setFieldsValue({ user_role: userRole });
         }
@@ -284,6 +303,16 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
 
 
   const handleSubmit = async (values) => {
+    // Validation: Check if all documents have a revision before doing anything
+    if (!editingOrder && documents.length > 0) {
+      for (const doc of documents) {
+        if (doc.file && (!doc.document_version || !doc.document_version.trim())) {
+          message.error(`Revision is required for document: ${doc.document_name || doc.file.name}`);
+          return;
+        }
+      }
+    }
+
     setLoading(true);
 
     try {
@@ -332,15 +361,15 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
         customer_id: parseInt(values.customer_id),
         product_id: productId,
         status: values.status,
+        approval_status: editingOrder ? editingOrder.approval_status : "Pending Approval",
         // user_id always represents whoever is logged in (project coordinator for this screen)
         user_id: values.user_id ? parseInt(values.user_id, 10) : getCurrentUserId(),
         // Admin selected in dropdown - required field
-        admin_id: values.admin_id ? parseInt(values.admin_id, 10) : getCurrentUserId(),
-        // Preserve the original project coordinator when editing, 
-        // otherwise set it to the creator if created by a project coordinator.
-        project_coordinator_id: editingOrder 
-          ? editingOrder.project_coordinator_id 
-          : (values.user_id ? parseInt(values.user_id, 10) : null),
+        admin_id: values.admin_id ? parseInt(values.admin_id, 10) : null,
+        // Set project_coordinator_id to current user (PC) when creating new order
+        project_coordinator_id: editingOrder
+          ? editingOrder.project_coordinator_id
+          : (values.user_id ? parseInt(values.user_id, 10) : getCurrentUserId()),
         manufacturing_coordinator_id:
           values.manufacturing_coordinator_id === undefined || values.manufacturing_coordinator_id === ""
             ? null
@@ -438,10 +467,9 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
       {
         file: null,
         document_name: "",
-        document_type: "Other",
+        document_type: "Technical",
         document_type_other: "",
-        document_version: "v1.0",
-        
+        document_version: "",
       },
     ]);
   };
@@ -458,6 +486,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
   };
 
   const uploadDocumentsForOrder = async (orderId) => {
+    const currentUserId = getCurrentUserId();
     for (const doc of documents) {
       if (doc.file) {
         const uploadFormData = new FormData();
@@ -468,7 +497,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           docType = doc.document_type_other.trim();
         }
         uploadFormData.append("document_type", docType);
-        uploadFormData.append("document_version", "v1.0"); // Hardcoded to v1.0 for new order creation
+        uploadFormData.append("document_version", doc.document_version || "00");
+        uploadFormData.append("user_id", String(currentUserId));
 
         try {
           await axios.post(
@@ -610,13 +640,15 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                 name="admin_id"
                 label={<span className="text-xs font-bold text-gray-600 uppercase tracking-wider whitespace-nowrap">Admin</span>}
                 className="mb-0"
+                rules={[{ required: !editingOrder || !isAdminOrder, message: 'Please select an admin' }]}
               >
                 <Select
                   placeholder="Select"
                   className="h-10"
-                  allowClear
+                  allowClear={!isAdminOrder}
                   showSearch
                   optionFilterProp="children"
+                  disabled={isAdminOrder}
                 >
                   {projectCoordinators.map((u) => (
                     <Option key={u.id} value={u.id.toString()}>
@@ -768,7 +800,7 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                       <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[25%]">File Selection</th>
                       <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[25%]">Document Name</th>
                       <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[30%]">Document Type</th>
-                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[10%] text-center">Ver</th>
+                      <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[10%] text-center">Rev</th>
                       <th className="px-2 sm:px-4 py-3 text-[10px] uppercase font-bold text-gray-500 w-[5%] text-center">Del</th>
                     </tr>
                   </thead>
@@ -831,6 +863,10 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                                 className="text-xs sm:text-sm h-10 custom-select-v2 w-full"
                                 size="middle"
                               >
+                                <Option value="Technical">Technical Drawing</Option>
+                                <Option value="Invoice">Invoice</Option>
+                                <Option value="Purchase Order">Purchase Order</Option>
+                                <Option value="Quote">Quote</Option>
                                 <Option value="Other">Other</Option>
                               </Select>
                             </div>
@@ -849,9 +885,14 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
                           </div>
                         </td>
                         <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">
-                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 sm:px-3 py-1.5 rounded-md border border-gray-200">
-                            v1.0
-                          </span>
+                          <Input
+                            value={doc.document_version}
+                            onChange={(e) => handleRevisionChange(e, index)}
+                            placeholder="00"
+                            autoComplete="off"
+                            className="text-xs font-bold text-center h-8 w-16 rounded-md border-gray-300 focus:border-blue-500"
+                            style={{ textAlign: 'center' }}
+                          />
                         </td>
                         <td className="px-2 sm:px-4 py-4 sm:py-6 text-center align-middle">
                           <Button

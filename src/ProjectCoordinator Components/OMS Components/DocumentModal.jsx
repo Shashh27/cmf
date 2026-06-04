@@ -17,58 +17,16 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
   const [parentId, setParentId] = useState(null);
   const [updatingDocName, setUpdatingDocName] = useState("");
 
-  // Version validation function
-  const validateVersionFormat = (value) => {
-    if (!value) return true; // Allow empty for optional validation
-    const versionPattern = /^v\d{1,2}\.\d{0,3}[a-zA-Z0-9]{0,3}$/;
-    return versionPattern.test(value);
+  // Revision normalization function
+  const normalizeRevision = (raw) => {
+    let v = raw || '';
+    // Allow alphanumeric and common revisioning symbols: . - _ / space
+    v = v.replace(/[^0-9a-zA-Z\s._\/]/g, '');
+    return v;
   };
 
   const handleVersionChange = (e) => {
-    let value = e.target.value;
-    
-    // Always start with 'v' if not present
-    if (value && !value.startsWith('v')) {
-      value = 'v' + value;
-    }
-    
-    // Remove invalid characters but keep v, digits, dots, and alphanumeric
-    value = value.replace(/[^v0-9.a-zA-Z]/g, '');
-    
-    // Ensure only one 'v' at the beginning
-    if (value.startsWith('v')) {
-      value = 'v' + value.substring(1).replace(/v/g, '');
-    }
-    
-    // Ensure only one dot
-    const parts = value.split('.');
-    if (parts.length > 2) {
-      value = parts[0] + '.' + parts.slice(1).join('');
-    }
-    
-    // Limit to exactly 3 characters before decimal (including 'v'), and max 3 characters after decimal
-    const match = value.match(/^(v\d{0,2})(?:\.(\d{0,3}[a-zA-Z0-9]{0,3}))?$/);
-    if (match) {
-      let major = match[1] || 'v';
-      let afterDecimal = match[2] || '';
-
-      value = major;
-      // Always include decimal point
-      value += '.';
-      // Add after decimal content (max 3 characters)
-      if (afterDecimal) {
-        afterDecimal = afterDecimal.substring(0, 3);
-        value += afterDecimal;
-      }
-    } else {
-      // Fallback for initial 'v' or 'v12' (max 3 chars total)
-      const initialMatch = value.match(/^(v\d{0,2})/);
-      if (initialMatch) {
-        value = initialMatch[1] + '.';
-      }
-    }
-    
-    form.setFieldValue('document_version', value);
+    form.setFieldValue('document_version', normalizeRevision(e.target.value));
   };
 
   const getCurrentUserId = () => {
@@ -118,9 +76,8 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       return;
     }
 
-    // Validate version format
-    if (!validateVersionFormat(values.document_version)) {
-      message.error("Version format must be: vXXX.XXX (e.g., v1.0, v12.3a, v123.456)");
+    if (!values.document_version || !values.document_version.trim()) {
+      message.error("Please enter revision");
       return;
     }
 
@@ -139,7 +96,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       docType = values.document_type_other.trim();
     }
     uploadFormData.append("document_type", docType);
-    uploadFormData.append("document_version", parentId ? (values.document_version || "v1.0") : "v1.0"); // Enforce v1.0 for new uploads
+    uploadFormData.append("document_version", values.document_version || "00");
     if (parentId) {
       uploadFormData.append("parent_id", parentId);
     }
@@ -154,7 +111,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
       const result = response.data;
       onDocumentUploaded(result);
       form.resetFields();
-      form.setFieldsValue({ document_version: "v1.0" });
+      form.setFieldsValue({ document_version: "" });
       setParentId(null);
       setUpdatingDocName("");
       if (selectedOrderId) {
@@ -228,26 +185,12 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
     setParentId(rootId);
     setUpdatingDocName(doc.document_name);
     
-    // Find all documents belonging to this version group to find the latest version
-    const versionGroup = documents.filter(d => d.id === rootId || d.parent_id === rootId);
-    
-    let maxVersion = 1.0;
-    versionGroup.forEach(d => {
-      // Correctly parse version string like "v2.0" by removing the 'v'
-      const v = parseFloat(String(d.document_version).replace(/^v/i, ''));
-      if (!isNaN(v) && v > maxVersion) {
-        maxVersion = v;
-      }
-    });
-
-    const nextVersion = 'v' + (maxVersion + 1.0).toFixed(1);
-
     form.setFieldsValue({
       document_type: doc.document_type,
-      document_version: nextVersion
+      document_version: "" // Let the user enter revision manually
     });
     
-    message.info(`Creating version ${nextVersion} for: ${doc.document_name}`);
+    message.info(`Please enter new revision for: ${doc.document_name}`);
   };
 
   const groupDocuments = () => {
@@ -280,7 +223,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
             <FileTextOutlined style={{ color: isVersion ? '#ffa940' : '#1890ff', fontSize: 16 }} />
             <Text strong style={{ fontSize: 14 }}>{doc.document_name}</Text>
             <Tag color="blue" style={{ fontSize: '13px', fontWeight: 'bold', border: '1px solid #91d5ff' }}>
-              {doc.document_version?.startsWith('v') ? doc.document_version : `v${doc.document_version}`}
+              {doc.document_version}
             </Tag>
           </div>
           <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -327,7 +270,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
   const handleClose = () => {
     form.resetFields();
-    form.setFieldsValue({ document_version: "v1.0" });
+    form.setFieldsValue({ document_version: "" });
     setDocuments([]);
     setParentId(null);
     setUpdatingDocName("");
@@ -372,7 +315,10 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
         form={form}
         layout="vertical"
         onFinish={handleUpload}
-        initialValues={{ document_version: 'v1.0' }}
+        initialValues={{ 
+          document_type: "Technical",
+          document_version: ''
+        }}
       >
         <Row gutter={[12, 12]}>
           <Col xs={24} lg={14}>
@@ -448,7 +394,7 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                       setParentId(null);
                       setUpdatingDocName("");
                       form.resetFields();
-                      form.setFieldsValue({ document_version: "v1.0" });
+                      form.setFieldsValue({ document_version: "" });
                     }}
                   >
                     Cancel
@@ -505,6 +451,10 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                             rules={[{ required: true, message: "Please select document type" }]}
                           >
                             <Select placeholder="Select type">
+                              <Option value="Technical">Technical Drawing</Option>
+                              <Option value="Invoice">Invoice</Option>
+                              <Option value="Purchase Order">Purchase Order</Option>
+                              <Option value="Quote">Quote</Option>
                               <Option value="Other">Other</Option>
                             </Select>
                           </Form.Item>
@@ -524,23 +474,15 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
                 <Col xs={24} sm={10}>
                   <Form.Item 
                     name="document_version" 
-                    label="Version" 
-                    rules={[
-                      { required: true, message: 'Version is required' },
-                      { validator: (_, value) => {
-                        if (!validateVersionFormat(value)) {
-                          return Promise.reject('Version format must be: vXXX.XXX (e.g., v1.0, v12.3a, v123.456)');
-                        }
-                        return Promise.resolve();
-                      }}
-                    ]} 
+                    label="Revision" 
+                    rules={[{ required: true, message: 'Required' }]}
                     style={{ marginBottom: 16 }}
                   >
                     <Input 
-                      placeholder="v1.0" 
-                      disabled={!parentId} 
+                      placeholder="00" 
                       onChange={handleVersionChange}
-                      style={{ backgroundColor: !parentId ? '#f5f5f5' : '#fff', fontWeight: 'bold' }} 
+                      autoComplete="off"
+                      style={{ fontWeight: 'bold', textAlign: 'center' }} 
                     />
                   </Form.Item>
                 </Col>

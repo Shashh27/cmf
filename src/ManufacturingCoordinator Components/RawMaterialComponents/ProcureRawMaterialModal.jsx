@@ -117,6 +117,21 @@ const ProcureRawMaterialModal = ({
           )}
         </div>
 
+        {/* Process Type Selection */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Process Type <span className="text-red-500">*</span></label>
+          <Select
+            style={{ width: '100%' }}
+            placeholder="Select Process Type"
+            value={procureForm.process_type}
+            onChange={(value) => setProcureForm(prev => ({ ...prev, process_type: value }))}
+          >
+            <Option value="Forging">Forging</Option>
+            <Option value="Barstocks">Barstocks</Option>
+            <Option value="Casting">Casting</Option>
+          </Select>
+        </div>
+
         {/* Form Type Selection */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Form Type <span className="text-red-500">*</span></label>
@@ -167,8 +182,33 @@ const ProcureRawMaterialModal = ({
           />
         </div>
 
-        
-  
+        {/* Estimated Cost */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Cost (₹) <span className="text-red-500">*</span></label>
+          <InputNumber
+            min={0}
+            precision={0}
+            controls={false}
+            style={{ width: '100%' }}
+            placeholder="Estimated Cost"
+            value={procureForm.estimated_cost}
+            onChange={(value) => {
+              // Only accept non-negative integers
+              if (value !== null && value >= 0 && Number.isInteger(value)) {
+                setProcureForm(prev => ({ ...prev, estimated_cost: value }));
+              } else if (value === null) {
+                setProcureForm(prev => ({ ...prev, estimated_cost: null }));
+              }
+            }}
+            onKeyPress={(e) => {
+              // Prevent non-numeric characters
+              const charCode = e.which ? e.which : e.keyCode;
+              if (charCode < 48 || charCode > 57) {
+                e.preventDefault();
+              }
+            }}
+          />
+        </div>
 
         {/* Vendor Selection */}
         <div>

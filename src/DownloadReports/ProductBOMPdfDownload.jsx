@@ -1,6 +1,6 @@
-import React, { useMemo } from "react";
-import { Button, Tooltip } from "antd";
-import { FilePdfOutlined } from "@ant-design/icons";
+import React, { useMemo, useState } from "react";
+import { Button, Tooltip, Spin, Modal, Space } from "antd";
+import { FilePdfOutlined, FileExcelOutlined, DownloadOutlined } from "@ant-design/icons";
 import {
   PDFDownloadLink,
   Document,
@@ -10,6 +10,9 @@ import {
   StyleSheet,
   Font,
 } from "@react-pdf/renderer";
+import axios from "axios";
+import { API_BASE_URL } from "../Config/auth";
+import * as XLSX from "xlsx";
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -143,8 +146,9 @@ const documentsColumnWidths = {
   partNumber: 65,
   partName: 120,
   type: 60,
-  document: 150,
+  document: 120,
   version: 40,
+  url: 150,
 };
 
 const ProductBOMPdfDocument = ({ product, bomExport }) => {
@@ -423,6 +427,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                 <Text style={[styles.headerCell, { width: documentsColumnWidths.version }]}>
                   Version
                 </Text>
+                <Text style={[styles.headerCell, { width: documentsColumnWidths.url }]}>
+                  URL
+                </Text>
               </View>
               {documents.map((doc, index) => (
                 <View key={doc.id || index} style={styles.row}>
@@ -444,6 +451,9 @@ const ProductBOMPdfDocument = ({ product, bomExport }) => {
                   <Text style={[styles.cell, { width: documentsColumnWidths.version }]}>
                     {doc.document_version ? (doc.document_version.startsWith('v') ? doc.document_version : `v${doc.document_version}`) : "v1.0"}
                   </Text>
+                  <Text style={[styles.cell, { width: documentsColumnWidths.url }]}>
+                    {doc.document_url || "-"}
+                  </Text>
                 </View>
               ))}
             </View>
@@ -463,6 +473,10 @@ const ProductBOMPdfDownload = ({
   bomExport,
   fileName,
 }) => {
+  const [loading, setLoading] = useState(false);
+  const [fullHierarchicalData, setFullHierarchicalData] = useState(null);
+  const [downloadModalVisible, setDownloadModalVisible] = useState(false);
+
   if (!bomExport) {
     return (
       <Tooltip title="Expand product to load BOM before export">
@@ -477,9 +491,7 @@ const ProductBOMPdfDownload = ({
 
   const hasContent =
     (bomExport.assemblies && bomExport.assemblies.length > 0) ||
-    (bomExport.parts && bomExport.parts.length > 0) ||
-    (bomExport.operations && bomExport.operations.length > 0) ||
-    (bomExport.documents && bomExport.documents.length > 0);
+    (bomExport.parts && bomExport.parts.length > 0);
 
   if (!hasContent) {
     return (
@@ -489,28 +501,360 @@ const ProductBOMPdfDownload = ({
     );
   }
 
+  // Flatten hierarchical data to match PDF component expectations
+  const flattenHierarchicalData = (hierarchicalData) => {
+    const assemblies = [];
+    const parts = [];
+    const operations = [];
+    const documents = [];
+
+    const processAssembly = (assembly, parentPath = [], parentAssembly = null) => {
+      const currentPath = [...parentPath, assembly.assembly.assembly_name];
+      
+      assemblies.push({
+        id: assembly.assembly.id,
+        assembly_number: assembly.assembly.assembly_number,
+        assembly_name: assembly.assembly.assembly_name,
+        parent_assembly_number: parentAssembly?.assembly_number || null,
+        parent_assembly_name: parentAssembly?.assembly_name || null,
+      });
+
+      // Process parts in this assembly
+      assembly.parts.forEach(partDetail => {
+        const part = partDetail.part;
+        parts.push({
+          id: part.id,
+          part_number: part.part_number,
+          part_name: part.part_name,
+          type_name: part.type_name,
+          parent_assembly_number: assembly.assembly.assembly_number,
+          parent_assembly_name: assembly.assembly.assembly_name,
+        });
+
+        // Add operations for this part
+        partDetail.operations.forEach(op => {
+          operations.push({
+            id: op.id,
+            part_number: part.part_number,
+            part_name: part.part_name,
+            operation_number: op.operation_number,
+            operation_name: op.operation_name,
+            part_type_name: op.part_type_name,
+            machine_name: op.machine_name,
+            machine_id: op.machine_id,
+            setup_time: op.setup_time,
+            cycle_time: op.cycle_time,
+            work_center_name: op.work_center_name,
+            workcenter_id: op.workcenter_id,
+            work_instructions: op.work_instructions,
+            notes: op.notes,
+          });
+        });
+
+        // Add documents for this part
+        partDetail.documents.forEach(doc => {
+          documents.push({
+            id: doc.id,
+            part_number: part.part_number,
+            part_name: part.part_name,
+            document_type: doc.document_type,
+            document_name: doc.document_name,
+            document_version: doc.document_version,
+            document_url: doc.document_url,
+          });
+        });
+      });
+
+      // Process subassemblies recursively
+      assembly.subassemblies.forEach(subAssembly => {
+        processAssembly(subAssembly, currentPath, assembly.assembly);
+      });
+    };
+
+    // Process root assemblies
+    hierarchicalData.assemblies.forEach(assembly => {
+      processAssembly(assembly);
+    });
+
+    // Process direct parts (not in any assembly)
+    hierarchicalData.direct_parts.forEach(partDetail => {
+      const part = partDetail.part;
+      parts.push({
+        id: part.id,
+        part_number: part.part_number,
+        part_name: part.part_name,
+        type_name: part.type_name,
+        parent_assembly_number: null,
+        parent_assembly_name: null,
+      });
+
+      // Add operations for this part
+      partDetail.operations.forEach(op => {
+        operations.push({
+          id: op.id,
+          part_number: part.part_number,
+          part_name: part.part_name,
+          operation_number: op.operation_number,
+          operation_name: op.operation_name,
+          part_type_name: op.part_type_name,
+          machine_name: op.machine_name,
+          machine_id: op.machine_id,
+          setup_time: op.setup_time,
+          cycle_time: op.cycle_time,
+          work_center_name: op.work_center_name,
+          workcenter_id: op.workcenter_id,
+          work_instructions: op.work_instructions,
+          notes: op.notes,
+        });
+      });
+
+      // Add documents for this part
+      partDetail.documents.forEach(doc => {
+        documents.push({
+          id: doc.id,
+          part_number: part.part_number,
+          part_name: part.part_name,
+          document_type: doc.document_type,
+          document_name: doc.document_name,
+          document_version: doc.document_version,
+          document_url: doc.document_url,
+        });
+      });
+    });
+
+    return { assemblies, parts, operations, documents };
+  };
+
+  // Excel generation function with multiple sheets
+  const generateExcel = (dataForExport) => {
+    const { assemblies, parts, operations, documents } = dataForExport;
+    const wb = XLSX.utils.book_new();
+
+    // Product Details Sheet
+    const productData = [
+      { Field: "Product Name", Value: product?.product_name || "N/A" },
+      { Field: "Product ID", Value: product?.id || "N/A" },
+      { Field: "Generated On", Value: new Date().toLocaleString() },
+      { Field: "Total Assemblies", Value: assemblies.length },
+      { Field: "Total Parts", Value: parts.length },
+      { Field: "Total Operations", Value: operations.length },
+      { Field: "Total Documents", Value: documents.length },
+    ];
+    const productWs = XLSX.utils.json_to_sheet(productData);
+    XLSX.utils.book_append_sheet(wb, productWs, "Product Details");
+
+    // Assemblies Sheet
+    if (assemblies.length > 0) {
+      const assembliesData = assemblies.map((asm, index) => ({
+        "S.No": index + 1,
+        "Assembly Number": asm.assembly_number || "-",
+        "Assembly Name": asm.assembly_name || "-",
+        "Parent Assembly": asm.parent_assembly_number
+          ? `${asm.parent_assembly_number} - ${asm.parent_assembly_name || ""}`
+          : "-",
+      }));
+      const assembliesWs = XLSX.utils.json_to_sheet(assembliesData);
+      assembliesWs['!cols'] = [
+        { wch: 6 },
+        { wch: 15 },
+        { wch: 30 },
+        { wch: 30 },
+      ];
+      XLSX.utils.book_append_sheet(wb, assembliesWs, "Assemblies");
+    }
+
+    // Parts Sheet
+    if (parts.length > 0) {
+      const partsData = parts.map((part, index) => ({
+        "S.No": index + 1,
+        "Part Number": part.part_number || "-",
+        "Part Name": part.part_name || "-",
+        "Type": part.type_name || "-",
+        "Parent Assembly": part.parent_assembly_number
+          ? `${part.parent_assembly_number} - ${part.parent_assembly_name || ""}`
+          : "-",
+      }));
+      const partsWs = XLSX.utils.json_to_sheet(partsData);
+      partsWs['!cols'] = [
+        { wch: 6 },
+        { wch: 15 },
+        { wch: 30 },
+        { wch: 10 },
+        { wch: 30 },
+      ];
+      XLSX.utils.book_append_sheet(wb, partsWs, "Parts");
+    }
+
+    // Operations Sheet
+    if (operations.length > 0) {
+      const operationsData = operations.map((op, index) => ({
+        "S.No": index + 1,
+        "Part Number": op.part_number || "-",
+        "Part Name": op.part_name || "-",
+        "Operation Number": op.operation_number || "-",
+        "Operation Name": op.operation_name || "-",
+        "Type": op.part_type_name || "IN-House",
+        "Machine": op.machine_name || op.machine_id || "-",
+        "Setup Time": op.setup_time || "00:00:00",
+        "Cycle Time": op.cycle_time || "00:00:00",
+        "Workcenter": op.work_center_name || op.workcenter_id || "-",
+        "Work Instructions": op.work_instructions || "-",
+        "Notes": op.notes || "-",
+      }));
+      const operationsWs = XLSX.utils.json_to_sheet(operationsData);
+      operationsWs['!cols'] = [
+        { wch: 6 },
+        { wch: 15 },
+        { wch: 25 },
+        { wch: 8 },
+        { wch: 25 },
+        { wch: 10 },
+        { wch: 15 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 15 },
+        { wch: 30 },
+        { wch: 30 },
+      ];
+      XLSX.utils.book_append_sheet(wb, operationsWs, "Operations");
+    }
+
+    // Documents Sheet
+    if (documents.length > 0) {
+      const documentsData = documents.map((doc, index) => ({
+        "S.No": index + 1,
+        "Part Number": doc.part_number || "-",
+        "Part Name": doc.part_name || "-",
+        "Document Type": doc.document_type || "-",
+        "Document Name": doc.document_name || "-",
+        "Version": doc.document_version ? (doc.document_version.startsWith('v') ? doc.document_version : `v${doc.document_version}`) : "v1.0",
+        "URL": doc.document_url || "-",
+      }));
+      const documentsWs = XLSX.utils.json_to_sheet(documentsData);
+      documentsWs['!cols'] = [
+        { wch: 6 },
+        { wch: 15 },
+        { wch: 25 },
+        { wch: 15 },
+        { wch: 30 },
+        { wch: 10 },
+        { wch: 50 },
+      ];
+      XLSX.utils.book_append_sheet(wb, documentsWs, "Documents");
+    }
+
+    // Generate filename and download
+    const fileName = `${product?.product_name || "Product"}_BOM_${new Date()
+      .toISOString()
+      .slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
+  const handlePrepareDownload = async () => {
+    setLoading(true);
+    try {
+      // Fetch full hierarchical data with operations and documents for BOM download
+      // This uses the hierarchical endpoint ONLY for this download report
+      const response = await axios.get(`${API_BASE_URL}/products/${product.id}/hierarchical`);
+      setFullHierarchicalData(response.data);
+      setDownloadModalVisible(true);
+    } catch (error) {
+      console.error("Error fetching full hierarchical data for BOM download:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Use full hierarchical data if available (for download), otherwise use lightweight data
+  const dataForExport = fullHierarchicalData 
+    ? flattenHierarchicalData(fullHierarchicalData)
+    : {
+        assemblies: bomExport.assemblies || [],
+        parts: bomExport.parts || [],
+        operations: [],
+        documents: [],
+      };
+
   const documentNode = useMemo(
-    () => <ProductBOMPdfDocument product={product} bomExport={bomExport} />,
-    [product, bomExport]
+    () => <ProductBOMPdfDocument product={product} bomExport={dataForExport} />,
+    [product, dataForExport]
   );
 
-  return (
-    <PDFDownloadLink
-      document={documentNode}
-      fileName={safeFileName}
-      style={{ textDecoration: "none" }}
+  if (loading) {
+    return (
+      <Tooltip title="Preparing BOM data...">
+        <Button icon={<Spin size="small" />} size="small" disabled />
+      </Tooltip>
+    );
+  }
+
+  // Download modal
+  const downloadModal = (
+    <Modal
+      title="Download BOM Report"
+      open={downloadModalVisible}
+      onCancel={() => setDownloadModalVisible(false)}
+      footer={null}
+      centered
+      width={400}
     >
-      {() => (
-        <Tooltip title="Download full BOM report">
+      <div style={{ padding: "20px 0" }}>
+        <p style={{ marginBottom: "20px", textAlign: "center", color: "#666" }}>
+          Choose your preferred download format:
+        </p>
+        
+        <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+          <PDFDownloadLink
+            document={documentNode}
+            fileName={safeFileName}
+            style={{ textDecoration: "none", width: "100%" }}
+          >
+            {({ loading: pdfLoading }) => (
+              <Button
+                icon={<FilePdfOutlined />}
+                loading={pdfLoading}
+                block
+                size="large"
+                style={{ height: "50px" }}
+                type="default"
+                onClick={() => setDownloadModalVisible(false)}
+              >
+                {pdfLoading ? "Preparing PDF..." : "Download PDF"}
+              </Button>
+            )}
+          </PDFDownloadLink>
           <Button
-            icon={<FilePdfOutlined />}
-            size="small"
-            type="text"
-            style={{ padding: 4, minWidth: 24, height: 24 }}
-          />
-        </Tooltip>
-      )}
-    </PDFDownloadLink>
+            icon={<FileExcelOutlined />}
+            block
+            size="large"
+            style={{ height: "50px" }}
+            type="default"
+            onClick={() => {
+              generateExcel(dataForExport);
+              setDownloadModalVisible(false);
+            }}
+          >
+            Download Excel
+          </Button>
+        </Space>
+      </div>
+    </Modal>
+  );
+
+  // Show download icon button
+  return (
+    <>
+      {downloadModal}
+      <Tooltip title="Download full BOM report">
+        <Button
+          icon={<DownloadOutlined />}
+          size="small"
+          type="text"
+          style={{ padding: 4, minWidth: 24, height: 24 }}
+          onClick={handlePrepareDownload}
+        />
+      </Tooltip>
+    </>
   );
 };
 

@@ -836,15 +836,18 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   };
 
   const renderProductTree = (product) => {
-    if (!hasMatchingItems(product, 'product', activeFilter, product.id)) return null;
-    
     const productHierarchy = hierarchicalData[product.id];
     const hasData = !!productHierarchy;
     const childAssemblies = productHierarchy?.assemblies || [];
     const directParts = productHierarchy?.parts || [];
+    
+    // Filter children based on active filter
+    const filteredDirectParts = directParts.filter(p => matchesFilter(p, activeFilter));
+    const filteredChildAssemblies = childAssemblies.filter(asm => hasMatchingItems(asm, 'assembly', activeFilter, product.id));
+    
     const combinedChildren = [
-      ...directParts.map(p => ({ ...p, __childType: 'part' })),
-      ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
+      ...filteredDirectParts.map(p => ({ ...p, __childType: 'part' })),
+      ...filteredChildAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
     ].sort((a, b) => {
       const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
       const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;

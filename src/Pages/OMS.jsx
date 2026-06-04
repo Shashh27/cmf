@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker } from "antd";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Form, Input as TextArea } from "antd";
 import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
-  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined, SyncOutlined } from "@ant-design/icons";
+  SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined, SyncOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
 import DocumentModal from "../OMS Components/DocumentModal";
 import OMSOrdersPdfDownload from "../DownloadReports/OMSOrdersPdfDownload";
@@ -30,6 +30,10 @@ const OMS = () => {
   const [dateRange, setDateRange] = useState(null);
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
+  const [approvalModalOpen, setApprovalModalOpen] = useState(false);
+  const [selectedOrderForApproval, setSelectedOrderForApproval] = useState(null);
+  const [approvalAction, setApprovalAction] = useState(null);
+  const [approvalForm] = Form.useForm();
 
   const getCurrentAdminId = () => {
     try {
@@ -123,6 +127,17 @@ const OMS = () => {
     return <Tag color={config.color}>{config.text?.toUpperCase()}</Tag>;
   };
 
+  const getApprovalStatusBadge = (approvalStatus) => {
+    const statusConfig = {
+      'Pending Approval': { color: "orange", text: "Pending Approval" },
+      'Approved': { color: "green", text: "Approved" },
+      'Rejected': { color: "red", text: "Rejected" },
+    };
+
+    const config = statusConfig[approvalStatus] || { color: "default", text: approvalStatus };
+    return <Tag color={config.color}>{config.text?.toUpperCase()}</Tag>;
+  };
+
   const handleCreateOrder = () => {
     setEditingOrder(null);
     setOrderModalOpen(true);
@@ -177,6 +192,33 @@ const OMS = () => {
     setDocumentModalOpen(false);
     if (document) {
       messageApi.success(`Document "${document.document_name}" uploaded successfully!`);
+    }
+  };
+
+  const handleApprovalAction = (order, action) => {
+    setSelectedOrderForApproval(order);
+    setApprovalAction(action);
+    approvalForm.setFieldsValue({
+      approval_status: action,
+      approval_remarks: "",
+    });
+    setApprovalModalOpen(true);
+  };
+
+  const handleApprovalSubmit = async (values) => {
+    try {
+      await axios.put(`${API_BASE_URL}/orders/${selectedOrderForApproval.id}/approve`, {
+        approval_status: values.approval_status,
+        approval_remarks: values.approval_remarks,
+      });
+      messageApi.success(`Order ${values.approval_status.toLowerCase()} successfully!`);
+      setApprovalModalOpen(false);
+      approvalForm.resetFields();
+      setSelectedOrderForApproval(null);
+      fetchOrders();
+    } catch (error) {
+      console.error("Error approving/rejecting order:", error);
+      messageApi.error(error?.response?.data?.detail || "Failed to process approval");
     }
   };
 
@@ -311,19 +353,28 @@ const OMS = () => {
       dataIndex: "product_id",
       key: "product_id",
       render: (productId, record) => (
-        <Button
-          type="link"
-          className="p-0 h-auto"
-          onClick={() => {
-            if (!productId) return;
-            navigate(`/admin/pdm/${productId}?from=oms&orderId=${record.id}`);
-          }}
-        >
-          <Space className="text-gray-700">
-            <AppstoreOutlined className="text-blue-500" />
-            <span className="underline">{getProductName(productId, record)}</span>
-          </Space>
-        </Button>
+        record.approval_status === "Rejected" ? (
+          <Tooltip title="Order rejected - cannot access project">
+            <Space className="text-gray-400">
+              <AppstoreOutlined />
+              <span className="font-medium">{getProductName(productId, record)}</span>
+            </Space>
+          </Tooltip>
+        ) : (
+          <Button
+            type="link"
+            className="p-0 h-auto"
+            onClick={() => {
+              if (!productId) return;
+              navigate(`/admin/pdm/${productId}?from=oms&orderId=${record.id}`);
+            }}
+          >
+            <Space className="text-gray-700">
+              <AppstoreOutlined className="text-blue-500" />
+              <span className="underline">{getProductName(productId, record)}</span>
+            </Space>
+          </Button>
+        )
       ),
     },
     {
@@ -399,11 +450,60 @@ const OMS = () => {
       render: (status) => getStatusBadge(status),
     },
     {
+      title: <span className="font-semibold text-gray-700">Approval Status</span>,
+      dataIndex: "approval_status",
+      key: "approval_status",
+      render: (approvalStatus) => getApprovalStatusBadge(approvalStatus),
+    },
+
+     {
+      title: <span className="font-semibold text-gray-700">Approval Remarks</span>,
+      dataIndex: "approval_remarks",
+      key: "approval_remarks",
+      render: (remarks) => (
+        <span className="text-gray-600 text-sm">
+          {remarks || "-"}
+        </span>
+      ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Approved At</span>,
+      dataIndex: "approved_at",
+      key: "approved_at",
+      render: (date) => (
+        <span className="text-gray-600 text-sm">
+          {date ? formatDate(date) : "-"}
+        </span>
+      ),
+    },
+    {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: "actions",
-      width: 150,
+      width: 200,
       render: (_, record) => (
         <Space size="small">
+          {record.approval_status === "Pending Approval" && (
+            <>
+              <Tooltip title="Approve Order">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CheckOutlined />}
+                  className="text-green-500 hover:bg-green-50"
+                  onClick={() => handleApprovalAction(record, "Approved")}
+                />
+              </Tooltip>
+              <Tooltip title="Reject Order">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CloseOutlined />}
+                  className="text-red-500 hover:bg-red-50"
+                  onClick={() => handleApprovalAction(record, "Rejected")}
+                />
+              </Tooltip>
+            </>
+          )}
           <Tooltip title="Edit Order">
             <Button
                 type="text"
@@ -413,24 +513,26 @@ const OMS = () => {
                 onClick={() => handleEditOrder(record)}
             />
           </Tooltip>
-          <Tooltip title="Documents">
-            <Button 
+          <Tooltip title={record.approval_status === "Rejected" ? "Cannot add documents to rejected order" : "Documents"}>
+            <Button
                 type="text"
-                size="small" 
+                size="small"
                 icon={<FileTextOutlined />}
                 className="text-purple-500 hover:bg-purple-50"
+                disabled={record.approval_status === "Rejected"}
                 onClick={() => {
                 setSelectedOrderId(record.id);
                 setDocumentModalOpen(true);
                 }}
             />
           </Tooltip>
-          <Tooltip title="Delete Order">
+          <Tooltip title={record.approval_status === "Rejected" ? "Cannot delete rejected order" : "Delete Order"}>
             <Button
                 type="text"
                 size="small"
                 icon={<DeleteOutlined />}
                 className="text-red-500 hover:bg-red-50"
+                disabled={record.approval_status === "Rejected"}
                 onClick={() => handleDeleteOrder(record)}
             />
           </Tooltip>
@@ -657,6 +759,93 @@ const OMS = () => {
         orderId={selectedOrderId}
         orders={orders}
       />
+
+      <Modal
+        title={
+          <div className="flex items-center gap-2">
+            {approvalAction === "Approved" ? (
+              <CheckOutlined className="text-green-500" />
+            ) : (
+              <CloseOutlined className="text-red-500" />
+            )}
+            <span className="font-bold text-gray-800">
+              {approvalAction === "Approved" ? "Approve" : "Reject"} Order
+            </span>
+          </div>
+        }
+        open={approvalModalOpen}
+        onCancel={() => {
+          setApprovalModalOpen(false);
+          approvalForm.resetFields();
+          setSelectedOrderForApproval(null);
+          setApprovalAction(null);
+        }}
+        footer={null}
+        width={500}
+        centered
+      >
+        <div className="mb-4">
+          <p className="text-gray-600">
+            Order: <span className="font-semibold text-gray-800">{selectedOrderForApproval?.sale_order_number}</span>
+          </p>
+          <p className="text-gray-600">
+            Customer: <span className="font-semibold text-gray-800">{getCustomerName(selectedOrderForApproval?.customer_id, selectedOrderForApproval)}</span>
+          </p>
+        </div>
+        <Form
+          form={approvalForm}
+          layout="vertical"
+          onFinish={handleApprovalSubmit}
+        >
+          <Form.Item name="approval_status" hidden>
+            <input type="hidden" />
+          </Form.Item>
+          <Form.Item
+            name="approval_remarks"
+            label={
+              <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">
+                Remarks {approvalAction === "Approved" ? "(Optional)" : "(Required)"}
+              </span>
+            }
+            rules={[
+              {
+                required: approvalAction === "Rejected",
+                message: "Please provide remarks for rejection",
+              },
+            ]}
+          >
+            <TextArea
+              placeholder="Enter approval/rejection remarks..."
+              rows={4}
+              maxLength={500}
+              showCount
+            />
+          </Form.Item>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button
+              onClick={() => {
+                setApprovalModalOpen(false);
+                approvalForm.resetFields();
+                setSelectedOrderForApproval(null);
+                setApprovalAction(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              htmlType="submit"
+              className={
+                approvalAction === "Approved"
+                  ? "bg-green-500 hover:bg-green-600 border-green-500"
+                  : "bg-red-500 hover:bg-red-600 border-red-500"
+              }
+            >
+              {approvalAction === "Approved" ? "Approve" : "Reject"}
+            </Button>
+          </div>
+        </Form>
+      </Modal>
     </div>
   );
 };

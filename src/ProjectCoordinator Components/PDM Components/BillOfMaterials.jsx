@@ -122,7 +122,8 @@ const BillOfMaterials = ({
           const transformedData = await fetchProductHierarchy(singleProductId);
           if (transformedData) {
             // Set product from hierarchical data (no need for separate product API call)
-            setProducts([{ id: singleProductId, product_name: transformedData.product_name || transformedData.product_number || `Product ${singleProductId}` }]);
+            const productData = transformedData.product || transformedData;
+            setProducts([{ id: singleProductId, product_name: productData.product_name || productData.product_number || `Product ${singleProductId}` }]);
             setExpandedItems(prev => ({ ...prev, [getExpandKey('product', singleProductId)]: true }));
           }
         } catch (e) {
@@ -764,16 +765,20 @@ const BillOfMaterials = ({
 
   // ── Product row ───────────────────────────────────────────────────────────
   const renderProductTree = (product) => {
-    if (!hasMatchingItems(product, 'product', activeFilter, product.id)) return null;
-    
     const productHierarchy = hierarchicalData[product.id];
     const hasData = !!productHierarchy;
     const childAssemblies = productHierarchy?.assemblies || [];
     const directParts = productHierarchy?.parts || [];
+    
+    // Filter children based on active filter
+    const filteredDirectParts = directParts.filter(p => matchesFilter(p, activeFilter));
+    const filteredChildAssemblies = childAssemblies.filter(asm => hasMatchingItems(asm, 'assembly', activeFilter, product.id));
+    
     const combinedChildren = [
-      ...directParts.map(p => ({ ...p, __childType: 'part' })),
-      ...childAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
+      ...filteredDirectParts.map(p => ({ ...p, __childType: 'part' })),
+      ...filteredChildAssemblies.map(a => ({ ...a, __childType: 'assembly' }))
     ].sort((a, b) => (a.id || 0) - (b.id || 0));
+    
     const isExpanded = expandedItems[getExpandKey('product', product.id)];
     const hasChildren = combinedChildren.length > 0;
     const showArrow = !hasData || hasChildren;
@@ -928,16 +933,42 @@ const BillOfMaterials = ({
               </h2>
             </div>
 
-            {(projectName || projectNumber) && (
-              <div className="text-right min-w-0 flex-1 ml-4">
-                <div className="text-[11px] font-bold text-slate-700 truncate leading-tight">
-                  {projectName}
+            <div className="flex items-center gap-2 min-w-0">
+              <AssemblyPartsUploadPanel
+                selectedItem={(() => {
+                  if (activeItemType === 'product' && activeItemId) {
+                    const prod = products.find(p => p.id === activeItemId);
+                    return { id: activeItemId, product_id: activeItemId, itemType: 'product', label: prod?.product_name || 'Product' };
+                  }
+                  if (activeItemType === 'assembly' && activeItemId) {
+                    for (const [pid, hd] of Object.entries(hierarchicalData)) {
+                      const found = hd.assemblies?.find(a => a.id === activeItemId);
+                      if (found) return { id: activeItemId, product_id: Number(pid), itemType: 'assembly', label: found.assembly_name || 'Assembly' };
+                    }
+                  }
+                  if (singleProductId) {
+                    const prod = products.find(p => p.id === singleProductId);
+                    return { id: singleProductId, product_id: singleProductId, itemType: 'product', label: prod?.product_name || 'Product' };
+                  }
+                  return null;
+                })()}
+                onPartsCreated={() => {
+                  const pid = activeItemType === 'product' ? activeItemId : (activeItemType === 'assembly' ? null : singleProductId);
+                  if (pid) fetchProductHierarchy(pid, true);
+                  else if (singleProductId) fetchProductHierarchy(singleProductId, true);
+                }}
+              />
+              {(projectName || projectNumber) && (
+                <div className="text-right min-w-0">
+                  <div className="text-[11px] font-bold text-slate-700 truncate leading-tight">
+                    {projectName}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                    {projectNumber}
+                  </div>
                 </div>
-                <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
-                  {projectNumber}
-                </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {!singleProductId && (
               <Button
@@ -952,44 +983,36 @@ const BillOfMaterials = ({
               </Button>
             )}
           </div>
-          <div className="flex items-center gap-2">
+        
+        {/* Search Bar & Filters */}
+        <div className="px-2 pb-2 flex items-center gap-2 w-full max-w-3xl">
+          <div className="flex-1 min-w-0">
             <Input
+              placeholder="Search by part/assembly..."
               prefix={<SearchOutlined className="text-slate-400" />}
-              placeholder="Search assemblies, sub-assemblies, and parts..."
               value={searchTerm}
               onChange={(e) => {
                 const filteredValue = (e.target.value || '').replace(/[^a-zA-Z0-9-_ ]/g, '').slice(0, 30);
                 setSearchTerm(filteredValue);
               }}
               maxLength={30}
-              className="rounded-md text-sm border-slate-200 flex-1"
               allowClear
-            />
-            <AssemblyPartsUploadPanel
-              selectedItem={(() => {
-                if (activeItemType === 'product' && activeItemId) {
-                  const prod = products.find(p => p.id === activeItemId);
-                  return { id: activeItemId, product_id: activeItemId, itemType: 'product', label: prod?.product_name || 'Product' };
-                }
-                if (activeItemType === 'assembly' && activeItemId) {
-                  for (const [pid, hd] of Object.entries(hierarchicalData)) {
-                    const found = hd.assemblies?.find(a => a.id === activeItemId);
-                    if (found) return { id: activeItemId, product_id: Number(pid), itemType: 'assembly', label: found.assembly_name || 'Assembly' };
-                  }
-                }
-                if (singleProductId) {
-                  const prod = products.find(p => p.id === singleProductId);
-                  return { id: singleProductId, product_id: singleProductId, itemType: 'product', label: prod?.product_name || 'Product' };
-                }
-                return null;
-              })()}
-              onPartsCreated={() => {
-                const pid = activeItemType === 'product' ? activeItemId : (activeItemType === 'assembly' ? null : singleProductId);
-                if (pid) fetchProductHierarchy(pid, true);
-                else if (singleProductId) fetchProductHierarchy(singleProductId, true);
-              }}
+              className="w-full"
+              size="small"
             />
           </div>
+          <div className="w-44 sm:w-52 shrink-0">
+            <BOMFilters 
+              stats={bomStats} 
+              activeFilter={activeFilter} 
+              onFilterChange={(filter) => {
+                setActiveFilter(filter);
+                setActiveItemId(null);
+                setActiveItemType(null);
+              }} 
+            />
+          </div>
+        </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 bom-scroll min-h-0">

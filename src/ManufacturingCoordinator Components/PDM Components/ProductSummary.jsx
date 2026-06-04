@@ -3,6 +3,7 @@ import { Card, Empty, Spin, Table, Tag, Typography, Input, Select } from "antd";
 import { ClockCircleOutlined, AppstoreOutlined, ToolOutlined, PartitionOutlined, SearchOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
+import ProductSummaryDownload from "../../DownloadReports/ProductSummaryDownload";
 
 const { Text } = Typography;
 
@@ -427,37 +428,44 @@ const ProductSummary = ({ productId }) => {
       >
 
         {/* Product title with search and filters */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <AppstoreOutlined className="text-blue-600 text-lg" />
-          <span style={{ fontWeight: 700, color: "#1e293b", fontSize: 13 }} className="truncate">
-            {summary.productName || "Product Summary"}
-          </span>
-          <Input
-            placeholder="Search part, operation, machine..."
-            prefix={<SearchOutlined className="text-slate-400" />}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            allowClear
-            size="small"
-            style={{ width: 250 }}
-          />
-          <Select
-            placeholder="Filter by Machine"
-            value={machineFilter}
-            onChange={setMachineFilter}
-            allowClear
-            size="small"
-            style={{ minWidth: 150 }}
-            options={summary.uniqueMachines.map(m => ({ label: m, value: m }))}
-          />
-          <Select
-            placeholder="Filter by Operation"
-            value={operationFilter}
-            onChange={setOperationFilter}
-            allowClear
-            size="small"
-            style={{ minWidth: 150 }}
-            options={summary.uniqueOperations.map(o => ({ label: o, value: o }))}
+        <div className="flex items-center gap-2 flex-wrap justify-between">
+          <div className="flex items-center gap-2 flex-wrap">
+            <AppstoreOutlined className="text-blue-600 text-lg" />
+            <span style={{ fontWeight: 700, color: "#1e293b", fontSize: 13 }} className="truncate">
+              {summary.productName || "Product Summary"}
+            </span>
+            <Input
+              placeholder="Search part, operation, machine..."
+              prefix={<SearchOutlined className="text-slate-400" />}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              allowClear
+              size="small"
+              style={{ width: 250 }}
+            />
+            <Select
+              placeholder="Filter by Machine"
+              value={machineFilter}
+              onChange={setMachineFilter}
+              allowClear
+              size="small"
+              style={{ minWidth: 150 }}
+              options={summary.uniqueMachines.map(m => ({ label: m, value: m }))}
+            />
+            <Select
+              placeholder="Filter by Operation"
+              value={operationFilter}
+              onChange={setOperationFilter}
+              allowClear
+              size="small"
+              style={{ minWidth: 150 }}
+              options={summary.uniqueOperations.map(o => ({ label: o, value: o }))}
+            />
+          </div>
+          <ProductSummaryDownload 
+            summaryData={summary} 
+            productName={summary.productName}
+            fileName={`${summary.productName || "product"}_summary.pdf`}
           />
         </div>
 

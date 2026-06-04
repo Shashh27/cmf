@@ -104,6 +104,17 @@ const OMS = () => {
     return <Tag color={config.color}>{config.text?.toUpperCase()}</Tag>;
   };
 
+  const getApprovalStatusBadge = (approvalStatus) => {
+    const statusConfig = {
+      'Pending Approval': { color: "orange", text: "Pending Approval" },
+      'Approved': { color: "green", text: "Approved" },
+      'Rejected': { color: "red", text: "Rejected" },
+    };
+
+    const config = statusConfig[approvalStatus] || { color: "default", text: approvalStatus };
+    return <Tag color={config.color}>{config.text?.toUpperCase()}</Tag>;
+  };
+
   const handleCreateOrder = () => {
     setEditingOrder(null);
     setOrderModalOpen(true);
@@ -285,19 +296,28 @@ const OMS = () => {
       dataIndex: "product_id",
       key: "product_id",
       render: (productId, record) => (
-        <Button
-          type="link"
-          className="p-0 h-auto"
-          onClick={() => {
-            if (!productId) return;
-            navigate(`/manufacturing_coordinator/pdm/${productId}?from=oms&orderId=${record.id}`);
-          }}
-        >
-          <Space className="text-gray-700">
-            <AppstoreOutlined className="text-blue-500" />
-            <span className="underline">{record.product_name || `Project ${productId}`}</span>
-          </Space>
-        </Button>
+        record.approval_status === "Rejected" ? (
+          <Tooltip title="Order rejected - cannot access project">
+            <Space className="text-gray-400">
+              <AppstoreOutlined />
+              <span className="font-medium">{record.product_name || `Project ${productId}`}</span>
+            </Space>
+          </Tooltip>
+        ) : (
+          <Button
+            type="link"
+            className="p-0 h-auto"
+            onClick={() => {
+              if (!productId) return;
+              navigate(`/manufacturing_coordinator/pdm/${productId}?from=oms&orderId=${record.id}`);
+            }}
+          >
+            <Space className="text-gray-700">
+              <AppstoreOutlined className="text-blue-500" />
+              <span className="underline">{record.product_name || `Project ${productId}`}</span>
+            </Space>
+          </Button>
+        )
       ),
     },
     {
@@ -371,6 +391,32 @@ const OMS = () => {
       render: (status) => getStatusBadge(status),
     },
     {
+      title: <span className="font-semibold text-gray-700">Approval Status</span>,
+      dataIndex: "approval_status",
+      key: "approval_status",
+      render: (approvalStatus) => getApprovalStatusBadge(approvalStatus),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Approval Remarks</span>,
+      dataIndex: "approval_remarks",
+      key: "approval_remarks",
+      render: (remarks) => (
+        <span className="text-gray-600 text-sm">
+          {remarks || "-"}
+        </span>
+      ),
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Approved At</span>,
+      dataIndex: "approved_at",
+      key: "approved_at",
+      render: (date) => (
+        <span className="text-gray-600 text-sm">
+          {date ? formatDate(date) : "-"}
+        </span>
+      ),
+    },
+    {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: "actions",
       width: 150,
@@ -387,9 +433,9 @@ const OMS = () => {
             />
           </Tooltip>
           <Tooltip title="Documents">
-            <Button 
+            <Button
                 type="text"
-                size="small" 
+                size="small"
                 icon={<FileTextOutlined />}
                 className="text-purple-500 hover:bg-purple-50"
                 onClick={() => {

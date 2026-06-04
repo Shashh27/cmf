@@ -37,6 +37,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const [linkModalVisible, setLinkModalVisible] = useState(false);
   const [selectedPart, setSelectedPart] = useState(null);
   const [selectedStock, setSelectedStock] = useState(null);
+  const [selectedProcessType, setSelectedProcessType] = useState(null);
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [selectedFormType, setSelectedFormType] = useState(null);
   const [requiredQuantity, setRequiredQuantity] = useState(1);
@@ -110,12 +111,14 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     setSelectedPart(part);
     if (part.part.raw_material_unit_id) {
       setSelectedStock(null);
+      setSelectedProcessType(null);
       setSelectedMaterial(null);
       setSelectedFormType(null);
       setSelectedUnit(null);
       setRequiredLength(null);
     } else {
       setSelectedStock(null);
+      setSelectedProcessType(null);
       setSelectedMaterial(null);
       setSelectedFormType(null);
       setSelectedUnit(null);
@@ -219,6 +222,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
       
       message.success('Material assigned successfully');
       setLinkModalVisible(false);
+      setSelectedProcessType(null);
       setSelectedMaterial(null);
       setSelectedFormType(null);
       setSelectedStock(null);
@@ -268,6 +272,15 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     }
     setLengthError(null);
     setRequiredLength(value);
+  };
+
+  // Helper function to get latest extracted data
+  const getLatestExtractedData = (extractedDataArray) => {
+    if (!extractedDataArray || !Array.isArray(extractedDataArray) || extractedDataArray.length === 0) {
+      return null;
+    }
+    const sorted = [...extractedDataArray].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return sorted[0];
   };
 
   const getAllParts = (hierarchy) => {
@@ -349,7 +362,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
     const linkedMaterialName = part.part.raw_material_name;
     const linkedMaterialDimensions = part.part.raw_material_stock_dimensions;
     const linkedMaterialFormType = part.part.raw_material_unit_details?.form_type || part.part.raw_material_form_type;
-    const stockSourceType = part.part.raw_material_stock_details?.source_type || null;
+    const stockSourceType = part.part.raw_material_stock_details?.source_type || part.part.raw_material_unit_details?.source_type || null;
     const linkedUnitId = part.part.raw_material_unit_id;
     const linkedRequiredLength = part.part.required_length;
     const partType = part.part.type_name || 'N/A';
@@ -424,30 +437,31 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
 
           {/* Extracted Raw Materials */}
           <Col xs={24} sm={4} md={5}>
-            {part.extracted_data && part.extracted_data.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {part.extracted_data.map((item, index) => (
-                  <div key={index}>
+            {(() => {
+              const latestExtractedData = getLatestExtractedData(part.extracted_data);
+              return latestExtractedData ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div>
                     <div style={{ display: 'flex', gap: '4px' }}>
                       <Text style={{ fontSize: '11px', color: '#595959', fontWeight: '500' }}>Material:</Text>
                       <Text strong style={{ fontSize: '11px', color: '#000', lineHeight: '1.2' }}>
-                        {item.material || 'N/A'}
+                        {latestExtractedData.material || 'N/A'}
                       </Text>
                     </div>
-                    {item.stock_size && (
+                    {latestExtractedData.stock_size && (
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <Text style={{ fontSize: '10px', color: '#8c8c8c' }}>Stock Size:</Text>
                         <Text style={{ fontSize: '10px', color: '#595959', lineHeight: '1.2' }}>
-                          {item.stock_size}
+                          {latestExtractedData.stock_size}
                         </Text>
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <Text style={{ fontSize: '11px', color: '#bfbfbf' }}>N/A</Text>
-            )}
+                </div>
+              ) : (
+                <Text style={{ fontSize: '11px', color: '#bfbfbf' }}>N/A</Text>
+              );
+            })()}
           </Col>
           
           {/* Material Details */}
@@ -763,7 +777,8 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                             const isOutsource = !isInHouse;
                             const isStandard = partType.toLowerCase().includes('standard');
                             const hasRawMaterial = partDetail === 'WITH_RAW_MATERIAL';
-                            const isOrderStock = part.part.raw_material_stock_details?.source_type === 'order';
+                            const stockSourceType = part.part.raw_material_stock_details?.source_type || part.part.raw_material_unit_details?.source_type || null;
+                            const isOrderStock = stockSourceType === 'order';
                             const canLinkMaterial = (isInHouse || (isOutsource && hasRawMaterial) || isStandard || (isOutsource && !hasRawMaterial) || isOrderStock);
                             
                             return (
@@ -798,18 +813,19 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                   <span style={{ fontSize: '11px', fontWeight: '600', color: '#000' }}>{part.part.qty}</span>
                                 </td>
                                 <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
-                                  {part.extracted_data && part.extracted_data.length > 0 ? (
-                                    <div style={{ fontSize: '9px', lineHeight: '1.3' }}>
-                                      {part.extracted_data.map((item, index) => (
-                                        <div key={index} style={{ marginBottom: index < part.extracted_data.length - 1 ? '4px' : 0 }}>
-                                          <div style={{ color: '#000', fontWeight: '600' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Material: </span>{item.material || 'N/A'}</div>
-                                          {item.stock_size && <div style={{ color: '#595959' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Stock Size: </span>{item.stock_size}</div>}
+                                  {(() => {
+                                    const latestExtractedData = getLatestExtractedData(part.extracted_data);
+                                    return latestExtractedData ? (
+                                      <div style={{ fontSize: '9px', lineHeight: '1.3' }}>
+                                        <div>
+                                          <div style={{ color: '#000', fontWeight: '600' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Material: </span>{latestExtractedData.material || 'N/A'}</div>
+                                          {latestExtractedData.stock_size && <div style={{ color: '#595959' }}><span style={{ color: '#8c8c8c', fontWeight: 'normal' }}>Stock Size: </span>{latestExtractedData.stock_size}</div>}
                                         </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <span style={{ fontSize: '9px', color: '#bfbfbf' }}>N/A</span>
-                                  )}
+                                      </div>
+                                    ) : (
+                                      <span style={{ fontSize: '9px', color: '#bfbfbf' }}>N/A</span>
+                                    );
+                                  })()}
                                 </td>
                                 <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
                                   {isLinked ? (
@@ -972,6 +988,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           setLinkModalVisible(false);
           setSelectedPart(null);
           setSelectedStock(null);
+          setSelectedProcessType(null);
           setSelectedMaterial(null);
           setSelectedFormType(null);
           setSelectedUnit(null);
@@ -1005,7 +1022,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
             {/* Warning for existing assignment */}
             {selectedPart.part.raw_material_unit_id && (
               <Alert
-                message="Warning"
+                title="Warning"
                 description={
                   <div>
                     This part is already assigned to Unit #{selectedPart.part.raw_material_unit_id}.
@@ -1020,33 +1037,58 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               />
             )}
 
-            {/* Step 1: Select Raw Material */}
+            {/* Step 1: Select Process Type */}
             <div style={{ marginBottom: '16px' }}>
-              <Text strong>Step 1: Select Raw Material</Text>
+              <Text strong>Step 1: Select Process Type</Text>
               <Select
                 style={{ width: '100%', marginTop: '8px' }}
-                placeholder="Select raw material"
-                showSearch
-                optionFilterProp="children"
-                value={selectedMaterial}
+                placeholder="Select process type"
+                value={selectedProcessType}
                 onChange={(value) => {
-                  setSelectedMaterial(value);
+                  setSelectedProcessType(value);
+                  setSelectedMaterial(null);
                   setSelectedFormType(null);
                   setSelectedStock(null);
                 }}
               >
-                {rawMaterials.map(material => (
-                  <Select.Option key={material.id} value={material.id}>
-                    {material.material_name}
-                  </Select.Option>
-                ))}
+                <Select.Option value="Forging">Forging</Select.Option>
+                <Select.Option value="Barstocks">Barstocks</Select.Option>
+                <Select.Option value="Casting">Casting</Select.Option>
               </Select>
             </div>
 
-            {/* Step 2: Select Form Type */}
-            {selectedMaterial && (
+            {/* Step 2: Select Raw Material */}
+            {selectedProcessType && (
               <div style={{ marginBottom: '16px' }}>
-                <Text strong>Step 2: Select Form Type</Text>
+                <Text strong>Step 2: Select Raw Material</Text>
+                <Select
+                  style={{ width: '100%', marginTop: '8px' }}
+                  placeholder="Select raw material"
+                  showSearch
+                  optionFilterProp="children"
+                  value={selectedMaterial}
+                  onChange={(value) => {
+                    setSelectedMaterial(value);
+                    setSelectedFormType(null);
+                    setSelectedStock(null);
+                  }}
+                >
+                  {[...new Set(generalStock.filter(s => s.process_type === selectedProcessType).map(s => s.material_id))].map(materialId => {
+                    const material = rawMaterials.find(m => m.id === materialId);
+                    return material ? (
+                      <Select.Option key={material.id} value={material.id}>
+                        {material.material_name}
+                      </Select.Option>
+                    ) : null;
+                  })}
+                </Select>
+              </div>
+            )}
+
+            {/* Step 3: Select Form Type */}
+            {selectedProcessType && selectedMaterial && (
+              <div style={{ marginBottom: '16px' }}>
+                <Text strong>Step 3: Select Form Type</Text>
                 <Select
                   style={{ width: '100%', marginTop: '8px' }}
                   placeholder="Select form type"
@@ -1056,7 +1098,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                     setSelectedStock(null);
                   }}
                 >
-                  {[...new Set(generalStock.filter(s => s.material_id === selectedMaterial).map(s => s.form_type))].map(formType => (
+                  {[...new Set(generalStock.filter(s => s.material_id === selectedMaterial && s.process_type === selectedProcessType).map(s => s.form_type))].map(formType => (
                     <Select.Option key={formType} value={formType}>
                       {formType}
                     </Select.Option>
@@ -1065,15 +1107,13 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               </div>
             )}
 
-            {/* Step 3: Select Stock */}
-            {selectedMaterial && selectedFormType && (
+            {/* Step 4: Select Stock */}
+            {selectedProcessType && selectedMaterial && selectedFormType && (
               <div style={{ marginBottom: '16px' }}>
-                <Text strong>Step 3: Select Stock</Text>
+                <Text strong>Step 4: Select Stock</Text>
                 <Select
                   style={{ width: '100%', marginTop: '8px' }}
                   placeholder="Select stock"
-                  showSearch
-                  optionFilterProp="children"
                   value={selectedStock?.id}
                   onChange={async (value) => {
                     const stock = generalStock.find(s => s.id === value);
@@ -1087,7 +1127,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   }}
                 >
                   {generalStock
-                    .filter(stock => stock.material_id === selectedMaterial && stock.form_type === selectedFormType)
+                    .filter(stock => stock.material_id === selectedMaterial && stock.form_type === selectedFormType && stock.process_type === selectedProcessType)
                     .map(stock => (
                       <Select.Option key={stock.id} value={stock.id}>
                         <div>
@@ -1114,8 +1154,6 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   <Select
                     style={{ width: '100%', marginTop: '8px' }}
                     placeholder="Select a unit"
-                    showSearch
-                    optionFilterProp="children"
                     value={selectedUnit?.id}
                     onChange={(value) => {
                       const unit = availableUnits.find(u => u.id === value);
@@ -1201,7 +1239,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
         width="90%"
         style={{ maxWidth: 1200, top: 20 }}
         styles={{ body: { padding: '16px', maxHeight: '75vh', overflowY: 'auto' } }}
-        destroyOnClose
+        destroyOnHidden
       >
         <OrderRequirementsDisplay 
           selectedOrder={selectedOrder}

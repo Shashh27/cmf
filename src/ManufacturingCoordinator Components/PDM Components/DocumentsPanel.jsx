@@ -569,6 +569,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
         );
       }
     },
+    { title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 150,
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
+      }
+    },
     { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
