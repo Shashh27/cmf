@@ -280,14 +280,6 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       render: (operator) => operator?.user_name || '-',
     },
     {
-      title: 'Production Order',
-      dataIndex: 'order',
-      key: 'production_order',
-      width: 160,
-      className: 'table-header-styled',
-      render: (order) => order?.sale_order_number || '-',
-    },
-    {
       title: 'Completed At',
       dataIndex: 'completed_at',
       key: 'completed_at',
@@ -362,35 +354,6 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
             </div>
           )}
         </div>
-      ),
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 140,
-      align: 'center',
-      className: 'table-header-styled',
-      render: (_, record) => (
-        <Space size="small">
-          <Tooltip title="Approve">
-            <Button
-              type="text"
-              size="small"
-              icon={<CheckOutlined style={{ color: '#52c41a' }} />}
-              onClick={() => handleApproveClick(record)}
-              disabled={record.approval_status === 'approved'}
-            />
-          </Tooltip>
-          <Tooltip title="Reject">
-            <Button
-              type="text"
-              size="small"
-              icon={<CloseOutlined style={{ color: '#ff4d4f' }} />}
-              onClick={() => handleRejectClick(record)}
-              disabled={record.approval_status === 'rejected'}
-            />
-          </Tooltip>
-        </Space>
       ),
     },
     {
@@ -562,21 +525,9 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
                     </div>
                   </div>
                   <div>
-                    <Text type="secondary">Production Order</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.order?.sale_order_number || '-'}
-                    </div>
-                  </div>
-                  <div>
                     <Text type="secondary">Completed At</Text>
                     <div style={{ fontWeight: 500 }}>
                       {formatDateTime(selectedLogDetails.completed_at)}
-                    </div>
-                  </div>
-                  <div>
-                    <Text type="secondary">Part</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.part?.part_name || '-'}
                     </div>
                   </div>
                   <div>

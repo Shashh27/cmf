@@ -170,12 +170,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   const [uploadDocType, setUploadDocType] = useState('2D');
   const [uploadDocTypeOther, setUploadDocTypeOther] = useState('');
   const [uploadParentId, setUploadParentId] = useState(null);
-  const [uploadVersion, setUploadVersion] = useState('v1.0');
+  const [uploadVersion, setUploadVersion] = useState('');
 
-  // ── Wizard state ────────────────────────────────────────────────────────
-  const [isWizardMode, setIsWizardMode] = useState(false);   // true when on step 2
-  const [wizardStep, setWizardStep] = useState(1);           // 1 = 2D, 2 = 3D
-  const [wizardPending3D, setWizardPending3D] = useState(null); // the 3D doc row awaiting update
+  // ── Dual upload state ─────────────────────────────────────────────────────
+  // For revision updates, both 2D and 3D must be uploaded together
+  const [isDualUploadMode, setIsDualUploadMode] = useState(false);
+  const [dualUploadFiles, setDualUploadFiles] = useState({ '2D': null, '3D': null });
 
   // Edit doc
   const [isEditDocModalOpen, setIsEditDocModalOpen] = useState(false);
@@ -186,7 +186,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   useEffect(() => {
     if (editingDoc) {
       const isOther = !['2D', '3D'].includes(editingDoc.document_type);
-      editForm.setFieldsValue({ document_name: editingDoc.document_name, document_type: isOther ? 'Other' : editingDoc.document_type, custom_type: isOther ? editingDoc.document_type : '' });
+      editForm.setFieldsValue({
+        document_name: editingDoc.document_name,
+        document_type: isOther ? 'Other' : editingDoc.document_type,
+        custom_type: isOther ? editingDoc.document_type : ''
+      });
     } else { editForm.resetFields(); }
   }, [editingDoc, editForm]);
 
@@ -227,9 +231,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         finally { setLoadingViewTools(false); }
       };
       fetchTools();
-    } else {
-      setViewOperationTools([]);
-    }
+    } else { setViewOperationTools([]); }
   }, [viewOperation, isViewModalOpen]);
 
   const getCurrentUserId = () => {
@@ -239,24 +241,16 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       const u = JSON.parse(stored);
       if (u?.id == null) return null;
       return u.id;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   };
 
-  const getCurrentUserRole = () => {
-    try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const u = JSON.parse(stored);
-      return u?.role || null;
-    } catch {
-      return null;
-    }
-  };
-
+  // ── fetchDocuments returns the fresh doc list directly (avoids stale closure) ──
   const fetchDocuments = async () => {
-    if (!selectedItem || selectedItem.itemType !== 'part') { setDocuments([]); setOperations([]); if (onDocumentsLoaded) onDocumentsLoaded([]); return; }
+    if (!selectedItem || selectedItem.itemType !== 'part') {
+      setDocuments([]); setOperations([]);
+      if (onDocumentsLoaded) onDocumentsLoaded([]);
+      return [];
+    }
     setLoading(true);
     try {
       const [dR, oR] = await Promise.all([
@@ -265,30 +259,24 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       ]);
       const docs = dR.data;
       const ops = oR.data;
-      
-      // Get current user info
-      const currentUserId = getCurrentUserId();
-      const currentUserRole = getCurrentUserRole();
-      
-      // Filter documents: PC uploads visible to PC without acknowledgment, require acknowledgment for others
-      const filteredDocs = docs.filter(doc => {
-        const uploaderRole = doc.user_role;
-        // If uploaded by same user (PC by PC), show without acknowledgment requirement
-        if (doc.user_id === currentUserId && currentUserRole === 'project_coordinator') return true;
-        // If uploaded by PC, require acknowledgment and not rejected
-        if (uploaderRole === 'project_coordinator') return doc.is_acknowledged && !doc.mc_is_rejected;
-        // Admin/MC uploads are visible to everyone without acknowledgment
-        return true;
-      });
-      
-      setDocuments(filteredDocs); setOperations(ops);
-      if (onDocumentsLoaded) onDocumentsLoaded(filteredDocs);
-    } catch (e) { console.error(e); }
+      setDocuments(docs); setOperations(ops);
+      if (onDocumentsLoaded) onDocumentsLoaded(docs);
+      return docs; // ← return fresh docs to caller
+    } catch (e) { console.error(e); return []; }
     finally { setLoading(false); }
   };
 
-  const handleDownload = (id) => { const a = document.createElement('a'); a.href = `${API_BASE_URL}/documents/${id}/download`; a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove(); };
-  const handlePreview = (doc) => { if (!doc.document_url) { message.error("Document URL not found"); return; } setPreviewDoc(doc); };
+  const handleDownload = (id) => {
+    const a = document.createElement('a');
+    a.href = `${API_BASE_URL}/documents/${id}/download`;
+    a.style.display = 'none';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
+  const handlePreview = (doc) => {
+    if (!doc.document_url) { message.error("Document URL not found"); return; }
+    setPreviewDoc(doc);
+  };
 
   const getPreviewType = (name) => {
     const ext = (name || '').split('.').pop().toLowerCase();
@@ -298,17 +286,164 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     return 'other';
   };
 
-  // ── Wizard-aware upload handler ─────────────────────────────────────────
+  // ── Helper: compute next version string ────────────────────────────────
+  const computeNextVersion = (currentVer) => {
+    let next = String(currentVer || "");
+    const match = next.match(/(\d+)$/);
+    if (match) {
+      const numStr = match[1];
+      const num = parseInt(numStr, 10);
+      const nextNumStr = String(num + 1).padStart(numStr.length, '0');
+      next = next.substring(0, match.index) + nextNumStr;
+    } else {
+      next = next ? next + "-01" : "01";
+    }
+    return next;
+  };
+
+  // ── Helper: get latest docs grouped by type from a raw docs array ──────
+  const getLatestByType = (docsArray) => {
+    const grouped = docsArray.reduce((acc, d) => {
+      const r = d.parent_id || d.id;
+      (acc[r] = acc[r] || []).push(d);
+      return acc;
+    }, {});
+    const latest = Object.values(grouped).map(g =>
+      [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]
+    );
+    // Build a map: document_type → latest doc  (e.g. '2D' → doc, '3D' → doc)
+    return latest.reduce((acc, d) => { acc[d.document_type] = d; return acc; }, {});
+  };
+
+  // ── Reset all upload + dual upload state ────────────────────────────────
+  const resetAll = () => {
+    setSelectedFileList([]);
+    setUploadParentId(null);
+    setUploadVersion('');
+    setUploadDocType('2D');
+    setUploadDocTypeOther('');
+    setIsDualUploadMode(false);
+    setDualUploadFiles({ '2D': null, '3D': null });
+  };
+
+  // ── initiateNewVersion: called when user clicks the Update Revision icon ─
+  const initiateNewVersion = (doc, latestVer) => {
+    const nextVer = computeNextVersion(latestVer);
+    const docType = doc.document_type || '2D';
+    resetAll();
+    setUploadParentId(doc.parent_id || doc.id);
+    setUploadVersion(nextVer);
+    setUploadDocType(docType);
+
+    // For 2D or 3D revisions, enable dual upload mode (both files together)
+    if (docType === '2D' || docType === '3D') {
+      setIsDualUploadMode(true);
+    }
+
+    setIsUploadModalOpen(true);
+  };
+
+  // ── Core upload handler (handles single and dual file uploads) ───────────
   const handleUpload = async () => {
-    if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
-    if (uploadDocType === 'Other' && !uploadDocTypeOther.trim()) { message.warning('Please enter document type'); return; }
     if (!uploadVersion || !uploadVersion.trim()) { message.warning('Please enter a revision'); return; }
 
+    // Dual upload mode: both 2D and 3D files required
+    if (isDualUploadMode) {
+      const has2D = dualUploadFiles['2D'] != null;
+      const has3D = dualUploadFiles['3D'] != null;
+
+      if (!has2D || !has3D) {
+        message.warning('Both 2D and 3D files are required for revision updates');
+        return;
+      }
+
+      // Duplicate revision check for both parent_ids
+      const freshDocs = await fetchDocuments();
+      const latestByType = getLatestByType(freshDocs);
+
+      const doc2D = latestByType['2D'];
+      const doc3D = latestByType['3D'];
+
+      const parentId2D = doc2D ? (doc2D.parent_id || doc2D.id) : null;
+      const parentId3D = doc3D ? (doc3D.parent_id || doc3D.id) : null;
+
+      // Check revision for 2D
+      if (parentId2D) {
+        const existing2D = freshDocs.filter(d => (d.parent_id || d.id) === parentId2D);
+        if (existing2D.some(v => String(v.document_version).trim() === uploadVersion.trim())) {
+          message.error('This revision already exists for 2D document');
+          return;
+        }
+      }
+
+      // Check revision for 3D
+      if (parentId3D) {
+        const existing3D = freshDocs.filter(d => (d.parent_id || d.id) === parentId3D);
+        if (existing3D.some(v => String(v.document_version).trim() === uploadVersion.trim())) {
+          message.error('This revision already exists for 3D document');
+          return;
+        }
+      }
+
+      setUploading(true);
+      try {
+        // Upload both files
+        const uploads = [];
+
+        // Upload 2D
+        if (dualUploadFiles['2D']) {
+          const fd2D = new FormData();
+          fd2D.append('file', dualUploadFiles['2D']);
+          fd2D.append('document_name', dualUploadFiles['2D'].name.split('.')[0]);
+          fd2D.append('document_type', '2D');
+          fd2D.append('document_version', uploadVersion);
+          if (selectedItem?.itemType === 'assembly') fd2D.append('assembly_id', selectedItem.id.toString());
+          else if (selectedItem) fd2D.append('part_id', selectedItem.id.toString());
+          if (parentId2D) fd2D.append('parent_id', parentId2D.toString());
+          const uid = getCurrentUserId();
+          if (uid != null) fd2D.append('user_id', String(uid));
+          uploads.push(axios.post(`${API_BASE_URL}/documents/`, fd2D));
+        }
+
+        // Upload 3D
+        if (dualUploadFiles['3D']) {
+          const fd3D = new FormData();
+          fd3D.append('file', dualUploadFiles['3D']);
+          fd3D.append('document_name', dualUploadFiles['3D'].name.split('.')[0]);
+          fd3D.append('document_type', '3D');
+          fd3D.append('document_version', uploadVersion);
+          if (selectedItem?.itemType === 'assembly') fd3D.append('assembly_id', selectedItem.id.toString());
+          else if (selectedItem) fd3D.append('part_id', selectedItem.id.toString());
+          if (parentId3D) fd3D.append('parent_id', parentId3D.toString());
+          const uid = getCurrentUserId();
+          if (uid != null) fd3D.append('user_id', String(uid));
+          uploads.push(axios.post(`${API_BASE_URL}/documents/`, fd3D));
+        }
+
+        await Promise.all(uploads);
+        message.success(`Both 2D and 3D updated to revision ${uploadVersion} ✓`);
+        resetAll();
+        setIsUploadModalOpen(false);
+        await fetchDocuments();
+      } catch (e) {
+        console.error(e);
+        message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to upload documents');
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
+    // Single file upload mode (new document or non-2D/3D revision)
+    if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
+    if (uploadDocType === 'Other' && !uploadDocTypeOther.trim()) { message.warning('Please enter document type'); return; }
+
+    // Duplicate revision check
     if (uploadParentId) {
       const existingVersions = documents.filter(d => (d.parent_id || d.id) === uploadParentId);
       const versionExists = existingVersions.some(v => String(v.document_version).trim() === uploadVersion.trim());
       if (versionExists) {
-        message.error('This revision already exists for this document. Please enter a new revision.');
+        message.error('This revision already exists for this document. Please enter a different revision.');
         return;
       }
     }
@@ -329,127 +464,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     try {
       await axios.post(`${API_BASE_URL}/documents/`, fd);
       message.success('Document uploaded successfully');
-
-      // ── Wizard: after a 2D upload (step 1), look for a 3D doc and force step 2 ──
-      const uploaded2D = (uploadDocType === '2D') && !isWizardMode;
-      if (uploaded2D) {
-        // Fetch the updated document list so we have fresh data
-        await fetchDocuments();
-
-        // Find the latest 3D document from the current list (before fetchDocuments updates state async)
-        const threeDDoc = latestPartDocs.find(d => d.document_type === '3D');
-
-        if (threeDDoc) {
-          // Calculate the next 3D revision
-          let next3DVer = String(threeDDoc.document_version || "");
-          const m = next3DVer.match(/(\d+)$/);
-          if (m) {
-            const n = parseInt(m[1], 10);
-            next3DVer = next3DVer.substring(0, m.index) + String(n + 1).padStart(m[1].length, '0');
-          } else {
-            next3DVer = next3DVer ? next3DVer + "-01" : "01";
-          }
-
-          // Transition modal to Step 2 (3D upload) — modal stays open
-          setSelectedFileList([]);
-          setUploadParentId(threeDDoc.parent_id || threeDDoc.id);
-          setUploadVersion(next3DVer);
-          setUploadDocType('3D');
-          setIsWizardMode(true);
-          setWizardStep(2);
-          setWizardPending3D(threeDDoc);
-          setUploading(false);
-          return; // don't close modal
-        }
-      }
-
-      // Normal completion (no wizard, or step 2 of wizard finished)
-      resetUploadState();
+      resetAll();
       setIsUploadModalOpen(false);
-      setIsWizardMode(false);
-      setWizardStep(1);
-      setWizardPending3D(null);
       await fetchDocuments();
     } catch (e) {
       console.error(e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        'Failed to upload document';
-      message.error(detail);
+      message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to upload document');
     } finally {
       setUploading(false);
     }
   };
 
-  const resetUploadState = () => {
-    setSelectedFileList([]);
-    setUploadParentId(null);
-    setUploadVersion('');
-    setUploadDocType('2D');
-    setUploadDocTypeOther('');
-  };
-
-  // Helper: compute next version string
-  const computeNextVersion = (currentVer) => {
-    let next = String(currentVer || "");
-    const match = next.match(/(\d+)$/);
-    if (match) {
-      const numStr = match[1];
-      const num = parseInt(numStr, 10);
-      const nextNumStr = String(num + 1).padStart(numStr.length, '0');
-      next = next.substring(0, match.index) + nextNumStr;
-    } else {
-      next = next ? next + "-01" : "01";
-    }
-    return next;
-  };
-
-  // ── Wizard-aware initiateNewVersion ────────────────────────────────────
-  const initiateNewVersion = (doc, latestVer) => {
-    const nextVer = computeNextVersion(latestVer);
-    setUploadParentId(doc.parent_id || doc.id);
-    setUploadVersion(nextVer);
-    setUploadDocType(doc.document_type || '2D');
-    // Reset wizard state for a fresh start
-    setIsWizardMode(false);
-    setWizardStep(1);
-    setWizardPending3D(null);
-    setSelectedFileList([]);
-    setIsUploadModalOpen(true);
-  };
-
-  // Handler for the "Skip" action inside wizard step 2
-  const handleWizardSkip = () => {
-    Modal.confirm({
-      title: 'Skip 3D Update?',
-      content: (
-        <div>
-          <p>The 3D model will be <strong>out of sync</strong> with the updated 2D drawing.</p>
-          <p className="mt-1 text-orange-600 text-sm">Are you sure you want to skip updating the 3D document?</p>
-        </div>
-      ),
-      okText: 'Skip (Not Recommended)',
-      okButtonProps: { danger: true },
-      cancelText: 'Go Back',
-      onOk: () => {
-        setIsUploadModalOpen(false);
-        resetUploadState();
-        setIsWizardMode(false);
-        setWizardStep(1);
-        setWizardPending3D(null);
-      },
-    });
-  };
-
-  // Handler for modal close/cancel — block easy escape during wizard step 2
+  // ── Modal close handler ───────────────────────────────────────────────
   const handleModalClose = () => {
-    if (isWizardMode) {
-      handleWizardSkip();
-    } else {
-      setIsUploadModalOpen(false);
-      resetUploadState();
-    }
+    resetAll();
+    setIsUploadModalOpen(false);
   };
 
   const handleDeleteDocument = async (id) => {
@@ -459,11 +488,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       await fetchDocuments();
     } catch (e) {
       console.error(e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        'Failed to delete document';
-      message.error(detail);
+      message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to delete document');
     }
   };
 
@@ -481,14 +506,32 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       await fetchDocuments();
     } catch (e) {
       console.error(e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        'Failed to update document';
-      message.error(detail);
+      message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to update document');
     }
   };
 
+  const handleAcknowledgeDocument = async (docId, currentStatus) => {
+    try {
+      await axios.put(`${API_BASE_URL}/documents/${docId}/acknowledge`, null, {
+        params: { is_acknowledged: !currentStatus }
+      });
+      message.success('Document acknowledged successfully');
+      setDocuments(prevDocs =>
+        prevDocs.map(doc => doc.id === docId ? { ...doc, is_acknowledged: true } : doc)
+      );
+      setSelectedVersions(prevVersions => {
+        const updated = { ...prevVersions };
+        for (const key in updated) {
+          if (updated[key]?.id === docId) updated[key] = { ...updated[key], is_acknowledged: true };
+        }
+        return updated;
+      });
+      await fetchDocuments();
+    } catch (e) {
+      console.error(e);
+      message.error(e?.response?.data?.detail || e?.response?.data?.message || 'Failed to update acknowledgment status');
+    }
+  };
 
   const handleDeleteOperation = async (opId) => {
     try {
@@ -497,25 +540,25 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       fetchDocuments();
     } catch (e) {
       console.error(e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        "Failed to delete operation";
-      message.error(detail);
+      message.error(e?.response?.data?.detail || e?.response?.data?.message || "Failed to delete operation");
     }
   };
 
   const openPartActionModal = (type) => {
-    if (!selectedItem || selectedItem.itemType !== 'part') { message.warning("Please select a part to add operations/documents"); return; }
+    if (!selectedItem || selectedItem.itemType !== 'part') {
+      message.warning("Please select a part to add operations/documents"); return;
+    }
     setPartActionType(type); setShowPartActionModal(true);
   };
 
   const handleActionCreated = async (newItem, type) => {
-    message.success(type === 'operation' ? `Operation "${newItem.operation_name}" created successfully!` : `Document "${newItem.document_name}" created successfully!`);
+    message.success(type === 'operation'
+      ? `Operation "${newItem.operation_name}" created successfully!`
+      : `Document "${newItem.document_name}" created successfully!`);
     await fetchDocuments(); setImportOperations([]);
   };
 
-  // ── operations table columns ───────────────────────────────────────────────
+  // ── operations table columns ─────────────────────────────────────────────
   const operationsColumns = [
     {
       title: 'Op #', dataIndex: 'operation_number', key: 'op', width: 70,
@@ -562,24 +605,34 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       if (segment) {
         let cleanName = segment.replace(/^\d{8}_\d{6}_/, '');
         const uuidMatch = cleanName.match(/^([a-zA-Z0-9]{8,})_/);
-        if (uuidMatch) {
-          cleanName = cleanName.replace(/^([a-zA-Z0-9]{8,})_/, '');
-        }
+        if (uuidMatch) cleanName = cleanName.replace(/^([a-zA-Z0-9]{8,})_/, '');
         return cleanName || doc.document_name || '';
       }
     }
     return doc.document_name || '';
   };
 
-  // ── eBOM table columns ─────────────────────────────────────────────────────
+  // ── eBOM table columns ───────────────────────────────────────────────────
   const eBomColumns = [
     {
       title: <span className="text-xs font-semibold">DOCUMENT NAME</span>, key: 'name',
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; const displayName = getDocumentDisplayName(cur); return <div className="flex items-center gap-3 py-1"><div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div><Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text></div>; }
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        const displayName = getDocumentDisplayName(cur);
+        return (
+          <div className="flex items-center gap-3 py-1">
+            <div className="p-2 bg-blue-50 rounded"><FilePdfOutlined className="text-blue-500" /></div>
+            <Text strong className="text-sm truncate max-w-[300px]">{displayName || cur.document_name}</Text>
+          </div>
+        );
+      }
     },
     {
       title: <span className="text-xs font-semibold">TYPE</span>, key: 'type', width: 120,
-      render: (_, r) => { const cur = selectedVersions[r.parent_id || r.id] || r; return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>; }
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>;
+      }
     },
     
     {
@@ -593,7 +646,16 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
           <Select size="small" value={cur.id} variant="filled" className="w-full"
             onChange={val => { const s = group.find(d => d.id === val); setSelectedVersions(p => ({ ...p, [rootId]: s })); }}
             styles={{ popup: { root: { minWidth: 180, padding: 4 } } }}
-            labelRender={({ value }) => { const v = group.find(d => d.id === value); const ver = v?.document_version || '1.0'; return <div className="flex items-center gap-2"><span className="font-bold text-blue-600">{fmtV(ver)}</span><span className="text-[10px] text-gray-400">{new Date(v?.created_at || Date.now()).toLocaleDateString()}</span></div>; }}
+            labelRender={({ value }) => {
+              const v = group.find(d => d.id === value);
+              const ver = v?.document_version || '1.0';
+              return (
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-blue-600">{fmtV(ver)}</span>
+                  <span className="text-[10px] text-gray-400">{new Date(v?.created_at || Date.now()).toLocaleDateString()}</span>
+                </div>
+              );
+            }}
           >
             {[...group].sort((a, b) => b.id - a.id).map(ver => (
               <Select.Option key={ver.id} value={ver.id}>
@@ -621,35 +683,21 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
-        
-        // Check if MC has handled this document (acknowledged or rejected)
-        if (cur.mc_is_rejected) {
-          return (
-            <Tooltip title={cur.mc_reject_remarks || 'Rejected by MC'}>
-              <Tag color="red" icon={<CloseCircleOutlined />} className="m-0 text-xs">Rejected</Tag>
-            </Tooltip>
-          );
-        } else if (cur.is_acknowledged) {
-          return (
-            <Tooltip title={cur.mc_ack_remarks || 'Acknowledged by MC'}>
-              <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>
-            </Tooltip>
-          );
-        } else {
-          return <span className="text-xs text-gray-400">Pending</span>;
+        if (cur.is_acknowledged) {
+          return <Tag color="green" icon={<CheckCircleOutlined />} className="m-0 text-xs">Acknowledged</Tag>;
         }
-      }
-    },
-    {
-      title: <span className="text-xs font-semibold">MC REMARKS</span>, key: 'mc_remarks', width: 200,
-      render: (_, r) => {
-        const cur = selectedVersions[r.parent_id || r.id] || r;
-        if (cur.mc_is_rejected) {
-          return <span className="text-xs text-red-600">{cur.mc_reject_remarks || '-'}</span>;
-        } else if (cur.is_acknowledged) {
-          return <span className="text-xs text-green-600">{cur.mc_ack_remarks || '-'}</span>;
-        }
-        return <span className="text-xs text-gray-400">-</span>;
+        return (
+          <Popconfirm
+            title="Acknowledge Document"
+            description="Are you sure you want to acknowledge this document?"
+            onConfirm={() => handleAcknowledgeDocument(cur.id, cur.is_acknowledged)}
+            okText="Yes" cancelText="No"
+          >
+            <Button size="small" type="primary" icon={<CheckCircleOutlined />} className="text-xs">
+              Acknowledge
+            </Button>
+          </Popconfirm>
+        );
       }
     },
     {
@@ -658,11 +706,23 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         return (
           <div className="flex gap-1 justify-center">
-            <Tooltip title="Preview"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handlePreview(cur)} className="hover:text-blue-500 hover:bg-blue-50" /></Tooltip>
-            <Tooltip title="Update Revision"><Button size="small" type="text" className="text-orange-500 hover:bg-orange-50" icon={<SyncOutlined />} onClick={() => initiateNewVersion(r, r.document_version)} /></Tooltip>
-            <Tooltip title="Edit Details"><Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />} onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} /></Tooltip>
-            <Tooltip title="Download"><Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />} onClick={() => handleDownload(cur.id)} /></Tooltip>
-            <Popconfirm title="Delete Document" description="Delete this version? This cannot be undone." onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
+            <Tooltip title="Preview">
+              <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => handlePreview(cur)} className="hover:text-blue-500 hover:bg-blue-50" />
+            </Tooltip>
+            <Tooltip title="Update Revision">
+              <Button size="small" type="text" className="text-orange-500 hover:bg-orange-50" icon={<SyncOutlined />}
+                onClick={() => initiateNewVersion(r, r.document_version)} />
+            </Tooltip>
+            <Tooltip title="Edit Details">
+              <Button size="small" type="text" className="text-blue-500 hover:bg-blue-50" icon={<EditOutlined />}
+                onClick={() => { setEditingDoc(cur); setIsEditDocModalOpen(true); }} />
+            </Tooltip>
+            <Tooltip title="Download">
+              <Button size="small" type="text" className="text-green-500 hover:bg-green-50" icon={<DownloadOutlined />}
+                onClick={() => handleDownload(cur.id)} />
+            </Tooltip>
+            <Popconfirm title="Delete Document" description="Delete this version? This cannot be undone."
+              onConfirm={() => handleDeleteDocument(cur.id)} okText="Yes" cancelText="No">
               <Button size="small" type="text" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
             </Popconfirm>
           </div>
@@ -674,23 +734,19 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
   if (!selectedItem) return <div className="flex-1 bg-gray-50" />;
   const isPart = selectedItem.itemType === 'part';
 
-  // ── Upload Modal title ────────────────────────────────────────────────────
-  const uploadModalTitle = () => {
-    if (isWizardMode) {
-      return (
-        <div className="flex items-center gap-2">
-          <SyncOutlined className="text-orange-500" />
-          <span>Update Revision — Step 2 of 2</span>
-        </div>
-      );
-    }
-    return (
+  // ── Upload Modal title ──────────────────────────────────────────────────
+  const uploadModalTitle = isDualUploadMode
+    ? (
+      <div className="flex items-center gap-2">
+        <SyncOutlined className="text-orange-500" />
+        <span>Update Revision (Both 2D & 3D)</span>
+      </div>
+    ) : (
       <div className="flex items-center gap-2">
         <PlusOutlined className="text-blue-500" />
         <span>{uploadParentId ? 'Upload New Revision' : 'Add New Document'}</span>
       </div>
     );
-  };
 
   const tabItems = [
     ...(isPart ? [{
@@ -713,10 +769,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               className="docs-ops-table"
               locale={{ emptyText: <Empty description="No operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
               onRow={(record) => ({
-                onClick: () => {
-                  setViewOperation(record);
-                  setIsViewModalOpen(true);
-                },
+                onClick: () => { setViewOperation(record); setIsViewModalOpen(true); },
                 style: { cursor: 'pointer' }
               })}
             />
@@ -731,7 +784,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-2 shrink-0 gap-2">
             <span className="text-xs text-slate-500">Documents & Revisions</span>
             <Button type="primary" size="small" icon={<PlusOutlined />} className="primary-btn-sm w-full sm:w-auto"
-              onClick={() => { if (isPart) { openPartActionModal('document'); } else { resetUploadState(); setIsUploadModalOpen(true); } }}>
+              onClick={() => { if (isPart) { openPartActionModal('document'); } else { resetAll(); setIsUploadModalOpen(true); } }}>
               Add Document
             </Button>
           </div>
@@ -747,81 +800,136 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             />
           </div>
 
-          {/* ── Upload / Wizard Modal ─────────────────────────────────────── */}
+          {/* ── Upload / Wizard Modal ──────────────────────────────────── */}
           <Modal
-            title={uploadModalTitle()}
+            title={uploadModalTitle}
             open={isUploadModalOpen}
             onCancel={handleModalClose}
             footer={null}
             destroyOnHidden
             width="95%"
             style={{ maxWidth: 450 }}
-            closable={!isWizardMode}
-            maskClosable={!isWizardMode}
           >
             <div className="space-y-4 mt-4">
 
-              {/* ── Step 2 warning banner ─────────────────────────────────── */}
-              {isWizardMode && (
-                <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 flex items-start gap-2">
-                  <SyncOutlined className="text-orange-500 mt-0.5 shrink-0" spin />
-                  <div>
-                    <p className="text-sm font-semibold text-orange-700">3D Update Required</p>
-                    <p className="text-xs text-orange-600 mt-0.5">
-                      You just updated the 2D drawing. The 3D model must also be updated to stay in sync.
-                    </p>
+              {/* ── Dual upload mode: 2D & 3D cards ───────────────────────── */}
+              {isDualUploadMode && (
+                <>
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 flex items-start gap-2">
+                    <SyncOutlined className="text-orange-500 mt-0.5 shrink-0" spin />
+                    <div>
+                      <p className="text-sm font-semibold text-orange-700">Both files required</p>
+                      <p className="text-xs text-orange-600 mt-0.5">
+                        Upload both 2D and 3D files with the same revision number to keep them in sync.
+                      </p>
+                    </div>
                   </div>
+
+                  {/* 2D / 3D Cards */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {['2D', '3D'].map((type) => {
+                      const file = dualUploadFiles[type];
+                      const hasFile = file != null;
+                      const color = type === '2D' ? '#2563eb' : '#7c3aed';
+                      const bg = type === '2D' ? '#eff6ff' : '#f5f3ff';
+
+                      return (
+                        <div
+                          key={type}
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = type === '2D' ? '.pdf,.png,.jpg,.jpeg' : '.stl,.step,.stp,.obj';
+                            input.onchange = (e) => {
+                              const f = e.target.files?.[0];
+                              if (f) setDualUploadFiles(prev => ({ ...prev, [type]: f }));
+                            };
+                            input.click();
+                          }}
+                          style={{
+                            border: `2px dashed ${hasFile ? color : '#d9d9d9'}`,
+                            borderRadius: 10,
+                            padding: '18px 8px',
+                            textAlign: 'center',
+                            cursor: 'pointer',
+                            background: hasFile ? bg : '#fafafa',
+                            minHeight: 90,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 3,
+                            position: 'relative',
+                          }}
+                        >
+                          {hasFile && (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDualUploadFiles(prev => ({ ...prev, [type]: null }));
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: 5,
+                                right: 5,
+                                width: 20,
+                                height: 20,
+                                borderRadius: '50%',
+                                background: '#ef4444',
+                                color: 'white',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: 12,
+                                zIndex: 10,
+                              }}
+                            >
+                              ×
+                            </div>
+                          )}
+                          {hasFile ? (
+                            <>
+                              <span style={{ fontSize: 22 }}>📄</span>
+                              <span style={{ fontSize: 10, fontWeight: 600, color, wordBreak: 'break-all', maxWidth: '100%', padding: '0 2px' }}>{file.name}</span>
+                              <span style={{ fontSize: 9, color: '#9ca3af' }}>{type} Document</span>
+                            </>
+                          ) : (
+                            <>
+                              <span style={{ fontSize: 26, fontWeight: 800, color }}>{type}</span>
+                              <span style={{ fontSize: 10, color, fontWeight: 600 }}>{type === '2D' ? '2D Drawing' : '3D Model'}</span>
+                              <span style={{ fontSize: 9, color: '#d1d5db' }}>click to upload</span>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* ── Single upload mode: document type selector ───────────── */}
+              {!isDualUploadMode && (
+                <div>
+                  <Text type="secondary" className="text-xs block mb-1">* Document Type</Text>
+                  <Select
+                    className="w-full"
+                    value={uploadDocType}
+                    onChange={setUploadDocType}
+                  >
+                    {['2D', '3D', 'Other'].map(t => (
+                      <Select.Option key={t} value={t}>
+                        {t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                  {uploadDocType === 'Other' && (
+                    <Input className="mt-2" placeholder="Enter custom document type"
+                      value={uploadDocTypeOther} onChange={e => setUploadDocTypeOther(e.target.value)} />
+                  )}
                 </div>
               )}
 
-              {/* ── Step progress tracker ─────────────────────────────────── */}
-              {isWizardMode && (
-                <div className="flex items-center gap-2 justify-center py-1">
-                  {/* Step 1 — done */}
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shadow-sm">
-                      <CheckCircleOutlined className="text-white text-xs" />
-                    </div>
-                    <span className="text-xs text-green-600 font-medium">2D Updated</span>
-                  </div>
-                  {/* Connector line */}
-                  <div className="flex-1 h-0.5 bg-orange-300 mx-1 rounded" />
-                  {/* Step 2 — active */}
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center shadow-sm">
-                      <span className="text-white text-[11px] font-bold">2</span>
-                    </div>
-                    <span className="text-xs text-orange-600 font-medium">Update 3D</span>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Document type selector ────────────────────────────────── */}
-              <div>
-                <Text type="secondary" className="text-xs block mb-1">* Document Type</Text>
-                <Select
-                  className="w-full"
-                  value={uploadDocType}
-                  onChange={setUploadDocType}
-                  disabled={isWizardMode} // locked to 3D on step 2
-                >
-                  {['2D', '3D', 'Other'].map(t => (
-                    <Select.Option key={t} value={t}>
-                      {t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}
-                    </Select.Option>
-                  ))}
-                </Select>
-                {uploadDocType === 'Other' && (
-                  <Input
-                    className="mt-2"
-                    placeholder="Enter custom document type"
-                    value={uploadDocTypeOther}
-                    onChange={e => setUploadDocTypeOther(e.target.value)}
-                  />
-                )}
-              </div>
-
-              {/* ── Revision input ────────────────────────────────────────── */}
+              {/* ── Revision input ─────────────────────────────────────── */}
               <div>
                 <Text type="secondary" className="text-[11px] block font-medium">* Revision</Text>
                 <Input
@@ -829,19 +937,25 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                   onChange={e => setUploadVersion(e.target.value.replace(/[^a-zA-Z0-9.-]/g, ''))}
                   placeholder="e.g. 00, 01"
                 />
-                {uploadParentId && (
+                {isDualUploadMode && (
+                  <Text className="text-[10px] mt-1 block text-green-700">
+                    ✓ Revision shared between 2D and 3D
+                  </Text>
+                )}
+                {!isDualUploadMode && uploadParentId && (
                   <Text type="warning" className="text-[10px] mt-1 block">
                     Creating a new revision for an existing document.
                   </Text>
                 )}
               </div>
 
-              {/* ── File dragger ──────────────────────────────────────────── */}
-              <Dragger
-                multiple={false}
-                fileList={selectedFileList}
-                beforeUpload={f => { setSelectedFileList([f]); return false; }}
-                onRemove={() => setSelectedFileList([])}
+              {/* ── File dragger (single mode only) ───────────────────────────── */}
+              {!isDualUploadMode && (
+                <Dragger
+                  multiple={false}
+                  fileList={selectedFileList}
+                  beforeUpload={f => { setSelectedFileList([f]); return false; }}
+                  onRemove={() => setSelectedFileList([])}
                 className="bg-gray-50 border-dashed border-2 py-8"
               >
                 <p className="ant-upload-drag-icon">
@@ -849,54 +963,38 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                 </p>
                 <p className="ant-upload-text">Click or drag file here</p>
                 <p className="ant-upload-hint text-xs text-gray-400">
-                  {isWizardMode ? 'Supports STL, STEP...' : 'Supports PDF, STL, STEP, Images...'}
+                  Supports PDF, STL, STEP, Images...
                 </p>
               </Dragger>
+              )}
 
-              {/* ── Action buttons ────────────────────────────────────────── */}
+              {/* ── Action buttons ─────────────────────────────────────── */}
               <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
-                {/* Step 1: normal cancel */}
-                {!isWizardMode && (
-                  <Button onClick={() => { setIsUploadModalOpen(false); resetUploadState(); }} className="w-full sm:w-auto">
-                    Cancel
-                  </Button>
-                )}
-
-                {/* Step 2: skip (with confirm) */}
-                {isWizardMode && (
-                  <Button
-                    danger
-                    onClick={handleWizardSkip}
-                    className="w-full sm:w-auto"
-                  >
-                    Skip (Not Recommended)
-                  </Button>
-                )}
-
-                {/* Primary upload button */}
+                <Button onClick={() => { resetAll(); setIsUploadModalOpen(false); }} className="w-full sm:w-auto">
+                  Cancel
+                </Button>
                 <Button
                   type="primary"
-                  icon={isWizardMode ? <SyncOutlined /> : <UploadOutlined />}
+                  icon={isDualUploadMode ? <SyncOutlined /> : <UploadOutlined />}
                   loading={uploading}
-                  disabled={!selectedFileList.length}
+                  disabled={isDualUploadMode ? (!dualUploadFiles['2D'] || !dualUploadFiles['3D']) : !selectedFileList.length}
                   onClick={handleUpload}
                   className="no-hover-btn w-full sm:w-auto"
                 >
-                  {isWizardMode ? 'Upload 3D & Complete' : uploadParentId ? 'Upload New Revision' : 'Upload Document'}
+                  {isDualUploadMode
+                    ? 'Upload Both Files'
+                    : uploadParentId ? 'Upload New Revision' : 'Upload Document'}
                 </Button>
               </div>
             </div>
           </Modal>
 
-          {/* ── Edit Document Modal ───────────────────────────────────────── */}
+          {/* ── Edit Document Modal ────────────────────────────────────── */}
           <Modal
             title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span>Edit Document Details</span></div>}
             open={isEditDocModalOpen}
             onCancel={() => { setIsEditDocModalOpen(false); setEditingDoc(null); }}
-            footer={null}
-            destroyOnHidden
-            width="95%"
-            style={{ maxWidth: 450 }}
+            footer={null} destroyOnHidden width="95%" style={{ maxWidth: 450 }}
           >
             <Form form={editForm} layout="vertical" onFinish={handleEditDocument} className="mt-4">
               <Form.Item label="Document Name" name="document_name" rules={[{ required: true, message: 'Please enter document name' }]}>
@@ -904,7 +1002,11 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               </Form.Item>
               <Form.Item label="Document Type" name="document_type" rules={[{ required: true, message: 'Please select document type' }]}>
                 <Select placeholder="Select type">
-                  {['2D', '3D', 'Other'].map(t => <Select.Option key={t} value={t}>{t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}</Select.Option>)}
+                  {['2D', '3D', 'Other'].map(t => (
+                    <Select.Option key={t} value={t}>
+                      {t === '2D' ? '2D Drawing' : t === '3D' ? '3D Model (STL/STEP)' : 'Other'}
+                    </Select.Option>
+                  ))}
                 </Select>
               </Form.Item>
               {watchedDocType === 'Other' && (
@@ -940,19 +1042,17 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       `}</style>
 
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-3 pt-2 pb-3" style={{ height: '100%' }}>
-        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} className="flex-1 flex flex-col min-h-0 overflow-hidden pdm-tabs-full" style={{ height: '100%' }} />
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems}
+          className="flex-1 flex flex-col min-h-0 overflow-hidden pdm-tabs-full" style={{ height: '100%' }} />
       </div>
 
-      {/* ── Preview Modal ─────────────────────────────────────────────────── */}
+      {/* ── Preview Modal ──────────────────────────────────────────────── */}
       {previewDoc && (
         <Modal
           title={previewDoc.document_name || "Document Preview"}
-          open
-          onCancel={() => setPreviewDoc(null)}
-          width="95%"
-          style={{ maxWidth: 1000, top: 20 }}
-          footer={null}
-          destroyOnHidden
+          open onCancel={() => setPreviewDoc(null)}
+          width="95%" style={{ maxWidth: 1000, top: 20 }}
+          footer={null} destroyOnHidden
           styles={{ body: { height: '75vh', padding: 0, overflow: 'hidden' } }}
         >
           {getPreviewType(getDocumentDisplayName(previewDoc) || previewDoc.document_name) === 'image' ? (
@@ -974,12 +1074,17 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         </Modal>
       )}
 
-      <OperationImportModal open={showImportModal} onCancel={() => setShowImportModal(false)} existingOperations={operations} onUseOperations={ops => { setImportOperations(ops); setShowImportModal(false); openPartActionModal('operation'); }} />
-      <PartActionModal open={showPartActionModal} onCancel={() => setShowPartActionModal(false)} actionType={partActionType} selectedPart={selectedItem} onActionCreated={handleActionCreated} initialOperations={importOperations} existingOperations={operations} />
-      <EditOperationModal open={isOperationModalOpen} onCancel={() => { setIsOperationModalOpen(false); setSelectedOperation(null); }} operation={selectedOperation} defaultTab={modalTab} showAddToolForm={showAddToolForm} onUpdate={async () => { await fetchDocuments(); }} />
-      <PartDocumentReport partData={{ operations, documents, rawMaterials: selectedItem?.raw_material_status ? [{ material_name: selectedItem.raw_material_name || selectedItem.part_name, material_status: selectedItem.raw_material_status }] : [], partName: selectedItem?.part_name, partNumber: selectedItem?.part_number }} open={showReportModal} onCancel={() => setShowReportModal(false)} />
+      <OperationImportModal open={showImportModal} onCancel={() => setShowImportModal(false)} existingOperations={operations}
+        onUseOperations={ops => { setImportOperations(ops); setShowImportModal(false); openPartActionModal('operation'); }} />
+      <PartActionModal open={showPartActionModal} onCancel={() => setShowPartActionModal(false)} actionType={partActionType}
+        selectedPart={selectedItem} onActionCreated={handleActionCreated} initialOperations={importOperations} existingOperations={operations} />
+      <EditOperationModal open={isOperationModalOpen} onCancel={() => { setIsOperationModalOpen(false); setSelectedOperation(null); }}
+        operation={selectedOperation} defaultTab={modalTab} showAddToolForm={showAddToolForm} onUpdate={async () => { await fetchDocuments(); }} />
+      <PartDocumentReport
+        partData={{ operations, documents, rawMaterials: selectedItem?.raw_material_status ? [{ material_name: selectedItem.raw_material_name || selectedItem.part_name, material_status: selectedItem.raw_material_status }] : [], partName: selectedItem?.part_name, partNumber: selectedItem?.part_number }}
+        open={showReportModal} onCancel={() => setShowReportModal(false)} />
 
-      {/* ── Operation View Modal ──────────────────────────────────────────── */}
+      {/* ── Operation View Modal ───────────────────────────────────────── */}
       <Modal
         title={
           <div className="flex items-center gap-2">
@@ -987,12 +1092,8 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             <span className="text-sm sm:text-base truncate font-bold">Operation Details: {viewOperation?.operation_name}</span>
           </div>
         }
-        open={isViewModalOpen}
-        onCancel={() => setIsViewModalOpen(false)}
-        width="95%"
-        style={{ maxWidth: 800 }}
-        footer={null}
-        destroyOnHidden
+        open={isViewModalOpen} onCancel={() => setIsViewModalOpen(false)}
+        width="95%" style={{ maxWidth: 800 }} footer={null} destroyOnHidden
       >
         {viewOperation && (
           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 sm:p-4 rounded-lg border border-blue-200 space-y-3 sm:space-y-4">
@@ -1020,12 +1121,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
                   <div className="flex justify-center p-4"><Spin size="small" /></div>
                 ) : (
                   <Table
-                    dataSource={viewOperationTools}
-                    rowKey="id"
-                    pagination={false}
-                    size="small"
-                    bordered
-                    scroll={{ x: 600 }}
+                    dataSource={viewOperationTools} rowKey="id" pagination={false} size="small" bordered scroll={{ x: 600 }}
                     columns={[
                       { title: 'Tool Name', dataIndex: ['tool', 'item_description'], key: 'name', render: (text) => <span className="font-medium text-xs sm:text-sm">{text}</span> },
                       { title: 'Code', dataIndex: ['tool', 'identification_code'], key: 'code', render: (text) => <Tag className="text-xs">{text}</Tag> },

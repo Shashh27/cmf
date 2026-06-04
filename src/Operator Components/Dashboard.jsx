@@ -363,7 +363,7 @@ const Dashboard = () => {
 
   const handleSelectJobClick = () => {
     if (checklistPending) {
-      message.warning('Please complete the due Poka Yoke checklist before selecting a job.');
+      message.warning('Please complete the due Checklist before selecting a job.');
       setShowChecklist(true);
     } else {
       setShowSelectJob(true);
@@ -636,7 +636,7 @@ const Dashboard = () => {
             headStyle={{ borderRadius: '16px 16px 0 0' }}
             title={
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span>Poka Yoke & Feedback</span>
+                <span>Preventive Maintenance</span>
                 {rejectedChecklists.length > 0 && (
                   <Badge count={rejectedChecklists.length} offset={[10, 0]}>
                     <FileTextOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
@@ -656,7 +656,7 @@ const Dashboard = () => {
               }}
               onClick={() => setShowChecklist(true)}
             >
-              {rejectedChecklists.length > 0 ? 'Redo Rejected Checklists' : 'Open Poka Yoke Checklist'}
+              {rejectedChecklists.length > 0 ? 'Redo Rejected Checklists' : 'Open Preventive Maintenance Checklist'}
             </Button>
             <div
               style={{
@@ -668,7 +668,7 @@ const Dashboard = () => {
             >
               {rejectedChecklists.length > 0 
                 ? 'Some checklists were rejected. Please review and resubmit.' 
-                : 'Review and complete poka yoke checkpoints'}
+                : 'Review and complete checklists'}
             </div>
 
             {/* Rejected Details */}

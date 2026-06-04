@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Modal, Form, Select, message, Typography, Space, DatePicker, Spin, Radio } from 'antd';
+import { Button, Modal, Form, Select, message, Typography, Space, DatePicker, Spin, Radio, Popconfirm } from 'antd';
 import {
   PlusOutlined, CalendarOutlined, ReloadOutlined,
-  FileTextOutlined, CloseOutlined, CheckSquareOutlined,
+  FileTextOutlined, CloseOutlined, CheckSquareOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
 import dayjs from 'dayjs';
@@ -222,14 +222,12 @@ const ItemsPopup = ({ visible, onClose, assignment }) => {
 };
 
 /* ─── Assignment detail card (side panel) ────────────────────────────────── */
-const AssignmentCard = ({ assignment, onViewItems }) => (
+const AssignmentCard = ({ assignment, onViewItems, onDelete }) => (
   <div
-    onClick={() => onViewItems(assignment)}
     style={{
       background: T.surface, border: `1px solid ${T.border}`,
       borderRadius: T.radiusSm, padding: '12px 14px', marginBottom: 8,
       borderLeft: `3px solid ${FREQ_COLOR[assignment.frequency] || T.primary}`,
-      cursor: 'pointer',
       transition: 'box-shadow 0.15s, transform 0.15s',
     }}
     onMouseEnter={e => {
@@ -242,46 +240,85 @@ const AssignmentCard = ({ assignment, onViewItems }) => (
     }}
   >
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-      <div style={{
-        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-        background: FREQ_BG[assignment.frequency] || T.primaryBg,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <FileTextOutlined style={{ color: FREQ_COLOR[assignment.frequency] || T.primary, fontSize: 14 }} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6, lineHeight: 1.3 }}>
-          {assignment.checklistName}
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
-          <FreqBadge freq={assignment.frequency} />
-          {assignment.frequency === 'Daily' && assignment.shift && (
-            <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-              ⏱ {assignment.shift} shift
-            </span>
-          )}
-          {assignment.frequency === 'Weekly' && assignment.scheduled_day && (
-            <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-              📅 {assignment.scheduled_day}
-            </span>
-          )}
-          {assignment.frequency === 'Monthly' && assignment.scheduled_day && (
-            <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-              📆 Day {assignment.scheduled_day}
-            </span>
-          )}
-          {/* Items badge */}
-          <span style={{
-            fontSize: 10, color: T.success,
-            background: T.successBg,
-            border: `1px solid ${T.success}40`,
-            borderRadius: 99, padding: '2px 9px', fontWeight: 600,
-            display: 'flex', alignItems: 'center', gap: 4,
+      <div 
+        onClick={() => onViewItems(assignment)}
+        style={{
+          flex: 1, minWidth: 0, cursor: 'pointer',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <div style={{
+            width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+            background: FREQ_BG[assignment.frequency] || T.primaryBg,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <CheckSquareOutlined style={{ fontSize: 9 }} />
-            {assignment.itemsCount} Items
-          </span>
+            <FileTextOutlined style={{ color: FREQ_COLOR[assignment.frequency] || T.primary, fontSize: 14 }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6, lineHeight: 1.3 }}>
+              {assignment.checklistName}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+              <FreqBadge freq={assignment.frequency} />
+              {assignment.frequency === 'Daily' && assignment.shift && (
+                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
+                  ⏱ {assignment.shift} shift
+                </span>
+              )}
+              {assignment.frequency === 'Weekly' && assignment.scheduled_day && (
+                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
+                  📅 {assignment.scheduled_day}
+                </span>
+              )}
+              {assignment.frequency === 'Monthly' && assignment.scheduled_day && (
+                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
+                  📆 Day {assignment.scheduled_day}
+                </span>
+              )}
+              {/* Items badge */}
+              <span style={{
+                fontSize: 10, color: T.success,
+                background: T.successBg,
+                border: `1px solid ${T.success}40`,
+                borderRadius: 99, padding: '2px 9px', fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 4,
+              }}>
+                <CheckSquareOutlined style={{ fontSize: 9 }} />
+                {assignment.itemsCount} Items
+              </span>
+            </div>
+          </div>
         </div>
+      </div>
+      
+      {/* Delete button */}
+      <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+        <Popconfirm
+          title="Delete Assignment"
+          description={`Are you sure you want to delete the assignment "${assignment.checklistName}"? This action cannot be undone.`}
+          onConfirm={() => onDelete(assignment)}
+          okText="Delete"
+          cancelText="Cancel"
+          okButtonProps={{ danger: true }}
+        >
+          <Button
+            type="text"
+            size="small"
+            icon={<DeleteOutlined />}
+            style={{
+              color: '#EF4444',
+              borderColor: '#EF4444',
+              borderRadius: 6,
+              padding: '4px 8px',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.background = '#FEF2F2';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          />
+        </Popconfirm>
       </div>
     </div>
   </div>
@@ -336,13 +373,21 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   };
 
   const handleAssignChecklist = async (values) => {
-    if (!selectedMachine) return;
+    if (!values.machine_ids || values.machine_ids.length === 0) {
+      message.error('Please select at least one machine');
+      return;
+    }
+    if (!values.checklist_ids || values.checklist_ids.length === 0) {
+      message.error('Please select at least one checklist');
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/${values.checklist_id}/assignments`, {
+      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/assignments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          machine_id: selectedMachine,
+          machine_ids: values.machine_ids,
+          checklist_ids: values.checklist_ids,
           frequency: values.frequency,
           shift: values.frequency === 'Daily' ? values.shift : null,
           scheduled_day: values.frequency === 'Weekly' ? values.dayOfWeek
@@ -353,7 +398,8 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       message.success('Checklist assigned successfully');
       setAssignModalVisible(false);
       form.resetFields();
-      fetchMachineAssignments(selectedMachine);
+      // Refresh assignments for all selected machines
+      values.machine_ids.forEach(machineId => fetchMachineAssignments(machineId));
     } catch (e) { message.error('Failed to assign checklist: ' + e.message); }
   };
 
@@ -373,7 +419,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
     const d = dayjs(new Date(year, month, day));
     setSelectedDate(d);
     const dow = d.day();
-    const isWeekend = dow === 0 || dow === 6;
+    const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
     setSelectedDateAssignments(isWeekend ? [] : getAssignmentsForDate(year, month, day, false, dow));
   };
 
@@ -400,6 +446,42 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
     }
   };
 
+  const handleDeleteAssignment = async (assignment) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/assignments/${assignment.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to delete assignment');
+      }
+      message.success('Assignment deleted successfully');
+      
+      // Refresh assignments for the selected machine
+      if (selectedMachine) {
+        fetchMachineAssignments(selectedMachine);
+      }
+      
+      // Update selected date assignments if needed
+      if (selectedDate) {
+        const dow = selectedDate.day();
+        const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
+        if (!isWeekend) {
+          const updatedAssignments = getAssignmentsForDate(
+            selectedDate.year(),
+            selectedDate.month(),
+            selectedDate.date(),
+            false,
+            dow
+          );
+          setSelectedDateAssignments(updatedAssignments);
+        }
+      }
+    } catch (e) {
+      message.error('Failed to delete assignment: ' + e.message);
+    }
+  };
+
   const cells = getDaysInMonth(viewYear, viewMonth);
   const machineName = machines.find(m => m.id === selectedMachine);
   const machineLabel = machineName ? `${machineName.make} - ${machineName.model || 'N/A'}` : '';
@@ -408,7 +490,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   const renderCell = ({ day, cur }, idx) => {
     const date = new Date(viewYear, cur ? viewMonth : (idx < 7 ? viewMonth - 1 : viewMonth + 1), day);
     const dow = date.getDay();
-    const isWeekend = dow === 0 || dow === 6;
+    const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
     const isToday = cur && day === today.date() && viewMonth === today.month() && viewYear === today.year();
     const isSelected = selectedDate && cur
       && selectedDate.date() === day
@@ -533,7 +615,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           <span style={{
             fontSize: 12, fontWeight: 600, color: T.primary,
             background: T.primaryBg, borderRadius: 99, padding: '4px 12px',
-          }}>{machineName?.make}</span>
+          }}>{machineLabel}</span>
         )}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <Button
@@ -545,8 +627,14 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
           <Button
             type="primary" icon={<PlusOutlined />}
             onClick={() => {
-              if (!selectedMachine) { message.warning('Select a machine first'); return; }
               fetchChecklists();
+              fetchMachines();
+              // Pre-select the currently selected machine if any
+              if (selectedMachine) {
+                form.setFieldsValue({ machine_ids: [selectedMachine] });
+              } else {
+                form.setFieldsValue({ machine_ids: [] });
+              }
               setAssignModalVisible(true);
             }}
             style={{ background: T.primary, borderColor: T.primary, borderRadius: 8, fontWeight: 600 }}
@@ -676,7 +764,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                   <div style={{ fontSize: 13, fontWeight: 500 }}>Select a date</div>
                   <div style={{ fontSize: 12, marginTop: 4 }}>Click any weekday to see its assignments</div>
                 </div>
-              ) : (selectedDate.day() === 0 || selectedDate.day() === 6) ? (
+              ) : selectedDate.day() === 0 ? (
                 <div style={{ textAlign: 'center', padding: '36px 16px' }}>
                   <div style={{ fontSize: 36, marginBottom: 10 }}>🏖️</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: T.warning }}>Weekend</div>
@@ -684,7 +772,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
                 </div>
               ) : selectedDateAssignments.length > 0 ? (
                 selectedDateAssignments.map((a, i) => (
-                  <AssignmentCard key={i} assignment={a} onViewItems={handleViewItems} />
+                  <AssignmentCard key={i} assignment={a} onViewItems={handleViewItems} onDelete={handleDeleteAssignment} />
                 ))
               ) : (
                 <div style={{ textAlign: 'center', padding: '36px 16px', color: T.textMuted }}>
@@ -715,10 +803,30 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         footer={null}
         width={480}
         centered
+        maskClosable={false}
       >
         <Form form={form} layout="vertical" onFinish={handleAssignChecklist} style={{ marginTop: 20 }}>
-          <Form.Item name="checklist_id" label="Select Checklist" rules={[{ required: true, message: 'Please select a checklist' }]}>
-            <Select placeholder="Select a checklist" loading={checklistsLoading} showSearch
+          <Form.Item name="machine_ids" label="Select Machines" rules={[{ required: true, message: 'Please select at least one machine' }]}>
+            <Select 
+              mode="multiple"
+              placeholder="Select machines" 
+              loading={machinesLoading}
+              onFocus={fetchMachines}
+              showSearch
+              filterOption={(input, opt) =>
+                (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
+                  .toString().toLowerCase().includes(input.toLowerCase())}
+            >
+              {machines.map(m => <Option key={m.id} value={m.id}>{m.make} - {m.model || 'N/A'}</Option>)}
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="checklist_ids" label="Select Checklists" rules={[{ required: true, message: 'Please select at least one checklist' }]}>
+            <Select 
+              mode="multiple"
+              placeholder="Select checklists" 
+              loading={checklistsLoading} 
+              showSearch
               filterOption={(input, opt) =>
                 (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
                   .toString().toLowerCase().includes(input.toLowerCase())}
@@ -750,7 +858,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
               if (freq === 'Weekly') return (
                 <Form.Item name="dayOfWeek" label="Day of Week" rules={[{ required: true }]}>
                   <Select placeholder="Select day">
-                    {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d => (
+                    {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d => (
                       <Option key={d} value={d}>{d}</Option>
                     ))}
                   </Select>
@@ -770,13 +878,6 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
             }}
           </Form.Item>
 
-          {selectedMachine && (
-            <div style={{ background: T.primaryBg, padding: 12, borderRadius: 8, marginBottom: 16, border: `1px solid ${T.primary}22` }}>
-              <Text style={{ color: T.primary, fontSize: 13 }}>
-                <strong>Machine:</strong> {machineLabel}
-              </Text>
-            </div>
-          )}
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>

@@ -47,6 +47,10 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const [completeLoading, setCompleteLoading] = useState(false);
   const [completeForm] = Form.useForm();
 
+  // Activate Confirmation Modal State
+  const [isActivateModalVisible, setIsActivateModalVisible] = useState(false);
+  const [operationToActivate, setOperationToActivate] = useState(null);
+
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
   const [productionStats, setProductionStats] = useState({
@@ -173,10 +177,21 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         if (partOps.length > 0) {
           let initialOp = partOps[0];
           if (selectedJob.operation_name || selectedJob.operation_number) {
-            const matchedOp = partOps.find(op =>
-              (selectedJob.operation_name && (op.operation_name === selectedJob.operation_name || op.name === selectedJob.operation_name)) ||
-              (selectedJob.operation_number && (op.operation_number === selectedJob.operation_number || op.number === selectedJob.operation_number))
-            );
+            const matchedOp = partOps.find(op => {
+              const opNameMatch = selectedJob.operation_name && (op.operation_name === selectedJob.operation_name || op.name === selectedJob.operation_name);
+              const opNumMatch = selectedJob.operation_number && (op.operation_number === selectedJob.operation_number || op.number === selectedJob.operation_number);
+              
+              // If both are provided, both must match for precise identification
+              if (selectedJob.operation_name && selectedJob.operation_number) {
+                return opNameMatch && opNumMatch;
+              }
+              // If only operation_number is provided, match by number (more specific)
+              if (selectedJob.operation_number) {
+                return opNumMatch;
+              }
+              // If only operation_name is provided, match by name
+              return opNameMatch;
+            });
 
             if (matchedOp) initialOp = matchedOp;
 
@@ -357,7 +372,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
               block
               disabled={isDisabled}
               loading={activating}
-              onClick={(e) => { e.stopPropagation(); handleActivate(record); }}
+              onClick={(e) => { e.stopPropagation(); handleShowActivateModal(record); }}
               style={effectivelyActivated ? {
                 background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
               } : isCompleted ? {
@@ -393,25 +408,26 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     if (!selectedJob) return true;
     if (!selectedJob.operation_name && !selectedJob.operation_number) return true;
 
-    // Prioritize operation_number matching when available
+    const opNameMatch = selectedJob.operation_name && (
+      (op.operation_name && op.operation_name.toLowerCase() === selectedJob.operation_name.toLowerCase()) ||
+      (op.name && op.name.toLowerCase() === selectedJob.operation_name.toLowerCase())
+    );
+    
+    const opNumMatch = selectedJob.operation_number && (
+      (op.operation_number && op.operation_number.toString() === selectedJob.operation_number.toString()) ||
+      (op.number && op.number.toString() === selectedJob.operation_number.toString())
+    );
+
+    // If both are provided, both must match for precise identification
+    if (selectedJob.operation_name && selectedJob.operation_number) {
+      return opNameMatch && opNumMatch;
+    }
+    // If only operation_number is provided, match by number (more specific)
     if (selectedJob.operation_number) {
-      const opNumMatch = (
-        (op.operation_number && op.operation_number.toString() === selectedJob.operation_number.toString()) ||
-        (op.number && op.number.toString() === selectedJob.operation_number.toString())
-      );
-      if (opNumMatch) return true;
+      return opNumMatch;
     }
-
-    // Only use operation_name as fallback if operation_number is not available
-    if (selectedJob.operation_name && !selectedJob.operation_number) {
-      const opNameMatch = (
-        (op.operation_name && op.operation_name.toLowerCase() === selectedJob.operation_name.toLowerCase()) ||
-        (op.name && op.name.toLowerCase() === selectedJob.operation_name.toLowerCase())
-      );
-      if (opNameMatch) return true;
-    }
-
-    return false;
+    // If only operation_name is provided, match by name
+    return opNameMatch;
   });
 
 
@@ -453,6 +469,11 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     });
   };
 
+  const handleShowActivateModal = (operation) => {
+    setOperationToActivate(operation);
+    setIsActivateModalVisible(true);
+  };
+
   const handleActivate = async (operation) => {
     const opId = operation.operation_id || operation.id;
     if (!opId) {
@@ -488,6 +509,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         });
 
         onActivate(operation);
+        setIsActivateModalVisible(false);
+        setOperationToActivate(null);
       }
     } catch (error) {
       console.error('Error activating operation:', error);
@@ -619,8 +642,67 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     }, 50);
   };
 
+  const getLatestVersionDocuments = (docs) => {
+    if (!docs || docs.length === 0) return [];
+
+    // Create a map to track document chains by their root document (parent_id = null)
+    // Documents in the same chain have the same root (the one with parent_id = null)
+    const docChains = new Map();
+
+    // First, identify all root documents (parent_id = null)
+    docs.forEach(doc => {
+      if (doc.parent_id === null) {
+        docChains.set(doc.id, [doc]);
+      }
+    });
+
+    // Then, add child documents to their respective chains
+    docs.forEach(doc => {
+      if (doc.parent_id !== null) {
+        // Find the root by traversing up the parent chain
+        let rootId = doc.parent_id;
+        let currentDoc = doc;
+        
+        // Traverse up to find the ultimate root
+        while (true) {
+          const parentDoc = docs.find(d => d.id === rootId);
+          if (!parentDoc || parentDoc.parent_id === null) {
+            break;
+          }
+          rootId = parentDoc.parent_id;
+        }
+
+        if (docChains.has(rootId)) {
+          docChains.get(rootId).push(doc);
+        } else {
+          // If root not found, this might be an orphan, add it as its own chain
+          docChains.set(doc.id, [doc]);
+        }
+      }
+    });
+
+    // For each chain, keep only the document with the highest version
+    const latestDocs = [];
+    docChains.forEach(chain => {
+      if (chain.length === 0) return;
+      
+      // Sort by version (descending) and take the first one
+      const sorted = chain.sort((a, b) => {
+        const versionA = a.document_version || '00';
+        const versionB = b.document_version || '00';
+        return versionB.localeCompare(versionA);
+      });
+      
+      latestDocs.push(sorted[0]);
+    });
+
+    return latestDocs;
+  };
+
   const renderDocuments = (docs, filter) => {
-    const filtered = filter === 'all' ? docs : docs.filter(d => (d.document_type || d.type || '').toLowerCase().includes(filter));
+    // Filter to show only latest versions for operators
+    const latestDocs = getLatestVersionDocuments(docs);
+    const filtered = filter === 'all' ? latestDocs : latestDocs.filter(d => (d.document_type || d.type || '').toLowerCase().includes(filter));
     if (filtered.length === 0) return <Empty description="No documents found." />;
     return filtered.map((doc, i) => (
       <Card key={i} size="small" style={{ marginBottom: 8 }}>
@@ -629,6 +711,9 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             <FileTextOutlined style={{ color: '#1677FF' }} />
             <div>
               <Text strong>{doc.document_name || doc.name}</Text>
+              <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
+                Version: {doc.document_version || '00'}
+              </div>
             </div>
           </Space>
           <Space>
@@ -788,6 +873,31 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* Activate Confirmation Modal */}
+      <Modal
+        title="Activate Operation"
+        open={isActivateModalVisible}
+        onCancel={() => { setIsActivateModalVisible(false); setOperationToActivate(null); }}
+        footer={[
+          <Button key="cancel" onClick={() => { setIsActivateModalVisible(false); setOperationToActivate(null); }}>
+            Cancel
+          </Button>,
+          <Button key="activate" type="primary" loading={activating} onClick={() => handleActivate(operationToActivate)}>
+            Activate
+          </Button>
+        ]}
+      >
+        {operationToActivate && (
+          <div>
+            <p>Are you sure you want to activate the following operation?</p>
+            <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 8 }}>
+              <div><strong>Operation Number:</strong> {operationToActivate.operation_number || operationToActivate.number || '-'}</div>
+              <div><strong>Operation Name:</strong> {operationToActivate.operation_name || operationToActivate.name || '-'}</div>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Preview Modal */}

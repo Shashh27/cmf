@@ -132,6 +132,15 @@ const AccessControl = () => {
       title: 'Role',
       dataIndex: 'role',
       key: 'role',
+      filters: [
+        { text: 'Admin', value: 'admin' },
+        { text: 'Project Coordinator', value: 'project_coordinator' },
+        { text: 'Manufacturing Coordinator', value: 'manufacturing_coordinator' },
+        { text: 'Supervisor', value: 'supervisor' },
+        { text: 'Supervisor-Tool Crib', value: 'inventory_supervisor' },
+        { text: 'Operator', value: 'operator' },
+      ],
+      onFilter: (value, record) => record.role === value,
       render: (role) => {
         let color = 'geekblue';
         if (role === 'admin') color = 'volcano';
@@ -180,7 +189,7 @@ const AccessControl = () => {
             <span>{displayText}</span>
             <Button
               type="text"
-              icon={isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+              icon={isVisible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
               onClick={() => togglePasswordVisibility(record.id)}
             />
           </Space>

@@ -90,6 +90,9 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
             {
               validator: (_, value) => {
                 if (!value) return Promise.resolve();
+                if (value !== value.trim()) {
+                  return Promise.reject(new Error('Username cannot have leading or trailing spaces'));
+                }
                 const isDuplicate = existingUsers.some(
                   (u) =>
                     u.username?.toLowerCase() === value.toLowerCase() &&
@@ -162,7 +165,18 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
         <Form.Item
           name="password"
           label="Password"
-          rules={[{ required: true, message: 'Please enter password' }]}
+          rules={[
+            { required: true, message: 'Please enter password' },
+            {
+              validator: (_, value) => {
+                if (!value) return Promise.resolve();
+                if (value.includes(' ')) {
+                  return Promise.reject(new Error('Password cannot contain spaces'));
+                }
+                return Promise.resolve();
+              }
+            }
+          ]}
         >
           <Input.Password placeholder="Enter password" />
         </Form.Item>
