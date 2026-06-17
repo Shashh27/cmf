@@ -6,7 +6,7 @@ import { API_BASE_URL } from '../../../Config/auth.js';
 
 const { Dragger } = Upload;
 
-const ToolsBulkUpload = ({ visible, onCancel, onSuccess }) => {
+const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null, selectedSubCategory = null }) => {
   const [file, setFile] = useState(null);
   const [previewData, setPreviewData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -90,6 +90,13 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess }) => {
 
         setPreviewData(processedData);
         setFile(file);
+        
+        // Check if category column exists in the file
+        const hasCategoryColumn = processedData.some(row => row.category);
+        if (!hasCategoryColumn && !selectedCategory) {
+          message.warning('No category column found in file. Please select a category before uploading, or add a category column to your Excel file.');
+        }
+        
         message.success(`Loaded ${processedData.length} records from file`);
       } catch (error) {
         console.error('Error reading file:', error);
@@ -118,10 +125,16 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess }) => {
       return;
     }
 
+    // Validate that category is provided either from file or from selection
+    const hasCategoryInData = previewData.some(row => row.category);
+    if (!hasCategoryInData && !selectedCategory) {
+      message.error('Category is required. Either select a category before uploading or include a category column in your Excel file.');
+      return;
+    }
+
     setUploading(true);
     try {
-      // Convert to backend format
-      const formData = new FormData();
+      // Convert to backend format - if category/sub-category are selected, use them
       const worksheet = XLSX.utils.json_to_sheet(previewData.map((row, index) => ({
         'Item Description': row.item_description || '',
         'Range': row.range || '',
@@ -134,8 +147,8 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess }) => {
         'Amount': row.amount || '',
         'Ref Ledger': row.ref_ledger || '',
         'Type': row.type || 'NON-CONSUMABLES',
-        'Category': row.category || '',
-        'Sub Category': row.sub_category || '',
+        'Category': row.category || selectedCategory || '',
+        'Sub Category': row.sub_category || selectedSubCategory || '',
       })));
       
       const workbook = XLSX.utils.book_new();
@@ -143,9 +156,17 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess }) => {
       const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
       const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       
+      const formData = new FormData();
       formData.append('file', new File([blob], 'tools_upload.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
 
-      const response = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
+      // Build URL with query parameters for category/sub-category
+      let url = `${API_BASE_URL}/tools-list/upload-excel`;
+      const params = new URLSearchParams();
+      if (selectedCategory) params.append('category', selectedCategory);
+      if (selectedSubCategory) params.append('sub_category', selectedSubCategory);
+      if (params.toString()) url += `?${params.toString()}`;
+
+      const response = await fetch(url, {
         method: 'POST',
         body: formData,
       });
