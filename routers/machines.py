@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import List
+from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 
 from DB.database import get_db
 from DB.models.configuration import Machine as MachineModel, WorkCenter as WorkCenterModel
@@ -22,6 +24,35 @@ router = APIRouter(
 )
 
 
+def calculate_due_date(calibration_date: datetime, frequency: str) -> Optional[datetime]:
+    """
+    Calculate calibration due date based on calibration date and frequency.
+    Frequency format: 'X days', 'X months', or 'X years'
+    """
+    if not calibration_date or not frequency:
+        return None
+
+    try:
+        # Parse frequency string (e.g., '6 months', '1 year', '2 years', '30 days')
+        parts = frequency.lower().split()
+        if len(parts) != 2:
+            return None
+
+        value = int(parts[0])
+        unit = parts[1]
+
+        if 'day' in unit:
+            return calibration_date + relativedelta(days=value)
+        elif 'month' in unit:
+            return calibration_date + relativedelta(months=value)
+        elif 'year' in unit:
+            return calibration_date + relativedelta(years=value)
+        else:
+            return None
+    except (ValueError, IndexError):
+        return None
+
+
 @router.post("/", response_model=MachinePublic, status_code=status.HTTP_201_CREATED)
 def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     """Create a new machine"""
@@ -33,7 +64,17 @@ def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
             detail=f"Work center with id {machine.work_center_id} not found"
         )
 
-    db_machine = MachineModel(**machine.model_dump())
+    # Auto-calculate calibration_due_date if calibration_date and frequency are provided
+    machine_data = machine.model_dump()
+    if machine_data.get('calibration_date') and machine_data.get('calibration_frequency'):
+        calculated_due_date = calculate_due_date(
+            machine_data['calibration_date'],
+            machine_data['calibration_frequency']
+        )
+        if calculated_due_date:
+            machine_data['calibration_due_date'] = calculated_due_date
+
+    db_machine = MachineModel(**machine_data)
     db.add(db_machine)
     db.commit()
     db.refresh(db_machine)
@@ -136,8 +177,57 @@ def update_machine(machine_id: int, machine: MachineUpdate, db: Session = Depend
                 detail=f"Work center with id {update_data['work_center_id']} not found"
             )
 
+    # Auto-calculate calibration_due_date if calibration_date or frequency is updated
+    recalculate_due = False
+    calibration_date = update_data.get('calibration_date') or db_machine.calibration_date
+    frequency = update_data.get('calibration_frequency') or db_machine.calibration_frequency
+    
+    if 'calibration_date' in update_data or 'calibration_frequency' in update_data:
+        if calibration_date and frequency:
+            calculated_due_date = calculate_due_date(calibration_date, frequency)
+            if calculated_due_date:
+                update_data['calibration_due_date'] = calculated_due_date
+                recalculate_due = True
+
     for field, value in update_data.items():
         setattr(db_machine, field, value)
+
+    db.commit()
+    db.refresh(db_machine)
+    return db_machine
+
+
+@router.put("/{machine_id}/calibration", response_model=MachinePublic)
+def update_machine_calibration(
+    machine_id: int,
+    calibration_date: datetime,
+    calibration_frequency: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Update machine calibration date and automatically calculate next due date.
+    This is used after calibration is performed to set the next due date.
+    """
+    db_machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
+    if not db_machine:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Machine with id {machine_id} not found"
+        )
+
+    # Update calibration date and frequency
+    db_machine.calibration_date = calibration_date
+    db_machine.calibration_frequency = calibration_frequency
+    
+    # Auto-calculate next due date
+    calculated_due_date = calculate_due_date(calibration_date, calibration_frequency)
+    if calculated_due_date:
+        db_machine.calibration_due_date = calculated_due_date
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid frequency format. Use format like '6 months', '1 year', '2 years'"
+        )
 
     db.commit()
     db.refresh(db_machine)

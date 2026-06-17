@@ -8,6 +8,7 @@ alembic==1.13.1
 minio==7.2.5
 python-multipart==0.0.9
 python-dateutil==2.8.2 
+apscheduler==3.10.4
 trimesh[all]==4.4.9
 numpy==2.2.2
 pandas==2.2.3

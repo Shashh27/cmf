@@ -8,6 +8,10 @@ from DB.models import Base
 
 from DB.minio_client import init_minio_client
 
+from scheduler_service import start_scheduler, stop_scheduler
+
+
+
 
 
 # Import all routers
@@ -102,6 +106,9 @@ from notification_routers import (
 
 from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
 
+from routers.operation_checklists import router as operation_checklists_router
+
+
 
 
 # Import document routers
@@ -162,6 +169,8 @@ async def startup_event():
 
     - Initializes MinIO client
 
+    - Starts the scheduler for automated notifications
+
     """
 
     print("=" * 60)
@@ -218,6 +227,13 @@ async def startup_event():
 
 
 
+    # Start the scheduler for automated notifications
+    try:
+        start_scheduler()
+    except Exception as e:
+        print(f"ERROR: Error starting scheduler: {e}")
+
+
     print("=" * 60)
 
     print("CMF Backend API is ready!")
@@ -225,6 +241,18 @@ async def startup_event():
     print(f"Documentation available at: http://localhost:8765/docs")
 
     print("=" * 60)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    Shutdown event handler
+    - Stops the scheduler
+    """
+    try:
+        stop_scheduler()
+    except Exception as e:
+        print(f"ERROR: Error stopping scheduler: {e}")
 
 
 
@@ -286,6 +314,8 @@ app.include_router(pokayoke_checklists_router, prefix="/api/v1")
 
 app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
 
+
+
 app.include_router(tool_issues_router, prefix="/api/v1")
 
 app.include_router(out_source_parts_status_router, prefix="/api/v1")
@@ -299,6 +329,8 @@ app.include_router(monitoring_router, prefix="/api/v1")
 app.include_router(production_analytics_router, prefix="/api/v1")
 
 app.include_router(recycle_bin_router, prefix="/api/v1")
+
+app.include_router(operation_checklists_router, prefix="/api/v1")
 
 # app.include_router(production_logs_router, prefix="/api/v1")
 

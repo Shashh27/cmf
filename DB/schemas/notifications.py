@@ -163,6 +163,7 @@ class MachineCalibrationNotificationWithDetails(MachineCalibrationNotification):
     model: Optional[str] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
+    calibration_frequency: Optional[str] = None
     created_by: Optional[str] = None
 
 
