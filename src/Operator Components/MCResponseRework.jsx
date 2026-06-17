@@ -1,10 +1,10 @@
 import React from 'react';
-import { Card, Typography, Space, Empty } from 'antd';
-import { SettingOutlined, WarningOutlined, MessageOutlined } from '@ant-design/icons';
+import { Card, Typography, Button } from 'antd';
+import { SettingOutlined, WarningOutlined, MessageOutlined, CheckCircleOutlined } from '@ant-design/icons';
 
 const { Text } = Typography;
 
-const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight }) => {
+const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onReportIssue }) => {
   const hasRework = productionStats?.hasRework;
   const hasMCReply = !!latestHelpReply;
 
@@ -12,158 +12,171 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight }) => {
     <Card
       title={
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Space>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <MessageOutlined style={{ color: '#1677FF' }} />
             <span>Response & Rework</span>
-          </Space>
+          </div>
+          <Button
+            type="link"
+            danger
+            style={{ padding: 0, height: 'auto', fontSize: 13 }}
+            onClick={onReportIssue}
+          >
+            <WarningOutlined /> Report Issue
+          </Button>
         </div>
       }
-      style={{ borderRadius: '16px', height: cardHeight, display: 'flex', flexDirection: 'column' }}
-      headStyle={{ borderRadius: '16px 16px 0 0' }}
-      bodyStyle={{ padding: 16, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'auto' }}
+      style={{ borderRadius: 16, height: cardHeight, display: 'flex', flexDirection: 'column' }}
+      headStyle={{ borderRadius: '16px 16px 0 0', padding: '10px 16px', minHeight: 'unset' }}
+      bodyStyle={{ padding: 12, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {/* Rework Information */}
+      {/* Side-by-side layout */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, height: '100%' }}>
+
+        {/* LEFT: Rework Panel */}
         {hasRework ? (
-          <div style={{ 
-            background: '#FFF2E8', 
-            borderRadius: 12, 
-            padding: 16, 
-            border: '1px solid #FFBB96'
+          <div style={{
+            background: '#FFF7F0',
+            borderRadius: 10,
+            padding: 12,
+            border: '1px solid #FFBB96',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <WarningOutlined style={{ color: '#FA8C16', fontSize: 18 }} />
-              <Text strong style={{ color: '#FA8C16', fontSize: 16 }}>Rework Required (Latest Submitted Log)</Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <WarningOutlined style={{ color: '#FA8C16', fontSize: 14 }} />
+              <Text strong style={{ color: '#FA8C16', fontSize: 12 }}>Rework Required</Text>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 12 }}>
-              <div>
-                <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Produced Quantity</Text>
-                <div style={{ marginTop: 4, fontWeight: 700, color: '#52C41A', fontSize: 18 }}>
-                  {productionStats.latestProduced || 0}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {[
+                { label: 'Produced', value: productionStats.latestProduced || 0, color: '#52C41A' },
+                { label: 'Approved', value: productionStats.latestApproved || 0, color: '#52C41A' },
+                { label: 'Rework',   value: productionStats.latestRework   || 0, color: '#FA8C16' },
+                { label: 'Rejected', value: productionStats.latestRejected || 0, color: '#FF4D4F' },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ background: 'rgba(255,255,255,0.6)', borderRadius: 8, padding: '6px 10px' }}>
+                  <Text style={{ color: '#94a3b8', fontSize: 11, display: 'block' }}>{label}</Text>
+                  <div style={{ fontWeight: 700, color, fontSize: 20, lineHeight: 1.2 }}>{value}</div>
                 </div>
-              </div>
-              <div>
-                <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Approved Quantity</Text>
-                <div style={{ marginTop: 4, fontWeight: 700, color: '#52C41A', fontSize: 18 }}>
-                  {productionStats.latestApproved || 0}
-                </div>
-              </div>
-              <div>
-                <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rework Quantity</Text>
-                <div style={{ marginTop: 4, fontWeight: 700, color: '#FA8C16', fontSize: 18 }}>
-                  {productionStats.latestRework || 0}
-                </div>
-              </div>
-              <div>
-                <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Rejected Quantity</Text>
-                <div style={{ marginTop: 4, fontWeight: 700, color: '#FF4D4F', fontSize: 18 }}>
-                  {productionStats.latestRejected || 0}
-                </div>
-              </div>
+              ))}
             </div>
+
             {productionStats.latestRemarks && (
-              <div>
-                <Text style={{ color: '#64748b', fontSize: 12, display: 'block' }}>Remarks</Text>
-                <div style={{
-                  marginTop: 4,
-                  fontWeight: 600,
-                  color: '#8C4A00',
-                  fontSize: 14,
-                  wordBreak: 'break-word',
-                  background: 'rgba(255, 255, 255, 0.5)',
-                  padding: '8px 12px',
-                  borderRadius: 8
-                }}>
+              <div style={{
+                background: 'rgba(255,255,255,0.5)',
+                borderRadius: 6,
+                padding: '6px 8px',
+                border: '1px solid #FFD8A8',
+              }}>
+                <Text style={{ color: '#94a3b8', fontSize: 10, display: 'block' }}>Remarks</Text>
+                <Text style={{ color: '#8C4A00', fontSize: 12, fontWeight: 600 }}>
                   {productionStats.latestRemarks}
-                </div>
+                </Text>
               </div>
             )}
           </div>
         ) : (
-          <div style={{ 
-            background: '#F6FFED', 
-            borderRadius: 12, 
-            padding: 16, 
+          <div style={{
+            background: '#F6FFED',
+            borderRadius: 10,
+            padding: 12,
             border: '1px solid #B7EB8F',
-            textAlign: 'center'
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
           }}>
-            <Text style={{ color: '#389E0D' }}>No Rework Pending</Text>
+            <CheckCircleOutlined style={{ color: '#52C41A', fontSize: 24 }} />
+            <Text style={{ color: '#389E0D', fontSize: 13, fontWeight: 600 }}>No Rework Pending</Text>
           </div>
         )}
 
-        {/* MC Reply Information */}
+        {/* RIGHT: MC Response Panel */}
         {hasMCReply ? (
-          <div style={{ 
-            background: '#F6FFED', 
-            borderRadius: 12, 
-            padding: 16, 
-            border: '1px solid #B7EB8F'
+          <div style={{
+            background: '#F6FFED',
+            borderRadius: 10,
+            padding: 12,
+            border: '1px solid #B7EB8F',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              <div style={{ 
-                width: 28, 
-                height: 28, 
-                borderRadius: '50%', 
-                background: '#52C41A', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center' 
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{
+                width: 24, height: 24, borderRadius: '50%',
+                background: '#52C41A',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
-                <SettingOutlined style={{ color: 'white', fontSize: 16 }} />
+                <SettingOutlined style={{ color: 'white', fontSize: 12 }} />
               </div>
-              <Text strong style={{ color: '#389E0D', fontSize: 16 }}>MC Response</Text>
+              <Text strong style={{ color: '#389E0D', fontSize: 13 }}>MC Response</Text>
               {latestHelpReply.replied_at && (
-                <Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>
+                <Text type="secondary" style={{ fontSize: 11, marginLeft: 'auto' }}>
                   {new Date(latestHelpReply.replied_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </Text>
               )}
             </div>
-            <div style={{ 
-              background: 'white', 
-              borderRadius: 8, 
-              padding: '12px', 
-              border: '1px solid #D9F7BE'
+
+            <div style={{
+              background: 'white',
+              borderRadius: 8,
+              padding: '8px 10px',
+              border: '1px solid #D9F7BE',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
             }}>
               {latestHelpReply.description && (
-                <div style={{ marginBottom: 10 }}>
-                  <Text style={{ color: '#595959', fontSize: 13, display: 'block' }}>
-                    <strong>Operator Request:</strong>
-                    <div style={{ marginTop: 4, fontStyle: 'italic', paddingLeft: 8, borderLeft: '3px solid #f0f0f0' }}>
-                      "{latestHelpReply.description}"
-                    </div>
+                <div>
+                  <Text style={{ color: '#94a3b8', fontSize: 11, display: 'block', marginBottom: 2 }}>
+                    Operator Request
                   </Text>
+                  <div style={{
+                    fontSize: 12, fontStyle: 'italic', color: '#595959',
+                    paddingLeft: 8, borderLeft: '3px solid #f0f0f0',
+                    wordBreak: 'break-word',
+                  }}>
+                    "{latestHelpReply.description}"
+                  </div>
                 </div>
               )}
-              <div style={{ marginBottom: 4 }}>
-                <Text style={{ color: '#237804', fontSize: 14, display: 'block' }}>
-                  <strong>MC Response:</strong>
-                  <div style={{ marginTop: 4, fontWeight: 600, paddingLeft: 8, borderLeft: '3px solid #52C41A' }}>
-                    "{latestHelpReply.mc_reply}"
-                  </div>
+              <div>
+                <Text style={{ color: '#94a3b8', fontSize: 11, display: 'block', marginBottom: 2 }}>
+                  MC Response
                 </Text>
+                <div style={{
+                  fontSize: 13, fontWeight: 600, color: '#237804',
+                  paddingLeft: 8, borderLeft: '3px solid #52C41A',
+                  wordBreak: 'break-word',
+                }}>
+                  "{latestHelpReply.mc_reply}"
+                </div>
               </div>
-              <div style={{ marginTop: 8, textAlign: 'right' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  — {latestHelpReply.replied_by_name || 'Manufacturing Coordinator'}
-                </Text>
-              </div>
+              <Text type="secondary" style={{ fontSize: 11, textAlign: 'right', marginTop: 'auto' }}>
+                — {latestHelpReply.replied_by_name || 'Manufacturing Coordinator'}
+              </Text>
             </div>
           </div>
         ) : (
-          <div style={{ 
-            background: '#f0f7ff', 
-            borderRadius: 12, 
-            padding: 16, 
+          <div style={{
+            background: '#f0f7ff',
+            borderRadius: 10,
+            padding: 12,
             border: '1px solid #d4e8ff',
-            textAlign: 'center'
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}>
-            <Text type="secondary">No MC Responses yet</Text>
+            <Text type="secondary" style={{ fontSize: 13 }}>No MC Responses yet</Text>
           </div>
         )}
 
-        {!hasRework && !hasMCReply && (
-          <Empty description="No updates available" style={{ marginTop: 40 }} />
-        )}
       </div>
     </Card>
   );

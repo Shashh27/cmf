@@ -1,0 +1,1384 @@
+.ir-modal .ant-modal-wrap {
+  overflow: hidden;
+}
+
+.ir-modal .ant-modal {
+  max-width: 100vw;
+  margin: 0;
+  padding: 0;
+  top: 0 !important;
+}
+
+.ir-modal .ant-modal-content {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0;
+  height: 100vh;
+  max-height: 100vh;
+}
+
+.ir-modal .ant-modal-body {
+  height: 100%;
+  padding: 0;
+}
+
+.ir-layout {
+  position: relative;
+  display: flex;
+  height: 100vh;
+  max-height: 100vh;
+  min-height: 0;
+  background: linear-gradient(145deg, #e8eef5 0%, #f1f5f9 45%, #eef2f7 100%);
+}
+
+/* —— Floating sidebar —— */
+.ir-sidebar {
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  bottom: 18px;
+  width: 288px;
+  z-index: 30;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.97) 0%,
+    rgba(248, 250, 252, 0.93) 100%
+  );
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.04),
+    0 4px 12px rgba(15, 23, 42, 0.04),
+    0 16px 40px rgba(15, 23, 42, 0.1);
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.ir-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ir-sidebar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+
+.ir-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+
+.ir-back-btn {
+  padding-left: 0 !important;
+  font-weight: 600;
+  color: #334155 !important;
+}
+
+.ir-back-btn:hover {
+  color: #1677ff !important;
+  background: #eff6ff !important;
+}
+
+.ir-close-btn {
+  color: #64748b !important;
+  font-size: 14px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+
+.ir-close-btn:hover {
+  color: #334155 !important;
+  background: #f1f5f9 !important;
+}
+
+.ir-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 6px;
+}
+
+.ir-sidebar-brand-icon-wrap {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+}
+
+.ir-sidebar-brand-icon {
+  font-size: 22px;
+  color: #2563eb;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+}
+
+.ir-sidebar-brand-text {
+  min-width: 0;
+}
+
+.ir-sidebar-title {
+  margin: 0 !important;
+  font-size: 17px !important;
+  font-weight: 700 !important;
+  line-height: 1.25 !important;
+  color: #0f172a !important;
+  letter-spacing: -0.01em;
+}
+
+.ir-sidebar-subtitle {
+  font-size: 12px;
+  display: block;
+  margin-top: 2px;
+  color: #64748b !important;
+}
+
+.ir-sidebar-panel {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 20px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+
+.ir-sidebar-panel--chrome {
+  gap: 8px;
+  background: linear-gradient(145deg, rgba(248, 251, 255, 0.95) 0%, rgba(241, 245, 249, 0.9) 100%);
+  border-color: rgba(191, 219, 254, 0.45);
+}
+
+.ir-sidebar-panel--actions {
+  gap: 8px;
+}
+
+.ir-sidebar-panel--view {
+  gap: 8px;
+}
+
+.ir-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.ir-meta-item {
+  min-width: 0;
+}
+
+.ir-meta-qty {
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(226, 232, 240, 0.75);
+}
+
+.ir-sidebar-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.ir-sidebar-card--nested {
+  margin-bottom: 0;
+}
+
+.ir-sidebar-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 3px;
+}
+
+.ir-sidebar-label-spaced {
+  margin-top: 10px;
+}
+
+.ir-sidebar-value {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.ir-sidebar-select {
+  width: 100%;
+}
+
+.ir-sidebar-footer-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  display: block;
+  margin-top: auto;
+  padding: 8px 12px;
+  color: #94a3b8 !important;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.ir-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ir-sidebar-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 0;
+}
+
+.ir-sidebar-export-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+.ir-sidebar-actions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ir-status-tag,
+.ir-workspace-tag {
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+  border-radius: 999px;
+  border: none;
+}
+
+.ir-save-btn {
+  font-weight: 600;
+  height: 42px;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.25);
+}
+
+.ir-action-row,
+.ir-export-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ir-action-row .ant-btn,
+.ir-export-grid .ant-btn {
+  height: 36px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.ir-export-grid .ant-dropdown-trigger {
+  display: block;
+}
+
+.ir-export-pdf-btn {
+  width: 100%;
+}
+
+.ir-export-caret {
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.ir-zoom-toolbar {
+  display: grid;
+  grid-template-columns: 36px 1fr 36px 36px;
+  align-items: center;
+  gap: 6px;
+}
+
+.ir-zoom-toolbar .ant-btn {
+  height: 36px;
+  border-radius: 12px;
+}
+
+.ir-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ir-zoom-controls .ant-btn {
+  flex: 0 0 36px;
+}
+
+.ir-zoom-readout {
+  flex: 1;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 12px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ir-zoom-readout:hover {
+  border-color: #1677ff;
+  background: #f8fafc;
+}
+
+.ir-zoom-readout--fit {
+  color: #1677ff;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.ir-sidebar-btn-secondary {
+  text-align: center;
+  border-color: #e2e8f0;
+  background: #fff;
+  color: #334155;
+}
+
+.ir-sidebar-btn-secondary:hover:not(:disabled) {
+  border-color: #93c5fd !important;
+  color: #2563eb !important;
+  background: #f8fafc !important;
+}
+
+.ir-hand-btn--active {
+  font-weight: 600;
+}
+
+.ir-workspace {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding-left: 324px;
+  background: transparent;
+}
+
+.ir-workspace-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 18px;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+  flex-shrink: 0;
+  min-height: 48px;
+}
+
+.ir-workspace-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.ir-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.ir-mode-pill--edit {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #86efac;
+}
+
+.ir-mode-pill--pan {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #93c5fd;
+}
+
+.ir-workspace-breadcrumb {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ir-workspace-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ir-workspace-zoom {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  padding: 4px 10px;
+  background: #f1f5f9;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+}
+
+.ir-canvas-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  cursor: default;
+  touch-action: none;
+  overscroll-behavior: contain;
+  margin: 12px 16px 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  background-color: #cbd5e1;
+  background-image: radial-gradient(circle, #94a3b8 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: center center;
+}
+
+.ir-canvas-viewport--panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.ir-canvas-viewport--hand {
+  cursor: grab;
+}
+
+.ir-canvas-viewport--hand.ir-canvas-viewport--panning {
+  cursor: grabbing;
+}
+
+.ir-canvas-viewport--panning .ir-editor-root,
+.ir-canvas-viewport--panning .ir-editor-root .ProseMirror {
+  pointer-events: none !important;
+  cursor: inherit;
+}
+
+.ir-editor-root .ProseMirror {
+  cursor: text;
+  outline: none;
+  min-height: 1em;
+}
+
+.ir-canvas-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.ir-canvas-spin {
+  display: flex !important;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.ir-canvas-spin > .ant-spin-container {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.ir-page-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.ir-zoom-host {
+  position: relative;
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.ir-canvas-spin > .ant-spin-container {
+  align-items: flex-start;
+}
+
+.ir-page.ir-a4-sheet {
+  width: 210mm;
+  min-height: 297mm;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.8),
+    0 4px 6px rgba(15, 23, 42, 0.04),
+    0 20px 48px rgba(15, 23, 42, 0.14);
+  transform-origin: top left;
+  padding: 10mm 12mm 12mm;
+  box-sizing: border-box;
+  position: relative;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  backface-visibility: hidden;
+  border-radius: 2px;
+}
+
+.ir-page.ir-a4-sheet::after {
+  content: none;
+}
+
+.ir-canvas-viewport--carousel {
+  cursor: zoom-in;
+}
+
+.ir-canvas-viewport--carousel.ir-canvas-viewport--hand {
+  cursor: grab;
+}
+
+.ir-workspace-page {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  padding: 4px 10px;
+  background: #fff;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+}
+
+.ir-page-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  transform: translateY(-50%);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
+  border: 1px solid #e2e8f0 !important;
+  background: #fff !important;
+}
+
+.ir-page-nav--prev {
+  left: 16px;
+}
+
+.ir-page-nav--next {
+  right: 16px;
+}
+
+.ir-page-nav:hover:not(:disabled) {
+  border-color: #93c5fd !important;
+  color: #2563eb !important;
+}
+
+.ir-zoom-host--carousel {
+  overflow: visible;
+}
+
+.ir-zoom-host--paged {
+  width: 210mm;
+}
+
+.ir-print-pages-root {
+  position: relative;
+  width: 210mm;
+}
+
+.ir-print-page-slot {
+  display: none;
+}
+
+.ir-print-page-slot--active {
+  display: block;
+}
+
+.ir-print-page-slot:not(.ir-print-page-slot--active) {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+  width: 210mm;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.ir-print-pages-root.ir-pdf-capture .ir-print-page-slot {
+  display: block !important;
+  position: static !important;
+  left: auto !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  margin-bottom: 20px;
+}
+
+.ir-print-page-slot--pdf-capture {
+  display: block !important;
+  position: static !important;
+  left: auto !important;
+  top: auto !important;
+  visibility: visible !important;
+  pointer-events: none !important;
+}
+
+body.ir-pdf-exporting .ir-sidebar {
+  display: none !important;
+}
+
+body.ir-pdf-exporting .ir-layout {
+  display: flex !important;
+}
+
+body.ir-pdf-exporting .ir-workspace {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  padding-left: 0 !important;
+}
+
+body.ir-pdf-exporting .ir-canvas-viewport {
+  overflow: visible !important;
+  background: #fff !important;
+  background-image: none !important;
+  min-height: auto !important;
+  height: auto !important;
+}
+
+body.ir-pdf-exporting .ir-canvas-stage {
+  transform: none !important;
+  position: static !important;
+}
+
+body.ir-pdf-exporting .ir-sheet-pan-handle,
+body.ir-pdf-exporting .ir-page-nav,
+body.ir-pdf-exporting .ir-workspace-chrome {
+  display: none !important;
+}
+
+body.ir-pdf-exporting .ir-print-page-slot:not(.ir-print-page-slot--pdf-capture) {
+  display: none !important;
+}
+
+body.ir-pdf-exporting .ir-a4-sheet {
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+body.ir-pdf-exporting .ir-a4-sheet--embedded,
+body.ir-pdf-exporting .ir-page.ir-a4-sheet {
+  height: auto !important;
+  max-height: none !important;
+  min-height: 297mm !important;
+  overflow: visible !important;
+}
+
+body.ir-pdf-exporting .ir-editor-root .ir-data-row td,
+body.ir-pdf-exporting .ir-editor-root .ir-data-row th {
+  height: auto !important;
+  min-height: 8.2mm !important;
+  max-height: none !important;
+  overflow: visible !important;
+  vertical-align: middle !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+
+body.ir-pdf-exporting .ir-editor-root .ir-data-row td p,
+body.ir-pdf-exporting .ir-editor-root .ir-data-row th p {
+  margin: 0 !important;
+  overflow: visible !important;
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  line-clamp: unset !important;
+  -webkit-box-orient: unset !important;
+  text-overflow: clip !important;
+  line-height: 1.3 !important;
+  word-break: break-word !important;
+}
+
+body.ir-pdf-exporting .ir-editor-root .ir-sheet-table--consolidated .ir-head-qty,
+body.ir-pdf-exporting .ir-editor-root .ir-sheet-table--consolidated .ir-col-qty,
+body.ir-pdf-exporting .ir-editor-root .ir-meta-row td,
+body.ir-pdf-exporting .ir-editor-root .ir-head th {
+  overflow: visible !important;
+  white-space: normal !important;
+}
+
+.ir-export-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.ir-export-overlay-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 280px;
+  padding: 32px 40px;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.06),
+    0 24px 48px rgba(15, 23, 42, 0.18);
+}
+
+.ir-export-overlay-title {
+  margin: 4px 0 0 !important;
+  font-weight: 600 !important;
+  color: #0f172a !important;
+}
+
+.ir-export-overlay-detail {
+  font-size: 13px;
+  text-align: center;
+  max-width: 260px;
+}
+
+.ir-a4-sheet--embedded {
+  width: 210mm;
+  min-height: 297mm;
+  height: 297mm;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.ir-print-carousel-viewport {
+  width: 100%;
+  overflow: hidden;
+}
+
+.ir-print-carousel-track {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  transition: transform 0.28s ease;
+  will-change: transform;
+}
+
+.ir-print-carousel-slide {
+  flex: 0 0 100%;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+
+.ir-print-carousel-slide[aria-hidden='true'] {
+  pointer-events: none;
+  user-select: none;
+}
+
+.ir-print-carousel-track.ir-pdf-capture {
+  flex-direction: column !important;
+  transform: none !important;
+  width: 100% !important;
+}
+
+.ir-print-carousel-track.ir-pdf-capture .ir-print-carousel-slide {
+  flex: none;
+  min-width: 100%;
+  pointer-events: auto;
+}
+
+.ir-print-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ir-print-stack--consolidated {
+  gap: 28px;
+}
+
+.ir-qty-sheet-group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+
+.ir-qty-sheet-group + .ir-qty-sheet-group {
+  margin-top: 4px;
+  padding-top: 24px;
+  border-top: 2px dashed #94a3b8;
+}
+
+.ir-qty-sheet-label {
+  align-self: flex-start;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ir-qty-sheet-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ir-a4-sheet--qty-start {
+  scroll-margin-top: 12px;
+}
+
+.ir-a4-sheet--stacked {
+  min-height: 297mm;
+  max-height: 297mm;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.8),
+    0 4px 6px rgba(15, 23, 42, 0.04),
+    0 20px 48px rgba(15, 23, 42, 0.14);
+}
+
+.ir-page.ir-a4-sheet:not(.ir-a4-sheet--stacked) {
+  max-height: 297mm;
+  overflow: hidden;
+}
+
+.ir-zoom-host--stack {
+  overflow: visible;
+}
+
+.ir-sheet-pan-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 6px 12px;
+  min-height: 32px;
+  border: 1px solid #dbeafe;
+  border-radius: 6px 6px 0 0;
+  border-bottom: none;
+  background: linear-gradient(180deg, #f8fbff 0%, #eff6ff 100%);
+  color: #3b82f6;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  z-index: 2;
+}
+
+.ir-sheet-pan-handle:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #2563eb;
+}
+
+.ir-canvas-viewport--panning .ir-sheet-pan-handle {
+  cursor: grabbing;
+}
+
+.ir-sheet-stack {
+  width: 100%;
+  border: 1px solid #000;
+  font-family: Aptos, "Aptos Display", "Segoe UI Variable", "Segoe UI", Calibri, sans-serif;
+  color: #000;
+}
+
+.ir-header-banner {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin: 0;
+}
+
+.ir-header-banner td {
+  border-bottom: 1px solid #000;
+  vertical-align: middle;
+}
+
+.ir-header-banner .ir-logo-cell {
+  width: 22%;
+  padding: 8px 12px;
+  text-align: left;
+  background: #fff;
+}
+
+.ir-header-banner .ir-report-logo {
+  display: block;
+  height: 13mm;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.ir-header-banner .ir-title-cell {
+  width: 78%;
+  text-align: center;
+  font-size: 16pt;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 10px 16px;
+  background: #fff;
+}
+
+.ir-editor-root {
+  width: 100%;
+}
+
+.ir-editor-root .ProseMirror {
+  outline: none;
+  width: 100% !important;
+  max-width: 100% !important;
+  display: block;
+  font-family: inherit;
+  font-size: 10pt;
+  line-height: 1.35;
+  color: inherit;
+  cursor: text;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.ir-editor-root .ProseMirror > table,
+.ir-editor-root .ir-sheet-table {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  border-collapse: collapse;
+  table-layout: fixed !important;
+  margin: 0;
+}
+
+.ir-editor-root th,
+.ir-editor-root td {
+  border: 1px solid #000;
+  padding: 0;
+  vertical-align: middle;
+  word-break: normal;
+}
+
+.ir-editor-root th p,
+.ir-editor-root td p {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.ir-editor-root .ir-text-left {
+  text-align: left;
+}
+
+/* Excel-style meta: label + value in one cell, 3 fields per row */
+.ir-editor-root .ir-meta-row td {
+  font-size: 11pt;
+  padding: 10px 14px;
+  height: 10mm;
+  min-height: 10mm;
+  vertical-align: middle;
+  background: #fff;
+}
+
+.ir-editor-root .ir-meta-field p {
+  padding: 0;
+  white-space: normal;
+  overflow: visible;
+}
+
+.ir-editor-root .ir-meta-field strong {
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+/* Column headers */
+.ir-editor-root .ir-head th {
+  background: #fff;
+  font-weight: 700;
+  text-align: center;
+  font-size: 10pt;
+  padding: 8px 6px;
+  height: 8mm;
+  white-space: nowrap;
+}
+
+.ir-editor-root .ir-head-main th {
+  border-bottom: none;
+}
+
+.ir-editor-root .ir-head-sub th {
+  font-weight: 600;
+  font-size: 10pt;
+  padding: 6px 4px;
+  height: 7mm;
+}
+
+.ir-editor-root .ir-sheet-table--consolidated .ir-head-group th {
+  font-size: 9pt;
+  letter-spacing: 0;
+  padding: 6px 3px;
+  height: auto;
+  min-height: 8mm;
+}
+
+.ir-editor-root .ir-sheet-table--consolidated .ir-head-qty {
+  font-size: 8pt;
+  padding: 4px 2px;
+  min-width: 9mm;
+  white-space: nowrap;
+}
+
+.ir-editor-root .ir-sheet-table--consolidated[data-qty-count='5'] .ir-head-qty,
+.ir-editor-root .ir-sheet-table--consolidated[data-qty-count='6'] .ir-head-qty,
+.ir-editor-root .ir-sheet-table--consolidated[data-qty-count='7'] .ir-head-qty,
+.ir-editor-root .ir-sheet-table--consolidated[data-qty-count='8'] .ir-head-qty {
+  font-size: 7.5pt;
+  letter-spacing: -0.02em;
+}
+
+.ir-editor-root .ir-sheet-table--consolidated .ir-head-qty p,
+.ir-editor-root .ir-sheet-table--consolidated .ir-col-qty p {
+  white-space: nowrap;
+}
+
+.ir-editor-root .ir-sheet-table--consolidated .ir-head-zone,
+.ir-editor-root .ir-sheet-table--consolidated .ir-col-zone {
+  font-size: 9pt;
+  padding-left: 3px;
+  padding-right: 3px;
+  min-width: 8mm;
+}
+
+.ir-editor-root .ir-sheet-table--consolidated .ir-col-qty {
+  font-size: 9pt;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.ir-editor-root .ir-sheet-table--consolidated .ir-head-main th.ir-text-left,
+.ir-editor-root .ir-sheet-table--consolidated .ir-data-row td.ir-text-left {
+  font-size: 9pt;
+  line-height: 1.2;
+}
+
+.ir-editor-root .ir-sheet-table--consolidated .ir-head-main th {
+  white-space: nowrap;
+  line-height: 1.25;
+}
+
+/* Data rows — fixed height so pagination matches rendered layout */
+.ir-editor-root .ir-data-row td {
+  font-size: 9.5pt;
+  padding: 3px 8px;
+  height: 8.2mm;
+  min-height: 8.2mm;
+  max-height: 8.2mm;
+  text-align: center;
+  vertical-align: middle;
+  background: #fff;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.ir-editor-root .ir-data-row td p {
+  margin: 0;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.ir-editor-root .ir-data-row td.ir-text-left {
+  text-align: left;
+  padding-left: 10px;
+  padding-right: 8px;
+}
+
+/* Footer — label|value grid + 50/50 sign row (Excel reference) */
+.ir-editor-root .ir-page-footer td {
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #fff;
+}
+
+.ir-editor-root .ir-footer-head td {
+  font-weight: 700;
+  text-align: center;
+  font-size: 10pt;
+  padding: 8px 6px;
+  height: 8mm;
+  min-height: 8mm;
+  vertical-align: middle;
+  border-top: 1px solid #000;
+}
+
+.ir-editor-root .ir-footer-head td p {
+  text-align: center;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.ir-editor-root .ir-footer-row td {
+  font-size: 10pt;
+  padding: 6px 8px;
+  height: 8.5mm;
+  min-height: 8.5mm;
+  vertical-align: middle;
+}
+
+.ir-editor-root .ir-footer-label {
+  text-align: left;
+  font-weight: 700;
+  padding: 6px 8px 6px 10px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
+  vertical-align: middle;
+}
+
+.ir-editor-root .ir-footer-label p {
+  text-align: left;
+  margin: 0;
+  line-height: 1.3;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.ir-editor-root .ir-footer-value {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.ir-editor-root .ir-footer-value p {
+  margin: 0;
+  line-height: 1.3;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.ir-editor-root .ir-sign .ir-sign-block {
+  text-align: left;
+  font-size: 10pt;
+  font-weight: 700;
+  padding: 8px 10px;
+  height: 13mm;
+  min-height: 13mm;
+  vertical-align: middle;
+}
+
+.ir-editor-root .ir-sign .ir-sign-block p {
+  text-align: left;
+  margin: 0;
+  line-height: 1.3;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.ir-editor-root .ProseMirror-selectednode {
+  outline: 2px solid #1677ff;
+}
+
+@media print {
+  .ir-modal .ant-modal-content {
+    height: auto;
+    max-height: none;
+  }
+
+  .ir-layout {
+    height: auto;
+    max-height: none;
+  }
+
+  .ir-sidebar {
+    display: none !important;
+  }
+
+  .ir-workspace {
+    background: #fff;
+  }
+
+  .ir-canvas-viewport {
+    overflow: visible;
+    background: #fff;
+    background-image: none;
+  }
+
+  .ir-workspace-chrome {
+    display: none !important;
+  }
+
+  .ir-canvas-stage {
+    transform: none !important;
+    position: static !important;
+  }
+
+  .ir-sheet-pan-handle {
+    display: none !important;
+  }
+
+  .ir-page-nav {
+    display: none !important;
+  }
+
+  .ir-print-pages-root {
+    width: 210mm !important;
+  }
+
+  .ir-print-pages-root .ir-print-page-slot {
+    display: block !important;
+    position: static !important;
+    left: auto !important;
+    visibility: visible !important;
+    page-break-after: always;
+    break-after: page;
+    margin-bottom: 0;
+  }
+
+  .ir-print-pages-root .ir-print-page-slot:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .ir-print-carousel-viewport {
+    overflow: visible !important;
+    width: auto !important;
+  }
+
+  .ir-print-carousel-track {
+    flex-direction: column !important;
+    transform: none !important;
+    width: 100% !important;
+  }
+
+  .ir-print-carousel-slide {
+    flex: none !important;
+    min-width: 100% !important;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  .ir-print-carousel-slide:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  body * {
+    visibility: hidden;
+  }
+
+  #inspection-report-print-root,
+  #inspection-report-print-root * {
+    visibility: visible;
+  }
+
+  .ir-zoom-host {
+    width: auto !important;
+    min-height: auto !important;
+  }
+
+  #inspection-report-print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 210mm !important;
+    min-height: 297mm !important;
+    transform: none !important;
+    box-shadow: none;
+    border: none;
+    padding: 0;
+  }
+
+  #inspection-report-print-root.ir-print-stack {
+    width: 210mm !important;
+    min-height: auto !important;
+    gap: 0;
+  }
+
+  #inspection-report-print-root.ir-print-stack .ir-a4-sheet--stacked {
+    width: 210mm !important;
+    min-height: 297mm !important;
+    padding: 10mm 12mm 12mm;
+    box-shadow: none;
+    border: none;
+    page-break-after: always;
+    break-after: page;
+    margin: 0;
+  }
+
+  #inspection-report-print-root.ir-print-stack .ir-a4-sheet--stacked:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .ir-qty-sheet-group {
+    page-break-before: always;
+    break-before: page;
+  }
+
+  .ir-qty-sheet-group:first-child {
+    page-break-before: auto;
+    break-before: auto;
+  }
+
+  .ir-qty-sheet-label {
+    display: none;
+  }
+
+  #inspection-report-print-root:not(.ir-print-stack) {
+    padding: 10mm 12mm 12mm;
+  }
+
+  #inspection-report-print-root::after {
+    display: none;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+}

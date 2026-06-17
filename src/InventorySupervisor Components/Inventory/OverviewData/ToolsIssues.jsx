@@ -209,18 +209,73 @@ const ToolsIssues = () => {
       key: 'tool_name',
       width: 200,
       fixed: 'left',
-      ellipsis: true,
       className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
-      title: 'Project Number',
+      title: 'Range',
+      dataIndex: 'tool_range',
+      key: 'tool_range',
+      width: 80,
+      className: 'table-header-styled',
+      render: (text) => text || '-',
+    },
+    {
+      title: 'ID Code',
+      dataIndex: 'identification_code',
+      key: 'identification_code',
+      width: 100,
+      className: 'table-header-styled',
+      render: (text) => text || '-',
+    },
+    {
+      title: 'Project',
       dataIndex: 'sale_order_number',
       key: 'project_number',
       width: 140,
-      ellipsis: true,
       className: 'table-header-styled',
-      render: (text) => text || '-',
+      render: (_, record) => {
+        const projName = record.sale_order_number || record.project_name || '-';
+        const productName = record.product_name || '';
+        return (
+          <div>
+            <div>{projName}</div>
+            {productName && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>{productName}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Part',
+      key: 'part',
+      width: 140,
+      className: 'table-header-styled',
+      render: (_, record) => {
+        const partName = record.part_name || '-';
+        const partNum = record.part_number || '';
+        return (
+          <div>
+            <div>{partName}</div>
+            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{partNum}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Operation',
+      key: 'operation',
+      width: 130,
+      className: 'table-header-styled',
+      render: (_, record) => {
+        const opName = record.operation_name || '-';
+        const opNum = record.operation_number || '';
+        return (
+          <div>
+            <div>{opName}</div>
+            {opNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{opNum}</div>}
+          </div>
+        );
+      },
     },
     {
       title: 'Issue Raised By',
@@ -251,7 +306,6 @@ const ToolsIssues = () => {
       dataIndex: 'description',
       key: 'description',
       width: 200,
-      ellipsis: true,
       className: 'table-header-styled',
       render: (text) => text || '-',
     },

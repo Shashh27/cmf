@@ -3,7 +3,8 @@ import {
   PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined,
   SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined,
   DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined,
-  HolderOutlined, ExclamationCircleOutlined, CheckCircleOutlined, CloseCircleOutlined
+  HolderOutlined, ExclamationCircleOutlined, CheckCircleOutlined, CloseCircleOutlined,
+  CheckSquareOutlined, UnorderedListOutlined, PlusCircleOutlined
 } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -14,6 +15,7 @@ import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
 import PartDocumentReport from "../../DownloadReports/PartDocumentReport";
 import ModelViewer3D from "./ModelViewer3D";
+import OperationChecklistsModal from "./OperationChecklistsModal";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -147,6 +149,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const [showImportModal, setShowImportModal]       = useState(false);
   const [importOperations, setImportOperations]       = useState([]);
   const [showReportModal, setShowReportModal] = useState(false);
+
+  // Checklists state
+  const [showChecklistsModal, setShowChecklistsModal] = useState(false);
+  const [selectedOperationForChecklists, setSelectedOperationForChecklists] = useState(null);
 
   // eBOM version selection
   const [selectedVersions, setSelectedVersions] = useState({});
@@ -416,29 +422,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     }
   };
 
-  const handleDownloadTemplate = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/operations/template/download`, {
-        responseType: 'blob'
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'Operations_Template.docx');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      message.success('Template downloaded successfully');
-    } catch (e) {
-      console.error(e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        'Failed to download template';
-      message.error(detail);
-    }
-  };
 
   const openPartActionModal = (type) => {
     if (!selectedItem || selectedItem.itemType !== 'part') { message.warning("Please select a part to add operations/documents"); return; }
@@ -524,6 +507,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             <Tooltip title="View"><Button size="small" icon={<EyeOutlined />} onClick={() => { setViewOperation(r); setIsViewModalOpen(true); }} className="text-green-500 hover:bg-green-50" /></Tooltip>
             <Tooltip title="Edit"><Button size="small" icon={<EditOutlined />} onClick={() => { setSelectedOperation(r); setModalTab('details'); setShowAddToolForm(false); setIsOperationModalOpen(true); }} className="text-blue-500 hover:bg-blue-50" /></Tooltip>
             {!isOut && <Tooltip title="Add Tool"><Button size="small" icon={<ToolOutlined />} onClick={() => { setSelectedOperation(r); setModalTab('tools'); setShowAddToolForm(true); setIsOperationModalOpen(true); }} className="text-orange-500 hover:bg-orange-50" /></Tooltip>}
+            <Tooltip title="Checklists"><Button size="small" icon={<UnorderedListOutlined />} onClick={() => { setSelectedOperationForChecklists(r); setShowChecklistsModal(true); }} className="text-purple-500 hover:bg-purple-50" /></Tooltip>
             <Popconfirm title="Delete operation?" onConfirm={() => handleDeleteOperation(r.id)} okText="Yes" cancelText="No">
               <Button size="small" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
             </Popconfirm>
@@ -932,8 +916,19 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           </div>
         )}
       </Modal>
+      <OperationChecklistsModal
+        visible={showChecklistsModal}
+        onClose={() => {
+          setShowChecklistsModal(false);
+          setSelectedOperationForChecklists(null);
+        }}
+        operation={selectedOperationForChecklists}
+      />
     </div>
   );
 };
 
 export default DocumentsPanel;
+
+
+

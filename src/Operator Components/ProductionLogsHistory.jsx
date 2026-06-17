@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, Table, Typography, Tag, message, Input, DatePicker, Button, Space, Select, Tooltip } from 'antd';
-import { SearchOutlined, ReloadOutlined, CheckCircleOutlined, ClockCircleOutlined, SyncOutlined } from '@ant-design/icons';
+import { SearchOutlined, ReloadOutlined, CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, DownloadOutlined } from '@ant-design/icons';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import dayjs from 'dayjs';
 
@@ -180,9 +182,99 @@ const ProductionLogsHistory = () => {
       ? `(${log.machine.make}) ${log.machine.model}`
       : log.machine?.make || log.machine?.model || log.machine?.name || 'N/A';
 
+  const handleDownloadPDF = () => {
+    try {
+      const doc = new jsPDF('l', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      
+      doc.setFontSize(18);
+      doc.text('Production Logs History', pageWidth / 2, 15, { align: 'center' });
+      
+      doc.setFontSize(10);
+      doc.text(`Generated on: ${dayjs().format('DD-MM-YYYY HH:mm:ss')}`, pageWidth / 2, 22, { align: 'center' });
+      
+      if (filteredLogs.length === 0) {
+        doc.setFontSize(12);
+        doc.text('No data available', pageWidth / 2, 40, { align: 'center' });
+        doc.save('production_logs_history.pdf');
+        return;
+      }
+
+      const tableData = filteredLogs.map((log, index) => [
+        index + 1,
+        log.operation?.order?.sale_order_number || '-',
+        log.operation?.product?.product_name || '-',
+        log.operation?.part?.part_name || '-',
+        log.operation?.part?.part_number || '-',
+        log.operation?.operation_name || '-',
+        log.operation?.operation_number || '-',
+        getMachineName(log),
+        formatDateTime(log.from_date, log.from_time),
+        formatDateTime(log.to_date, log.to_time),
+        log.operation?.part?.quantity || 0,
+        log.produced_quantity || 0,
+        log.approved_quantity || 0,
+        log.rework_quantity || 0,
+        log.rejected_quantity || 0,
+        log.status || '-',
+        log.supervisor?.user_name || 'N/A',
+        log.remarks || '-',
+      ]);
+
+      autoTable(doc, {
+        startY: 30,
+        head: [
+          ['SL No', 'Sale Order', 'Product', 'Part Name', 'Part No', 'Operation', 'Op No', 
+           'Machine', 'From Time', 'To Time', 'Part Qty', 'Produced', 'Approved', 'Rework', 
+           'Rejected', 'Status', 'Supervisor', 'Remarks']
+        ],
+        body: tableData,
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+          overflow: 'linebreak',
+        },
+        headStyles: {
+          fillColor: [24, 144, 255],
+          textColor: 255,
+          fontStyle: 'bold',
+        },
+        alternateRowStyles: {
+          fillColor: [240, 248, 255],
+        },
+        columnStyles: {
+          0: { cellWidth: 10 },
+          1: { cellWidth: 25 },
+          2: { cellWidth: 30 },
+          3: { cellWidth: 25 },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 25 },
+          6: { cellWidth: 15 },
+          7: { cellWidth: 25 },
+          8: { cellWidth: 25 },
+          9: { cellWidth: 25 },
+          10: { cellWidth: 15 },
+          11: { cellWidth: 15 },
+          12: { cellWidth: 15 },
+          13: { cellWidth: 15 },
+          14: { cellWidth: 15 },
+          15: { cellWidth: 18 },
+          16: { cellWidth: 20 },
+          17: { cellWidth: 30 },
+        },
+      });
+
+      doc.save('production_logs_history.pdf');
+      message.success('PDF downloaded successfully');
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      message.error('Failed to generate PDF');
+    }
+  };
+
   const columns = [
     {
-      title: 'SL No',
+      title: 'Sl No',
       key: 'sl_no',
       align: 'center',
       width: 60,
@@ -191,6 +283,7 @@ const ProductionLogsHistory = () => {
     {
       title: 'Project Details',
       key: 'project_details',
+      width: 120,
       fixed: 'left',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -202,6 +295,7 @@ const ProductionLogsHistory = () => {
     {
       title: 'Part Details',
       key: 'part_details',
+      width: 120,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
           <Text strong>{highlightText(record.operation?.part?.part_name, searchText)}</Text>
@@ -212,6 +306,7 @@ const ProductionLogsHistory = () => {
     {
       title: 'Operation Details',
       key: 'operation_details',
+      width: 120,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
           <Text strong>{highlightText(record.operation?.operation_name, searchText)}</Text>
@@ -222,6 +317,7 @@ const ProductionLogsHistory = () => {
     {
       title: 'Machine',
       key: 'machine',
+      width: 120,
       render: (_, record) => (
         <Text style={{ fontSize: 12 }}>{highlightText(getMachineName(record), searchText)}</Text>
       ),
@@ -229,6 +325,7 @@ const ProductionLogsHistory = () => {
     {
       title: 'From Time',
       key: 'from',
+      width: 120,
       sorter: (a, b) => {
         const dA = a.from_date && a.from_time ? dayjs(`${a.from_date} ${a.from_time}`).valueOf() : a.from_date ? dayjs(a.from_date).valueOf() : 0;
         const dB = b.from_date && b.from_time ? dayjs(`${b.from_date} ${b.from_time}`).valueOf() : b.from_date ? dayjs(b.from_date).valueOf() : 0;
@@ -242,6 +339,7 @@ const ProductionLogsHistory = () => {
     {
       title: 'To Time',
       key: 'to',
+      width: 120,
       sorter: (a, b) => {
         const dA = a.to_date && a.to_time ? dayjs(`${a.to_date} ${a.to_time}`).valueOf() : a.to_date ? dayjs(a.to_date).valueOf() : 0;
         const dB = b.to_date && b.to_time ? dayjs(`${b.to_date} ${b.to_time}`).valueOf() : b.to_date ? dayjs(b.to_date).valueOf() : 0;
@@ -251,6 +349,22 @@ const ProductionLogsHistory = () => {
       render: (_, record) => (
         <Text style={{ fontSize: 12 }}>{formatDateTime(record.to_date, record.to_time)}</Text>
       ),
+    },
+    {
+      title: 'Notes',
+      dataIndex: 'notes',
+      key: 'notes',
+      width: 100,
+      render: (notes) => {
+        const display = notes ? (notes.length > 20 ? `${notes.substring(0, 20)}...` : notes) : '-';
+        return (
+          <Tooltip title={notes || ''}>
+            <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {highlightText(display, searchText)}
+            </Text>
+          </Tooltip>
+        );
+      },
     },
     {
       title: 'Part Qty',
@@ -263,7 +377,7 @@ const ProductionLogsHistory = () => {
       title: 'Produced Qty',
       dataIndex: 'produced_quantity',
       key: 'produced_quantity',
-      width: 100,
+      width: 80,
       align: 'center',
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
@@ -271,7 +385,7 @@ const ProductionLogsHistory = () => {
       title: 'Approved Qty',
       dataIndex: 'approved_quantity',
       key: 'approved_quantity',
-      width: 100,
+      width: 80,
       align: 'center',
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
@@ -279,7 +393,7 @@ const ProductionLogsHistory = () => {
       title: 'Rework Qty',
       dataIndex: 'rework_quantity',
       key: 'rework_quantity',
-      width: 100,
+      width: 80,
       align: 'center',
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
@@ -287,7 +401,7 @@ const ProductionLogsHistory = () => {
       title: 'Rejected Qty',
       dataIndex: 'rejected_quantity',
       key: 'rejected_quantity',
-      width: 100,
+      width: 80,
       align: 'center',
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
@@ -295,6 +409,7 @@ const ProductionLogsHistory = () => {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
+      width: 100,
       filters: [
         { text: 'Pending',     value: 'pending' },
         { text: 'Completed',   value: 'completed' },
@@ -309,7 +424,7 @@ const ProductionLogsHistory = () => {
     {
       title: 'Supervisor',
       key: 'supervisor',
-      width: 110,
+      width: 100,
       render: (_, record) => (
         <Text style={{ fontSize: 12 }}>{highlightText(record.supervisor?.user_name, searchText) || 'N/A'}</Text>
       ),
@@ -318,7 +433,7 @@ const ProductionLogsHistory = () => {
       title: 'Remarks',
       dataIndex: 'remarks',
       key: 'remarks',
-      width: 120,
+      width: 100,
       render: (remarks) => {
         const display = remarks ? (remarks.length > 20 ? `${remarks.substring(0, 20)}...` : remarks) : '-';
         return (
@@ -380,9 +495,14 @@ const ProductionLogsHistory = () => {
               style={{ minWidth: 250 }}
             />
           </Space>
-          <Button icon={<ReloadOutlined />} onClick={fetchProductionLogs} loading={loading}>
-            Refresh
-          </Button>
+          <Space>
+            <Button icon={<DownloadOutlined />} onClick={handleDownloadPDF}>
+              Download PDF
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={fetchProductionLogs} loading={loading}>
+              Refresh
+            </Button>
+          </Space>
         </div>
 
         <Table

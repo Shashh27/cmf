@@ -599,12 +599,17 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         <Text strong style={{ fontSize: 13, color: T.textMid, whiteSpace: 'nowrap' }}>Select Machine:</Text>
         <div style={{ flex: '1 1 280px', minWidth: 220 }}>
           <Select
+            showSearch
             placeholder="Choose a machine to view assignments"
             loading={machinesLoading}
             onFocus={fetchMachines}
             style={{ width: '100%' }}
             value={selectedMachine}
             onChange={setSelectedMachine}
+            filterOption={(input, opt) =>
+              (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
+                .toString().toLowerCase().includes(input.toLowerCase())
+            }
           >
             {machines.map(m => (
               <Option key={m.id} value={m.id}>{m.make} - {m.model || 'N/A'}</Option>

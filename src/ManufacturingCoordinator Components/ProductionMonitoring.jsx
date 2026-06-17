@@ -2,10 +2,10 @@ import React from 'react';
 import { Card, Typography } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
-import LiveMonitoring from '../Product Monitoring Components/LiveMonitoring';
-import OEEDashboard from '../Product Monitoring Components/OEEDashboard';
-import PlannedVsActual from '../Product Monitoring Components/PlannedVsActual';
-import OrderTracking from '../Product Monitoring Components/OrderTracking';
+import LiveMonitoring from './ProductMonitoringComponents/LiveMonitoring';
+import OEEDashboard from './ProductMonitoringComponents/OEEDashboard';
+import PlannedVsActual from './ProductMonitoringComponents/PlannedVsActual';
+import OrderTracking from './ProductMonitoringComponents/OrderTracking';
 
 const { Title } = Typography;
 

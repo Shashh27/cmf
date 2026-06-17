@@ -124,18 +124,16 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
   const fetchRequests = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/inventory-requests/`);
+      const currentOpId = getCurrentOperatorId();
+      let url = `${API_BASE_URL}/inventory-requests/`;
+      if (currentOpId != null) {
+        url = `${API_BASE_URL}/inventory-requests/by-operator/${currentOpId}`;
+      }
+      const response = await fetch(url);
       if (response.ok) {
         let data = await response.json();
         const sortedData = Array.isArray(data) ? data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];
-        const currentOpId = getCurrentOperatorId();
-        const filteredSorted = currentOpId != null
-          ? sortedData.filter(r => {
-              const oid = r.operator_id ?? r.operatorId ?? r.operator_id_fk ?? r.operator?.id;
-              return oid == null ? true : parseInt(oid) === currentOpId;
-            })
-          : sortedData;
-        setRequests(filteredSorted);
+        setRequests(sortedData);
       }
     } catch (error) {
       console.error('Failed to fetch requests:', error);
@@ -146,20 +144,16 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
 
   const fetchReturnRequests = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
+      const currentOpId = getCurrentOperatorId();
+      let url = `${API_BASE_URL}/inventory-return-requests/`;
+      if (currentOpId != null) {
+        url = `${API_BASE_URL}/inventory-return-requests/by-operator/${currentOpId}`;
+      }
+      const response = await fetch(url);
       if (response.ok) {
         let data = await response.json();
         const arr = Array.isArray(data) ? data : [];
-        const currentOpId = getCurrentOperatorId();
-        const filtered = currentOpId != null
-          ? arr.filter(rr => {
-              const top = rr.operator_id ?? rr.operatorId ?? rr.operator_id_fk;
-              const nested = rr.inventory_request_details?.operator_id ?? rr.inventory_request_details?.operator?.id;
-              const oid = top != null ? top : nested;
-              return oid == null ? true : parseInt(oid) === currentOpId;
-            })
-          : arr;
-        setReturnRequests(filtered);
+        setReturnRequests(arr);
       }
     } catch (error) {
       console.error('Failed to fetch return requests:', error);
@@ -372,11 +366,20 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
 
   const columns = [
     {
+      title: 'Sl No',
+      key: 'sno',
+      width: 50,
+      fixed: 'left',
+      render: (_, __, index) => {
+        const { current, pageSize } = pagination;
+        return (current - 1) * pageSize + index + 1;
+      },
+    },
+    {
       title: 'Tool Name',
       dataIndex: 'tool_name',
       key: 'tool_name',
-      width: 150,
-      ellipsis: true,
+      width: 120,
       fixed: 'left',
       filteredValue: [searchText],
       onFilter: (value, record) => {
@@ -389,50 +392,99 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       sorter: (a, b) => (a.tool_name || '').localeCompare(b.tool_name || ''),
     },
     {
+      title: 'Range',
+      dataIndex: 'tool_range',
+      key: 'tool_range',
+      width: 80,
+      render: (text) => text || '-',
+    },
+    {
+      title: 'ID Code',
+      dataIndex: 'identification_code',
+      key: 'identification_code',
+      width: 100,
+      render: (text) => text || '-',
+    },
+    {
+      title: 'Project',
+      dataIndex: 'project_name',
+      key: 'project_name',
+      width: 120,
+      render: (_, record) => {
+        const projName = record.project_name || '-';
+        const productName = record.product_name || '';
+        return (
+          <div>
+            <div>{projName}</div>
+            {productName && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>{productName}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Part',
+      dataIndex: 'part_name',
+      key: 'part_name',
+      width: 120,
+      render: (_, record) => {
+        const partName = record.part_name || '-';
+        const partNum = record.part_number || '';
+        return (
+          <div>
+            <div>{partName}</div>
+            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{partNum}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Operation',
+      key: 'operation',
+      width: 120,
+      render: (_, record) => {
+        const opName = record.operation_name || '-';
+        const opNum = record.operation_number || '';
+        return (
+          <div>
+            <div>{opName}</div>
+            {opNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{opNum}</div>}
+          </div>
+        );
+      },
+    },
+    {
       title: 'Requested Qty',
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 100,
+      width: 80,
     },
     {
       title: 'Remaining Qty',
       key: 'remaining_qty',
-      width: 130,
+      width: 80,
       render: (_, record) => {
         const remaining = computeRemaining(record);
         return remaining > 0 ? remaining : 0;
       }
     },
     {
-      title: 'Project',
-      dataIndex: 'project_name',
-      key: 'project_name',
-      width: 150,
-      ellipsis: true,
-    },
-    {
-      title: 'Part',
-      dataIndex: 'part_name',
-      key: 'part_name',
-      width: 150,
-      ellipsis: true,
-    },
-    {
-      title: 'Date',
+      title: 'Requested At',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
       render: (text) => {
         if (!text) return '-';
         const d = new Date(text);
-        return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+        const date = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+        const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        return `${date}, ${time}`;
       },
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 120,
+      width: 80,
       // ← FIXED: bind filteredValue to the filters state so Ant Design
       //   knows this column is controlled and applies the selection correctly
       filteredValue: filters.status || null,
@@ -451,11 +503,23 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
       onFilter: (value, record) => record.status?.toLowerCase() === value,
     },
     {
+      title: 'Approved At',
+      dataIndex: 'updated_at',
+      key: 'updated_at',
+      width: 120,
+      render: (text) => {
+        if (!text) return '-';
+        const d = new Date(text);
+        const date = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+        const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        return `${date}, ${time}`;
+      },
+    },
+    {
       title: 'Approved By',
       dataIndex: 'inventory_supervisor_name',
       key: 'inventory_supervisor_name',
-      width: 150,
-      ellipsis: true,
+      width: 80,
       render: (text) => text || <span style={{ color: '#999', fontStyle: 'italic' }}>Pending</span>,
     },
     {
@@ -575,6 +639,15 @@ const ToolRequested = ({ onReturnSuccess, onReportIssueSuccess }) => {
             position: ['bottomCenter']
           }}
           onChange={handleTableChange}   // ← now correctly captures filters too
+          components={{
+            header: {
+              cell: (props) => (
+                <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                  {props.children}
+                </th>
+              ),
+            },
+          }}
         />
       </Card>
 

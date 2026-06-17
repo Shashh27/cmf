@@ -185,19 +185,6 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
         title: (
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <FolderOutlined style={{ color: '#722ed1' }} />
-            <span>MPP</span>
-          </span>
-        ),
-        titleText: 'MPP',
-        key: `mpp-${part.id}${orderId ? `-${orderId}` : ''}`,
-        isLeaf: true,
-        selectable: true,
-        nodeData: { type: 'part-category', category: 'MPP', partId: part.id, partName: part.part_name, orderId }
-      },
-      {
-        title: (
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <FolderOutlined style={{ color: '#722ed1' }} />
             <span>ENGINEERING_DRAWING</span>
           </span>
         ),
@@ -221,21 +208,25 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
         key: `ipid-${part.id}${orderId ? `-${orderId}` : ''}`,
         isLeaf: true,
         selectable: true,
-        nodeData: { type: 'part-category', category: 'IPID', partId: part.id, partName: part.part_name, orderId }
+        nodeData: { type: 'part-ipid', partId: part.id, partName: part.part_name, orderId }
       });
     }
 
     children.push(
+<<<<<<< HEAD
     
       // CNC Programs folder
+=======
+      // Operations folder
+>>>>>>> a2fc9a4917429c168a594b142c2f289da10a4d47
       {
         title: (
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <FolderOutlined style={{ color: '#13c2c2' }} />
-            <span>CNC Programs</span>
+            <span>Operations</span>
           </span>
         ),
-        titleText: 'CNC Programs',
+        titleText: 'Operations',
         key: `cnc-${part.id}${orderId ? `-${orderId}` : ''}`,
         isLeaf: false,
         selectable: false,

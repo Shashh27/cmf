@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Table, Button, Space, message, Input, Upload, Tag, Breadcrumb, Spin, Badge, Popconfirm, Tooltip
+  Table, Button, Space, message, Input, Tag, Breadcrumb, Spin, Badge, Popconfirm, Tooltip, Modal, Dropdown
 } from 'antd';
 import {
   EditOutlined, DeleteOutlined, SearchOutlined, UploadOutlined,
@@ -13,31 +13,41 @@ import {
 } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth';
 import ToolsHistory from './ToolsHistory';
+import ToolsBulkUpload from './ToolsBulkUpload';
+import CategorySubCategoryModal from './CategorySubCategoryModal';
 import * as XLSX from 'xlsx';
 
 const { Search } = Input;
 
-/* ─── constants ─────────────────────────────────────────── */
-const CATEGORY_COLORS = {
-  Tools:       { bg: '#e6f4ff', text: '#1677ff', border: '#91caff', dot: '#1677ff' },
-  Instruments: { bg: '#f6ffed', text: '#389e0d', border: '#b7eb8f', dot: '#52c41a' },
-  Misc:        { bg: '#fff7e6', text: '#d46b08', border: '#ffd591', dot: '#fa8c16' },
-};
-
 /* ═══════════════════════════════════════════════════════════
    SIDEBAR — 2-level tree
 ═══════════════════════════════════════════════════════════ */
-function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCat, searchText }) {
+function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCat, searchText, onCreateCategory, onCreateSubCategory, onContextMenu }) {
   if (loading) {
     return <div style={{ padding: 24, textAlign: 'center' }}><Spin size="small" /></div>;
   }
 
   const sidebarFontStack = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
 
-  // Define colors for "Tools" and "Instruments"
-  const CATEGORY_STYLES = {
-    'Tools': { icon: <ToolOutlined />, color: '#1677ff', bg: '#e6f4ff' },
-    'Instruments': { icon: <ExperimentOutlined />, color: '#52c41a', bg: '#f6ffed' }
+  // Dynamic color generation based on category name
+  const getCategoryStyle = (category) => {
+    const lowerCategory = category.toLowerCase();
+    
+    // Blue for Tools, Green for Instruments
+    if (lowerCategory === 'tools') {
+      return { icon: <ToolOutlined />, color: '#1677ff', bg: '#e6f4ff' };
+    } else if (lowerCategory === 'instruments') {
+      return { icon: <ExperimentOutlined />, color: '#52c41a', bg: '#f6ffed' };
+    }
+    
+    // Fallback colors for other categories
+    const colors = [
+      { icon: <AppstoreOutlined />, color: '#fa8c16', bg: '#fff7e6' },
+      { icon: <ToolOutlined />, color: '#722ed1', bg: '#f9f0ff' },
+      { icon: <ExperimentOutlined />, color: '#eb2f96', bg: '#fff0f6' },
+    ];
+    const hash = category.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[hash % colors.length];
   };
 
   const highlightSubText = (text, query) => {
@@ -58,10 +68,22 @@ function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCa
 
   return (
     <div style={{ padding: '4px 8px 16px 8px', fontFamily: sidebarFontStack }}>
+      {/* Add Category Button */}
+      <div style={{ marginBottom: 12, padding: '0 4px' }}>
+        <Button
+          type="dashed"
+          icon={<PlusOutlined />}
+          onClick={onCreateCategory}
+          style={{ width: '100%', borderRadius: 8, borderStyle: 'dashed' }}
+          size="small"
+        >
+          Create Category
+        </Button>
+      </div>
       {tree.map(catNode => {
         const catExpanded = !!expandedCats[catNode.category];
         const isCatSelected = selected?.category === catNode.category && !selected?.sub_category;
-        const style = CATEGORY_STYLES[catNode.category] || { icon: <AppstoreOutlined />, color: '#595959', bg: '#f0f0f0' };
+        const style = getCategoryStyle(catNode.category);
 
         return (
           <div key={catNode.category} style={{ marginBottom: 4 }}>
@@ -71,13 +93,14 @@ function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCa
                 toggleCat(catNode.category);
                 onSelect({ category: catNode.category, sub_category: null });
               }}
+              onContextMenu={(e) => onContextMenu(e, 'category', { category: catNode.category })}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '10px 12px',
                 borderRadius: 8,
                 cursor: 'pointer', userSelect: 'none',
-                background: isCatSelected ? '#f0f7ff' : 'transparent',
-                color: isCatSelected ? '#1677ff' : '#434343',
+                background: isCatSelected ? style.bg : 'transparent',
+                color: isCatSelected ? style.color : '#434343',
                 transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
               onMouseEnter={e => { if (!isCatSelected) e.currentTarget.style.background = '#f5f5f5'; }}
@@ -91,7 +114,7 @@ function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCa
                 width: 24, height: 24, flexShrink: 0,
                 background: 'transparent',
                 borderRadius: 6,
-                color: isCatSelected ? '#1677ff' : style.color,
+                color: style.color,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 20,
                 transition: 'all 0.2s'
@@ -106,7 +129,7 @@ function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCa
               <Badge
                 count={catNode.sub_categories.length}
                 style={{
-                  backgroundColor: isCatSelected ? '#1677ff' : style.color,
+                  backgroundColor: style.color,
                   fontSize: 10,
                   height: 18,
                   minWidth: 18,
@@ -127,6 +150,7 @@ function SidebarTree({ tree, selected, onSelect, loading, expandedCats, toggleCa
                     <div
                       key={subNode.sub_category}
                       onClick={() => onSelect({ category: catNode.category, sub_category: subNode.sub_category })}
+                      onContextMenu={(e) => onContextMenu(e, 'sub_category', { category: catNode.category, sub_category: subNode.sub_category })}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         padding: '8px 12px',
@@ -189,24 +213,37 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   const [tools,        setTools]        = useState([]);
   const [tableLoading, setTableLoading] = useState(false);
   const [searchText,   setSearchText]   = useState('');
+  
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState({
+    visible: false,
+    x: 0,
+    y: 0,
+    type: null, // 'category' or 'sub_category'
+    data: null // { category, sub_category }
+  });
+  
+  // Edit modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editModalData, setEditModalData] = useState({ type: null, oldName: '', categoryName: '' });
+  const [editModalValue, setEditModalValue] = useState('');
   const [treeSearchText, setTreeSearchText] = useState('');
   const [filteredData, setFilteredData] = useState([]);
   const [pagination,   setPagination]   = useState({ current: 1, pageSize: 10 });
   const [collapsed,    setCollapsed]    = useState(false);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyTool,    setHistoryTool]    = useState(null);
+  const [bulkUploadVisible, setBulkUploadVisible] = useState(false);
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
+  const [categoryModalMode, setCategoryModalMode] = useState('category');
+  const [parentCategoryForSub, setParentCategoryForSub] = useState(null);
 
   const fetchingTree  = useRef(false);
   const fetchingTable = useRef(false);
 
   useEffect(() => { fetchTree(); }, []);
 
-  const DEFAULT_CATEGORIES = [
-    { category: 'Tools', sub_categories: [], total_count: 0 },
-    { category: 'Instruments', sub_categories: [], total_count: 0 },
-  ];
-
-  const displayTree = (tree.length > 0 ? tree : DEFAULT_CATEGORIES).filter(cat => cat.category !== 'Misc');
+  const displayTree = tree;
 
   // Filter tree based on sidebar search
   const filteredTree = React.useMemo(() => {
@@ -259,7 +296,10 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     if (selected?.sub_category && selected?.category) {
       fetchBySubCategory(selected.category, selected.sub_category);
     } else if (selected?.category) {
-      fetchByCategory(selected.category);
+      // Don't fetch tools for category-only selection
+      // Tools are only added to sub-categories
+      setTools([]);
+      setFilteredData([]);
     } else {
       setTools([]);
       setFilteredData([]);
@@ -346,23 +386,177 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     }
   };
 
-  const handleBulkUpload = async (file) => {
-    setTableLoading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
-        method: 'POST', body: formData,
-      });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Upload failed'); }
-      const result = await res.json();
-      message.success(`Uploaded ${result.length} tools successfully`);
-      fetchTree();
-    } catch (e) {
-      message.error('Upload failed: ' + e.message);
-    } finally {
-      setTableLoading(false);
+  const handleBulkUpload = () => {
+    setBulkUploadVisible(true);
+  };
+
+  const handleBulkUploadSuccess = () => {
+    fetchTree();
+    if (selected?.sub_category) {
+      fetchBySubCategory(selected.category, selected.sub_category);
+    } else {
+      // Don't fetch for category-only selection
+      setTools([]);
+      setFilteredData([]);
     }
+  };
+
+  const handleCreateCategory = () => {
+    setCategoryModalMode('category');
+    setParentCategoryForSub(null);
+    setCategoryModalVisible(true);
+  };
+
+  const handleCreateSubCategory = (parentCategory) => {
+    setCategoryModalMode('sub_category');
+    setParentCategoryForSub(parentCategory);
+    setCategoryModalVisible(true);
+  };
+
+  // Context menu handlers
+  const handleContextMenu = (e, type, data) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      type,
+      data
+    });
+  };
+
+  const hideContextMenu = () => {
+    setContextMenu({ ...contextMenu, visible: false });
+  };
+
+  // Hide context menu on click outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (contextMenu.visible) {
+        hideContextMenu();
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [contextMenu.visible]);
+
+  const handleEditCategory = () => {
+    const { category } = contextMenu.data;
+    setEditModalData({ type: 'category', oldName: category, categoryName: category });
+    setEditModalValue(category);
+    setEditModalVisible(true);
+    hideContextMenu();
+  };
+
+  const handleEditSubCategory = () => {
+    const { category, sub_category } = contextMenu.data;
+    setEditModalData({ type: 'sub_category', oldName: sub_category, categoryName: category });
+    setEditModalValue(sub_category);
+    setEditModalVisible(true);
+    hideContextMenu();
+  };
+
+  const handleEditModalOk = async () => {
+    if (!editModalValue || editModalValue.trim() === '') {
+      message.error('Name cannot be empty');
+      return;
+    }
+    
+    try {
+      if (editModalData.type === 'category') {
+        const res = await fetch(`${API_BASE_URL}/tools-list/categories`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ old_name: editModalData.oldName, new_name: editModalValue.trim() })
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed to update category');
+        message.success('Category updated successfully');
+      } else {
+        const res = await fetch(`${API_BASE_URL}/tools-list/sub-categories`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            category: editModalData.categoryName, 
+            old_name: editModalData.oldName, 
+            new_name: editModalValue.trim() 
+          })
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || 'Failed to update sub-category');
+        message.success('Sub-category updated successfully');
+        // Update selected if it was this sub-category
+        if (selected?.category === editModalData.categoryName && selected?.sub_category === editModalData.oldName) {
+          setSelected({ category: editModalData.categoryName, sub_category: editModalValue.trim() });
+        }
+      }
+      fetchTree();
+      setEditModalVisible(false);
+    } catch (err) {
+      message.error('Failed to update: ' + err.message);
+    }
+  };
+
+  const handleDeleteCategory = () => {
+    const { category } = contextMenu.data;
+    Modal.confirm({
+      title: 'Delete Category',
+      content: `Are you sure you want to delete "${category}"? This will delete the category, all its sub-categories, and all tools under them. This action cannot be undone.`,
+      okText: 'Delete',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/tools-list/categories/${encodeURIComponent(category)}`, {
+            method: 'DELETE'
+          });
+          if (!res.ok) throw new Error((await res.json()).detail || 'Failed to delete category');
+          message.success('Category deleted successfully');
+          fetchTree();
+          setSelected(null);
+          setTools([]);
+          setFilteredData([]);
+        } catch (err) {
+          message.error('Failed to delete category: ' + err.message);
+        }
+      }
+    });
+    hideContextMenu();
+  };
+
+  const handleDeleteSubCategory = () => {
+    const { category, sub_category } = contextMenu.data;
+    Modal.confirm({
+      title: 'Delete Sub-Category',
+      content: `Are you sure you want to delete "${sub_category}"? This will delete the sub-category and all tools under it. This action cannot be undone.`,
+      okText: 'Delete',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const res = await fetch(`${API_BASE_URL}/tools-list/sub-categories/${encodeURIComponent(category)}/${encodeURIComponent(sub_category)}`, {
+            method: 'DELETE'
+          });
+          if (!res.ok) throw new Error((await res.json()).detail || 'Failed to delete sub-category');
+          message.success('Sub-category deleted successfully');
+          fetchTree();
+          setSelected(null);
+          setTools([]);
+          setFilteredData([]);
+        } catch (err) {
+          message.error('Failed to delete sub-category: ' + err.message);
+        }
+      }
+    });
+    hideContextMenu();
+  };
+
+  const handleAddSubCategoryFromMenu = () => {
+    const { category } = contextMenu.data;
+    handleCreateSubCategory(category);
+    hideContextMenu();
+  };
+
+  const handleCategoryModalSuccess = () => {
+    fetchTree();
+    setCategoryModalVisible(false);
   };
 
   const handleExportExcel = () => {
@@ -519,7 +713,18 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
           </Space>
         </div>
         <div style={{ overflowY: 'auto', flex: 1, padding: '8px 0' }}>
-          <SidebarTree tree={filteredTree} selected={selected} onSelect={(node) => { setSelected(node); setSearchText(''); }} loading={treeLoading} expandedCats={expandedCats} toggleCat={toggleCat} searchText={treeSearchText} />
+          <SidebarTree 
+            tree={filteredTree} 
+            selected={selected} 
+            onSelect={(node) => { setSelected(node); setSearchText(''); }} 
+            loading={treeLoading} 
+            expandedCats={expandedCats} 
+            toggleCat={toggleCat} 
+            searchText={treeSearchText}
+            onCreateCategory={handleCreateCategory}
+            onCreateSubCategory={handleCreateSubCategory}
+            onContextMenu={handleContextMenu}
+          />
         </div>
       </div>
 
@@ -548,6 +753,21 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
             </div>
             <p style={{ fontSize: 15, color: '#8c8c8c', maxWidth: 400, textAlign: 'center', lineHeight: 1.6 }}>
               Select a category or sub-category from the tree to view inventory records.
+            </p>
+          </div>
+        ) : selected.category && !selected.sub_category ? (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 20px' }}>
+            <div style={{
+              width: 100, height: 100, borderRadius: '30%',
+              background: 'linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              marginBottom: 24,
+              boxShadow: '0 8px 16px rgba(255, 167, 38, 0.1)'
+            }}>
+              <ToolOutlined style={{ fontSize: 48, color: '#fa8c16' }} />
+            </div>
+            <p style={{ fontSize: 15, color: '#8c8c8c', maxWidth: 400, textAlign: 'center', lineHeight: 1.6 }}>
+              Tools are only added to sub-categories. Please select a sub-category from the sidebar to view tools.
             </p>
           </div>
         ) : (
@@ -612,14 +832,21 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
                     Add Row
                   </Button>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <Upload beforeUpload={file => { handleBulkUpload(file); return false; }} showUploadList={false} accept=".xlsx,.xls">
-                      <Button icon={<UploadOutlined />} size="large" style={{ borderRadius: 10, fontWeight: 500, height: 44 }}>Import</Button>
-                    </Upload>
+                    <Button icon={<UploadOutlined />} size="large" onClick={handleBulkUpload} style={{ borderRadius: 10, fontWeight: 500, height: 44 }}>Import</Button>
                     <Button icon={<DownloadOutlined />} size="large" onClick={handleExportExcel} style={{ borderRadius: 10, fontWeight: 500, height: 44 }}>Export</Button>
                     <Button
                       icon={<ReloadOutlined />}
                       size="large"
-                      onClick={() => (selected?.sub_category ? fetchBySubCategory(selected.category, selected.sub_category) : fetchByCategory(selected.category))}
+                      onClick={() => {
+                        fetchTree();
+                        if (selected?.sub_category) {
+                          fetchBySubCategory(selected.category, selected.sub_category);
+                        } else {
+                          // Don't fetch for category-only selection
+                          setTools([]);
+                          setFilteredData([]);
+                        }
+                      }}
                       style={{ borderRadius: 10, height: 44, width: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     />
                   </div>
@@ -664,6 +891,85 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         )}
       </div>
       <ToolsHistory tool={historyTool} visible={historyVisible} onClose={() => { setHistoryVisible(false); setHistoryTool(null); }} />
+      <ToolsBulkUpload 
+        visible={bulkUploadVisible} 
+        onCancel={() => setBulkUploadVisible(false)} 
+        onSuccess={handleBulkUploadSuccess}
+        selectedCategory={selected?.category}
+        selectedSubCategory={selected?.sub_category}
+      />
+      <CategorySubCategoryModal
+        visible={categoryModalVisible}
+        onCancel={() => setCategoryModalVisible(false)}
+        onSuccess={handleCategoryModalSuccess}
+        mode={categoryModalMode}
+        parentCategory={parentCategoryForSub}
+      />
+      
+      {/* Edit Modal */}
+      <Modal
+        title={editModalData.type === 'category' ? 'Edit Category Name' : 'Edit Sub-Category Name'}
+        open={editModalVisible}
+        onOk={handleEditModalOk}
+        onCancel={() => setEditModalVisible(false)}
+        okText="Save"
+      >
+        <Input
+          value={editModalValue}
+          onChange={(e) => setEditModalValue(e.target.value)}
+          placeholder="Enter new name"
+          onPressEnter={handleEditModalOk}
+          autoFocus
+        />
+      </Modal>
+      
+      {/* Context Menu */}
+      <Dropdown
+        open={contextMenu.visible}
+        onOpenChange={(visible) => !visible && hideContextMenu()}
+        trigger={[]}
+        menu={{
+          items: contextMenu.type === 'category' ? [
+            {
+              key: 'add_sub',
+              label: <span><PlusOutlined /> Add Sub-Category</span>,
+              onClick: handleAddSubCategoryFromMenu
+            },
+            {
+              key: 'edit',
+              label: <span><EditOutlined /> Edit Name</span>,
+              onClick: handleEditCategory
+            },
+            {
+              key: 'delete',
+              label: <span style={{ color: '#ff4d4f' }}><DeleteOutlined /> Delete</span>,
+              onClick: handleDeleteCategory
+            }
+          ] : [
+            {
+              key: 'edit',
+              label: <span><EditOutlined /> Edit Name</span>,
+              onClick: handleEditSubCategory
+            },
+            {
+              key: 'delete',
+              label: <span style={{ color: '#ff4d4f' }}><DeleteOutlined /> Delete</span>,
+              onClick: handleDeleteSubCategory
+            }
+          ]
+        }}
+      >
+        <div
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            width: 1,
+            height: 1,
+            pointerEvents: 'none'
+          }}
+        />
+      </Dropdown>
       <style>{`
         .row-alt td { background: #fafafa !important; }
         .ant-table-row:hover td { background: #f0f7ff !important; }
