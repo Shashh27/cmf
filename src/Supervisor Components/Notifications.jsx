@@ -1232,6 +1232,11 @@ const Notifications = () => {
       key: 'completedAt',
       align: 'center',
       width: 120,
+      sorter: (a, b) => {
+        const dateA = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const dateB = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+        return dateA - dateB;
+      },
       render: (text) => {
         if (!text) return 'N/A';
         try {
@@ -1242,6 +1247,7 @@ const Notifications = () => {
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
+            second: '2-digit',
             hour12: false
           });
         } catch (error) {
@@ -1266,6 +1272,34 @@ const Notifications = () => {
           {(text || 'N/A').toUpperCase()}
         </Tag>
       ),
+    },
+    {
+      title: 'Acknowledged\nAt',
+      key: 'acknowledgedAt',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const dateA = a.supervisor_acknowledged_at ? new Date(a.supervisor_acknowledged_at).getTime() : 0;
+        const dateB = b.supervisor_acknowledged_at ? new Date(b.supervisor_acknowledged_at).getTime() : 0;
+        return dateA - dateB;
+      },
+      render: (_, record) => {
+        if (!record.supervisor_acknowledged_at) return 'N/A';
+        try {
+          const date = new Date(record.supervisor_acknowledged_at);
+          return date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          });
+        } catch (error) {
+          return 'N/A';
+        }
+      },
     },
     {
       title: 'Action',

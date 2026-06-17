@@ -4,6 +4,7 @@ import { BellOutlined, CheckOutlined, ReloadOutlined } from '@ant-design/icons';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import config from '../Config/config';
 import dayjs from 'dayjs';
+import NotificationPokaYoke from './NotificationPokaYoke';
 
 const { Title, Text } = Typography;
 
@@ -707,6 +708,11 @@ const Notifications = () => {
                   />
                 </Spin>
               ),
+            },
+            {
+              key: 'pokayoke-checklist',
+              label: 'PokaYoke Checklist',
+              children: <NotificationPokaYoke />,
             },
           ]}
         />

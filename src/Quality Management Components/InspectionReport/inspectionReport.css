@@ -704,11 +704,35 @@ body.ir-pdf-exporting .ir-a4-sheet {
 }
 
 body.ir-pdf-exporting .ir-a4-sheet--embedded,
-body.ir-pdf-exporting .ir-page.ir-a4-sheet {
-  height: auto !important;
-  max-height: none !important;
+body.ir-pdf-exporting .ir-page.ir-a4-sheet,
+body.ir-pdf-exporting .ir-a4-sheet--with-footer {
+  height: 297mm !important;
+  max-height: 297mm !important;
   min-height: 297mm !important;
-  overflow: visible !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+body.ir-pdf-exporting .ir-sheet-stack.ir-sheet-stack--with-footer {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+body.ir-pdf-exporting .ir-sheet-stack--with-footer .ir-editor-root,
+body.ir-pdf-exporting .ir-sheet-stack--with-footer .ir-editor-root .ProseMirror {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+}
+
+body.ir-pdf-exporting .ir-sheet-stack--with-footer table.ir-sheet-table,
+body.ir-pdf-exporting .ir-sheet-stack--with-footer tbody.ir-sheet-body {
+  height: 100% !important;
+  min-height: 100% !important;
 }
 
 body.ir-pdf-exporting .ir-editor-root .ir-data-row td,
@@ -786,6 +810,17 @@ body.ir-pdf-exporting .ir-editor-root .ir-head th {
   height: 297mm;
   overflow: hidden;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.ir-a4-sheet--with-footer {
+  height: 297mm;
+  max-height: 297mm;
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 }
 
 .ir-print-carousel-viewport {
@@ -927,6 +962,72 @@ body.ir-pdf-exporting .ir-editor-root .ir-head th {
   border: 1px solid #000;
   font-family: Aptos, "Aptos Display", "Segoe UI Variable", "Segoe UI", Calibri, sans-serif;
   color: #000;
+}
+
+/* Pin Chemical / Ultrasonic / Hardness footer block to the bottom of each A4 page */
+.ir-page.ir-a4-sheet {
+  display: flex;
+  flex-direction: column;
+}
+
+.ir-sheet-stack.ir-sheet-stack--with-footer {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ir-sheet-stack--with-footer .ir-editor-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ir-sheet-stack--with-footer .ir-editor-root .ProseMirror {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: block;
+}
+
+.ir-sheet-stack--with-footer .ir-editor-root table.ir-sheet-table {
+  height: 100%;
+  min-height: 100%;
+}
+
+.ir-sheet-stack--with-footer .ir-editor-root tbody.ir-sheet-body {
+  height: 100%;
+}
+
+.ir-editor-root tr.ir-footer-spacer {
+  height: 100%;
+}
+
+.ir-editor-root tr.ir-footer-spacer td {
+  height: 100%;
+  min-height: 8mm;
+  padding: 0 !important;
+  border-top: none !important;
+  border-bottom: none !important;
+  border-left: 1px solid #000;
+  border-right: 1px solid #000;
+  vertical-align: top;
+  background: #fff;
+}
+
+.ir-editor-root tr.ir-footer-spacer td p {
+  margin: 0;
+  line-height: 0;
+  font-size: 0;
+}
+
+.ir-editor-root tr.ir-page-footer.ir-footer-head td {
+  border-top: 1px solid #000;
+}
+
+.ir-a4-sheet--embedded .ir-sheet-stack.ir-sheet-stack--with-footer {
+  height: 100%;
 }
 
 .ir-header-banner {
@@ -1139,6 +1240,15 @@ body.ir-pdf-exporting .ir-editor-root .ir-head th {
   padding-right: 8px;
 }
 
+.ir-editor-root .ir-data-row--filler td {
+  background: #fff;
+}
+
+.ir-editor-root .ir-data-row--filler td p {
+  color: transparent;
+  user-select: none;
+}
+
 /* Footer — label|value grid + 50/50 sign row (Excel reference) */
 .ir-editor-root .ir-page-footer td {
   box-sizing: border-box;
@@ -1331,6 +1441,41 @@ body.ir-pdf-exporting .ir-editor-root .ir-head th {
     box-shadow: none;
     border: none;
     padding: 0;
+  }
+
+  .ir-sheet-stack.ir-sheet-stack--with-footer {
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 297mm !important;
+    height: 297mm !important;
+  }
+
+  .ir-a4-sheet--with-footer,
+  .ir-a4-sheet--embedded {
+    height: 297mm !important;
+    max-height: 297mm !important;
+    min-height: 297mm !important;
+  }
+
+  .ir-sheet-stack--with-footer .ir-editor-root,
+  .ir-sheet-stack--with-footer .ir-editor-root .ProseMirror {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+  }
+
+  .ir-sheet-stack--with-footer table.ir-sheet-table,
+  .ir-sheet-stack--with-footer tbody.ir-sheet-body {
+    height: 100% !important;
+    min-height: 100% !important;
+  }
+
+  tr.ir-footer-spacer {
+    height: 100% !important;
+  }
+
+  tr.ir-footer-spacer td {
+    height: 100% !important;
   }
 
   #inspection-report-print-root.ir-print-stack {

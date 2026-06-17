@@ -47,10 +47,20 @@ function patchCloneForCapture(doc) {
     sheet.style.transform = 'none';
     sheet.style.boxShadow = 'none';
     sheet.style.margin = '0';
-    sheet.style.height = 'auto';
-    sheet.style.maxHeight = 'none';
-    sheet.style.minHeight = '297mm';
-    sheet.style.overflow = 'visible';
+    const hasFooter = sheet.classList.contains('ir-a4-sheet--with-footer')
+      || sheet.classList.contains('ir-a4-sheet--embedded')
+      || sheet.querySelector('.ir-sheet-stack--with-footer');
+    if (hasFooter) {
+      sheet.style.height = '297mm';
+      sheet.style.maxHeight = '297mm';
+      sheet.style.minHeight = '297mm';
+      sheet.style.overflow = 'hidden';
+    } else {
+      sheet.style.height = 'auto';
+      sheet.style.maxHeight = 'none';
+      sheet.style.minHeight = '297mm';
+      sheet.style.overflow = 'visible';
+    }
   });
   doc.querySelectorAll('.ir-sheet-table').forEach((table) => {
     table.style.tableLayout = 'fixed';
@@ -176,8 +186,8 @@ export async function downloadInspectionReportPdf(
         height: sheet.scrollHeight,
         windowWidth: sheet.scrollWidth,
         windowHeight: sheet.scrollHeight,
-        onclone: (_doc, clonedNode) => {
-          patchCloneForCapture(clonedNode.ownerDocument);
+        onclone: (clonedDoc) => {
+          patchCloneForCapture(clonedDoc);
         },
       });
 

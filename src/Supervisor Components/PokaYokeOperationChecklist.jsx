@@ -327,6 +327,20 @@ const PokaYokeOperationChecklist = () => {
       render: (remarks) => <Text style={{ fontSize: 12 }}>{remarks || '-'}</Text>,
     },
     {
+      title: 'Approved At',
+      key: 'sup_action_at',
+      sorter: (a, b) => {
+        const aVal = a.sup_action_at ? dayjs(a.sup_action_at).valueOf() : 0;
+        const bVal = b.sup_action_at ? dayjs(b.sup_action_at).valueOf() : 0;
+        return aVal - bVal;
+      },
+      render: (_, record) => (
+        <Text style={{ fontSize: 12 }}>
+          {record.sup_action_at ? dayjs(record.sup_action_at).format('DD-MM-YYYY, HH:mm:ss') : 'N/A'}
+        </Text>
+      ),
+    },
+    {
       title: 'Actions',
       key: 'actions',
       fixed: 'right',
