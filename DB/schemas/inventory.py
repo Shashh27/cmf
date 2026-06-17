@@ -457,6 +457,10 @@ class ItemNode(BaseModel):
 
     count: int
 
+    range: Optional[str] = None
+
+    identification_code: Optional[str] = None
+
  
 
  
@@ -503,6 +507,8 @@ class InventoryRequestBase(BaseModel):
 
     part_id: int
 
+    operation_id: int
+
     quantity: int
 
     purpose_of_use: Optional[str] = None
@@ -523,6 +529,8 @@ class InventoryRequestCreate(BaseModel):
 
     part_id: int
 
+    operation_id: int
+
     quantity: int
 
     purpose_of_use: Optional[str] = None
@@ -540,6 +548,8 @@ class InventoryRequestUpdate(BaseModel):
     project_id: Optional[int] = None
 
     part_id: Optional[int] = None
+
+    operation_id: Optional[int] = None
 
     quantity: Optional[int] = None
 
@@ -573,6 +583,10 @@ class InventoryRequestWithDetails(InventoryRequest):
 
     tool_type: Optional[str] = None
 
+    tool_range: Optional[str] = None
+
+    identification_code: Optional[str] = None
+
     operator_name: Optional[str] = None
 
     inventory_supervisor_name: Optional[str] = None
@@ -580,6 +594,14 @@ class InventoryRequestWithDetails(InventoryRequest):
     project_name: Optional[str] = None
 
     part_name: Optional[str] = None
+
+    part_number: Optional[str] = None
+
+    product_name: Optional[str] = None
+
+    operation_name: Optional[str] = None
+
+    operation_number: Optional[str] = None
 
 
 
@@ -871,11 +893,25 @@ class ToolIssueWithDetails(ToolIssue):
 
     tool_name: Optional[str] = None
 
+    tool_range: Optional[str] = None
+
+    identification_code: Optional[str] = None
+
     operator_name: Optional[str] = None
 
     inventory_supervisor_name: Optional[str] = None
 
     sale_order_number: Optional[str] = None
+
+    part_name: Optional[str] = None
+
+    part_number: Optional[str] = None
+
+    product_name: Optional[str] = None
+
+    operation_name: Optional[str] = None
+
+    operation_number: Optional[str] = None
 
 
 

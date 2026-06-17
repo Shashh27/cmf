@@ -102,6 +102,10 @@ from notification_routers import (
 
 from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
 
+# Import operation checklists router
+
+from routers.operation_checklists import router as operation_checklists_router
+
 
 
 # Import document routers
@@ -285,6 +289,8 @@ app.include_router(transaction_history_router, prefix="/api/v1")
 app.include_router(pokayoke_checklists_router, prefix="/api/v1")
 
 app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
+
+app.include_router(operation_checklists_router, prefix="/api/v1")
 
 app.include_router(tool_issues_router, prefix="/api/v1")
 

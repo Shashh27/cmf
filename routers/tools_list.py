@@ -215,12 +215,16 @@ def get_category_tree(db: Session = Depends(get_db)):
             ToolsListModel.category,
             ToolsListModel.sub_category,
             ToolsListModel.item_description,
+            ToolsListModel.range,
+            ToolsListModel.identification_code,
             func.count(ToolsListModel.id).label("count"),
         )
         .group_by(
             ToolsListModel.category,
             ToolsListModel.sub_category,
             ToolsListModel.item_description,
+            ToolsListModel.range,
+            ToolsListModel.identification_code,
         )
         .order_by(
             ToolsListModel.category,
@@ -236,6 +240,8 @@ def get_category_tree(db: Session = Depends(get_db)):
         cat  = row.category         or "Misc"
         sub  = row.sub_category     or "General"
         item = row.item_description or "Unknown"
+        rng  = row.range
+        id_code = row.identification_code
         cnt  = row.count
 
         if cat not in tree:
@@ -249,7 +255,7 @@ def get_category_tree(db: Session = Depends(get_db)):
             }
 
         tree[cat]["sub_categories"][sub]["items"].append(
-            ItemNode(item_description=item, count=cnt)
+            ItemNode(item_description=item, count=cnt, range=rng, identification_code=id_code)
         )
         tree[cat]["sub_categories"][sub]["count"] += cnt
         tree[cat]["total_count"] += cnt

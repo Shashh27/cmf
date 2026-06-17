@@ -192,3 +192,81 @@ class PokayokeItemResponse(Base):
     completed_log = relationship("PokayokeCompletedLog", back_populates="item_responses")
     item = relationship("PokayokeChecklistItem")
     approver = relationship("AccessUser")
+
+
+# =======================
+# Operation Checklists
+# =======================
+class OperationChecklist(Base):
+    __tablename__ = "operation_checklists"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    type = Column(String, nullable=False)  # 'general' or 'custom'
+    created_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    operation_assignments = relationship("OperationChecklistAssign", back_populates="checklist", cascade="all, delete-orphan")
+    submission_details = relationship("SubmissionDetail", back_populates="checklist", cascade="all, delete-orphan")
+    creator = relationship("AccessUser", foreign_keys=[created_by])
+
+
+class OperationChecklistAssign(Base):
+    __tablename__ = "operation_checklist_assign"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
+    checklist_id = Column(Integer, ForeignKey("configuration.operation_checklists.id"), nullable=False)
+    assigned_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    checklist = relationship("OperationChecklist", back_populates="operation_assignments")
+    assigner = relationship("AccessUser", foreign_keys=[assigned_by])
+
+
+class Submission(Base):
+    __tablename__ = "submissions"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=False)
+    operator = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    status = Column(String, nullable=False, default='pending')  # 'pending', 'approved', 'rejected'
+    submitted_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    supervisor = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    sup_action_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    sup_remarks = Column(Text, nullable=True)
+    supervisor_ack_by = Column(Boolean, nullable=True, default=None)
+    supervisor_ack_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    operator_ack_by = Column(Boolean, nullable=True, default=None)
+    operator_ack_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    mc_ack_by = Column(Boolean, nullable=True, default=None)
+    mc_ack_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    details = relationship("SubmissionDetail", back_populates="submission", cascade="all, delete-orphan")
+    operator_user = relationship("AccessUser", foreign_keys=[operator])
+    supervisor_user = relationship("AccessUser", foreign_keys=[supervisor])
+
+
+class SubmissionDetail(Base):
+    __tablename__ = "submission_details"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    sub_id = Column(Integer, ForeignKey("configuration.submissions.id"), nullable=False)
+    checklist_id = Column(Integer, ForeignKey("configuration.operation_checklists.id"), nullable=False)
+    response = Column(Boolean, nullable=True, default=None)  # True or False
+    op_remarks = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relationships
+    submission = relationship("Submission", back_populates="details")
+    checklist = relationship("OperationChecklist", back_populates="submission_details")

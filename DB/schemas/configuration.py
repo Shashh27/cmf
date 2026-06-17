@@ -157,10 +157,7 @@ class PokayokeChecklistItemBase(BaseModel):
 
 
 class PokayokeMachineAssignmentBase(BaseModel):
-    machine_id: Optional[int] = None  # Single machine (for backward compatibility)
-    machine_ids: Optional[List[int]] = None  # Multiple machines
-    checklist_id: Optional[int] = None  # Single checklist (for backward compatibility)
-    checklist_ids: Optional[List[int]] = None  # Multiple checklists
+    machine_id: int
     frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
     shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
     scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
@@ -203,8 +200,12 @@ class PokayokeChecklistCreate(PokayokeChecklistBase):
     items: List[PokayokeChecklistItemCreate] = []
 
 
-class PokayokeMachineAssignmentCreate(PokayokeMachineAssignmentBase):
-    pass
+class PokayokeMachineAssignmentCreate(BaseModel):
+    machine_ids: List[int]
+    checklist_ids: List[int]
+    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
+    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
+    scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
 
 
 # Update schemas
@@ -442,3 +443,141 @@ class SimpleCompletedLog(BaseModel):
 
 from .oms import Part as PartSchema, Order as OrderSchema
 PokayokeCompletedLogWithResponses.model_rebuild()
+
+
+# =======================
+# Operation Checklists Schemas
+# =======================
+class OperationChecklistBase(BaseModel):
+    name: str
+    type: str  # 'general' or 'custom'
+    created_by: int
+
+
+class OperationChecklistCreate(OperationChecklistBase):
+    pass
+
+
+class OperationChecklistUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+
+
+class OperationChecklist(OperationChecklistBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class OperationChecklistAssignBase(BaseModel):
+    operation_id: int
+    checklist_id: int
+    assigned_by: int
+
+
+class OperationChecklistAssignCreate(OperationChecklistAssignBase):
+    pass
+
+
+class OperationChecklistAssignUpdate(BaseModel):
+    operation_id: Optional[int] = None
+    checklist_id: Optional[int] = None
+
+
+class OperationChecklistAssign(BaseModel):
+    id: int
+    operation_id: int
+    checklist_id: int
+    assigned_by: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class OperationChecklistAssignWithChecklist(OperationChecklistAssign):
+    checklist: OperationChecklist
+
+
+class SubmissionDetailBase(BaseModel):
+    sub_id: int
+    checklist_id: int
+    response: Optional[bool] = None
+    op_remarks: Optional[str] = None
+
+
+class SubmissionDetailCreate(BaseModel):
+    checklist_id: int
+    response: Optional[bool] = None
+    op_remarks: Optional[str] = None
+
+
+class SubmissionDetailUpdate(BaseModel):
+    response: Optional[bool] = None
+    op_remarks: Optional[str] = None
+
+
+class SubmissionDetail(SubmissionDetailBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SubmissionDetailWithChecklist(SubmissionDetail):
+    checklist: OperationChecklist
+
+
+class SubmissionBase(BaseModel):
+    operation_id: int
+    operator: int
+    status: str = 'pending'
+    supervisor: Optional[int] = None
+    sup_remarks: Optional[str] = None
+    supervisor_ack_by: Optional[bool] = None
+    operator_ack_by: Optional[bool] = None
+    mc_ack_by: Optional[bool] = None
+
+
+class SubmissionCreate(SubmissionBase):
+    details: List[SubmissionDetailCreate] = []
+
+
+class SubmissionUpdate(BaseModel):
+    status: Optional[str] = None
+    supervisor: Optional[int] = None
+    sup_remarks: Optional[str] = None
+    supervisor_ack_by: Optional[bool] = None
+    supervisor_ack_at: Optional[datetime] = None
+    operator_ack_by: Optional[bool] = None
+    operator_ack_at: Optional[datetime] = None
+    mc_ack_by: Optional[bool] = None
+    mc_ack_at: Optional[datetime] = None
+
+
+class SupervisorAction(BaseModel):
+    status: str  # 'approved' or 'rejected'
+    supervisor_id: Optional[int] = None
+    sup_remarks: Optional[str] = None
+
+
+class Submission(SubmissionBase):
+    id: int
+    submitted_at: datetime
+    sup_action_at: Optional[datetime] = None
+    supervisor_ack_at: Optional[datetime] = None
+    operator_ack_at: Optional[datetime] = None
+    mc_ack_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SubmissionWithDetails(Submission):
+    details: List[SubmissionDetail] = []

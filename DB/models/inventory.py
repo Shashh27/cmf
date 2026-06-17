@@ -275,6 +275,8 @@ class InventoryRequest(Base):
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
 
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=True)
+
     quantity = Column(Integer, nullable=False)
 
     purpose_of_use = Column(Text, nullable=True)
