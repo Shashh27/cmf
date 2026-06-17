@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
-import { Modal, Form, Input, DatePicker, Button, message, InputNumber } from "antd";
+import { Modal, Form, Input, DatePicker, Button, message, InputNumber, Select } from "antd";
 import dayjs from "dayjs";
 
 const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const [frequencyUnit, setFrequencyUnit] = useState(null);
 
   useEffect(() => {
     if (machine) {
+      const freqUnit = machine.calibration_frequency ? machine.calibration_frequency.split(' ')[1] : null;
+      setFrequencyUnit(freqUnit);
       form.setFieldsValue({
         work_center_id: machine.work_center_id || workCenterId,
         type: machine.type || "",
@@ -20,11 +23,13 @@ const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }
         cnc_controller_service: machine.cnc_controller_service || "",
         remarks: machine.remarks || "",
         calibration_date: machine.calibration_date ? dayjs(machine.calibration_date) : null,
-        calibration_due_date: machine.calibration_due_date ? dayjs(machine.calibration_due_date) : null,
+        calibration_frequency_value: machine.calibration_frequency ? parseInt(machine.calibration_frequency.split(' ')[0]) : null,
+        calibration_frequency_unit: freqUnit,
         password: machine.password || "",
       });
     } else {
       form.resetFields();
+      setFrequencyUnit(null);
       form.setFieldsValue({ work_center_id: workCenterId });
     }
   }, [machine, workCenterId, isOpen, form]);
@@ -43,7 +48,9 @@ const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }
       cnc_controller_service: values.cnc_controller_service || null,
       remarks: values.remarks || null,
       calibration_date: values.calibration_date ? values.calibration_date.toISOString() : null,
-      calibration_due_date: values.calibration_due_date ? values.calibration_due_date.toISOString() : null,
+      calibration_frequency: values.calibration_frequency_value && values.calibration_frequency_unit
+        ? `${values.calibration_frequency_value} ${values.calibration_frequency_unit}`
+        : null,
     };
 
     if (!machine) {
@@ -165,34 +172,94 @@ const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }
           <Form.Item
             name="calibration_date"
             label="Calibration Date"
+            tooltip="Latest calibration date"
           >
-            <DatePicker 
-              style={{ width: '100%' }} 
+            <DatePicker
+              style={{ width: '100%' }}
               inputReadOnly={true}
-              onChange={() => form.setFieldsValue({ calibration_due_date: null })}
             />
           </Form.Item>
 
           <Form.Item
-            noStyle
-            shouldUpdate={(prevValues, currentValues) => prevValues.calibration_date !== currentValues.calibration_date}
+            name="calibration_frequency"
+            label="Calibration Frequency"
+            tooltip="Frequency for calibration (e.g., every 6 months, 1 year)"
           >
-            {({ getFieldValue }) => (
+            <div style={{ display: 'flex', gap: '8px' }}>
               <Form.Item
-                name="calibration_due_date"
-                label="Calibration Due Date"
+                name="calibration_frequency_value"
+                noStyle
+                rules={[
+                  {
+                    validator: (_, value) => {
+                      if (!frequencyUnit) {
+                        return Promise.resolve();
+                      }
+                      if (!value) {
+                        return Promise.reject(new Error('Please enter a value'));
+                      }
+                      const numValue = Number(value);
+                      if (frequencyUnit === 'days' && (numValue < 1 || numValue > 365)) {
+                        return Promise.reject(new Error('Days must be between 1 and 365'));
+                      }
+                      if (frequencyUnit === 'months' && (numValue < 1 || numValue > 24)) {
+                        return Promise.reject(new Error('Months must be between 1 and 24'));
+                      }
+                      if (frequencyUnit === 'years' && (numValue < 1 || numValue > 10)) {
+                        return Promise.reject(new Error('Years must be between 1 and 10'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
               >
-                <DatePicker 
-                  style={{ width: '100%' }} 
-                  inputReadOnly={true}
-                  disabledDate={(current) => {
-                    const calibrationDate = getFieldValue('calibration_date');
-                    return current && calibrationDate && current.isBefore(calibrationDate, 'day');
+                <Input
+                  type="text"
+                  style={{ width: '100%' }}
+                  placeholder="Enter value"
+                  disabled={!frequencyUnit}
+                  maxLength={frequencyUnit === 'days' ? 3 : 2}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (!/^\d*$/.test(value)) {
+                      e.target.value = value.replace(/\D/g, '');
+                      form.setFieldsValue({ calibration_frequency_value: e.target.value });
+                      return;
+                    }
+                    if (value) {
+                      const numValue = Number(value);
+                      const maxValue = frequencyUnit === 'days' ? 365 : frequencyUnit === 'months' ? 24 : 10;
+                      if (numValue > maxValue) {
+                        form.setFieldsValue({ calibration_frequency_value: maxValue });
+                      }
+                    }
                   }}
-                  disabled={!getFieldValue('calibration_date')}
                 />
               </Form.Item>
-            )}
+              <Form.Item
+                name="calibration_frequency_unit"
+                noStyle
+              >
+                <Select
+                  style={{ width: '120px' }}
+                  placeholder="Unit"
+                  onChange={(value) => {
+                    setFrequencyUnit(value);
+                    form.setFieldsValue({ calibration_frequency_value: null });
+                  }}
+                >
+                  <Select.Option value="days">Days</Select.Option>
+                  <Select.Option value="months">Months</Select.Option>
+                  <Select.Option value="years">Years</Select.Option>
+                </Select>
+              </Form.Item>
+            </div>
+            <div style={{ fontSize: '12px', color: '#8c8c8c', marginTop: '4px' }}>
+              {frequencyUnit === 'days' && 'Valid range: 1-365 days'}
+              {frequencyUnit === 'months' && 'Valid range: 1-24 months'}
+              {frequencyUnit === 'years' && 'Valid range: 1-10 years'}
+              {!frequencyUnit && 'Select a unit first, then enter the value'}
+            </div>
           </Form.Item>
 
           <Form.Item

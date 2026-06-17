@@ -188,6 +188,13 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
       render: (text) => formatDate(text),
     },
     {
+      title: 'FREQUENCY',
+      dataIndex: 'calibration_frequency',
+      key: 'calibration_frequency',
+      align: 'center',
+      render: (text) => text || "-",
+    },
+    {
       title: 'PASSWORD',
       dataIndex: 'password',
       key: 'password',
