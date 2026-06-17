@@ -766,9 +766,10 @@ def get_product_summary_data(product_id: int, db: Session = Depends(get_db)):
             OperationModel.part_id.in_(part_ids)
         ).order_by(OperationModel.id.asc()).all()
 
-    # Get machine names
+    # Get machine names + mhr rates
     all_machines = db.query(MachineModel).all()
     machine_map = {m.id: m.make for m in all_machines}
+    machine_mhr_map = {m.id: (m.mhr or 0) for m in all_machines}
 
     # Get part type names
     all_part_types = db.query(PartTypeModel).all()
@@ -798,6 +799,7 @@ def get_product_summary_data(product_id: int, db: Session = Depends(get_db)):
                         "cycle_time": str(op.cycle_time) if op.cycle_time else "00:00:00",
                         "machine_id": op.machine_id,
                         "machine_name": machine_map.get(op.machine_id),
+                        "mhr_rate": machine_mhr_map.get(op.machine_id, 0),
                         "part_type_id": op.part_type_id,
                         "part_type_name": part_type_map.get(op.part_type_id),
                     }

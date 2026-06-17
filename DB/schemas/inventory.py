@@ -123,6 +123,8 @@ class RawMaterialStockBase(BaseModel):
     received_vendor_id: Optional[int] = None  # Final vendor who received the order
 
     user_id: Optional[int] = None
+    
+    merge_group_id: Optional[str] = None  # UUID to track merged orders for bulk vendor linking
 
     status: str = "available"
     
@@ -137,10 +139,6 @@ class RawMaterialStockBase(BaseModel):
     @classmethod
 
     def validate_process_type(cls, v):
-
-        if v not in ["Forging", "Barstocks", "Casting"]:
-
-            raise ValueError('process_type must be "Forging", "Barstocks", or "Casting"')
 
         return v
 
@@ -227,6 +225,8 @@ class RawMaterialStockUpdate(BaseModel):
     received_vendor_id: Optional[int] = None  # Final vendor who received the order
 
     user_id: Optional[int] = None
+    
+    merge_group_id: Optional[str] = None  # UUID to track merged orders for bulk vendor linking
 
     status: Optional[str] = None
     

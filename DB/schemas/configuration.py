@@ -50,6 +50,7 @@ class MachineBase(BaseModel):
     cnc_controller: Optional[str] = None
     cnc_controller_service: Optional[str] = None
     remarks: Optional[str] = None
+    mhr: Optional[int] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     password: str
@@ -69,6 +70,7 @@ class MachineUpdate(BaseModel):
     cnc_controller: Optional[str] = None
     cnc_controller_service: Optional[str] = None
     remarks: Optional[str] = None
+    mhr: Optional[int] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     password: Optional[str] = None
@@ -90,6 +92,7 @@ class MachinePublic(BaseModel):
     cnc_controller: Optional[str] = None
     cnc_controller_service: Optional[str] = None
     remarks: Optional[str] = None
+    mhr: Optional[int] = None
     calibration_date: Optional[datetime] = None
     calibration_due_date: Optional[datetime] = None
     id: int

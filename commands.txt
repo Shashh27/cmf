@@ -1,4 +1,18 @@
-uvicorn main:app --reload --host 172.18.7.89 --port 8000
+# Start Redis server (Docker)
+docker run -d -p 6379:6379 redis
+
+# Start Ollama server
+ollama serve
+
+# Start backend server
+uvicorn main:app --reload --host 172.18.7.86 --port 3000
+
+
+
+
+
+
+
 
 
 docker build -t vinny520/cmf-3dviewer:v1 .

@@ -70,8 +70,14 @@ from routers import (
     production_analytics_router,
 )
 
+# Import planned raw materials router
+from routers.planned_raw_materials import router as planned_raw_materials_router
+
 # Import recycle bin router
 from recyclebin_router.recyclebin import router as recycle_bin_router
+
+# Import chatbot router
+from chatbot.chatbot import router as chatbot_router
 
 # Import scheduling router
 
@@ -307,6 +313,10 @@ app.include_router(production_analytics_router, prefix="/api/v1")
 app.include_router(raw_material_summary_router, prefix="/api/v1")
 
 app.include_router(recycle_bin_router, prefix="/api/v1")
+
+app.include_router(planned_raw_materials_router, prefix="/api/v1")
+
+app.include_router(chatbot_router, prefix="/api/chatbot")
 
 # app.include_router(production_logs_router, prefix="/api/v1")
 

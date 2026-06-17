@@ -51,6 +51,7 @@ class Machine(Base):
     cnc_controller = Column(String)
     cnc_controller_service = Column(String)
     remarks = Column(String)
+    mhr = Column(Integer, nullable=True)
     calibration_date = Column(TIMESTAMP)
     calibration_due_date = Column(TIMESTAMP)
     password = Column(String, nullable=False)

@@ -134,6 +134,8 @@ class RawMaterialStock(Base):
     received_vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Final vendor who received the order
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    
+    merge_group_id = Column(String, nullable=True)  # UUID to track merged orders for bulk vendor linking
 
     status = Column(String, nullable=False, default="available")
     
