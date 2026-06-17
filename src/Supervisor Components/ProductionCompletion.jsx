@@ -343,15 +343,16 @@ const ProductionCompletion = () => {
 
   const columns = [
     {
-      title: 'SL No',
+      title: 'Sl No',
       key: 'sl_no',
-      width: 60,
+      width: 50,
       align: 'center',
       render: (_, __, index) => (currentPage - 1) * pageSize + index + 1,
     },
     {
       title: 'Project Details',
       key: 'project_details',
+      width: 120,
       fixed: 'left',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -363,6 +364,7 @@ const ProductionCompletion = () => {
     {
       title: 'Part Details',
       key: 'part_details',
+      width: 120,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
           <Text strong>{highlightText(record.operation?.part?.part_name, searchText)}</Text>
@@ -373,6 +375,7 @@ const ProductionCompletion = () => {
     {
       title: 'Operation Details',
       key: 'operation_details',
+      width: 120,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
           <Text strong>{highlightText(record.planned_schedule_item?.operation_name, searchText)}</Text>
@@ -388,47 +391,48 @@ const ProductionCompletion = () => {
     {
       title: 'Machine',
       key: 'machine',
+      width: 120,
       render: (_, record) => <Text style={{ fontSize: 12 }}>{highlightText(record.planned_schedule_item?.machine_name, searchText)}</Text>,
     },
     {
       title: 'Total Qty',
       key: 'total_quantity',
-      width: 100,
+      width: 80,
       render: (_, record) => <Text>{record.operation?.part?.quantity || 'N/A'} {record.operation?.part?.unit || ''}</Text>,
     },
     {
       title: 'Produced Qty',
       dataIndex: 'produced_quantity',
       key: 'produced_quantity',
-      width: 100,
+      width: 80,
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
       title: 'Approved Qty',
       dataIndex: 'approved_quantity',
       key: 'approved_quantity',
-      width: 100,
+      width: 80,
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
       title: 'Rework Qty',
       dataIndex: 'rework_quantity',
       key: 'rework_quantity',
-      width: 100,
+      width: 80,
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
       title: 'Rejected Qty',
       dataIndex: 'rejected_quantity',
       key: 'rejected_quantity',
-      width: 100,
+      width: 80,
       render: (qty) => <Text style={{ fontSize: 12 }}>{qty ?? '-'}</Text>,
     },
     {
       title: 'Notes',
       dataIndex: 'notes',
       key: 'notes',
-      width: 120,
+      width: 100,
       render: (notes) => {
         const display = notes ? (notes.length > 20 ? `${notes.substring(0, 20)}...` : notes) : '-';
         return (
@@ -476,7 +480,7 @@ const ProductionCompletion = () => {
       title: 'Remarks',
       dataIndex: 'remarks',
       key: 'remarks',
-      width: 120,
+      width: 100,
       render: (remarks) => {
         const display = remarks ? (remarks.length > 20 ? `${remarks.substring(0, 20)}...` : remarks) : '-';
         return (
@@ -492,6 +496,7 @@ const ProductionCompletion = () => {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
+      width: 80,
       filters: [
         { text: 'Pending', value: 'pending' },
         { text: 'Completed', value: 'completed' },

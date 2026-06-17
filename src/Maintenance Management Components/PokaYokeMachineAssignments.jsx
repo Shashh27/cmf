@@ -301,7 +301,7 @@ const AssignmentCard = ({ assignment, onViewItems, onDelete }) => (
           cancelText="Cancel"
           okButtonProps={{ danger: true }}
         >
-          {/* <Button
+          <Button
             type="text"
             size="small"
             icon={<DeleteOutlined />}
@@ -317,7 +317,7 @@ const AssignmentCard = ({ assignment, onViewItems, onDelete }) => (
             onMouseLeave={e => {
               e.currentTarget.style.background = 'transparent';
             }}
-          /> */}
+          />
         </Popconfirm>
       </div>
     </div>
@@ -373,13 +373,21 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
   };
 
   const handleAssignChecklist = async (values) => {
-    if (!selectedMachine) return;
+    if (!values.machine_ids || values.machine_ids.length === 0) {
+      message.error('Please select at least one machine');
+      return;
+    }
+    if (!values.checklist_ids || values.checklist_ids.length === 0) {
+      message.error('Please select at least one checklist');
+      return;
+    }
     try {
-      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/${values.checklist_id}/assignments`, {
+      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/assignments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          machine_id: selectedMachine,
+          machine_ids: values.machine_ids,
+          checklist_ids: values.checklist_ids,
           frequency: values.frequency,
           shift: values.frequency === 'Daily' ? values.shift : null,
           scheduled_day: values.frequency === 'Weekly' ? values.dayOfWeek
@@ -390,7 +398,8 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       message.success('Checklist assigned successfully');
       setAssignModalVisible(false);
       form.resetFields();
-      fetchMachineAssignments(selectedMachine);
+      // Refresh assignments for all selected machines
+      values.machine_ids.forEach(machineId => fetchMachineAssignments(machineId));
     } catch (e) { message.error('Failed to assign checklist: ' + e.message); }
   };
 
@@ -590,12 +599,17 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         <Text strong style={{ fontSize: 13, color: T.textMid, whiteSpace: 'nowrap' }}>Select Machine:</Text>
         <div style={{ flex: '1 1 280px', minWidth: 220 }}>
           <Select
+            showSearch
             placeholder="Choose a machine to view assignments"
             loading={machinesLoading}
             onFocus={fetchMachines}
             style={{ width: '100%' }}
             value={selectedMachine}
             onChange={setSelectedMachine}
+            filterOption={(input, opt) =>
+              (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
+                .toString().toLowerCase().includes(input.toLowerCase())
+            }
           >
             {machines.map(m => (
               <Option key={m.id} value={m.id}>{m.make} - {m.model || 'N/A'}</Option>
@@ -615,15 +629,21 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
             loading={loading}
             style={{ borderRadius: 8 }}
           >Refresh</Button>
-          {/* <Button
+          <Button
             type="primary" icon={<PlusOutlined />}
             onClick={() => {
-              if (!selectedMachine) { message.warning('Select a machine first'); return; }
               fetchChecklists();
+              fetchMachines();
+              // Pre-select the currently selected machine if any
+              if (selectedMachine) {
+                form.setFieldsValue({ machine_ids: [selectedMachine] });
+              } else {
+                form.setFieldsValue({ machine_ids: [] });
+              }
               setAssignModalVisible(true);
             }}
             style={{ background: T.primary, borderColor: T.primary, borderRadius: 8, fontWeight: 600 }}
-          >New Assignment</Button> */}
+          >New Assignment</Button>
         </div>
       </div>
 
@@ -788,10 +808,30 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         footer={null}
         width={480}
         centered
+        maskClosable={false}
       >
         <Form form={form} layout="vertical" onFinish={handleAssignChecklist} style={{ marginTop: 20 }}>
-          <Form.Item name="checklist_id" label="Select Checklist" rules={[{ required: true, message: 'Please select a checklist' }]}>
-            <Select placeholder="Select a checklist" loading={checklistsLoading} showSearch
+          <Form.Item name="machine_ids" label="Select Machines" rules={[{ required: true, message: 'Please select at least one machine' }]}>
+            <Select 
+              mode="multiple"
+              placeholder="Select machines" 
+              loading={machinesLoading}
+              onFocus={fetchMachines}
+              showSearch
+              filterOption={(input, opt) =>
+                (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
+                  .toString().toLowerCase().includes(input.toLowerCase())}
+            >
+              {machines.map(m => <Option key={m.id} value={m.id}>{m.make} - {m.model || 'N/A'}</Option>)}
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="checklist_ids" label="Select Checklists" rules={[{ required: true, message: 'Please select at least one checklist' }]}>
+            <Select 
+              mode="multiple"
+              placeholder="Select checklists" 
+              loading={checklistsLoading} 
+              showSearch
               filterOption={(input, opt) =>
                 (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
                   .toString().toLowerCase().includes(input.toLowerCase())}
@@ -843,13 +883,6 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
             }}
           </Form.Item>
 
-          {selectedMachine && (
-            <div style={{ background: T.primaryBg, padding: 12, borderRadius: 8, marginBottom: 16, border: `1px solid ${T.primary}22` }}>
-              <Text style={{ color: T.primary, fontSize: 13 }}>
-                <strong>Machine:</strong> {machineLabel}
-              </Text>
-            </div>
-          )}
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>

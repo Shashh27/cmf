@@ -283,6 +283,10 @@ const Login = () => {
               onChange={handleRoleSelect}
               size="large"
               style={{ width: 360 }}
+              showSearch
+              filterOption={(input, option) =>
+                option.children.toLowerCase().includes(input.toLowerCase())
+              }
               prefix={<UserOutlined style={{ color: '#000000', opacity: 0.65 }} />}
             >
               {roleOptions.map(opt => (

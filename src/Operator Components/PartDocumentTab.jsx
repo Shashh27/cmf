@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message } from 'antd';
+import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message, Tooltip } from 'antd';
 import { FileTextOutlined, EyeOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import ModelViewer3D from './ModelViewer3D';
+import OperationChecklist from './OperationChecklist';
 
 
 const { TabPane } = Tabs;
@@ -51,6 +52,12 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const [isActivateModalVisible, setIsActivateModalVisible] = useState(false);
   const [operationToActivate, setOperationToActivate] = useState(null);
 
+  // Poka-Yoke Checklist State
+  const [isChecklistVisible, setIsChecklistVisible] = useState(false);
+  const [checklistOperationId, setChecklistOperationId] = useState(null);
+  const [submissionStatuses, setSubmissionStatuses] = useState({});
+  const [checklistAssigned, setChecklistAssigned] = useState({});
+
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
   const [productionStats, setProductionStats] = useState({
@@ -73,6 +80,12 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     setSessionActivationTime(null);
     setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '', operatorStatus: null });
   }, [selectedJob?.schedule_id]);
+
+  useEffect(() => {
+    if (partData) {
+      fetchSubmissionStatuses();
+    }
+  }, [partData]);
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -264,7 +277,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const operationColumns = [
     {
-      title: 'Operation Number', key: 'op_num',
+      title: 'Operation No', key: 'op_num',
       render: (record) => record.operation_number || record.number || record.op_no || '-'
     },
     {
@@ -309,6 +322,38 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       render: (record) => record.part_type_name || record.operation_type || record.type || record.op_type || '-'
     },
     {
+      title: 'Work Instructions', key: 'work_instructions',
+      render: (record) => {
+        const instructions = record.work_instructions || '-';
+        // If instructions are long, truncate and show full text in tooltip
+        const isLong = instructions.length > 50;
+        const displayText = isLong ? instructions.substring(0, 50) + '...' : instructions;
+        return (
+          <Tooltip title={isLong ? instructions : undefined} placement="topLeft">
+            <Text style={{ fontSize: 12 }}>
+              {displayText}
+            </Text>
+          </Tooltip>
+        );
+      }
+    },
+    {
+      title: 'Notes', key: 'notes',
+      render: (record) => {
+        const notes = record.notes || '-';
+        const isLong = notes.length > 30;
+        const displayText = isLong ? notes.substring(0, 30) + '...' : notes;
+        return (
+          <Tooltip title={isLong ? notes : undefined} placement="topLeft">
+            <Text style={{ fontSize: 12 }}>
+              {displayText}
+            </Text>
+          </Tooltip>
+        );
+      }
+    },
+    
+    {
       title: 'Activation Time', key: 'activation_time',
       render: (record) => {
         const opId = record.operation_id || record.id || record.operation_number || record.number;
@@ -339,7 +384,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           // Re-format nicely
           const d = dayjs(activationTime);
           if (d.isValid()) {
-            return d.format('DD-MM-YYYY HH:mm:ss');
+            return d.format('DD-MM-YYYY, HH:mm:ss');
           }
           return activationTime; // Fallback to raw string if dayjs fails
         } catch (e) {
@@ -367,10 +412,30 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         return (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Button
+              type="default"
+              size="small"
+              block
+              onClick={(e) => {
+                e.stopPropagation();
+                if (submissionStatuses[record.id] === 'pending') {
+                  message.info('Supervisor approval required');
+                } else {
+                  handleShowChecklist(record);
+                }
+              }}
+              style={{
+                backgroundColor: submissionStatuses[record.id] === 'approved' ? '#52c41a' : submissionStatuses[record.id] === 'rejected' ? '#ff4d4f' : '#fa8c16',
+                borderColor: submissionStatuses[record.id] === 'approved' ? '#52c41a' : submissionStatuses[record.id] === 'rejected' ? '#ff4d4f' : '#fa8c16',
+                color: '#fff'
+              }}
+            >
+              Poka-Yoke
+            </Button>
+            <Button
               type="primary"
               size="small"
               block
-              disabled={isDisabled}
+              disabled={isDisabled || (checklistAssigned[record.id] && (!submissionStatuses[record.id] || submissionStatuses[record.id] !== 'approved'))}
               loading={activating}
               onClick={(e) => { e.stopPropagation(); handleShowActivateModal(record); }}
               style={effectivelyActivated ? {
@@ -467,6 +532,65 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       part_id: selectedJob?.part_id || selectedJob?.id,
       quantity: 1,
     });
+  };
+
+  const handleShowChecklist = (operation) => {
+    const opId = operation.operation_id || operation.id;
+    setChecklistOperationId(opId);
+    setIsChecklistVisible(true);
+  };
+
+  const fetchSubmissionStatuses = async () => {
+    try {
+      const allOperations = partData?.operations || partData?.part_operations || partData?.partOperations || [];
+      let operatorId = null;
+      try {
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          operatorId = user.id;
+        }
+      } catch (e) {
+        console.error('Error parsing user from local storage', e);
+      }
+
+      if (!operatorId) return;
+
+      const statuses = {};
+      const checklistAssigned = {};
+
+      for (const op of allOperations) {
+        // Check if checklist is assigned to this operation
+        try {
+          const assignmentResponse = await axios.get(
+            `${API_BASE_URL}/operation-checklists/assignments?operation_id=${op.id}`
+          );
+          if (assignmentResponse.status === 200 && assignmentResponse.data && assignmentResponse.data.length > 0) {
+            checklistAssigned[op.id] = true;
+          } else {
+            checklistAssigned[op.id] = false;
+          }
+        } catch (error) {
+          checklistAssigned[op.id] = false;
+        }
+
+        // Fetch submission status
+        try {
+          const response = await axios.get(
+            `${API_BASE_URL}/operation-checklists/submissions/latest?operation_id=${op.id}&operator=${operatorId}`
+          );
+          if (response.status === 200 && response.data.status) {
+            statuses[op.id] = response.data.status;
+          }
+        } catch (error) {
+          // No submission for this operation - don't set status
+        }
+      }
+      setSubmissionStatuses(statuses);
+      setChecklistAssigned(checklistAssigned);
+    } catch (error) {
+      console.error('Failed to fetch submission statuses:', error);
+    }
   };
 
   const handleShowActivateModal = (operation) => {
@@ -934,6 +1058,13 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             <Empty description="No preview available for this file type. Please download to view." />
          )}
       </Modal>
+
+      {/* Poka-Yoke Checklist Popup */}
+      <OperationChecklist
+        visible={isChecklistVisible}
+        onClose={() => setIsChecklistVisible(false)}
+        operationId={checklistOperationId}
+      />
 
       {/* Complete Operation Modal */}
       <Modal

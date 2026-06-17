@@ -93,6 +93,10 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
                 if (value !== value.trim()) {
                   return Promise.reject(new Error('Username cannot have leading or trailing spaces'));
                 }
+                // Add this check for consecutive spaces
+                if (/  +/.test(value)) {
+                  return Promise.reject(new Error('Username cannot have consecutive spaces'));
+                }
                 const isDuplicate = existingUsers.some(
                   (u) =>
                     u.username?.toLowerCase() === value.toLowerCase() &&

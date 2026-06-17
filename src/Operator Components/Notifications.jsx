@@ -668,7 +668,7 @@ const Notifications = () => {
               key: 'pokayoke',
               label: (
                 <Badge count={pokayokeNotifications.filter(log => !log.operator_acknowledged).length} showZero={false}>
-                  Pokayoke Checklists
+                  Preventive Maintenance Checklists
                 </Badge>
               ),
               children: (

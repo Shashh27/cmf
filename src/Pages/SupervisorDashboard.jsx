@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import ProductionCompletion from '../Supervisor Components/ProductionCompletion';
 import AssetsAvailability from '../Supervisor Components/AssetsAvailability';
 import PreventiveMaintenance from '../Supervisor Components/PreventiveMaintenance';
+import PokaYokeOperationChecklist from '../Supervisor Components/PokaYokeOperationChecklist';
 
 const SupervisorDashboard = () => {
   const location = useLocation();
@@ -14,6 +15,9 @@ const SupervisorDashboard = () => {
     }
     if (path.includes('/product-monitoring/pokayoke-checklists')) {
       return <PreventiveMaintenance />;
+    }
+    if (path.includes('/pokayoke-operation-checklists')) {
+      return <PokaYokeOperationChecklist />;
     }
     return <ProductionCompletion />;
   };

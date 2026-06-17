@@ -4,7 +4,7 @@ import { Layout, Menu, Drawer, Button, Badge } from "antd";
 
 import { Link, useLocation } from "react-router-dom";
 
-import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,
+import { AppstoreOutlined, DeploymentUnitOutlined, SettingOutlined, ShoppingCartOutlined,DashboardOutlined,MonitorOutlined,ToolOutlined,CarryOutOutlined,
 
   SafetyCertificateOutlined,DatabaseOutlined,FileTextOutlined,BellOutlined,LockOutlined,MenuOutlined,CloseOutlined,ExperimentOutlined,CalendarOutlined,BuildOutlined,HistoryOutlined,SyncOutlined,DeleteOutlined
 
@@ -140,29 +140,7 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
     }
 
-
-
-    // Poll for notification count every 30 seconds
-
-    const interval = setInterval(() => {
-
-      if (prefix === '/operator') {
-
-        fetchOperatorNotificationCount();
-
-      } else if (prefix === '/supervisor') {
-
-        fetchSupervisorNotificationCount();
-
-      }
-
-    }, 30000);
-
-
-
-    return () => clearInterval(interval);
-
-  }, [prefix]);
+  }, []);
 
 
 
@@ -902,6 +880,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
       },
       {
+        key: `${prefix}/create-inspection-plan`,
+
+        label: <Link to={`${prefix}/create-inspection-plan`} onClick={() => setMobileDrawerOpen(false)}>Create Inspection Plan</Link>,
+
+        icon: <BuildOutlined />,
+
+      },
+      {
 
         key: `${prefix}/pps/assets-availability`,
 
@@ -910,25 +896,22 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <AppstoreOutlined />,
 
       },
-
       {
 
         key: `${prefix}/product-monitoring/pokayoke-checklists`,
 
         label: <Link to={`${prefix}/product-monitoring/pokayoke-checklists`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
 
-        icon: <SafetyCertificateOutlined />,
+        icon: <CarryOutOutlined  />,
 
       },
       {
-        key: `${prefix}/create-inspection-plan`,
+        key: `${prefix}/pokayoke-operation-checklists`,
 
-        label: <Link to={`${prefix}/create-inspection-plan`} onClick={() => setMobileDrawerOpen(false)}>Create Inspection Plan</Link>,
+        label: <Link to={`${prefix}/pokayoke-operation-checklists`} onClick={() => setMobileDrawerOpen(false)}>PokaYoke Checklist</Link>,
 
-        icon: <BuildOutlined />,
-
+        icon: <SafetyCertificateOutlined />,
       },
-
       {
         key: `${prefix}/notifications`,
 
@@ -1166,7 +1149,4 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 };
 
-
-
 export default Sidebar;
-

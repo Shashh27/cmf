@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, message, Button, Modal, Input } from 'antd';
+import { Table, Tag, message, Button, Modal, Input, Tooltip } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth';
  
@@ -35,7 +35,8 @@ const ToolIssues = () => {
       const resp = await fetch(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      setIssues(Array.isArray(data) ? data : []);
+      const sortedData = Array.isArray(data) ? data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [];
+      setIssues(sortedData);
     } catch (e) {
       console.error('Failed to load tool issues', e);
       message.error('Failed to load tool issues');
@@ -65,9 +66,9 @@ const ToolIssues = () => {
  
   const columns = [
     {
-      title: 'SL NO',
+      title: 'Sl No',
       key: 'sl_no',
-      width: 70,
+      width: 50,
       align: 'center',
       render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1,
     },
@@ -75,8 +76,7 @@ const ToolIssues = () => {
       title: 'Tool Name',
       dataIndex: 'tool_name',
       key: 'tool_name',
-      width: 200,
-      ellipsis: true,
+      width: 120,
       filteredValue: [searchText],
       onFilter: (value, record) =>
         String(record.tool_name || '').toLowerCase().includes(value.toLowerCase()) ||
@@ -85,39 +85,95 @@ const ToolIssues = () => {
       sorter: (a, b) => (a.tool_name || '').localeCompare(b.tool_name || ''),
     },
     {
-      title: 'Project Number',
+      title: 'Range',
+      dataIndex: 'tool_range',
+      key: 'tool_range',
+      width: 80,
+      render: (text) => text || '-',
+    },
+    {
+      title: 'ID Code',
+      dataIndex: 'identification_code',
+      key: 'identification_code',
+      width: 100,
+      render: (text) => text || '-',
+    },
+    {
+      title: 'Project',
       dataIndex: 'sale_order_number',
       key: 'project_number',
-      width: 140,
-      ellipsis: true,
-      render: (_, record) => record.sale_order_number || record.project_name || '-',
+      width: 120,
+      render: (_, record) => {
+        const projName = record.sale_order_number || record.project_name || '-';
+        const productName = record.product_name || '';
+        return (
+          <div>
+            <div>{projName}</div>
+            {productName && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>{productName}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Part',
+      dataIndex: 'part_name',
+      key: 'part_name',
+      width: 120,
+      render: (_, record) => {
+        const partName = record.part_name || '-';
+        const partNum = record.part_number || '';
+        return (
+          <div>
+            <div>{partName}</div>
+            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{partNum}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Operation',
+      key: 'operation',
+      width: 120,
+      render: (_, record) => {
+        const opName = record.operation_name || '-';
+        const opNum = record.operation_number || '';
+        return (
+          <div>
+            <div>{opName}</div>
+            {opNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{opNum}</div>}
+          </div>
+        );
+      },
     },
     {
       title: 'Issue Qty',
       dataIndex: 'tool_issue_qty',
       key: 'tool_issue_qty',
-      width: 120,
+      width: 80,
       align: 'center',
     },
     {
       title: 'Issue Category',
       dataIndex: 'issue_category',
       key: 'issue_category',
-      width: 140,
+      width: 120,
       render: (text) => text || '-',
     },
     {
       title: 'Description',
       dataIndex: 'description',
       key: 'description',
-      width: 240,
-      ellipsis: true,
-      render: (text) => text || '-',
+      width: 140,
+      render: (text) => text ? (
+        <Tooltip title={text} placement="topLeft">
+          <span style={{ cursor: 'pointer' }}>{text}</span>
+        </Tooltip>
+      ) : '-',
     },
     {
       title: 'Document',
       key: 'document',
-      width: 130,
+      width: 100,
       render: (_, record) => record.documents && record.documents.length > 0 ? (
         <Button size="small" onClick={() => { 
           const urls = record.documents.map(doc => doc.document_url);
@@ -129,10 +185,23 @@ const ToolIssues = () => {
       ) : '—'
     },
     {
+      title: 'Reported At',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 130,
+      render: (text) => {
+        if (!text) return '-';
+        const d = new Date(text);
+        const date = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+        const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        return `${date}, ${time}`;
+      },
+    },
+    {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 120,
+      width: 80,
       align: 'center',
       filteredValue: filters.status || null,
       render: (status) => (
@@ -148,10 +217,34 @@ const ToolIssues = () => {
       onFilter: (value, record) => record.status?.toLowerCase() === value,
     },
     {
-      title: 'Approved By',
+      title: 'Acknowledged At',
+      dataIndex: 'updated_at',
+      key: 'updated_at',
+      width: 130,
+      render: (text) => {
+        if (!text) return '-';
+        const d = new Date(text);
+        const date = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+        const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        return `${date}, ${time}`;
+      },
+    },
+    {
+      title: 'Remarks',
+      dataIndex: 'remarks',
+      key: 'remarks',
+      width: 140,
+      render: (text) => text ? (
+        <Tooltip title={text} placement="topLeft">
+          <span style={{ cursor: 'pointer' }}>{text}</span>
+        </Tooltip>
+      ) : '-',
+    },
+    {
+      title: 'Acknowledged By',
       dataIndex: 'inventory_supervisor_name',
       key: 'inventory_supervisor_name',
-      width: 140,
+      width: 130,
       render: (text) => text || '-',
     },
   ];
@@ -184,6 +277,15 @@ const ToolIssues = () => {
         }}
         onChange={handleTableChange}
         scroll={{ x: 1100 }}
+        components={{
+          header: {
+            cell: (props) => (
+              <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                {props.children}
+              </th>
+            ),
+          },
+        }}
       />
       <Modal
         title="Document Preview"

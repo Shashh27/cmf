@@ -37,6 +37,7 @@ export const InteractiveDrawing = forwardRef(({
   onRegionSelect,
   activeTool = 'pan',
   isLoading = false,
+  processingTip = 'Processing…',
   balloonColor = 'blue',
   sidebarOffset = 50,
   rotation = 0
@@ -374,6 +375,12 @@ export const InteractiveDrawing = forwardRef(({
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-white/80 backdrop-blur-sm">
             <Loader2 className="w-8 h-8 animate-spin text-sky-500/30" />
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Processing Drawing...</span>
+          </motion.div>
+        )}
+        {isLoading && !loading && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-white/60 backdrop-blur-[2px]">
+            <Loader2 className="w-8 h-8 animate-spin text-sky-500" />
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">{processingTip}</span>
           </motion.div>
         )}
         {error && (

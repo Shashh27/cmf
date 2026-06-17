@@ -122,6 +122,8 @@ const AccessControl = () => {
       title: 'Username',
       dataIndex: 'username',
       key: 'username',
+      sorter: (a, b) => a.username.localeCompare(b.username),
+      sortDirections: ['ascend', 'descend'],
     },
     {
       title: 'E-mail',
@@ -166,12 +168,24 @@ const AccessControl = () => {
       title: 'Created At',
       dataIndex: 'createdAt',
       key: 'createdAt',
+      sorter: (a, b) => {
+        const dateA = a.createdAt ? dayjs(a.createdAt).valueOf() : 0;
+        const dateB = b.createdAt ? dayjs(b.createdAt).valueOf() : 0;
+        return dateA - dateB;
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (text) => text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '-',
     },
     {
       title: 'Updated At',
       dataIndex: 'updatedAt',
       key: 'updatedAt',
+      sorter: (a, b) => {
+        const dateA = a.updatedAt ? dayjs(a.updatedAt).valueOf() : 0;
+        const dateB = b.updatedAt ? dayjs(b.updatedAt).valueOf() : 0;
+        return dateA - dateB;
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (text) => text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '-',
     },
     {

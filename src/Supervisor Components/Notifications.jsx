@@ -7,8 +7,92 @@ import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
 import dayjs from 'dayjs';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
+import { parseMasterBocBboxToPdfRect } from '../Quality Management Components/InspectorComponents/bocMappers';
+import PokayokeOperationNotification from './PokayokeOperationNotification';
 
 const { Title, Text } = Typography;
+
+const MONO_FONT = '"JetBrains Mono", "Consolas", "Courier New", monospace';
+
+function isBalloonOperationDocument(d) {
+  if (!d) return false;
+  const t = String(d.document_type || '').trim().toLowerCase();
+  return t === 'baloon' || t === 'balloon' || t.includes('balloon');
+}
+
+function isDrawingDocument(d) {
+  if (!d || isBalloonOperationDocument(d)) return false;
+  const type = (d.document_type || '').toLowerCase();
+  const name = (d.document_name || '').toLowerCase();
+  const url = (d.document_url || '').toLowerCase();
+  const isPdfFile = url.endsWith('.pdf') || type.includes('pdf');
+  return (
+    type.includes('2d') ||
+    type.includes('drawing') ||
+    name.includes('drawing') ||
+    isPdfFile ||
+    url.endsWith('.png') ||
+    url.endsWith('.jpg') ||
+    url.endsWith('.jpeg')
+  );
+}
+
+function toPlanDrawingInfo(doc, endpoint) {
+  const isPdf =
+    (doc.document_url || '').toLowerCase().endsWith('.pdf') ||
+    (doc.document_type || '').toLowerCase().includes('pdf');
+  return {
+    url: `${QUALITY_API_BASE_URL}/${endpoint}/${doc.id}/preview`,
+    isPdf,
+    name: doc.document_name,
+    apiDocumentId: doc.id,
+    endpoint,
+  };
+}
+
+function resolvePlanDrawing(operationDocs, partDocs) {
+  const opDocs = Array.isArray(operationDocs) ? operationDocs : [];
+  const partDocList = Array.isArray(partDocs) ? partDocs : [];
+
+  const balloonOp = opDocs
+    .filter(isBalloonOperationDocument)
+    .sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0))[0];
+  if (balloonOp) return toPlanDrawingInfo(balloonOp, 'operation-documents');
+
+  const nonBalloonOp = opDocs.filter((d) => !isBalloonOperationDocument(d));
+  const nonBalloonPart = partDocList.filter((d) => !isBalloonOperationDocument(d));
+  const previewDrawing =
+    nonBalloonOp.find(isDrawingDocument) ||
+    nonBalloonPart.find(isDrawingDocument) ||
+    nonBalloonOp[0] ||
+    nonBalloonPart[0] ||
+    opDocs[0] ||
+    partDocList[0];
+
+  if (!previewDrawing) {
+    return { url: null, isPdf: false, name: '', apiDocumentId: null, endpoint: null };
+  }
+
+  const endpoint = previewDrawing.operation_id != null ? 'operation-documents' : 'documents';
+  return toPlanDrawingInfo(previewDrawing, endpoint);
+}
+
+const fmtPlanTol = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  if (Math.abs(n) < 1e-12) return '0';
+  return n > 0 ? `+${n}` : `${n}`;
+};
+
+const planDimensionTypeTagColor = (value) => {
+  const v = (value || '').toString().toLowerCase();
+  if (!v) return 'default';
+  if (v.includes('diameter')) return 'gold';
+  if (v.includes('length') || v.includes('linear')) return 'blue';
+  if (v.includes('angle')) return 'purple';
+  return 'geekblue';
+};
 
 const Notifications = () => {
   const navigate = useNavigate();
@@ -24,6 +108,7 @@ const Notifications = () => {
   const [activeTab, setActiveTab] = useState('production');
   const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
   const [query, setQuery] = useState('');
+  const [pokayokeChecklistUnacknowledgedCount, setPokayokeChecklistUnacknowledgedCount] = useState(0);
 
   // FTP Modal States
   const [ftpApproveModalOpen, setFtpApproveModalOpen] = useState(false);
@@ -34,11 +119,31 @@ const Notifications = () => {
   const [planDrawingIsPdf, setPlanDrawingIsPdf] = useState(true);
   const [planDrawingFileName, setPlanDrawingFileName] = useState(null);
 
+  const [planViewOpen, setPlanViewOpen] = useState(false);
+  const [planViewLoading, setPlanViewLoading] = useState(false);
+  const [planViewMeta, setPlanViewMeta] = useState(null);
+  const [planViewTableRows, setPlanViewTableRows] = useState([]);
+  const [planViewDrawingUrl, setPlanViewDrawingUrl] = useState('');
+  const [planViewDrawingIsPdf, setPlanViewDrawingIsPdf] = useState(true);
+  const [planViewDrawingFileName, setPlanViewDrawingFileName] = useState('');
+  const [planViewBalloonDocumentId, setPlanViewBalloonDocumentId] = useState(null);
+  const [planViewDrawingEndpoint, setPlanViewDrawingEndpoint] = useState(null);
+  const [planViewActiveBalloonId, setPlanViewActiveBalloonId] = useState(null);
+
   useEffect(() => {
     fetchNotifications();
     fetchPokayokeNotifications();
     fetchInspectionNotifications();
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'approval') return;
+    const refresh = () => {
+      void fetchInspectionNotifications();
+    };
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [activeTab]);
 
   const fetchNotifications = async () => {
     setLoading(true);
@@ -272,6 +377,103 @@ const Notifications = () => {
     }
   };
 
+  const planViewInteractiveBalloons = useMemo(() => {
+    return (planViewTableRows || [])
+      .map((r, idx) => {
+        const rect = parseMasterBocBboxToPdfRect(r.bbox);
+        if (!rect) return null;
+        return {
+          id: String(r.id),
+          label: String(idx + 1),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          page: rect.page || 1,
+        };
+      })
+      .filter(Boolean);
+  }, [planViewTableRows]);
+
+  const openPlanViewModal = async (record) => {
+    setPlanViewMeta({
+      orderNo: record.sale_order_number ?? record.order_id ?? '—',
+      partNo: record.part_number || '—',
+      opNo: record.op_no ?? '—',
+      opName: '',
+    });
+    setPlanViewOpen(true);
+    setPlanViewLoading(true);
+    setPlanViewTableRows([]);
+    setPlanViewDrawingUrl('');
+    setPlanViewDrawingFileName('');
+    setPlanViewBalloonDocumentId(null);
+    setPlanViewDrawingEndpoint(null);
+    setPlanViewActiveBalloonId(null);
+
+    const opNo = Number(record.op_no);
+    try {
+      let partPk = record.part_id;
+      if (!partPk && record.part_number) {
+        const pRes = await axios.get(`${QUALITY_API_BASE_URL}/parts/part-number/${record.part_number}`);
+        partPk = pRes.data?.id;
+      }
+
+      const [opDocsRes, partDocsRes, bocRes, opRes] = await Promise.all([
+        axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${record.operation_id}`),
+        partPk
+          ? axios.get(`${QUALITY_API_BASE_URL}/documents/part/${partPk}`)
+          : Promise.resolve({ data: [] }),
+        axios.get(`${QUALITY_API_BASE_URL}/quality/master-boc`, {
+          params: {
+            part_id: record.part_number,
+            sales_order_id: Number(record.order_id),
+            op_no: Number.isFinite(opNo) ? opNo : undefined,
+          },
+        }),
+        axios.get(`${QUALITY_API_BASE_URL}/operations/${record.operation_id}`),
+      ]);
+
+      const opName = opRes.data?.operation_name || '';
+      setPlanViewMeta((prev) => (prev ? { ...prev, opName } : prev));
+
+      const opDocs = Array.isArray(opDocsRes.data) ? opDocsRes.data : [];
+      const partDocs = Array.isArray(partDocsRes.data) ? partDocsRes.data : [];
+      const { url, isPdf, name, apiDocumentId, endpoint } = resolvePlanDrawing(opDocs, partDocs);
+
+      if (url && apiDocumentId) {
+        setPlanViewDrawingUrl(url);
+        setPlanViewDrawingIsPdf(isPdf);
+        setPlanViewDrawingFileName(name || '');
+        setPlanViewBalloonDocumentId(apiDocumentId);
+        setPlanViewDrawingEndpoint(endpoint);
+      }
+
+      setPlanViewTableRows(Array.isArray(bocRes.data) ? bocRes.data : []);
+    } catch (err) {
+      console.error(err);
+      const detail = err.response?.data?.detail;
+      message.error(typeof detail === 'string' ? detail : err.message || 'Failed to load plan details');
+    } finally {
+      setPlanViewLoading(false);
+    }
+  };
+
+  const handleDownloadPlanViewDrawing = () => {
+    if (!planViewDrawingUrl) return;
+    const id =
+      planViewBalloonDocumentId ??
+      planViewDrawingUrl.match(/(?:operation-documents|documents)\/(\d+)\//)?.[1];
+    if (!id) return;
+    const endpoint = planViewDrawingEndpoint || 'operation-documents';
+    const a = document.createElement('a');
+    a.href = `${QUALITY_API_BASE_URL}/${endpoint}/${id}/download`;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.download = planViewDrawingFileName || `operation_${planViewMeta?.opNo || 'plan'}_drawing.pdf`;
+    a.click();
+  };
+
   const handleOpenQmsSoftware = async (record) => {
     const hideLoading = message.loading('Resolving project details...', 0);
     try {
@@ -326,6 +528,7 @@ const Notifications = () => {
         mode: 'PLAN'
       });
       if (drawing?.id) qs.set('documentId', String(drawing.id));
+      if (record.operation_id) qs.set('operationId', String(record.operation_id));
 
       const path = window.location.pathname.startsWith('/supervisor') ? '/supervisor/qms-inspector' : '/admin/qms-inspector';
       navigate(`${path}?${qs.toString()}`);
@@ -940,19 +1143,17 @@ const Notifications = () => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 250,
-      render: (_, record) => (
-        <Space wrap>
-          {!record.is_ack && (
-            <Button type="primary" icon={<CheckCircleOutlined />} onClick={() => handleInspectionAcknowledge(record.id)}>
-              Acknowledge
-            </Button>
-          )}
+      width: 180,
+      render: (_, record) =>
+        record.is_ack ? (
+          <Button icon={<EyeOutlined />} onClick={() => openPlanViewModal(record)}>
+            Review
+          </Button>
+        ) : (
           <Button icon={<AppstoreOutlined />} onClick={() => handleOpenQmsSoftware(record)}>
             Open QMS Software
           </Button>
-        </Space>
-      ),
+        ),
     },
   ];
 
@@ -1128,7 +1329,10 @@ const Notifications = () => {
       >
         <Tabs
           activeKey={activeTab}
-          onChange={(key) => setActiveTab(key)}
+          onChange={(key) => {
+            setActiveTab(key);
+            if (key === 'approval') void fetchInspectionNotifications();
+          }}
           items={[
             {
               key: 'production',
@@ -1229,7 +1433,7 @@ const Notifications = () => {
               key: 'pokayoke',
               label: (
                 <Badge count={pokayokeNotifications.filter(log => !log.supervisor_acknowledged).length} showZero={false}>
-                  Pokayoke Checklists
+                  Preventive Maintenance Checklists
                 </Badge>
               ),
               children: (
@@ -1269,9 +1473,108 @@ const Notifications = () => {
                 </Spin>
               ),
             },
+            {
+              key: 'pokayoke-checklist',
+              label: (
+                <Badge count={pokayokeChecklistUnacknowledgedCount} showZero={false}>
+                  PokaYoke Checklist
+                </Badge>
+              ),
+              children: <PokayokeOperationNotification onUnacknowledgedCountChange={setPokayokeChecklistUnacknowledgedCount} />,
+            },
           ]}
         />
       </Card>
+
+      {/* Confirmed inspection plan view (Approval Notifications → Review) */}
+      <Modal
+        title={`Operation ${planViewMeta?.opNo || '—'}: ${planViewMeta?.opName || 'Inspection Plan'}`}
+        centered
+        footer={null}
+        width="95%"
+        onCancel={() => setPlanViewOpen(false)}
+        open={planViewOpen}
+        styles={{ body: { padding: 12, height: '80vh', background: '#f7f8fa' } }}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 14, height: '100%', fontFamily: MONO_FONT }}>
+          <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef0f3', background: '#fafbfc' }}>
+              <Text strong style={{ color: '#111827', fontSize: 22, lineHeight: 1.2, fontFamily: MONO_FONT }}>Inspection Details</Text>
+              <div style={{ marginTop: 10, fontSize: 16, color: '#374151' }}>
+                <Text style={{ fontSize: 16, fontFamily: MONO_FONT }}><b>Order:</b> {planViewMeta?.orderNo || '—'}</Text>
+                <Text style={{ fontSize: 16, marginLeft: 18, fontFamily: MONO_FONT }}><b>Part:</b> {planViewMeta?.partNo || '—'}</Text>
+                <Text style={{ fontSize: 16, marginLeft: 18, fontFamily: MONO_FONT }}><b>Operation:</b> {planViewMeta?.opNo || '—'}</Text>
+              </div>
+            </div>
+            <div style={{ padding: '0 10px 10px', flex: 1, minHeight: 0 }}>
+              <Table
+                size="small"
+                loading={planViewLoading}
+                dataSource={planViewTableRows}
+                rowKey="id"
+                pagination={{ pageSize: 14, showSizeChanger: false }}
+                scroll={{ x: 'max-content', y: 520 }}
+                columns={[
+                  { title: 'S.No', key: 'sno', width: 82, render: (_, __, idx) => <Text style={{ fontFamily: MONO_FONT, fontSize: 13 }}>{idx + 1}</Text> },
+                  { title: 'Zone', dataIndex: 'zone', key: 'zone', width: 90, render: (z) => <Tag color="geekblue" style={{ margin: 0, borderRadius: 10, fontFamily: MONO_FONT }}>{z || '—'}</Tag> },
+                  { title: 'Description', dataIndex: 'dimension_type', key: 'dimension_type', width: 240, render: (val) => <Tag color={planDimensionTypeTagColor(val)} style={{ margin: 0, borderRadius: 10, fontFamily: MONO_FONT }}>{val || '—'}</Tag> },
+                  { title: 'Nominal', dataIndex: 'nominal', key: 'nominal', width: 130, render: (v) => <Text style={{ fontFamily: MONO_FONT, color: '#1f2937', fontSize: 13 }}>{v ?? '—'}</Text> },
+                  { title: 'Upper Tol', dataIndex: 'uppertol', key: 'uppertol', width: 130, render: (v) => <Text style={{ fontFamily: MONO_FONT, color: Number(v) > 0 ? '#15803d' : '#6b7280', fontSize: 13 }}>{fmtPlanTol(v)}</Text> },
+                  { title: 'Lower Tol', dataIndex: 'lowertol', key: 'lowertol', width: 130, render: (v) => <Text style={{ fontFamily: MONO_FONT, color: Number(v) < 0 ? '#b91c1c' : '#6b7280', fontSize: 13 }}>{fmtPlanTol(v)}</Text> },
+                  {
+                    title: 'Instrument',
+                    dataIndex: 'measured_instrument',
+                    key: 'measured_instrument',
+                    width: 160,
+                    render: (v) => {
+                      const label = (v || '').trim() || 'default';
+                      return (
+                        <Text
+                          style={{
+                            fontFamily: MONO_FONT,
+                            fontSize: 13,
+                            color: label === 'default' ? '#94a3b8' : '#334155',
+                          }}
+                          ellipsis={{ tooltip: label }}
+                        >
+                          {label}
+                        </Text>
+                      );
+                    },
+                  },
+                ]}
+              />
+            </div>
+          </div>
+          <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text strong style={{ color: '#111827', fontFamily: MONO_FONT }}>Drawing View</Text>
+              <Button size="small" icon={<CloudDownloadOutlined />} onClick={handleDownloadPlanViewDrawing} disabled={!planViewDrawingUrl}>
+                Download Drawing
+              </Button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column', background: '#f8fafc' }}>
+              {planViewLoading ? (
+                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin /></div>
+              ) : planViewDrawingUrl && planViewBalloonDocumentId ? (
+                <InteractiveDrawing
+                  pdfId={planViewBalloonDocumentId}
+                  directImageSrc={!planViewDrawingIsPdf ? planViewDrawingUrl : null}
+                  pageNumber={1}
+                  balloons={planViewInteractiveBalloons}
+                  activeBalloonId={planViewActiveBalloonId}
+                  onBalloonClick={(b) => setPlanViewActiveBalloonId(b.id)}
+                  balloonColor="blue"
+                />
+              ) : (
+                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Empty description="No drawing found for this operation" />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </Modal>
 
       {/* FTP Approval Modal */}
       <Modal
