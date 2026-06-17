@@ -1,25 +1,21 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, message, Tabs, App } from "antd";
+import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, Tabs, App, Segmented } from "antd";
 import { 
   ExperimentOutlined, 
   PlusOutlined, 
   EditOutlined, 
   DeleteOutlined,
-  ShopOutlined,
-  DatabaseOutlined,
-  EyeOutlined,
-  AppstoreOutlined
+  DatabaseOutlined
 } from "@ant-design/icons";
 import { RawMaterialsInventoryPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
 import { StockDetailsPdfDownload } from "../DownloadReports/StockDetailsPdfDownload";
-import UnitsViewModal from "./UnitsViewModal";
+import RawMaterialInventoryView from "./RawMaterialInventoryView";
 
 const { Option } = Select;
-const { TabPane } = Tabs;
 
-const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange, onRefresh }) => {
+const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange }) => {
   const { message, modal } = App.useApp();
   const [form] = Form.useForm();
   const [rawMaterials, setRawMaterials] = useState(propRawMaterials || []);
@@ -29,9 +25,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const [rawMaterialModalOpen, setRawMaterialModalOpen] = useState(false);
   const [editingRawMaterial, setEditingRawMaterial] = useState(null);
   const [savingRawMaterial, setSavingRawMaterial] = useState(false);
-  const [decimalWarnings, setDecimalWarnings] = useState({});
-  const [vendors, setVendors] = useState([]);
-  const [vendorsLoading, setVendorsLoading] = useState(false);
   const [stockModalOpen, setStockModalOpen] = useState(false);
   const [selectedMaterialStock, setSelectedMaterialStock] = useState(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -44,11 +37,22 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     orderNumber: null,
     partNumber: null,
   });
-  const [unitsModalOpen, setUnitsModalOpen] = useState(false);
-  const [selectedStockForUnits, setSelectedStockForUnits] = useState(null);
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('rmViewMode') || 'list');
+  const [invSearch, setInvSearch] = useState("");
+  const [invFilters, setInvFilters] = useState({ fMaterial: [], fSource: [], fOrder: [], fPart: [], fStockStatus: [], fUnitStatus: [] });
+  const [invFilterOptions, setInvFilterOptions] = useState({ materials: [], orders: [], partsByOrder: {} });
+
+  const [invRows, setInvRows] = useState([]);
+  const setF = (key, val) => setInvFilters(prev => ({ ...prev, [key]: val || [] }));
+  const handleFilterOptionsReady = useCallback((opts) => setInvFilterOptions(opts), []);
+  const handleRowsReady = useCallback((r) => setInvRows(r), []);
+
+  const handleViewModeChange = (val) => {
+    localStorage.setItem('rmViewMode', val);
+    setViewMode(val);
+  };
 
   const fetchingRawMaterials = useRef(false);
-  const initializedRef = useRef(false);
 
   const getCurrentUserId = () => {
     try {
@@ -95,19 +99,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     } finally {
       setLoading(false);
       fetchingRawMaterials.current = false;
-    }
-  };
-
-  const fetchVendors = async () => {
-    setVendorsLoading(true);
-    try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
-      setVendors(response.data || []);
-    } catch (error) {
-      console.error("Error fetching vendors:", error);
-      setVendors([]);
-    } finally {
-      setVendorsLoading(false);
     }
   };
 
@@ -161,11 +152,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     });
   };
 
-  const openUnitsModal = (stock) => {
-    setSelectedStockForUnits(stock);
-    setUnitsModalOpen(true);
-  };
-
   const openCreateRawMaterial = () => {
     setEditingRawMaterial(null);
     form.resetFields();
@@ -185,95 +171,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const closeRawMaterialModal = () => {
     setRawMaterialModalOpen(false);
     setEditingRawMaterial(null);
-  };
-
-  const limitDecimals = (value, fieldName, precision = 3) => {
-    if (value === null || value === undefined || value === '') return value;
-    const cleaned = String(value).replace(/[^0-9.]/g, '');
-    let str = cleaned;
-    
-    if (precision === 0) {
-      str = str.replace(/\./g, '');
-      if (str.length > 5) {
-        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
-        return str.slice(0, 5);
-      }
-      return str;
-    }
-
-    if (str.includes('.')) {
-      const [int, dec] = str.split('.');
-      let finalInt = int;
-      if (int.length > 6) {
-        showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-        finalInt = int.slice(0, 6);
-      }
-      
-      if (dec.length > precision) {
-        showDecimalWarning(fieldName, precision);
-        return `${finalInt}.${dec.slice(0, precision)}`;
-      }
-      return `${finalInt}.${dec}`;
-    } else {
-      if (str.length > 6) {
-        showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-        return str.slice(0, 6);
-      }
-    }
-    return str;
-  };
-
-  const showDecimalWarning = (fieldName, precision, customMsg) => {
-    if (!fieldName) return;
-    const msg = customMsg ?? (precision === 0 ? "Only whole numbers allowed" : `Max ${precision} decimal places allowed`);
-    setDecimalWarnings(prev => ({ ...prev, [fieldName]: msg }));
-    setTimeout(() => {
-      setDecimalWarnings(prev => ({ ...prev, [fieldName]: null }));
-    }, 3000);
-  };
-
-  const blockExtraDecimals = (e, fieldName, precision = 3) => {
-    const { value } = e.target;
-    const controlKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Control'];
-    if (controlKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
-    if (!/[0-9.]/.test(e.key)) { e.preventDefault(); return; }
-    if (precision === 0 && e.key === '.') { showDecimalWarning(fieldName, 0); e.preventDefault(); return; }
-
-    if (/[0-9]/.test(e.key)) {
-      const hasSelection = e.target.selectionStart !== e.target.selectionEnd;
-      if (precision === 0) {
-        const digitsOnly = String(value).replace(/\D/g, '');
-        if (digitsOnly.length >= 5 && !hasSelection) {
-          showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
-          e.preventDefault();
-          return;
-        }
-      } else {
-        const parts = value.split('.');
-        const selectionStart = e.target.selectionStart;
-        const dotIndex = value.indexOf('.');
-        if ((dotIndex === -1 || selectionStart <= dotIndex) && !hasSelection) {
-          const integerPart = dotIndex === -1 ? value : parts[0];
-          if (integerPart.length >= 6) {
-            showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-    }
-    if (e.key === '.' && value.includes('.')) { e.preventDefault(); return; }
-    if (value.includes('.')) {
-      const parts = value.split('.');
-      const selectionStart = e.target.selectionStart;
-      const dotIndex = value.indexOf('.');
-      if (selectionStart > dotIndex && parts[1].length >= precision) {
-        if (e.target.selectionStart === e.target.selectionEnd) {
-          showDecimalWarning(fieldName, precision);
-          e.preventDefault();
-        }
-      }
-    }
   };
 
   const handleSaveRawMaterial = async (values) => {
@@ -400,10 +297,9 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
            numericContent.includes(searchLower);
   }).sort((a, b) => (a.id || 0) - (b.id || 0));
 
-  const columns = [
+  const listColumns = [
     {
       title: <span className="font-semibold text-gray-700">Sl No</span>,
-      dataIndex: 'index',
       key: 'index',
       width: 60,
       render: (_, __, index) => {
@@ -422,7 +318,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
         </Tooltip>
       ),
     },
-    
     {
       title: <span className="font-semibold text-gray-700">Density (kg/m³)</span>,
       dataIndex: 'density',
@@ -436,33 +331,11 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
       render: (text) => text !== null && text !== undefined ? `₹${text.toFixed(2)}` : "-",
     },
     {
-      title: <span className="font-semibold text-gray-700">Status</span>,
-      dataIndex: 'status',
-      key: 'status',
-      render: (_, record) => {
-        // Use has_available_stock from backend response
-        // If at least one stock has 'available' status, show as AVAILABLE
-        const hasAvailableStock = record.has_available_stock;
-        const text = hasAvailableStock ? 'AVAILABLE' : 'NOT AVAILABLE';
-        const color = hasAvailableStock ? 'success' : 'error';
-        return <Tag color={color}>{text}</Tag>;
-      },
-    },
-    {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: 'actions',
-      width: 180,
+      width: 100,
       render: (_, record) => (
         <Space>
-          <Tooltip title="View Stock">
-            <Button
-              type="text"
-              size="small"
-              icon={<DatabaseOutlined />}
-              className="text-green-500 hover:bg-green-50"
-              onClick={() => openStockModal(record)}
-            />
-          </Tooltip>
           <Tooltip title="Edit">
             <Button
               type="text"
@@ -483,7 +356,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
           </Tooltip>
         </Space>
       ),
-    }
+    },
   ];
 
   return (
@@ -495,44 +368,96 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
                 <div className="flex items-center gap-2">
                     <ExperimentOutlined className="text-purple-600" />
-                    <span className="font-bold text-gray-800 text-sm sm:text-base">Raw Materials Inventory</span>
+                    <span className="font-bold text-gray-800 text-sm sm:text-base">
+                      {viewMode === 'inventory' ? 'Raw Materials Inventory' : 'Raw Material List'}
+                    </span>
                 </div>
-                <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
-                  <Input.Search
-                    placeholder="Search all columns..."
-                    allowClear
-                    onSearch={handleSearch}
-                    onChange={(e) => handleSearch(e.target.value)}
-                    value={searchText}
-                    maxLength={50}
-                    className="w-full sm:w-64"
+                <Space wrap>
+                  <Segmented
+                    options={[
+                      { label: 'List', value: 'list' },
+                      { label: 'Inventory', value: 'inventory' },
+                    ]}
+                    value={viewMode}
+                    onChange={handleViewModeChange}
                     size="middle"
                   />
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    <RawMaterialsInventoryPdfDownload rawMaterials={rawMaterials} />
-                    <Button
-                      type="primary"
-                      icon={<PlusOutlined />}
-                      onClick={openCreateRawMaterial}
-                      size="middle"
-                      style={{ backgroundColor: '#2563eb' }}
-                      className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
-                    >
-                      <span className="hidden sm:inline">Add Raw Material</span>
-                      <span className="sm:hidden">Add</span>
-                    </Button>
-                  </div>
+                  {viewMode === 'inventory' && (
+                    <>
+                      <Input.Search
+                        placeholder="Search material / stock..."
+                        allowClear
+                        value={invSearch}
+                        onChange={(e) => setInvSearch(e.target.value)}
+                        onSearch={setInvSearch}
+                        style={{ width: 200 }}
+                        size="middle"
+                      />
+                      <Select mode="multiple" placeholder="Material" allowClear showSearch optionFilterProp="children" value={invFilters.fMaterial} onChange={v => setF('fMaterial', v)} style={{ minWidth: 160, maxWidth: 260 }} size="middle" maxTagCount="responsive">
+                        {invFilterOptions.materials.map(m => <Option key={m.id} value={m.id}>{m.name}</Option>)}
+                      </Select>
+                      <Select mode="multiple" placeholder="Source" allowClear value={invFilters.fSource} onChange={v => { setInvFilters(p => ({ ...p, fSource: v || [], fOrder: [], fPart: [] })); }} style={{ minWidth: 110, maxWidth: 200 }} size="middle" maxTagCount="responsive">
+                        <Option value="general">General</Option>
+                        <Option value="order">Order</Option>
+                      </Select>
+                      <Select mode="multiple" placeholder="Order No" allowClear showSearch optionFilterProp="children" value={invFilters.fOrder} onChange={v => { setInvFilters(p => ({ ...p, fOrder: v || [], fPart: [] })); }} style={{ minWidth: 140, maxWidth: 260 }} size="middle" maxTagCount="responsive" disabled={invFilters.fSource.length > 0 && !invFilters.fSource.includes('order')}>
+                        {invFilterOptions.orders.map(o => <Option key={o} value={o}>{o}</Option>)}
+                      </Select>
+                      <Select mode="multiple" placeholder="Part No" allowClear showSearch optionFilterProp="children" value={invFilters.fPart} onChange={v => setF('fPart', v)} style={{ minWidth: 130, maxWidth: 260 }} size="middle" maxTagCount="responsive" disabled={invFilters.fOrder.length === 0}>
+                        {Array.from(new Set(invFilters.fOrder.flatMap(o => invFilterOptions.partsByOrder[o] || []))).sort().map(p => <Option key={p} value={p}>{p}</Option>)}
+                      </Select>
+                      <Select mode="multiple" placeholder="Stock Status" allowClear value={invFilters.fStockStatus} onChange={v => setF('fStockStatus', v)} style={{ minWidth: 140, maxWidth: 240 }} size="middle" maxTagCount="responsive">
+                        <Option value="available">Available</Option>
+                        <Option value="not_available">Not Available</Option>
+                        <Option value="exhausted">Exhausted</Option>
+                      </Select>
+                      <Select mode="multiple" placeholder="Unit Status" allowClear value={invFilters.fUnitStatus} onChange={v => setF('fUnitStatus', v)} style={{ minWidth: 140, maxWidth: 240 }} size="middle" maxTagCount="responsive">
+                        <Option value="available">Available</Option>
+                        <Option value="partially_used">Partially Used</Option>
+                        <Option value="not_available">Not Available</Option>
+                        <Option value="exhausted">Exhausted</Option>
+                      </Select>
+                      <StockDetailsPdfDownload rows={invRows} label={`Inventory — ${invRows.length} rows`} />
+                    </>
+                  )}
+                  {viewMode === 'list' && (
+                    <>
+                      <Input.Search
+                        placeholder="Search all columns..."
+                        allowClear
+                        onSearch={handleSearch}
+                        onChange={(e) => handleSearch(e.target.value)}
+                        value={searchText}
+                        maxLength={50}
+                        className="w-52"
+                        size="middle"
+                      />
+                      <RawMaterialsInventoryPdfDownload rawMaterials={rawMaterials} />
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={openCreateRawMaterial}
+                        size="middle"
+                        style={{ backgroundColor: '#2563eb' }}
+                        className="border-none shadow-md no-hover-btn"
+                      >
+                        <span className="hidden sm:inline">Add Raw Material</span>
+                        <span className="sm:hidden">Add</span>
+                      </Button>
+                    </>
+                  )}
                 </Space>
             </div>
         }
       >
-        <Table
-            columns={columns}
+        {viewMode === 'list' ? (
+          <Table
+            columns={listColumns}
             dataSource={filteredMaterials}
             rowKey="id"
             size="small"
             bordered
-            scroll={{ x: 1400 }}
+            scroll={{ x: 800 }}
             pagination={{
               current: rawMaterialsPagination.current,
               pageSize: rawMaterialsPagination.pageSize,
@@ -547,8 +472,23 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
             locale={{ emptyText: <Empty description={searchText ? "No raw materials found matching your search" : "No raw materials found"} /> }}
             className="modern-table"
             loading={loading}
-        />
+          />
+        ) : null}
       </Card>
+
+      {viewMode === 'inventory' && (
+        <RawMaterialInventoryView
+          searchText={invSearch}
+          fMaterial={invFilters.fMaterial}
+          fSource={invFilters.fSource}
+          fOrder={invFilters.fOrder}
+          fPart={invFilters.fPart}
+          fStockStatus={invFilters.fStockStatus}
+          fUnitStatus={invFilters.fUnitStatus}
+          onFilterOptionsReady={handleFilterOptionsReady}
+          onRowsReady={handleRowsReady}
+        />
+      )}
 
       <Modal
         open={rawMaterialModalOpen}
@@ -813,26 +753,15 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
                           { title: 'User Name', dataIndex: 'creator_name', key: 'creator_name', render: (name) => name || '-' },
                           { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'available' ? 'green' : 'red'}>{s}</Tag> },
                           { title: 'Actions', key: 'actions', render: (_, record) => (
-                            <Space size="small">
-                              <Tooltip title="View Units">
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<AppstoreOutlined />}
-                                  className="text-blue-500 hover:bg-blue-50"
-                                  onClick={() => openUnitsModal(record)}
-                                />
-                              </Tooltip>
-                              <Tooltip title="Delete">
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<DeleteOutlined />}
-                                  className="text-red-500 hover:bg-red-50"
-                                  onClick={() => handleDeleteStock(record.id)}
-                                />
-                              </Tooltip>
-                            </Space>
+                            <Tooltip title="Delete">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<DeleteOutlined />}
+                                className="text-red-500 hover:bg-red-50"
+                                onClick={() => handleDeleteStock(record.id)}
+                              />
+                            </Tooltip>
                           )},
                         ]}
                       />
@@ -860,16 +789,11 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
         </div>
       </Modal>
 
-      <UnitsViewModal
-        open={unitsModalOpen}
-        onCancel={() => setUnitsModalOpen(false)}
-        stock={selectedStockForUnits}
-      />
     </div>
   );
 };
 
-const StockForm = ({ materialId, materialCost, onSuccess }) => {
+export const StockForm = ({ materialId, materialCost, onSuccess }) => {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);

@@ -1,470 +1,253 @@
 import React, { useState } from "react";
-import { Button, Tooltip, Modal, Space } from "antd";
-import { FilePdfOutlined, FileExcelOutlined, DownloadOutlined } from "@ant-design/icons";
-import {
-  PDFDownloadLink,
-  Document,
-  Page,
-  Text,
-  View,
-  StyleSheet,
-  Font,
-} from "@react-pdf/renderer";
-import * as XLSX from "xlsx";
+import { Button, Dropdown, message } from "antd";
+import { DownloadOutlined, FilePdfOutlined, FileExcelOutlined } from "@ant-design/icons";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import ExcelJS from "exceljs";
 
-Font.registerHyphenationCallback((word) => [word]);
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-const styles = StyleSheet.create({
-  page: {
-    paddingTop: 32,
-    paddingBottom: 32,
-    paddingHorizontal: 24,
-    fontSize: 9,
-    fontFamily: "Helvetica",
-  },
-  header: {
-    marginBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#d1d5db",
-    borderBottomStyle: "solid",
-    paddingBottom: 8,
-    alignItems: "center",
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: 700,
-    marginBottom: 4,
-    textTransform: "uppercase",
-    textAlign: "center",
-  },
-  subtitle: {
-    fontSize: 10,
-    color: "#6b7280",
-    textAlign: "center",
-  },
-  materialInfo: {
-    marginTop: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-  },
-  materialInfoText: {
-    fontSize: 9,
-    color: "#4b5563",
-    fontWeight: 600,
-  },
-  metaRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-  },
-  metaText: {
-    fontSize: 8,
-    color: "#4b5563",
-  },
-  table: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderStyle: "solid",
-    width: "100%",
-  },
-  tableHeader: {
-    flexDirection: "row",
-    backgroundColor: "#f3f4f6",
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb",
-    borderBottomStyle: "solid",
-  },
-  headerCell: {
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-    borderRightWidth: 1,
-    borderRightColor: "#e5e7eb",
-    borderRightStyle: "solid",
-    fontWeight: 700,
-  },
-  row: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#f3f4f6",
-    borderBottomStyle: "solid",
-  },
-  cell: {
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-    borderRightWidth: 1,
-    borderRightColor: "#f3f4f6",
-    borderRightStyle: "solid",
-  },
-  footer: {
-    marginTop: 16,
-    fontSize: 7,
-    color: "#9ca3af",
-    textAlign: "right",
-  },
-});
+const fmt = (v) => (v == null || v === "" ? "—" : String(v));
+const fmtNum = (v, d = 3) => (v != null ? parseFloat(v).toFixed(d) : "—");
 
-const stockColumnWidths = {
-  processType: 70,
-  formType: 60,
-  dimensions: 100,
-  quantity: 50,
-  volume: 60,
-  mass: 60,
-  weight: 60,
-  cost: 60,
-  source: 50,
-  order: 70,
-  parts: 80,
-  userName: 70,
-  status: 50,
+const getDimensions = (s) => {
+  if (s.form_type === "Round") return `\u2205${s.diameter} \u00d7 ${s.length}mm`;
+  if (s.form_type === "Square") return `${s.breadth} \u00d7 ${s.height} \u00d7 ${s.length}mm`;
+  if (s.form_type === "Pipe") return `\u2205${s.outer_diameter}/${s.inner_diameter} \u00d7 ${s.length}mm`;
+  return "-";
 };
 
-const StockDetailsPdfDocument = ({ materialName, materialDensity, materialCost, stockData }) => {
-  const generatedAt = new Date().toLocaleString();
-  const total = stockData.length;
+const COLUMNS = [
+  "SL", "Material", "Process", "Form", "Dimensions",
+  "Qty", "Mass (kg)", "Source", "Order No", "Stock Status",
+  "Unit", "Total Len", "Remaining", "Used For", "Unit Status",
+];
 
-  const getDimensions = (record) => {
-    if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
-    if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
-    if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
-    return '-';
-  };
+// Build export rows — material shown once per material group, stock shown once per stock group
+const buildExportRows = (rows) => {
+  const result = [];
+  let lastSlNo = null;
+  let lastStockId = null;
 
-  return (
-    <Document>
-      <Page size="A4" orientation="landscape" style={styles.page}>
-        <View style={styles.header}>
-          <Text style={styles.title}>
-            CMF DIGITIZATION 
-          </Text>
-          <Text style={styles.subtitle}>
-            Stock Details Report
-          </Text>
-          <View style={styles.materialInfo}>
-            <Text style={styles.materialInfoText}>
-              Material: {materialName}
-            </Text>
-            <Text style={styles.materialInfoText}>
-              Density: {materialDensity != null ? `${materialDensity} kg/m³` : "-"}
-            </Text>
-            <Text style={styles.materialInfoText}>
-              Cost: {materialCost != null ? `₹${materialCost.toFixed(2)}/kg` : "-"}
-            </Text>
-          </View>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Total stocks: {total}</Text>
-            <Text style={styles.metaText}>Generated on: {generatedAt}</Text>
-          </View>
-        </View>
+  rows.forEach((row) => {
+    const isNewMat = row.slNo !== lastSlNo;
+    const isNewStock = row.stock?.id !== lastStockId;
 
-        <View style={styles.table}>
-          <View style={styles.tableHeader}>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.processType }]}>
-              PROCESS TYPE
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.formType }]}>
-              FORM TYPE
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.dimensions }]}>
-              DIMENSIONS
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.quantity }]}>
-              QUANTITY
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.volume }]}>
-              VOLUME (m³)
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.mass }]}>
-              MASS (kg)
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.weight }]}>
-              WEIGHT (N)
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.cost }]}>
-              COST (₹)
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.source }]}>
-              SOURCE
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.order }]}>
-              ORDER
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.parts }]}>
-              PARTS
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.userName }]}>
-              USER NAME
-            </Text>
-            <Text style={[styles.headerCell, { width: stockColumnWidths.status }]}>
-              STATUS
-            </Text>
-          </View>
+    const matName = isNewMat ? fmt(row.material?.material_name) : "";
+    const slNo = isNewMat ? (row.slNo ?? "") : "";
+    const process = isNewStock ? fmt(row.stock?.process_type) : "";
+    const form = isNewStock ? fmt(row.stock?.form_type) : "";
+    const dim = isNewStock && row.stock ? getDimensions(row.stock) : "";
+    const qty = isNewStock ? fmt(row.stock?.quantity) : "";
+    const mass = isNewStock && row.stock ? fmtNum(row.stock?.mass) : "";
+    const src = isNewStock && row.stock ? (row.stock.source_type === "order" ? "Order" : "General") : "";
+    const order = isNewStock ? fmt(row.stock?.source_order_number) : "";
+    const stockStatus = isNewStock ? fmt(row.stock?.status?.replace(/_/g, " ")) : "";
 
-          {stockData.map((stock, index) => (
-            <View key={stock.id || index} style={styles.row}>
-              <Text style={[styles.cell, { width: stockColumnWidths.processType }]}>
-                {stock.process_type || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.formType }]}>
-                {stock.form_type || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.dimensions }]}>
-                {getDimensions(stock)}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.quantity }]}>
-                {stock.quantity != null ? String(stock.quantity) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.volume }]}>
-                {stock.volume != null ? String(stock.volume.toFixed(6)) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.mass }]}>
-                {stock.mass != null ? String(stock.mass.toFixed(3)) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.weight }]}>
-                {stock.weight != null ? String(stock.weight.toFixed(3)) : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.cost }]}>
-                {stock.cost != null ? `₹${stock.cost.toFixed(2)}` : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.source }]}>
-                {stock.source_type === 'order' ? 'Order' : 'General'}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.order }]}>
-                {stock.source_order_number || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.parts }]}>
-                {stock.part_numbers?.length > 0 ? stock.part_numbers.join(', ') : "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.userName }]}>
-                {stock.creator_name || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: stockColumnWidths.status }]}>
-                {stock.status || "-"}
-              </Text>
-            </View>
-          ))}
-        </View>
+    if (row.slNo !== null) lastSlNo = row.slNo;
+    if (row.stock?.id != null) lastStockId = row.stock.id;
 
-        <Text style={styles.footer}>
-          Generated by CMF Digitization Raw Materials module
-        </Text>
-      </Page>
-    </Document>
-  );
-};
-
-export const StockDetailsPdfDownload = ({
-  materialName,
-  materialDensity,
-  materialCost,
-  stockData,
-  fileName = "stock-details.pdf",
-}) => {
-  const [isModalVisible, setIsModalVisible] = useState(false);
-
-  const handleDownloadExcel = () => {
-    if (!stockData || stockData.length === 0) return;
-
-    // Create workbook and worksheet
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([]);
-
-    // Add header information
-    XLSX.utils.sheet_add_aoa(ws, [
-      ["CMF DIGITIZATION"],
-      ["Stock Details Report"],
-      [],
-      [`Material: ${materialName}`],
-      [`Density: ${materialDensity != null ? `${materialDensity} kg/m³` : "-"}`],
-      [`Cost: ${materialCost != null ? `₹${materialCost.toFixed(2)}/kg` : "-"}`],
-      [],
-      [`Total Stocks: ${stockData.length}`],
-      [`Generated on: ${new Date().toLocaleString()}`],
-      []
-    ], { origin: "A1" });
-
-    // Add table headers
-    const headers = [
-      "PROCESS TYPE",
-      "FORM TYPE",
-      "DIMENSIONS",
-      "QUANTITY",
-      "VOLUME (m³)",
-      "MASS (kg)",
-      "WEIGHT (N)",
-      "COST (₹)",
-      "SOURCE",
-      "ORDER",
-      "PARTS",
-      "USER NAME",
-      "STATUS"
-    ];
-
-    // Merge cells for header titles and metadata
-    ws['!merges'] = [
-      { s: { r: 0, c: 0 }, e: { r: 0, c: headers.length - 1 } },
-      { s: { r: 1, c: 0 }, e: { r: 1, c: headers.length - 1 } },
-      { s: { r: 3, c: 0 }, e: { r: 3, c: headers.length - 1 } },
-      { s: { r: 4, c: 0 }, e: { r: 4, c: headers.length - 1 } },
-      { s: { r: 5, c: 0 }, e: { r: 5, c: headers.length - 1 } },
-      { s: { r: 7, c: 0 }, e: { r: 7, c: headers.length - 1 } },
-      { s: { r: 8, c: 0 }, e: { r: 8, c: headers.length - 1 } }
-    ];
-
-    // Apply styling to header cells
-    if (ws['A1']) ws['A1'].s = { font: { sz: 16, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A2']) ws['A2'].s = { font: { sz: 14, bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A4']) ws['A4'].s = { font: { bold: true }, alignment: { horizontal: "left", vertical: "center" } };
-    if (ws['A5']) ws['A5'].s = { font: { bold: true }, alignment: { horizontal: "left", vertical: "center" } };
-    if (ws['A6']) ws['A6'].s = { font: { bold: true }, alignment: { horizontal: "left", vertical: "center" } };
-    if (ws['A8']) ws['A8'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-    if (ws['A9']) ws['A9'].s = { font: { bold: true }, alignment: { horizontal: "center", vertical: "center" } };
-
-    XLSX.utils.sheet_add_aoa(ws, [headers], { origin: "A11" });
-
-    // Apply styling to table headers
-    for (let i = 0; i < headers.length; i++) {
-      const cellAddress = XLSX.utils.encode_cell({ r: 10, c: i });
-      if (ws[cellAddress]) {
-        ws[cellAddress].s = { 
-          font: { bold: true }, 
-          alignment: { horizontal: "center", vertical: "center" },
-          fill: { fgColor: { rgb: "F3F4F6" } }
-        };
-      }
+    if (row.type === "no-stock") {
+      result.push([slNo, matName, "—","—","—","—","—","—","—","—","—","—","—","—","—"]);
+    } else if (row.type === "no-unit") {
+      result.push([slNo, matName, process, form, dim, qty, mass, src, order, stockStatus, "—","—","—","—","—"]);
+    } else {
+      const usedFor = row.unit?.usages?.length > 0
+        ? row.unit.usages.map((u) => u.part_number ? `${u.part_number}(${fmtNum(u.used_length, 2)}mm)` : null).filter(Boolean).join(", ") || "—"
+        : "—";
+      result.push([
+        slNo, matName, process, form, dim, qty, mass, src, order, stockStatus,
+        row.unitSeq != null ? `Unit ${row.unitSeq}` : fmt(row.unit?.id),
+        fmtNum(row.unit?.total_length, 2),
+        fmtNum(row.unit?.remaining_length, 2),
+        usedFor,
+        fmt(row.unit?.status?.replace(/_/g, " ")),
+      ]);
     }
+  });
+  return result;
+};
 
-    const getDimensions = (record) => {
-      if (record.form_type === 'Round') return `⌀${record.diameter} × ${record.length}mm`;
-      if (record.form_type === 'Square') return `${record.breadth} × ${record.height} × ${record.length}mm`;
-      if (record.form_type === 'Pipe') return `⌀${record.outer_diameter}/${record.inner_diameter} × ${record.length}mm`;
-      return '-';
-    };
+// ---------------------------------------------------------------------------
+// PDF Export
+// ---------------------------------------------------------------------------
 
-    // Prepare and add table data
-    let currentRow = 12;
-    stockData.forEach((stock) => {
-      const rowData = [
-        stock.process_type || "-",
-        stock.form_type || "-",
-        getDimensions(stock),
-        stock.quantity != null ? stock.quantity : "-",
-        stock.volume != null ? stock.volume.toFixed(6) : "-",
-        stock.mass != null ? stock.mass.toFixed(3) : "-",
-        stock.weight != null ? stock.weight.toFixed(3) : "-",
-        stock.cost != null ? `₹${stock.cost.toFixed(2)}` : "-",
-        stock.source_type === 'order' ? 'Order' : 'General',
-        stock.source_order_number || "-",
-        stock.part_numbers?.length > 0 ? stock.part_numbers.join(', ') : "-",
-        stock.creator_name || "-",
-        stock.status || "-"
-      ];
-      
-      XLSX.utils.sheet_add_aoa(ws, [rowData], { origin: `A${currentRow}` });
-      currentRow++;
-    });
+const exportPDF = (rows, label) => {
+  const data = buildExportRows(rows);
+  if (!data.length) { message.warning("No data to export"); return; }
 
-    // Set column widths
-    const colWidths = [
-      { wch: 12 },  // PROCESS TYPE
-      { wch: 10 },  // FORM TYPE
-      { wch: 20 },  // DIMENSIONS
-      { wch: 10 },  // QUANTITY
-      { wch: 12 },  // VOLUME (m³)
-      { wch: 10 },  // MASS (kg)
-      { wch: 10 },  // WEIGHT (N)
-      { wch: 10 },  // COST (₹)
-      { wch: 10 },  // SOURCE
-      { wch: 12 },  // ORDER
-      { wch: 15 },  // PARTS
-      { wch: 12 },  // USER NAME
-      { wch: 10 }   // STATUS
-    ];
-    ws['!cols'] = colWidths;
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 8;
+  const generatedAt = new Date().toLocaleString();
 
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(wb, ws, "Stock Details");
-
-    // Generate and download Excel file
-    const excelFileName = fileName.replace('.pdf', '.xlsx');
-    XLSX.writeFile(wb, excelFileName);
-    
-    setIsModalVisible(false);
+  const drawHeader = () => {
+    doc.setFillColor(30, 64, 175);
+    doc.rect(margin, 8, pageW - margin * 2, 10, "F");
+    doc.setFontSize(11); doc.setFont("helvetica", "bold"); doc.setTextColor(255, 255, 255);
+    doc.text("RAW MATERIAL INVENTORY REPORT", pageW / 2, 14.5, { align: "center" });
+    doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+    doc.text(`Generated: ${generatedAt}`, margin, 22);
+    doc.text(`${label}   |   Records: ${rows.length}`, pageW / 2, 22, { align: "center" });
+    doc.text("CMF Digitization", pageW - margin, 22, { align: "right" });
+    doc.setDrawColor(30, 64, 175); doc.setLineWidth(0.3);
+    doc.line(margin, 24, pageW - margin, 24);
   };
 
-  if (!stockData || stockData.length === 0) {
-    return (
-      <Tooltip title="No stock data available for export">
-        <Button icon={<DownloadOutlined />} size="small" disabled>
-          Download
-        </Button>
-      </Tooltip>
-    );
-  }
+  drawHeader();
+
+  // col widths: SL,Material,Process,Form,Dim,Qty,Mass,Src,Order,StockSt,UnitID,TotLen,RemLen,UsedFor,UnitSt
+  const colW = [8, 24, 18, 14, 30, 10, 16, 14, 22, 18, 13, 16, 16, 30, 18];
+
+  autoTable(doc, {
+    startY: 27,
+    head: [COLUMNS],
+    body: data,
+    styles: { fontSize: 6, cellPadding: { top: 1.5, bottom: 1.5, left: 1.5, right: 1.5 }, valign: "middle", overflow: "linebreak", lineColor: [209, 213, 219], lineWidth: 0.2, textColor: [30, 30, 30] },
+    headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255], fontStyle: "bold", halign: "center", fontSize: 6, lineColor: [255, 255, 255], lineWidth: 0.3 },
+    alternateRowStyles: { fillColor: [239, 246, 255] },
+    bodyStyles: { halign: "center" },
+    columnStyles: Object.fromEntries(colW.map((w, i) => [i, { cellWidth: w, halign: [1, 2, 4, 13].includes(i) ? "left" : "center" }])),
+    didParseCell: (d) => {
+      if (d.section !== "body") return;
+      const v = String(d.cell.raw || "");
+      if (v === "available") { d.cell.styles.textColor = [22, 163, 74]; d.cell.styles.fontStyle = "bold"; }
+      else if (v === "exhausted") { d.cell.styles.textColor = [207, 19, 34]; }
+      else if (v === "not available") { d.cell.styles.textColor = [89, 89, 89]; }
+      else if (v === "partially used") { d.cell.styles.textColor = [212, 107, 8]; }
+    },
+    margin: { left: margin, right: margin, top: 27, bottom: 18 },
+    didDrawPage: (d) => {
+      if (d.pageNumber > 1) drawHeader();
+      doc.setFontSize(6.5); doc.setFont("helvetica", "normal"); doc.setTextColor(156, 163, 175);
+      doc.setDrawColor(209, 213, 219); doc.setLineWidth(0.2);
+      doc.line(margin, pageH - 10, pageW - margin, pageH - 10);
+      doc.text(`Page ${d.pageNumber} of ${doc.internal.getNumberOfPages()}`, pageW / 2, pageH - 6, { align: "center" });
+      doc.text("CMF Digitization — Confidential", margin, pageH - 6);
+    },
+  });
+
+  doc.save(`Inventory_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+};
+
+// ---------------------------------------------------------------------------
+// Excel Export
+// ---------------------------------------------------------------------------
+
+const exportExcel = async (rows, label) => {
+  const data = buildExportRows(rows);
+  if (!data.length) { message.warning("No data to export"); return; }
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "CMF Digitization";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("Inventory", { pageSetup: { orientation: "landscape" } });
+
+  // Row 1: Title
+  ws.mergeCells(1, 1, 1, COLUMNS.length);
+  const t = ws.getCell("A1");
+  t.value = "RAW MATERIAL INVENTORY REPORT";
+  t.font = { bold: true, size: 14, color: { argb: "FF1E40AF" } };
+  t.alignment = { horizontal: "center", vertical: "middle" };
+  t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDBEAFE" } };
+  ws.getRow(1).height = 28;
+
+  // Row 2: Subtitle
+  ws.mergeCells(2, 1, 2, COLUMNS.length);
+  const s = ws.getCell("A2");
+  s.value = `Generated: ${new Date().toLocaleString()}   |   ${label}   |   Rows: ${rows.length}`;
+  s.font = { size: 9, italic: true, color: { argb: "FF6B7280" } };
+  s.alignment = { horizontal: "center" };
+  ws.getRow(2).height = 16;
+
+  ws.addRow([]);
+
+  // Row 4: Header
+  const hdr = ws.addRow(COLUMNS);
+  hdr.height = 20;
+  hdr.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 8 };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E40AF" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = { top: { style: "thin", color: { argb: "FF93C5FD" } }, bottom: { style: "thin", color: { argb: "FF93C5FD" } }, left: { style: "thin", color: { argb: "FF93C5FD" } }, right: { style: "thin", color: { argb: "FF93C5FD" } } };
+  });
+
+  // Data rows
+  data.forEach((r, idx) => {
+    const dr = ws.addRow(r);
+    dr.height = 14;
+    const isAlt = idx % 2 === 1;
+    dr.eachCell({ includeEmpty: true }, (cell, colNum) => {
+      cell.alignment = { vertical: "middle", wrapText: true };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: isAlt ? "FFEFF6FF" : "FFFFFFFF" } };
+      cell.border = { top: { style: "hair", color: { argb: "FFD1D5DB" } }, bottom: { style: "hair", color: { argb: "FFD1D5DB" } }, left: { style: "hair", color: { argb: "FFD1D5DB" } }, right: { style: "hair", color: { argb: "FFD1D5DB" } } };
+      const v = String(cell.value || "");
+      if (v === "available") cell.font = { color: { argb: "FF16A34A" }, bold: true };
+      else if (v === "exhausted") cell.font = { color: { argb: "FFCF1322" } };
+      else if (v === "not available") cell.font = { color: { argb: "FF595959" } };
+      else if (v === "partially used") cell.font = { color: { argb: "FFD46B08" } };
+    });
+  });
+
+  // Col widths
+  const colWidths = [6, 22, 14, 10, 26, 8, 12, 10, 18, 14, 10, 12, 12, 28, 14];
+  COLUMNS.forEach((_, i) => { ws.getColumn(i + 1).width = colWidths[i] || 12; });
+  ws.views = [{ state: "frozen", ySplit: 4 }];
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: COLUMNS.length } };
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Inventory_Report_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// Component — used both from inventory view and stock modal
+// ---------------------------------------------------------------------------
+
+export const StockDetailsPdfDownload = ({ rows = [], label = "All Records", stockData, materialName, materialDensity, materialCost, fileName }) => {
+  const [loading, setLoading] = useState("");
+
+  // Support legacy usage (stockData array) by converting to rows format
+  const exportRows = rows.length > 0 ? rows : (stockData || []).map((s, i) => ({
+    type: "no-unit", slNo: i + 1, matRowSpan: 1,
+    material: { material_name: materialName },
+    stock: s, stockRowSpan: 1,
+  }));
+
+  const handlePDF = () => {
+    if (!exportRows.length) { message.warning("No data to export"); return; }
+    setLoading("pdf");
+    try { exportPDF(exportRows, label); }
+    catch (e) { message.error("PDF export failed"); }
+    finally { setLoading(""); }
+  };
+
+  const handleExcel = async () => {
+    if (!exportRows.length) { message.warning("No data to export"); return; }
+    setLoading("excel");
+    try { await exportExcel(exportRows, label); }
+    catch (e) { message.error("Excel export failed"); }
+    finally { setLoading(""); }
+  };
+
+  const menuItems = [
+    { key: "pdf", label: "Download PDF", icon: <FilePdfOutlined style={{ color: "#ef4444" }} />, onClick: handlePDF },
+    { key: "excel", label: "Download Excel", icon: <FileExcelOutlined style={{ color: "#16a34a" }} />, onClick: handleExcel },
+  ];
 
   return (
-    <>
-      <Button 
-        icon={<DownloadOutlined />} 
-        size="small"
-        onClick={() => setIsModalVisible(true)}
-      >
-        Download
+    <Dropdown menu={{ items: menuItems }} trigger={["click"]} disabled={!!loading}>
+      <Button icon={<DownloadOutlined />} loading={!!loading} size="small" style={{ fontSize: 11 }}>
+        Export
       </Button>
-
-      <Modal
-        title="Download Stock Details Report"
-        open={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
-        footer={null}
-        centered
-        width={400}
-      >
-        <div style={{ padding: "20px 0" }}>
-          <p style={{ marginBottom: "20px", textAlign: "center", color: "#666" }}>
-            Choose your preferred download format:
-          </p>
-          
-          <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
-            <PDFDownloadLink
-              document={
-                <StockDetailsPdfDocument 
-                  materialName={materialName}
-                  materialDensity={materialDensity}
-                  materialCost={materialCost}
-                  stockData={stockData}
-                />
-              }
-              fileName={fileName}
-              style={{ textDecoration: "none", width: "100%" }}
-            >
-              {({ loading }) => (
-                <Button 
-                  icon={<FilePdfOutlined />} 
-                  size="large"
-                  style={{ width: "100%", height: "50px" }}
-                  type="default"
-                >
-                  {loading ? "Preparing PDF..." : "Download PDF"}
-                </Button>
-              )}
-            </PDFDownloadLink>
-
-            <Button 
-              icon={<FileExcelOutlined />} 
-              size="large"
-              style={{ width: "100%", height: "50px" }}
-              type="default"
-              onClick={handleDownloadExcel}
-            >
-              Download Excel
-            </Button>
-          </Space>
-        </div>
-      </Modal>
-    </>
+    </Dropdown>
   );
 };

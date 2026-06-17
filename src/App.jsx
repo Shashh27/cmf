@@ -12,6 +12,8 @@ import Layout from "./components/Layout";
 
 import Login from "./Pages/Login";
 
+import ChatPanel from "./chatbot/Chatbot";
+
 
 
 import OMS from "./Pages/OMS";
@@ -522,6 +524,9 @@ function App() {
           <Route path="/operator/qms-inspector" element={<QMSInspector />} />
         </Route>
       </Routes>
+
+      {/* Chat Panel - floating widget */}
+      <ChatPanel />
 
     </Router>
 

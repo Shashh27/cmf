@@ -97,12 +97,21 @@ const styles = StyleSheet.create({
 
 const partWiseColumnWidths = {
   slNo: 30,
-  projectNumber: 80,
+  projectNumber: 90,
   projectName: 140,
-  productName: 140,
+  dueDate: 70,
+  partName: 150,
   partNumber: 100,
-  partName: 160,
   priority: 45,
+};
+
+const fmtDate = (val) => {
+  if (!val) return "-";
+  const d = new Date(val);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
 };
 
 const orderWiseColumnWidths = {
@@ -136,52 +145,24 @@ const PartWisePriorityPdfDocument = ({ data }) => {
 
         <View style={styles.table}>
           <View style={styles.tableHeader}>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.slNo }]}>
-              SL NO
-            </Text>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.projectName }]}>
-              PROJECT NAME
-            </Text>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.projectNumber }]}>
-              PROJECT NO
-            </Text>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.productName }]}>
-              PRODUCT NAME
-            </Text>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.partName }]}>
-              PART NAME
-            </Text>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.partNumber }]}>
-              PART NO
-            </Text>
-            <Text style={[styles.headerCell, { width: partWiseColumnWidths.priority }]}>
-              PRIORITY
-            </Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.slNo }]}>SL NO</Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.projectNumber }]}>PROJECT NO</Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.projectName }]}>PROJECT NAME</Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.dueDate }]}>DUE DATE</Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.partName }]}>PART NAME</Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.partNumber }]}>PART NO</Text>
+            <Text style={[styles.headerCell, { width: partWiseColumnWidths.priority }]}>PRIORITY</Text>
           </View>
 
           {data.map((row, index) => (
             <View key={row.id || index} style={styles.row}>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.slNo }]}>
-                {index + 1}
-              </Text>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.projectName }]}>
-                {row.product_name || row.project_name || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.projectNumber }]}>
-                {row.sale_order_number || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.productName }]}>
-                {row.product_name || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.partName }]}>
-                {row.part_name || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.partNumber }]}>
-                {row.part_number || "-"}
-              </Text>
-              <Text style={[styles.cell, { width: partWiseColumnWidths.priority }]}>
-                {row.priority != null ? String(row.priority) : "-"}
-              </Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.slNo }]}>{index + 1}</Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.projectNumber }]}>{row.sale_order_number || "-"}</Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.projectName }]}>{row.product_name || row.project_name || "-"}</Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.dueDate }]}>{fmtDate(row.due_date)}</Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.partName }]}>{row.part_name || "-"}</Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.partNumber }]}>{row.part_number || "-"}</Text>
+              <Text style={[styles.cell, { width: partWiseColumnWidths.priority }]}>{row.priority != null ? String(row.priority) : "-"}</Text>
             </View>
           ))}
         </View>
@@ -296,10 +277,9 @@ export const PartWisePriorityPdfDownload = ({
     // Add table headers
     const headers = [
       "SL NO",
-      "PROJECT NAME",
       "PROJECT NO",
-      "PRODUCT NAME",
-      "PRODUCT NAME",
+      "PROJECT NAME",
+      "DUE DATE",
       "PART NAME",
       "PART NO",
       "PRIORITY"
@@ -335,31 +315,29 @@ export const PartWisePriorityPdfDownload = ({
 
     // Prepare and add table data - ensure exact alignment with headers
     data.forEach((row, index) => {
+      const d = row.due_date ? new Date(row.due_date) : null;
+      const dueDateStr = d ? `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}` : "-";
       const rowData = [
-        index + 1,                                    // Column A: SL NO
-        row.product_name || row.project_name || "-",  // Column B: PROJECT NAME
-        row.sale_order_number || "-",                 // Column C: PROJECT NO
-        row.product_name || "-",                      // Column D: PRODUCT NAME
-        row.product_name || "-",                      // Column E: PRODUCT NAME
-        row.part_name || "-",                         // Column F: PART NAME
-        row.part_number || "-",                       // Column G: PART NO
-        row.priority != null ? row.priority : "-"     // Column H: PRIORITY
+        index + 1,
+        row.sale_order_number || "-",
+        row.product_name || row.project_name || "-",
+        dueDateStr,
+        row.part_name || "-",
+        row.part_number || "-",
+        row.priority != null ? row.priority : "-",
       ];
-      
-      // Write each row individually to ensure proper alignment
-      const rowNum = 8 + index; // Start from row 8 (after headers)
+      const rowNum = 8 + index;
       XLSX.utils.sheet_add_aoa(ws, [rowData], { origin: `A${rowNum}` });
     });
 
-    // Set column widths
     const colWidths = [
       { wch: 8 },   // SL NO
-      { wch: 15 },  // PROJECT NO
-      { wch: 20 },  // PROJECT NAME
-      { wch: 20 },  // PRODUCT NAME
-      { wch: 15 },  // PART NO
-      { wch: 25 },  // PART NAME
-      { wch: 12 }   // PRIORITY
+      { wch: 18 },  // PROJECT NO
+      { wch: 25 },  // PROJECT NAME
+      { wch: 14 },  // DUE DATE
+      { wch: 28 },  // PART NAME
+      { wch: 16 },  // PART NO
+      { wch: 10 },  // PRIORITY
     ];
     ws['!cols'] = colWidths;
 

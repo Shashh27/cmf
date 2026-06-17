@@ -88,9 +88,17 @@ const ProjectCoordinatorProductView = () => {
   if (!productId && !isModuleView) {
     return (
       <div className="p-4">
-        <Link to="/project_coordinator/oms/orders" className="text-blue-600 hover:underline">
-          ← Back to Orders
-        </Link>
+        <div className="flex items-center gap-3 mb-2">
+          <Link to="/project_coordinator/oms/orders" className="text-blue-600 hover:underline">
+            ← Back to Orders
+          </Link>
+          {(projectName || projectNumber) && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-slate-700">{projectName}</span>
+              {projectNumber && <span className="text-sm text-slate-500">({projectNumber})</span>}
+            </div>
+          )}
+        </div>
         <p className="mt-2 text-gray-500">No product selected.</p>
       </div>
     );
@@ -144,14 +152,22 @@ const ProjectCoordinatorProductView = () => {
             label: 'PDM',
             children: (
               <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
-                  <Link
-                    to="/project_coordinator/oms/orders"
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
-                  >
-                    <ArrowLeftOutlined />
-                    Back to Orders
-                  </Link>
+                <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="flex items-center gap-3">
+                    <Link
+                      to="/project_coordinator/oms/orders"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
+                    >
+                      <ArrowLeftOutlined />
+                      Back to Orders
+                    </Link>
+                    {(projectName || projectNumber) && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-700">{projectName}</span>
+                        {projectNumber && <span className="text-sm text-slate-500">({projectNumber})</span>}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <Layout style={{ height: "100%", flex: 1, overflow: "hidden", display: 'flex' }}>
                   {isMobile && (
@@ -239,14 +255,22 @@ const ProjectCoordinatorProductView = () => {
             label: 'Order Tracking',
             children: (
               <div style={{ paddingTop: 10, height: 'calc(100vh - 120px)', minHeight: 320, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
-                  <Link
-                    to="/project_coordinator/oms/orders"
-                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
-                  >
-                    <ArrowLeftOutlined />
-                    Back to Orders
-                  </Link>
+                <div style={{ padding: '0 16px 10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="flex items-center gap-3">
+                    <Link
+                      to="/project_coordinator/oms/orders"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 text-xs font-semibold rounded-lg transition-colors border border-indigo-200"
+                    >
+                      <ArrowLeftOutlined />
+                      Back to Orders
+                    </Link>
+                    {(projectName || projectNumber) && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-700">{projectName}</span>
+                        {projectNumber && <span className="text-sm text-slate-500">({projectNumber})</span>}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <OrderTracking />
               </div>

@@ -38,6 +38,17 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       return;
     }
 
+    // For part-category, part-ipid, and operation-folder types, skip tree refresh
+    // since document version uploads don't affect the tree structure
+    if (
+      selectedNode &&
+      (selectedNode.type === 'part-category' || 
+       selectedNode.type === 'part-ipid' || 
+       selectedNode.type === 'operation-folder')
+    ) {
+      return; // Don't refresh the tree for these types
+    }
+
     // For all other types, use the generic callback (updates general tree, etc.)
     if (onDocumentsChange && typeof onDocumentsChange === 'function') {
       onDocumentsChange();
@@ -69,6 +80,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   const [addFileList, setAddFileList] = useState([]);
   const [addUploading, setAddUploading] = useState(false);
   const [addDocType, setAddDocType] = useState('CNC');
+  const [customDocType, setCustomDocType] = useState('');
 
   useEffect(() => {
     if (selectedNode) {
@@ -76,6 +88,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
           selectedNode.type === 'common-folder' ||
           selectedNode.type === 'common-root' ||
           selectedNode.type === 'part-category' || 
+          selectedNode.type === 'part-ipid' ||
           selectedNode.type === 'operation-folder' ||
           selectedNode.type === 'machine-folder' ||
           selectedNode.type === 'machine' ||
@@ -103,6 +116,42 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         url = `${config.API_BASE_URL}/common-documents/all/documents`;
       } else if (selectedNode.type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/part/${selectedNode.partId}`;
+      } else if (selectedNode.type === 'part-ipid') {
+        // For IPID, fetch operations and their documents
+        const operationsResponse = await fetch(`${config.API_BASE_URL}/operations/part/${selectedNode.partId}`);
+        if (!operationsResponse.ok) {
+          throw new Error('Failed to fetch operations');
+        }
+        const operations = await operationsResponse.json();
+        
+        // Fetch documents for each operation
+        const allDocuments = [];
+        for (const operation of operations) {
+          const docsResponse = await fetch(`${config.API_BASE_URL}/operation-documents/operation/${operation.id}`);
+          if (docsResponse.ok) {
+            const docs = await docsResponse.json();
+            // Filter only IPID documents and add operation information
+            const ipidDocs = docs
+              .filter(doc => (doc.document_type || '').toLowerCase() === 'ipid')
+              .map(doc => ({
+                ...doc,
+                file_name: doc.document_name,
+                version: doc.document_version,
+                url: doc.document_url,
+                operation_number: operation.operation_number,
+                operation_name: operation.operation_name,
+                operation_id: operation.id,
+                doc_source_type: 'part-ipid'
+              }));
+            allDocuments.push(...ipidDocs);
+          }
+        }
+        
+        // Reset selected versions when new documents are fetched
+        setSelectedVersions({});
+        setDocuments(allDocuments);
+        setLoading(false);
+        return;
       } else if (selectedNode.type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/operation/${selectedNode.operationId}`;
       } else if (selectedNode.type === 'folder' && selectedNode.category === 'Reports') {
@@ -130,10 +179,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         const category = selectedNode.category;
         data = data.filter(doc => {
           const docType = (doc.document_type || '').toLowerCase();
-          if (category === 'MPP') return docType === 'mpp';
-          if (category === 'ENGINEERING_DRAWING') return docType === '2d' || docType === '3d';
-          if (category === 'IPID') return docType === 'ipid';
-          if (category === 'Balloon') return docType === 'balloon';
+          if (category === 'ENGINEERING_DRAWING') return true; // Show all documents for Engineering Drawing
           return false;
         });
       }
@@ -236,12 +282,28 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       render: (_, record, index) => index + 1,
       width: 60,
     },
+    ...(selectedNode && selectedNode.type === 'part-ipid' ? [
+      {
+        title: 'Operation No',
+        dataIndex: 'operation_number',
+        key: 'operation_number',
+        width: 120,
+        render: (text) => <Text strong style={{ color: '#595959' }}>{text || '-'}</Text>
+      },
+      {
+        title: 'Operation Name',
+        dataIndex: 'operation_name',
+        key: 'operation_name',
+        width: 180,
+        render: (text) => <Text style={{ color: '#595959' }}>{text || '-'}</Text>
+      }
+    ] : []),
     {
       title: 'Document Name',
       dataIndex: 'file_name',
       key: 'file_name',
       render: (text, record) => (
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ 
             width: '32px', 
             height: '32px', 
@@ -249,31 +311,30 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
             borderRadius: '4px', 
             display: 'flex', 
             alignItems: 'center', 
-            justifyContent: 'center',
-            marginTop: '2px'
+            justifyContent: 'center'
           }}>
             <FileOutlined style={{ color: '#1890ff', fontSize: '18px' }} />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <Text strong style={{ fontSize: '14px', color: '#262626' }}>{text}</Text>
-            {record.document_type && (
-              <Tag size="small" style={{ 
-                fontSize: '10px', 
-                margin: 0, 
-                width: 'fit-content', 
-                padding: '0 4px',
-                backgroundColor: '#f5f5f5',
-                color: '#8c8c8c',
-                border: 'none',
-                lineHeight: '16px',
-                marginTop: '2px'
-              }}>
-                {record.document_type.toUpperCase()}
-              </Tag>
-            )}
-          </div>
+          <Text strong style={{ fontSize: '14px', color: '#262626' }}>{text}</Text>
         </div>
       ),
+    },
+    {
+      title: 'Document Type',
+      dataIndex: 'document_type',
+      key: 'document_type',
+      width: 120,
+      render: (text) => text ? (
+        <Tag style={{ 
+          fontSize: '11px',
+          padding: '2px 8px',
+          backgroundColor: '#f0f0f0',
+          color: '#595959',
+          border: '1px solid #d9d9d9'
+        }}>
+          {text.toUpperCase()}
+        </Tag>
+      ) : '-'
     },
     {
       title: 'Version',
@@ -466,7 +527,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       } else if (editingDocument.doc_source_type === 'part-category') {
         url = `${config.API_BASE_URL}/documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
-      } else if (editingDocument.doc_source_type === 'operation-folder') {
+      } else if (editingDocument.doc_source_type === 'part-ipid' || editingDocument.doc_source_type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/${editingDocument.id}`;
         body = { document_name: newDocumentName.trim() };
       } else if (editingDocument.doc_source_type === 'machine-folder') {
@@ -516,7 +577,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       downloadUrl = `${config.API_BASE_URL}/general-documents/documents/${document.id}/download`;
     } else if (document.doc_source_type === 'part-category') {
       downloadUrl = `${config.API_BASE_URL}/documents/${document.id}/download`;
-    } else if (document.doc_source_type === 'operation-folder') {
+    } else if (document.doc_source_type === 'part-ipid' || document.doc_source_type === 'operation-folder') {
       downloadUrl = `${config.API_BASE_URL}/operation-documents/${document.id}/download`;
     } else if (document.doc_source_type === 'folder') {
       downloadUrl = `${config.API_BASE_URL}/order-documents/download/${document.id}`;
@@ -651,9 +712,10 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.append('document_version', nextVersion);
         formData.append('part_id', selectedNode.partId);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
-      } else if (uploadingDocument.doc_source_type === 'operation-folder') {
+      } else if (uploadingDocument.doc_source_type === 'part-ipid' || uploadingDocument.doc_source_type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/upload/`;
-        formData.append('operation_id', selectedNode.operationId);
+        const operationId = uploadingDocument.operation_id || selectedNode.operationId;
+        formData.append('operation_id', operationId);
         formData.append('document_type', uploadingDocument.document_type || 'CNC');
         formData.append('document_version', nextVersion);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
@@ -709,6 +771,12 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   const handleAddDocument = async () => {
     if (!addFileList.length) {
       message.error('Please select files to upload');
+      return;
+    }
+
+    // Validate custom document type if "Other" is selected
+    if (selectedNode?.type === 'operation-folder' && addDocType === 'Other' && !customDocType.trim()) {
+      message.error('Please enter a custom document type');
       return;
     }
 
@@ -776,16 +844,13 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.delete('files');
         formData.append('file', file, file.name);
         formData.append('document_name', file.name);
-        formData.append('document_type', selectedNode.category === 'MPP' ? 'mpp' : 
-                        selectedNode.category === 'ENGINEERING_DRAWING' ? '2d' : 
-                        selectedNode.category === 'IPID' ? 'ipid' : 
-                        selectedNode.category === 'Balloon' ? 'balloon' : 'other');
+        formData.append('document_type', selectedNode.category === 'ENGINEERING_DRAWING' ? '2d' : 'other');
         formData.append('document_version', '1.0');
         formData.append('part_id', selectedNode.partId);
       } else if (selectedNode.type === 'operation-folder') {
         url = `${config.API_BASE_URL}/operation-documents/upload/`;
         formData.append('operation_id', selectedNode.operationId);
-        formData.append('document_type', addDocType);
+        formData.append('document_type', addDocType === 'Other' ? customDocType : addDocType);
         formData.append('document_version', '1.0');
         // Operation documents endpoint expects 'files' (plural) as it supports multi-upload
         // Remove the existing 'files' and add them with proper naming
@@ -833,6 +898,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
       message.success('Document added successfully');
       setAddModalVisible(false);
       setAddFileList([]);
+      setCustomDocType('');
       fetchDocuments();
       
       // Notify parent of document change
@@ -858,7 +924,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
             url = `${config.API_BASE_URL}/general-documents/documents/${document.id}`;
           } else if (document.doc_source_type === 'part-category') {
             url = `${config.API_BASE_URL}/documents/${document.id}`;
-          } else if (document.doc_source_type === 'operation-folder') {
+          } else if (document.doc_source_type === 'part-ipid' || document.doc_source_type === 'operation-folder') {
             url = `${config.API_BASE_URL}/operation-documents/${document.id}`;
           } else if (document.doc_source_type === 'machine-folder') {
             url = `${config.API_BASE_URL}/machine-documents/documents/${document.id}`;
@@ -907,7 +973,8 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     selectedNode.type === 'general-folder' || 
     selectedNode.type === 'common-folder' ||
     selectedNode.type === 'common-root' ||
-    selectedNode.type === 'part-category' || 
+    selectedNode.type === 'part-category' ||
+    selectedNode.type === 'part-ipid' || 
     selectedNode.type === 'operation-folder' ||
     selectedNode.type === 'machine-folder' ||
     selectedNode.type === 'machine' ||
@@ -928,7 +995,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     if (selectedNode.type === 'general-folder') return <FolderOutlined style={{ color: '#722ed1', fontSize: '20px' }} />;
     if (selectedNode.type === 'common-folder') return <FolderOutlined style={{ color: '#eb2f96', fontSize: '20px' }} />;
     if (selectedNode.type === 'machine-folder' || selectedNode.type === 'machine') return <FolderOutlined style={{ color: '#52c41a', fontSize: '20px' }} />;
-    if (selectedNode.type === 'part-category') return <FileOutlined style={{ color: '#1890ff', fontSize: '20px' }} />;
+    if (selectedNode.type === 'part-category' || selectedNode.type === 'part-ipid') return <FileOutlined style={{ color: '#1890ff', fontSize: '20px' }} />;
     if (selectedNode.type === 'operation-folder') return <FileOutlined style={{ color: '#faad14', fontSize: '20px' }} />;
     if (selectedNode.category === 'Reports') return <FileOutlined style={{ color: '#52c41a', fontSize: '20px' }} />;
     return <FolderOutlined style={{ color: '#722ed1', fontSize: '20px' }} />;
@@ -936,6 +1003,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
 
   const getHeaderTitle = () => {
     if (selectedNode.type === 'part-category') return `${selectedNode.partName} - ${selectedNode.category}`;
+    if (selectedNode.type === 'part-ipid') return `${selectedNode.partName} - IPID`;
     if (selectedNode.type === 'operation-folder') return `Operation: ${selectedNode.operationName}`;
     if (selectedNode.category === 'Reports') return `Reports - Order: ${selectedNode.orderId}`;
     if (selectedNode.type === 'machine-folder') return `${selectedNode.machineName} - ${selectedNode.folderName}`;
@@ -1120,6 +1188,7 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         onCancel={() => {
           setAddModalVisible(false);
           setAddFileList([]);
+          setCustomDocType('');
         }}
         okText="Upload"
         cancelText="Cancel"
@@ -1134,10 +1203,26 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
             <Select
               style={{ width: '100%' }}
               value={addDocType}
-              onChange={setAddDocType}
+              onChange={(value) => {
+                setAddDocType(value);
+                if (value !== 'Other') {
+                  setCustomDocType('');
+                }
+              }}
             >
+              <Option value="IPID">IPID</Option>
               <Option value="CNC">CNC</Option>
+              <Option value="Image">Image</Option>
+              <Option value="Other">Other</Option>
             </Select>
+            {addDocType === 'Other' && (
+              <Input
+                style={{ width: '100%', marginTop: '8px' }}
+                placeholder="Enter custom document type"
+                value={customDocType}
+                onChange={(e) => setCustomDocType(e.target.value)}
+              />
+            )}
           </div>
         )}
         

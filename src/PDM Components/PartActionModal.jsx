@@ -266,7 +266,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
               fd.append('operation_id', String(newOp.id));
               fd.append('files', fileObj);
               fd.append('document_name', fileObj.name || 'Document');
-              fd.append('document_type', resolveType(doc.document_type, doc.document_type_other) || 'IPID');
+              fd.append('document_type', resolveType(doc.document_type, doc.document_type_other) || 'Image');
               fd.append('document_version', (doc.document_version || '1.0').replace(/^v/i, ''));
               fd.append('parent_id', '');
             }
@@ -577,9 +577,9 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                           const type = getFieldValue(['items', index, 'documents', dn, 'document_type']);
                                           return (
                                             <div className="flex flex-col gap-2">
-                                              <Form.Item {...dr} name={[dn, 'document_type']} label={<span className="text-xs font-medium text-gray-600">Doc Type</span>} className="mb-0" initialValue="IPID">
+                                              <Form.Item {...dr} name={[dn, 'document_type']} label={<span className="text-xs font-medium text-gray-600">Doc Type</span>} className="mb-0" initialValue="Image">
                                                 <Select placeholder="Select Type" size="small" className="w-full">
-                                                  {['IPID','Image','CNC','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
+                                                  {['Image','CNC','Video','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
                                                 </Select>
                                               </Form.Item>
                                               {type === 'Other' && (
@@ -604,7 +604,7 @@ const PartActionModal = ({ open, onCancel, actionType, selectedPart, onActionCre
                                 </Card>
                               ))}
                               <Form.Item>
-                                <Button type="dashed" onClick={() => addDoc({ document_type: 'IPID', document_version: '' })} block icon={<PlusOutlined />} className="text-blue-500 border-blue-200">
+                                <Button type="dashed" onClick={() => addDoc({ document_type: 'Image', document_version: '' })} block icon={<PlusOutlined />} className="text-blue-500 border-blue-200">
                                   Add Document to Operation
                                 </Button>
                               </Form.Item>

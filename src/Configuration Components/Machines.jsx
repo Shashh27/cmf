@@ -174,6 +174,13 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
       render: (text) => text || "-",
     },
     {
+      title: 'MHR',
+      dataIndex: 'mhr',
+      key: 'mhr',
+      align: 'center',
+      render: (val) => val != null ? `₹${val}` : "-",
+    },
+    {
       title: 'CALIBRATION DATE',
       dataIndex: 'calibration_date',
       key: 'calibration_date',
@@ -186,6 +193,13 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
       key: 'calibration_due_date',
       align: 'center',
       render: (text) => formatDate(text),
+    },
+    {
+      title: 'FREQUENCY',
+      dataIndex: 'calibration_frequency',
+      key: 'calibration_frequency',
+      align: 'center',
+      render: (text) => text || "-",
     },
     {
       title: 'PASSWORD',

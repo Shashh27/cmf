@@ -40,6 +40,8 @@ const parseHmsToSeconds = (val) => {
   return h * 3600 + m * 60 + s;
 };
 
+const fmtCost = (val) => val != null ? `Rs.${Number(val).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—";
+
 const formatHms = (seconds) => {
   const sec = Math.max(0, Math.floor(seconds || 0));
   const h = Math.floor(sec / 3600);
@@ -133,6 +135,9 @@ const ProductSummary = ({ productId }) => {
           String(op?.part_type_name || "").toLowerCase().includes("out");
         
         const machineName = op?.machine_name || (op?.machine_id ? `Machine ${op.machine_id}` : "N/A");
+        const mhrRate = op?.mhr_rate || 0;
+        // Cost = total hours × mhr_rate
+        const machineCost = (totalSec / 3600) * mhrRate;
         rows.push({
           key: `${part?.id || "p"}-${op?.id || op?.operation_number || Math.random()}`,
           part_number: part?.part_number || "—",
@@ -143,11 +148,13 @@ const ProductSummary = ({ productId }) => {
           cycle_time: op?.cycle_time || "00:00:00",
           machine_name: machineName,
           machine_id: op?.machine_id || null,
-          part_qty: partQty, // Store quantity for reference
-          is_outsource: isOutSource, // Store outsource flag
+          mhr_rate: mhrRate,
+          machine_cost: machineCost,
+          part_qty: partQty,
+          is_outsource: isOutSource,
           setup_seconds: setupSec,
-          cycle_seconds: totalCycleSec, // Total cycle time for all quantities
-          total_seconds: totalSec, // Total time (setup + cycle for all quantities)
+          cycle_seconds: totalCycleSec,
+          total_seconds: totalSec,
         });
       });
     });
@@ -186,10 +193,11 @@ const ProductSummary = ({ productId }) => {
     const byMachine = new Map();
     filteredRows.forEach((r) => {
       const key = r.machine_id || r.machine_name || "N/A";
-      const prev = byMachine.get(key) || { machine_name: r.machine_name, setup_seconds: 0, cycle_seconds: 0, total_seconds: 0 };
+      const prev = byMachine.get(key) || { machine_name: r.machine_name, mhr_rate: r.mhr_rate, setup_seconds: 0, cycle_seconds: 0, total_seconds: 0, machine_cost: 0 };
       prev.setup_seconds += r.setup_seconds;
       prev.cycle_seconds += r.cycle_seconds;
       prev.total_seconds += r.total_seconds;
+      prev.machine_cost += r.machine_cost;
       byMachine.set(key, prev);
     });
 
@@ -199,12 +207,15 @@ const ProductSummary = ({ productId }) => {
     const uniqueMachines = Array.from(new Set(rows.map(r => r.machine_name).filter(m => m && m !== "N/A"))).sort();
     const uniqueOperations = Array.from(new Set(rows.map(r => r.operation_name).filter(o => o))).sort();
 
+    const totalCost = filteredRows.reduce((a, r) => a + (r.machine_cost || 0), 0);
+
     return { 
       productName: summaryData?.product?.product_name || "", 
       rows: filteredRows, 
       totalSetup, 
       totalCycle, 
-      totalAll: totalSetup + totalCycle, 
+      totalAll: totalSetup + totalCycle,
+      totalCost,
       machineRows,
       uniqueMachines,
       uniqueOperations,
@@ -276,6 +287,26 @@ const ProductSummary = ({ productId }) => {
       render: (_, r) => (
         <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#1e293b", fontSize: 11 }}>
           {formatHms(r.total_seconds)}
+        </span>
+      ),
+    },
+    {
+      title: "MHR Rate",
+      key: "mhr_rate",
+      width: 90,
+      render: (_, r) => (
+        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#7c3aed" }}>
+          {r.mhr_rate ? `Rs.${r.mhr_rate}/hr` : <span style={{ color: "#94a3b8" }}>—</span>}
+        </span>
+      ),
+    },
+    {
+      title: "Machine Cost",
+      key: "machine_cost",
+      width: 110,
+      render: (_, r) => (
+        <span style={{ fontFamily: "monospace", fontWeight: 600, color: r.machine_cost > 0 ? "#15803d" : "#94a3b8", fontSize: 11 }}>
+          {r.machine_cost > 0 ? fmtCost(r.machine_cost) : "—"}
         </span>
       ),
     },
@@ -376,6 +407,16 @@ const ProductSummary = ({ productId }) => {
       render: (_, r) => (
         <span style={{ fontFamily: "monospace", color: "#475569", fontSize: 11 }}>
           {formatHms(r.total_seconds)}
+        </span>
+      ),
+    },
+    {
+      title: "Cost",
+      key: "machine_cost",
+      width: 110,
+      render: (_, r) => (
+        <span style={{ fontFamily: "monospace", fontWeight: 600, color: r.machine_cost > 0 ? "#15803d" : "#94a3b8", fontSize: 11 }}>
+          {r.machine_cost > 0 ? fmtCost(r.machine_cost) : "—"}
         </span>
       ),
     },
@@ -491,10 +532,11 @@ const ProductSummary = ({ productId }) => {
         </div>
 
         {/* Stat cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard icon={<ClockCircleOutlined />} iconColor="#f97316" label="Total Setup Time"       value={formatHms(summary.totalSetup)} />
           <StatCard icon={<ClockCircleOutlined />} iconColor="#16a34a" label="Total Cycle Time"       value={formatHms(summary.totalCycle)} />
           <StatCard icon={<ClockCircleOutlined />} iconColor="#2563eb" label="Total (Setup + Cycle)"  value={formatHms(summary.totalAll)}   />
+          <StatCard icon={<ToolOutlined />}         iconColor="#7c3aed" label="Total Machining Cost"  value={fmtCost(summary.totalCost)}     />
         </div>
 
         {/* ── Table 1: Machine-wise ─────────────────────────────────────── */}
@@ -512,7 +554,7 @@ const ProductSummary = ({ productId }) => {
               rowKey={(r) => r.machine_name}
               pagination={false}
               size="small"
-              scroll={{ x: 420 }}
+              scroll={{ x: 620 }}
               locale={{ emptyText: <Empty description="No IN-House operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
             />
           </div>
@@ -533,7 +575,7 @@ const ProductSummary = ({ productId }) => {
               rowKey="key"
               pagination={false}
               size="small"
-              scroll={{ x: 850 }}
+              scroll={{ x: 1100 }}
               locale={{ emptyText: <Empty description="No operations found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
             />
           </div>

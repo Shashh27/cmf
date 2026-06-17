@@ -3,7 +3,8 @@ import {
   PlusOutlined, DownloadOutlined, FileTextOutlined, EyeOutlined,
   SyncOutlined, ToolOutlined, ClockCircleOutlined, EnvironmentOutlined,
   DeleteOutlined, InboxOutlined, FilePdfOutlined, UploadOutlined, EditOutlined,
-  HolderOutlined, ExclamationCircleOutlined, CheckCircleOutlined, CloseCircleOutlined
+  HolderOutlined, ExclamationCircleOutlined, CheckCircleOutlined, CloseCircleOutlined,
+  CheckSquareOutlined, UnorderedListOutlined, PlusCircleOutlined
 } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
@@ -14,6 +15,7 @@ import EditOperationModal from "./EditOperationModal";
 import OperationImportModal from "./OperationImportModal";
 import PartDocumentReport from "../../DownloadReports/PartDocumentReport";
 import ModelViewer3D from "./ModelViewer3D";
+import OperationChecklistsModal from "./OperationChecklistsModal";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -29,7 +31,7 @@ const SortableRow = (props) => {
 
   const style = {
     ...props.style,
-    transform: CSS.Transform.toString(transform && { ...transform, scaleY: 1 }),
+    transform: CSS.Transform.toString(transform && { x: 0, y: transform.y, scaleX: 1, scaleY: 1 }),
     transition,
     ...(isDragging ? { position: 'relative', zIndex: 9999, opacity: 0.8 } : {}),
   };
@@ -148,6 +150,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const [importOperations, setImportOperations]       = useState([]);
   const [showReportModal, setShowReportModal] = useState(false);
 
+  // Checklists state
+  const [showChecklistsModal, setShowChecklistsModal] = useState(false);
+  const [selectedOperationForChecklists, setSelectedOperationForChecklists] = useState(null);
+
   // eBOM version selection
   const [selectedVersions, setSelectedVersions] = useState({});
 
@@ -177,7 +183,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 1,
+        distance: 5,
       },
     })
   );
@@ -416,29 +422,6 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     }
   };
 
-  const handleDownloadTemplate = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/operations/template/download`, {
-        responseType: 'blob'
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'Operations_Template.docx');
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      message.success('Template downloaded successfully');
-    } catch (e) {
-      console.error(e);
-      const detail =
-        e?.response?.data?.detail ||
-        e?.response?.data?.message ||
-        'Failed to download template';
-      message.error(detail);
-    }
-  };
 
   const openPartActionModal = (type) => {
     if (!selectedItem || selectedItem.itemType !== 'part') { message.warning("Please select a part to add operations/documents"); return; }
@@ -512,10 +495,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       render: (id, r) => <Tag color="geekblue" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.machine_name || id || 'N/A'}</Tag> },
     { title: <span className="font-semibold text-slate-700">Op Type</span>, dataIndex: 'part_type_id', key: 'type',
       render: (_, r) => <Tag color={r.part_type_name === 'Out-Source' ? 'orange' : 'blue'} className="m-0 px-1.5 py-0.5 text-xs">{r.part_type_name || 'IN-House'}</Tag> },
-    { title: <span className="font-semibold text-slate-700">From Date</span>, dataIndex: 'from_date', key: 'from',
-      render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
-    { title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to',
-      render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
+    { title: <span className="font-semibold text-slate-700">From Date</span>, dataIndex: 'from_date', key: 'from', width: 120,
+      render: v => v ? <span className="text-sm text-slate-700 font-medium">{new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-slate-500">—</span> },
+    { title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to', width: 120,
+      render: v => v ? <span className="text-sm text-slate-700 font-medium">{new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-slate-500">—</span> },
     { title: <span className="font-semibold text-slate-700 text-center block">Actions</span>, key: 'actions', align: 'center', width: 150, fixed: 'right',
       render: (_, r) => {
         const isOut = r.part_type_name === 'Out-Source' || r.part_type_id === 2;
@@ -524,6 +507,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
             <Tooltip title="View"><Button size="small" icon={<EyeOutlined />} onClick={() => { setViewOperation(r); setIsViewModalOpen(true); }} className="text-green-500 hover:bg-green-50" /></Tooltip>
             <Tooltip title="Edit"><Button size="small" icon={<EditOutlined />} onClick={() => { setSelectedOperation(r); setModalTab('details'); setShowAddToolForm(false); setIsOperationModalOpen(true); }} className="text-blue-500 hover:bg-blue-50" /></Tooltip>
             {!isOut && <Tooltip title="Add Tool"><Button size="small" icon={<ToolOutlined />} onClick={() => { setSelectedOperation(r); setModalTab('tools'); setShowAddToolForm(true); setIsOperationModalOpen(true); }} className="text-orange-500 hover:bg-orange-50" /></Tooltip>}
+            <Tooltip title="Checklists"><Button size="small" icon={<UnorderedListOutlined />} onClick={() => { setSelectedOperationForChecklists(r); setShowChecklistsModal(true); }} className="text-purple-500 hover:bg-purple-50" /></Tooltip>
             <Popconfirm title="Delete operation?" onConfirm={() => handleDeleteOperation(r.id)} okText="Yes" cancelText="No">
               <Button size="small" danger icon={<DeleteOutlined />} className="hover:bg-red-50" />
             </Popconfirm>
@@ -609,6 +593,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
+      }
+    },
+    { title: <span className="text-xs font-semibold">DATE</span>, key: 'date', width: 120,
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        return cur.created_at ? <span className="text-xs text-slate-700 font-medium">{new Date(cur.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-xs text-slate-400">—</span>;
       }
     },
     { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
@@ -926,8 +916,19 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
           </div>
         )}
       </Modal>
+      <OperationChecklistsModal
+        visible={showChecklistsModal}
+        onClose={() => {
+          setShowChecklistsModal(false);
+          setSelectedOperationForChecklists(null);
+        }}
+        operation={selectedOperationForChecklists}
+      />
     </div>
   );
 };
 
 export default DocumentsPanel;
+
+
+

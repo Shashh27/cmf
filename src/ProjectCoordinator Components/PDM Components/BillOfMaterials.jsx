@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined } from "@ant-design/icons";
+import { SearchOutlined, PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, AppstoreOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, DownloadOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
 import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
@@ -220,6 +220,37 @@ const BillOfMaterials = ({
   };
 
   const handleCreateProduct = () => openModal('product');
+
+  const downloadTemplate = async (templateType) => {
+    try {
+      const endpoint = templateType === 'parts'
+        ? `${API_BASE_URL}/parts/template/download`
+        : `${API_BASE_URL}/operations/template/download`;
+
+      const response = await axios.get(endpoint, {
+        responseType: 'blob',
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute(
+        'download',
+        templateType === 'parts' ? 'PartsTemplate.docx' : 'Operations_Template.docx'
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      message.success(`${templateType === 'parts' ? 'Parts' : 'Operations'} template downloaded successfully`);
+    } catch (error) {
+      console.error('Template download error:', error);
+      message.error(
+        `Failed to download ${templateType} template. Please ensure the template has been uploaded to the server.`
+      );
+    }
+  };
   const handleCreateAssembly = (product) => openModal('assembly', product);
   const handleCreatePart = (product, assembly = null) => {
     if (!product) return;
@@ -941,6 +972,17 @@ const BillOfMaterials = ({
             </div>
 
             <div className="flex items-center gap-2 min-w-0">
+              <Tooltip title="Download Parts Template">
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={() => downloadTemplate('parts')}
+                  className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-300 text-xs font-medium px-2 py-1 rounded-md shadow-sm"
+                >
+                  <span className="hidden sm:inline">Parts Template</span>
+                </Button>
+              </Tooltip>
               <AssemblyPartsUploadPanel
                 selectedItem={(() => {
                   if (activeItemType === 'product' && activeItemId) {
@@ -965,30 +1007,22 @@ const BillOfMaterials = ({
                   else if (singleProductId) fetchProductHierarchy(singleProductId, true);
                 }}
               />
-              {(projectName || projectNumber) && (
-                <div className="text-right min-w-0">
-                  <div className="text-[11px] font-bold text-slate-700 truncate leading-tight">
-                    {projectName}
-                  </div>
-                  <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
-                    {projectNumber}
-                  </div>
-                </div>
-              )}
             </div>
 
-            {!singleProductId && (
-              <Button
-                type="primary"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={handleCreateProduct}
-                className="bom-primary-btn shrink-0"
-              >
-                <span className="hidden sm:inline">New Product</span>
-                <span className="sm:hidden">New</span>
-              </Button>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {!singleProductId && (
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={handleCreateProduct}
+                  className="bom-primary-btn shrink-0"
+                >
+                  <span className="hidden sm:inline">New Product</span>
+                  <span className="sm:hidden">New</span>
+                </Button>
+              )}
+            </div>
           </div>
         
         {/* Search Bar & Filters */}

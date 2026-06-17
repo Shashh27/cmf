@@ -213,7 +213,7 @@ const AssemblyPartsUploadPanel = ({
       prev.map((r) => {
         if (r._key === key) {
           const updatedRow = { ...r, [field]: value };
-          
+
           // Clear error status if user is fixing required fields
           if (field === 'part_name' || field === 'part_number') {
             if (updatedRow.part_name?.trim() && updatedRow.part_number?.trim()) {
@@ -223,12 +223,31 @@ const AssemblyPartsUploadPanel = ({
               return { ...updatedRow, _status: "pending", _error: null };
             }
           }
-          
+
           return updatedRow;
         }
         return r;
       })
     );
+  };
+
+  // ── add new empty row ─────────────────────────────────────────────────────
+  const addNewRow = () => {
+    const newKey = Math.max(...rows.map(r => r._key), 0) + 1;
+    const newRow = {
+      _key: newKey,
+      part_name: "",
+      part_number: "",
+      qty: 1,
+      size: "",
+      raw_material_name: null,
+      type_id: 1,
+      part_detail: null,
+      _status: "pending",
+      _error: null,
+    };
+    setRows((prev) => [...prev, newRow]);
+    setSelectedRowKeys((prev) => [...prev, newKey]);
   };
 
   const removeRow = (key) => {
@@ -247,17 +266,17 @@ const AssemblyPartsUploadPanel = ({
       return;
     }
 
-    // Validate required fields before sending
-    const invalid = toCreate.filter(
+    // Validate all rows (not just selected ones) to ensure no invalid rows exist
+    const allInvalid = rows.filter(
       (r) => !r.part_name?.trim() || !r.part_number?.trim()
     );
-    if (invalid.length > 0) {
+    if (allInvalid.length > 0) {
       message.error(
-        `${invalid.length} row(s) are missing Part Name or Part Number.`
+        `${allInvalid.length} row(s) are missing Part Name or Part Number. Please fill all required fields before creating parts.`
       );
       setRows((prev) =>
         prev.map((r) =>
-          invalid.find((inv) => inv._key === r._key)
+          allInvalid.find((inv) => inv._key === r._key)
             ? {
                 ...r,
                 _status: "error",
@@ -265,6 +284,10 @@ const AssemblyPartsUploadPanel = ({
               }
             : r
         )
+      );
+      // Deselect invalid rows to prevent them from being created
+      setSelectedRowKeys((prev) =>
+        prev.filter((k) => !allInvalid.find((inv) => inv._key === k))
       );
       return;
     }
@@ -456,17 +479,7 @@ const AssemblyPartsUploadPanel = ({
         />
       ),
     },
-    {
-      title: <span className="text-xs font-semibold">MATERIAL (info)</span>,
-      dataIndex: "raw_material_name",
-      key: "raw_material_name",
-      width: 140,
-      render: (val) => (
-        <Text type="secondary" className="text-xs">
-          {val || "—"}
-        </Text>
-      ),
-    },
+    
     {
       title: <span className="text-xs font-semibold">TYPE</span>,
       dataIndex: "type_id",
@@ -700,6 +713,14 @@ const AssemblyPartsUploadPanel = ({
                   disabled={submitting}
                 >
                   ← Re-upload
+                </Button>
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={addNewRow}
+                  disabled={submitting}
+                >
+                  Add Part
                 </Button>
                 <Text type="secondary" className="text-xs">
                   {pendingSelected} row(s) selected for creation
