@@ -127,7 +127,7 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
         inventory_request_details = None
         if inventory_request:
             from DB.models.inventory import ToolsList
-            from DB.models.oms import Order, Part
+            from DB.models.oms import Order, Part, Operation, Product
             from DB.models.access_control import AccessUser as AdminUser
             
             tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
@@ -135,6 +135,8 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
             inv_req_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.inventory_supervisor_id).first()
             project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
             part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+            operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first() if inventory_request.operation_id else None
+            product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
             
             inventory_request_details = {
                 "id": inventory_request.id,
@@ -142,16 +144,24 @@ def get_all_inventory_return_requests(db: Session = Depends(get_db)):
                 "operator_id": inventory_request.operator_id,
                 "project_id": inventory_request.project_id,
                 "part_id": inventory_request.part_id,
+                "operation_id": inventory_request.operation_id,
                 "quantity": inventory_request.quantity,
                 "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
                 "status": inventory_request.status,
                 "created_at": inventory_request.created_at,
                 "updated_at": inventory_request.updated_at,
                 "tool_name": tool.item_description if tool else None,
+                "tool_type": tool.type if tool else None,
+                "tool_range": tool.range if tool else None,
+                "identification_code": tool.identification_code if tool else None,
                 "operator_name": inv_operator.user_name if inv_operator else None,
                 "inventory_supervisor_name": inv_req_supervisor.user_name if inv_req_supervisor else None,
                 "project_name": project.sale_order_number if project else None,
-                "part_name": part.part_name if part else None
+                "part_name": part.part_name if part else None,
+                "part_number": part.part_number if part else None,
+                "product_name": product.product_name if product else None,
+                "operation_name": operation.operation_name if operation else None,
+                "operation_number": operation.operation_number if operation else None
             }
         
         request_dict = {
@@ -192,7 +202,7 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
     inventory_request_details = None
     if inventory_request:
         from DB.models.inventory import ToolsList
-        from DB.models.oms import Order, Part
+        from DB.models.oms import Order, Part, Operation, Product
         from DB.models.access_control import AccessUser as AdminUser
         
         tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
@@ -200,6 +210,8 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
         inv_req_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+        operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first() if inventory_request.operation_id else None
+        product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
         
         inventory_request_details = {
             "id": inventory_request.id,
@@ -207,16 +219,22 @@ def get_inventory_return_request(return_request_id: int, db: Session = Depends(g
             "operator_id": inventory_request.operator_id,
             "project_id": inventory_request.project_id,
             "part_id": inventory_request.part_id,
+            "operation_id": inventory_request.operation_id,
             "quantity": inventory_request.quantity,
             "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
             "status": inventory_request.status,
             "created_at": inventory_request.created_at,
             "updated_at": inventory_request.updated_at,
             "tool_name": tool.item_description if tool else None,
+            "tool_type": tool.type if tool else None,
+            "tool_range": tool.range if tool else None,
+            "identification_code": tool.identification_code if tool else None,
             "operator_name": inv_operator.user_name if inv_operator else None,
             "inventory_supervisor_name": inv_req_supervisor.user_name if inv_req_supervisor else None,
             "project_name": project.sale_order_number if project else None,
-            "part_name": part.part_name if part else None
+            "part_name": part.part_name if part else None,
+            "operation_name": operation.operation_name if operation else None,
+            "operation_number": operation.operation_number if operation else None
         }
     
     request_dict = {
@@ -420,20 +438,22 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
         # Get related details
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
-        supervisor = db.query(AccessUser).filter(AccessUser.id == ret_req.supervisor_id).first()
+        supervisor = db.query(AccessUser).filter(AccessUser.id == ret_req.inventory_supervisor_id).first()
         
         # Get inventory request details
         inventory_request_details = None
         if inventory_request:
             from DB.models.inventory import ToolsList
-            from DB.models.oms import Order, Part
+            from DB.models.oms import Order, Part, Operation, Product
             from DB.models.access_control import AccessUser as AdminUser
             
             tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
             inv_operator = db.query(AdminUser).filter(AdminUser.id == inventory_request.operator_id).first()
-            inventory_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.supervisor_id).first()
+            inventory_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.inventory_supervisor_id).first()
             project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
             part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+            operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first() if inventory_request.operation_id else None
+            product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
             
             inventory_request_details = {
                 "id": inventory_request.id,
@@ -441,16 +461,24 @@ def get_inventory_return_requests_by_operator(operator_id: int, db: Session = De
                 "operator_id": inventory_request.operator_id,
                 "project_id": inventory_request.project_id,
                 "part_id": inventory_request.part_id,
+                "operation_id": inventory_request.operation_id,
                 "quantity": inventory_request.quantity,
-                "supervisor_id": inventory_request.supervisor_id,
+                "supervisor_id": inventory_request.inventory_supervisor_id,
                 "status": inventory_request.status,
                 "created_at": inventory_request.created_at,
                 "updated_at": inventory_request.updated_at,
                 "tool_name": tool.item_description if tool else None,
+                "tool_type": tool.type if tool else None,
+                "tool_range": tool.range if tool else None,
+                "identification_code": tool.identification_code if tool else None,
                 "operator_name": inv_operator.user_name if inv_operator else None,
                 "supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
                 "project_name": project.sale_order_number if project else None,
-                "part_name": part.part_name if part else None
+                "part_name": part.part_name if part else None,
+                "part_number": part.part_number if part else None,
+                "product_name": product.product_name if product else None,
+                "operation_name": operation.operation_name if operation else None,
+                "operation_number": operation.operation_number if operation else None
             }
         
         request_dict = {
@@ -482,20 +510,22 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
         # Get related details
         inventory_request = db.query(InventoryRequest).filter(InventoryRequest.id == ret_req.requested_id).first()
         operator = db.query(AccessUser).filter(AccessUser.id == ret_req.operator_id).first()
-        supervisor = db.query(AccessUser).filter(AccessUser.id == ret_req.supervisor_id).first()
+        supervisor = db.query(AccessUser).filter(AccessUser.id == ret_req.inventory_supervisor_id).first()
         
         # Get inventory request details
         inventory_request_details = None
         if inventory_request:
             from DB.models.inventory import ToolsList
-            from DB.models.oms import Order, Part
+            from DB.models.oms import Order, Part, Operation, Product
             from DB.models.access_control import AccessUser as AdminUser
             
             tool = db.query(ToolsList).filter(ToolsList.id == inventory_request.tool_id).first()
             inv_operator = db.query(AdminUser).filter(AdminUser.id == inventory_request.operator_id).first()
-            inventory_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.supervisor_id).first()
+            inventory_supervisor = db.query(AdminUser).filter(AdminUser.id == inventory_request.inventory_supervisor_id).first()
             project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
             part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+            operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first() if inventory_request.operation_id else None
+            product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
             
             inventory_request_details = {
                 "id": inventory_request.id,
@@ -503,16 +533,24 @@ def get_inventory_return_requests_by_status(status: str, db: Session = Depends(g
                 "operator_id": inventory_request.operator_id,
                 "project_id": inventory_request.project_id,
                 "part_id": inventory_request.part_id,
+                "operation_id": inventory_request.operation_id,
                 "quantity": inventory_request.quantity,
-                "supervisor_id": inventory_request.supervisor_id,
+                "supervisor_id": inventory_request.inventory_supervisor_id,
                 "status": inventory_request.status,
                 "created_at": inventory_request.created_at,
                 "updated_at": inventory_request.updated_at,
                 "tool_name": tool.item_description if tool else None,
+                "tool_type": tool.type if tool else None,
+                "tool_range": tool.range if tool else None,
+                "identification_code": tool.identification_code if tool else None,
                 "operator_name": inv_operator.user_name if inv_operator else None,
                 "supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
                 "project_name": project.sale_order_number if project else None,
-                "part_name": part.part_name if part else None
+                "part_name": part.part_name if part else None,
+                "part_number": part.part_number if part else None,
+                "product_name": product.product_name if product else None,
+                "operation_name": operation.operation_name if operation else None,
+                "operation_number": operation.operation_number if operation else None
             }
         
         request_dict = {

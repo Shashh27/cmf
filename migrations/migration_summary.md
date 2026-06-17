@@ -1,5 +1,46 @@
 # Database Migration Summary
 
+## Migration Date: 2024-06-16
+
+## New Migration: Machine Calibration Frequency
+
+### Table Modified:
+
+#### 1. configuration.machines
+- **Status**: ✅ Schema defined
+- **Purpose**: Add calibration_frequency field to support dynamic calibration due date calculation
+- **Column Added**:
+  - calibration_frequency (VARCHAR(50), nullable) - Calibration frequency interval (e.g., "6 months", "1 year", "2 years")
+- **Migration File**: `migrations/add_machine_calibration_frequency.sql`
+- **Status**: ✅ SQL script created, ready to execute
+
+### Next Steps:
+1. **Execute migration SQL** on the database
+2. **Verify column addition** with verification commands below
+3. **Test calibration date auto-calculation** with new frequency field
+
+### Verification Commands:
+
+```sql
+-- Check calibration_frequency column exists
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'configuration'
+AND table_name = 'machines'
+AND column_name = 'calibration_frequency';
+
+-- Check column comment
+SELECT pg_description.obj_description(obj_oid, 'pg_class') as table_comment,
+       pg_description.obj_description(obj_sub_id, 'pg_attribute') as column_comment
+FROM pg_description
+JOIN pg_class ON pg_description.obj_oid = pg_class.oid
+JOIN pg_attribute ON pg_description.obj_sub_id = pg_attribute.attnum
+WHERE pg_class.relname = 'machines'
+AND pg_attribute.attname = 'calibration_frequency';
+```
+
+---
+
 ## Migration Date: 2026-05-23
 
 ## New Migration: PC Notification System

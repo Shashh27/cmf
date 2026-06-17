@@ -47,7 +47,7 @@ from .configuration import (
     MachineWithWorkCenter,
     Customer,
     CustomerCreate,
-    CustomerUpdate
+    CustomerUpdate,
 )
 from .access_control import (
     AccessUserBase,
