@@ -270,27 +270,72 @@ const ReturnRequestsTable = () => {
       key: 'tool_name',
       width: 180,
       fixed: 'left',
-      ellipsis: true,
       className: 'table-header-styled',
       render: (text, record) => record.inventory_request_details?.tool_name || '-',
     },
     {
-      title: 'Project Number',
+      title: 'Range',
+      key: 'tool_range',
+      width: 80,
+      className: 'table-header-styled',
+      render: (_, record) => record.inventory_request_details?.tool_range || '-',
+    },
+    {
+      title: 'ID Code',
+      key: 'identification_code',
+      width: 100,
+      className: 'table-header-styled',
+      render: (_, record) => record.inventory_request_details?.identification_code || '-',
+    },
+    {
+      title: 'Project',
       dataIndex: ['inventory_request_details', 'project_name'],
       key: 'project_number',
       width: 140,
-      ellipsis: true,
       className: 'table-header-styled',
-      render: (text, record) => record.inventory_request_details?.project_name || '-',
+      render: (_, record) => {
+        const projName = record.inventory_request_details?.project_name || '-';
+        const productName = record.inventory_request_details?.product_name || '';
+        return (
+          <div>
+            <div>{projName}</div>
+            {productName && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>{productName}</div>}
+          </div>
+        );
+      },
     },
     {
-      title: 'Part Name',
+      title: 'Part',
       dataIndex: ['inventory_request_details', 'part_name'],
       key: 'part_name',
       width: 140,
-      ellipsis: true,
       className: 'table-header-styled',
-      render: (text, record) => record.inventory_request_details?.part_name || '-',
+      render: (_, record) => {
+        const partName = record.inventory_request_details?.part_name || '-';
+        const partNum = record.inventory_request_details?.part_number || '';
+        return (
+          <div>
+            <div>{partName}</div>
+            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{partNum}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Operation',
+      key: 'operation',
+      width: 130,
+      className: 'table-header-styled',
+      render: (_, record) => {
+        const opName = record.inventory_request_details?.operation_name || '-';
+        const opNum = record.inventory_request_details?.operation_number || '';
+        return (
+          <div>
+            <div>{opName}</div>
+            {opNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{opNum}</div>}
+          </div>
+        );
+      },
     },
     {
       title: 'Requested Qty',

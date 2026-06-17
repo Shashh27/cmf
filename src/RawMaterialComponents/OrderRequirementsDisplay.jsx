@@ -115,37 +115,56 @@ const OrderRequirementsDisplay = ({ selectedOrder, visible, orderHierarchy, sele
     }
   };
 
+  // Helper function to get latest extracted data
+  const getLatestExtractedData = (extractedDataArray) => {
+    if (!extractedDataArray || !Array.isArray(extractedDataArray) || extractedDataArray.length === 0) {
+      return null;
+    }
+    const sorted = [...extractedDataArray].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return sorted[0];
+  };
+
+  // Helper function to get latest document
+  const getLatestDocument = (documents) => {
+    if (!documents || !Array.isArray(documents) || documents.length === 0) {
+      return null;
+    }
+    const sorted = [...documents].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return sorted[0];
+  };
+
   const columns = [
     {
       title: 'Extracted Data',
       dataIndex: 'extracted_data',
       key: 'extracted_data',
-      width: '45%',
+      width: '40%',
       ellipsis: false,
       render: (extracted_data) => {
-        if (!extracted_data || extracted_data.length === 0) {
+        const data = getLatestExtractedData(extracted_data);
+        if (!data) {
           return <Text type="secondary" style={{ fontSize: '12px' }}>No extracted data</Text>;
         }
-        
-        const data = extracted_data[0]; // Show first extracted data
         return (
-          <div style={{ fontSize: '13px', lineHeight: '1.6', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {data.material && (
-              <div style={{ marginBottom: '6px' }}>
-                <Text strong style={{ color: '#1890ff', fontSize: '13px' }}>Material:</Text>
-                <div style={{ marginTop: '2px', paddingLeft: '8px' }}>{data.material}</div>
-              </div>
-            )}
-            {data.stock_size && (
-              <div style={{ marginBottom: '6px' }}>
-                <Text strong style={{ color: '#1890ff', fontSize: '13px' }}>Stock Size:</Text>
-                <div style={{ marginTop: '2px', paddingLeft: '8px' }}>{data.stock_size}</div>
-              </div>
-            )}
+          <div style={{ fontSize: '12px', lineHeight: '1.5' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginBottom: data.note ? '6px' : '0' }}>
+              {data.material && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Text strong style={{ color: '#1890ff', fontSize: '12px' }}>Material:</Text>
+                  <Text style={{ fontSize: '12px' }}>{data.material}</Text>
+                </div>
+              )}
+              {data.stock_size && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Text strong style={{ color: '#1890ff', fontSize: '12px' }}>Stock Size:</Text>
+                  <Text style={{ fontSize: '12px' }}>{data.stock_size}</Text>
+                </div>
+              )}
+            </div>
             {data.note && (
-              <div style={{ marginBottom: '6px' }}>
-                <Text strong style={{ color: '#1890ff', fontSize: '13px' }}>Notes:</Text>
-                <div style={{ marginTop: '2px', paddingLeft: '8px', whiteSpace: 'pre-wrap' }}>{data.note}</div>
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'flex-start' }}>
+                <Text strong style={{ color: '#1890ff', fontSize: '12px', whiteSpace: 'nowrap' }}>Notes:</Text>
+                <Text style={{ fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{data.note}</Text>
               </div>
             )}
           </div>
@@ -159,48 +178,55 @@ const OrderRequirementsDisplay = ({ selectedOrder, visible, orderHierarchy, sele
       width: '30%',
       ellipsis: true,
       render: (documents) => {
-        if (!documents || documents.length === 0) {
+        const latestDoc = getLatestDocument(documents);
+        if (!latestDoc) {
           return <Text type="secondary" style={{ fontSize: '12px' }}>No documents</Text>;
         }
-        
         return (
           <div style={{ fontSize: '12px', lineHeight: '1.4' }}>
-            {documents.slice(0, 2).map((doc, index) => (
-              <div key={index} style={{ marginBottom: '4px', padding: '2px 4px', backgroundColor: '#f0f0f0', borderRadius: '2px' }}>
-                <Text ellipsis={{ tooltip: doc.document_name }}>{doc.document_name}</Text>
-              </div>
-            ))}
-            {documents.length > 2 && (
-              <Text type="secondary" style={{ fontSize: '11px' }}>+{documents.length - 2} more</Text>
-            )}
+            <div style={{ marginBottom: '4px', padding: '2px 4px', backgroundColor: '#f0f0f0', borderRadius: '2px' }}>
+              <Text ellipsis={{ tooltip: latestDoc.document_name }}>{latestDoc.document_name}</Text>
+            </div>
           </div>
+        );
+      }
+    },
+    {
+      title: 'Revision',
+      dataIndex: 'documents',
+      key: 'revision',
+      width: '15%',
+      render: (documents) => {
+        const latestDoc = getLatestDocument(documents);
+        if (!latestDoc) {
+          return <Text type="secondary" style={{ fontSize: '12px' }}>N/A</Text>;
+        }
+        return (
+          <Tag color="blue" style={{ fontSize: '11px' }}>
+            {latestDoc.document_version || 'N/A'}
+          </Tag>
         );
       }
     },
     {
       title: 'Actions',
       key: 'actions',
-      width: '25%',
+      width: '15%',
       render: (_, record) => {
-        if (!record.documents || record.documents.length === 0) {
+        const latestDoc = getLatestDocument(record.documents);
+        if (!latestDoc) {
           return <Text type="secondary" style={{ fontSize: '11px' }}>No docs</Text>;
         }
-        
         return (
-          <Space size="small" wrap>
-            {record.documents.slice(0, 2).map((doc, index) => (
-              <Button
-                key={index}
-                size="small"
-                icon={<EyeOutlined />}
-                onClick={() => handleDocumentPreview(doc)}
-                style={{ fontSize: '10px', height: '24px', padding: '0 6px' }}
-                title={`Preview: ${doc.document_name}`}
-              >
-                Preview
-              </Button>
-            ))}
-          </Space>
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => handleDocumentPreview(latestDoc)}
+            style={{ fontSize: '10px', height: '24px', padding: '0 6px' }}
+            title={`Preview: ${latestDoc.document_name}`}
+          >
+            Preview
+          </Button>
         );
       }
     }

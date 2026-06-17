@@ -242,7 +242,7 @@ const InventoryRequestsTable = () => {
     {
       title: 'SL NO',
       key: 'sl_no',
-      width: 70,
+      width: 50,
       fixed: 'left',
       align: 'center',
       className: 'table-header-styled',
@@ -252,29 +252,76 @@ const InventoryRequestsTable = () => {
       title: 'Tool Name',
       dataIndex: 'tool_name',
       key: 'tool_name',
-      width: 180,
+      width: 120,
       fixed: 'left',
-      ellipsis: true,
       className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
-      title: 'Project Number',
+      title: 'Range',
+      dataIndex: 'tool_range',
+      key: 'tool_range',
+      width: 80,
+      className: 'table-header-styled',
+      render: (text) => text || '-',
+    },
+    {
+      title: 'ID Code',
+      dataIndex: 'identification_code',
+      key: 'identification_code',
+      width: 100,
+      className: 'table-header-styled',
+      render: (text) => text || '-',
+    },
+    {
+      title: 'Project',
       dataIndex: 'project_name',
       key: 'project_number',
       width: 140,
-      ellipsis: true,
       className: 'table-header-styled',
-      render: (text) => text || '-',
+      render: (_, record) => {
+        const projName = record.project_name || '-';
+        const productName = record.product_name || '';
+        return (
+          <div>
+            <div>{projName}</div>
+            {productName && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>{productName}</div>}
+          </div>
+        );
+      },
     },
     {
-      title: 'Part Name',
+      title: 'Part',
       dataIndex: 'part_name',
       key: 'part_name',
       width: 140,
-      ellipsis: true,
       className: 'table-header-styled',
-      render: (text) => text || '-',
+      render: (_, record) => {
+        const partName = record.part_name || '-';
+        const partNum = record.part_number || '';
+        return (
+          <div>
+            <div>{partName}</div>
+            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{partNum}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Operation',
+      key: 'operation',
+      width: 130,
+      className: 'table-header-styled',
+      render: (_, record) => {
+        const opName = record.operation_name || '-';
+        const opNum = record.operation_number || '';
+        return (
+          <div>
+            <div>{opName}</div>
+            {opNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{opNum}</div>}
+          </div>
+        );
+      },
     },
     {
       title: 'Quantity',

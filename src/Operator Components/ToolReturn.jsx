@@ -38,8 +38,12 @@ const ToolReturn = () => {
   const fetchReturns = async () => {
     setLoading(true);
     try {
-      const operatorId = getCurrentOperatorId();
-      const response = await fetch(`${API_BASE_URL}/inventory-return-requests/`);
+      const currentOpId = getCurrentOperatorId();
+      let url = `${API_BASE_URL}/inventory-return-requests/`;
+      if (currentOpId != null) {
+        url = `${API_BASE_URL}/inventory-return-requests/by-operator/${currentOpId}`;
+      }
+      const response = await fetch(url);
 
       if (response.ok) {
         let returnsData = await response.json();
@@ -52,20 +56,18 @@ const ToolReturn = () => {
             ...ret,
             tool_name: details.tool_name || '-',
             project_name: details.project_name || '-',
+            product_name: details.product_name || '',
+            part_number: details.part_number || '',
+            part_name: details.part_name || '-',
+            tool_range: details.tool_range || '-',
+            identification_code: details.identification_code || '-',
+            operation_name: details.operation_name || '-',
+            operation_number: details.operation_number || '-',
           };
         });
 
-        const currentOpId = getCurrentOperatorId();
-        const filtered = currentOpId != null
-          ? returnsData.filter(ret => {
-              const top = ret.operator_id ?? ret.operatorId ?? ret.operator_id_fk;
-              const nested = ret.inventory_request_details?.operator_id ?? ret.inventory_request_details?.operator?.id;
-              const oid = top != null ? top : nested;
-              return oid == null ? true : parseInt(oid) === currentOpId;
-            })
-          : returnsData;
-
-        setReturns(filtered);
+        const sortedFiltered = returnsData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        setReturns(sortedFiltered);
       } else {
         console.warn('Inventory returns endpoint not found');
         const savedReturns = localStorage.getItem('inventory_returns');
@@ -92,11 +94,20 @@ const ToolReturn = () => {
 
   const columns = [
     {
+      title: 'Sl No',
+      key: 'sno',
+      width: 50,
+      fixed: 'left',
+      render: (_, __, index) => {
+        const { current, pageSize } = pagination;
+        return (current - 1) * pageSize + index + 1;
+      },
+    },
+    {
       title: 'Tool Name',
       dataIndex: 'tool_name',
       key: 'tool_name',
-      width: 150,
-      ellipsis: true,
+      width: 120,
       filteredValue: [searchText],
       onFilter: (value, record) => {
         return (
@@ -107,13 +118,74 @@ const ToolReturn = () => {
       sorter: (a, b) => (a.tool_name || '').localeCompare(b.tool_name || ''),
     },
     {
+      title: 'Range',
+      dataIndex: 'tool_range',
+      key: 'tool_range',
+      width: 80,
+      render: (text) => text || '-',
+    },
+    {
+      title: 'ID Code',
+      dataIndex: 'identification_code',
+      key: 'identification_code',
+      width: 100,
+      render: (text) => text || '-',
+    },
+    {
+      title: 'Project',
+      dataIndex: 'project_name',
+      key: 'project_name',
+      width: 120,
+      render: (_, record) => {
+        const projName = record.project_name || '-';
+        const productName = record.product_name || '';
+        return (
+          <div>
+            <div>{projName}</div>
+            {productName && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>{productName}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Part',
+      dataIndex: 'part_name',
+      key: 'part_name',
+      width: 100,
+      render: (_, record) => {
+        const partName = record.part_name || '-';
+        const partNum = record.part_number || '';
+        return (
+          <div>
+            <div>{partName}</div>
+            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{partNum}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Operation',
+      key: 'operation',
+      width: 120,
+      render: (_, record) => {
+        const opName = record.operation_name || '-';
+        const opNum = record.operation_number || '';
+        return (
+          <div>
+            <div>{opName}</div>
+            {opNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{opNum}</div>}
+          </div>
+        );
+      },
+    },
+    {
       title: 'Quantity',
       dataIndex: 'returned_qty',
       key: 'returned_qty',
-      width: 100,
+      width: 80,
     },
     {
-      title: 'Return Date',
+      title: 'Returned At',
       dataIndex: 'return_date',
       key: 'return_date',
       width: 120,
@@ -121,14 +193,16 @@ const ToolReturn = () => {
         const date = text || record.created_at || record.updated_at;
         if (!date) return '-';
         const d = new Date(date);
-        return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+        const dateStr = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+        const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        return `${dateStr}, ${time}`;
       },
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 120,
+      width: 80,
       filteredValue: filters.status || null,
       render: (status) => {
         let color = 'blue';
@@ -143,21 +217,24 @@ const ToolReturn = () => {
       onFilter: (value, record) => record.status?.toLowerCase() === value,
     },
     {
+      title: 'Collected At',
+      dataIndex: 'updated_at',
+      key: 'updated_at',
+      width: 120,
+      render: (text) => {
+        if (!text) return '-';
+        const d = new Date(text);
+        const dateStr = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+        const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        return `${dateStr}, ${time}`;
+      },
+    },
+    {
       title: 'Collected By',
       dataIndex: 'collected_by',
       key: 'collected_by',
-      width: 150,
-      ellipsis: true,
+      width: 80,
       render: (text, record) => text || record.inventory_supervisor_name || record.admin_name || '-',
-    },
-    {
-      title: 'Details',
-      key: 'details',
-      width: 200,
-      ellipsis: true,
-      render: (_, record) => (
-        <span>Returned from {record.project_name || 'Project'}</span>
-      ),
     },
   ];
 
@@ -196,6 +273,15 @@ const ToolReturn = () => {
           position: ['bottomCenter'],
         }}
         onChange={handleTableChange}   // ← now correctly captures filters too
+        components={{
+          header: {
+            cell: (props) => (
+              <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                {props.children}
+              </th>
+            ),
+          },
+        }}
       />
     </div>
   );

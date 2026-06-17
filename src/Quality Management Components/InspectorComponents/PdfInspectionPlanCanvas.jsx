@@ -446,6 +446,21 @@ const PdfInspectionPlanCanvas = ({
     [documentId, partId, onDetectionComplete, message],
   );
 
+  const runNoteRegion = useCallback(
+    async (box) => {
+      if (!box || detectingRef.current) return;
+      detectingRef.current = true;
+      setLoading(true);
+      try {
+        await onNoteRegion?.(box);
+      } finally {
+        setLoading(false);
+        detectingRef.current = false;
+      }
+    },
+    [onNoteRegion],
+  );
+
   const onCanvasMouseDown = (e) => {
     if (isPan) return;
     if (!canDragSelect) return;
@@ -518,7 +533,7 @@ const PdfInspectionPlanCanvas = ({
       return;
     }
     if (activeTool === 'notes') {
-      onNoteRegion?.(box);
+      void runNoteRegion(box);
       return;
     }
 
@@ -556,7 +571,13 @@ const PdfInspectionPlanCanvas = ({
         };
 
   const busy = loading || loadingExternal;
-  const spinTip = loading ? 'Detecting…' : loadingExternal ? 'Saving…' : 'Working…';
+  const spinTip = loading
+    ? activeTool === 'notes'
+      ? 'Extracting notes…'
+      : 'Detecting…'
+    : loadingExternal
+      ? 'Saving…'
+      : 'Working…';
 
   const cursorStyle = isPan ? (isPanning ? 'grabbing' : 'grab') : canDragSelect ? 'crosshair' : 'default';
 

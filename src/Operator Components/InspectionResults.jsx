@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, ConfigProvider, Empty, Modal, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import {
@@ -12,38 +12,15 @@ import {
 } from '@ant-design/icons';
 import axios from 'axios';
 import { QUALITY_API_BASE_URL } from '../Config/qualityconfig';
+import InteractiveDrawing from '../Quality Management Components/InspectorComponents/InteractiveDrawing';
+import { parseMasterBocBboxToPdfRect } from '../Quality Management Components/InspectorComponents/bocMappers';
+import { resolveBaseDrawingDocument } from '../Quality Management Components/InspectorComponents/drawingDocumentUtils';
 
 const { Title, Text } = Typography;
 
 const FONT_STACK = '"JetBrains Mono", "JetBrains Mono NL", ui-monospace, "Cascadia Code", "Consolas", monospace';
 
 const monoStyle = { fontFamily: FONT_STACK };
-
-const themeInspectionQueue = {
-  token: {
-    fontFamily: FONT_STACK,
-    borderRadiusLG: 12,
-    colorPrimary: '#2563eb',
-    colorSuccess: '#059669',
-    colorWarning: '#d97706',
-  },
-  components: {
-    Table: {
-      headerBg: '#f1f5f9',
-      headerColor: '#334155',
-      rowHoverBg: '#f8fafc',
-      fontSize: 12,
-      cellPaddingBlockMD: 12,
-      cellPaddingInlineMD: 14,
-    },
-    Card: {
-      colorBgContainer: '#ffffff',
-    },
-    Tag: {
-      defaultBg: '#f1f5f9',
-    },
-  },
-};
 
 const fmtTol = (value) => {
   const n = Number(value);
@@ -110,12 +87,48 @@ const InspectionResults = () => {
   const [planTableRows, setPlanTableRows] = useState([]);
   const [planDrawingUrl, setPlanDrawingUrl] = useState('');
   const [planDrawingIsPdf, setPlanDrawingIsPdf] = useState(true);
+  const [planDrawingFileName, setPlanDrawingFileName] = useState('');
+  const [planBalloonDocumentId, setPlanBalloonDocumentId] = useState(null);
+  const [planDrawingEndpoint, setPlanDrawingEndpoint] = useState(null);
+  const [activeBalloonId, setActiveBalloonId] = useState(null);
   const [planViewMeta, setPlanViewMeta] = useState(null);
+  const planBocBodyRef = useRef(null);
+  const [planBocTableScrollY, setPlanBocTableScrollY] = useState(undefined);
 
-  const pdfEmbedSrcForReview = (url) => {
-    if (!url) return '';
-    return `${url}${url.includes('?') ? '&' : '?'}toolbar=1&navpanes=1&scrollbar=1&view=FitH`;
-  };
+  useEffect(() => {
+    if (!planViewOpen) {
+      setPlanBocTableScrollY(undefined);
+      return undefined;
+    }
+    const el = planBocBodyRef.current;
+    if (!el) return undefined;
+    const update = () => {
+      const next = Math.max(0, Math.floor(el.clientHeight) - 40);
+      setPlanBocTableScrollY((prev) => (prev === next ? prev : next));
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [planViewOpen, planViewLoading, planTableRows.length]);
+
+  const planInteractiveBalloons = useMemo(() => {
+    return (planTableRows || [])
+      .map((r, idx) => {
+        const rect = parseMasterBocBboxToPdfRect(r.bbox);
+        if (!rect) return null;
+        return {
+          id: String(r.id),
+          label: String(idx + 1),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          page: rect.page || 1,
+        };
+      })
+      .filter(Boolean);
+  }, [planTableRows]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -176,26 +189,51 @@ const InspectionResults = () => {
     setPlanViewOpen(true);
     setPlanViewLoading(true);
     setPlanTableRows([]);
-    if (op.preview_document_id != null && op.preview_endpoint) {
-      const drawUrl = `${QUALITY_API_BASE_URL}/${op.preview_endpoint}/${op.preview_document_id}/preview`;
-      setPlanDrawingUrl(drawUrl);
-      const name = (op.preview_document_name || '').toLowerCase();
-      setPlanDrawingIsPdf(name.endsWith('.pdf') || name.includes('pdf'));
-    } else {
-      setPlanDrawingUrl('');
-      setPlanDrawingIsPdf(true);
-    }
+    setPlanDrawingUrl('');
+    setPlanDrawingFileName('');
+    setPlanBalloonDocumentId(null);
+    setPlanDrawingEndpoint(null);
+    setActiveBalloonId(null);
 
     const opNo = Number(op.operation_number);
     try {
-      const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/master-boc`, {
-        params: {
-          part_id: op.part_number,
-          sales_order_id: Number(op.order_id),
-          op_no: Number.isFinite(opNo) ? opNo : undefined,
-        },
-      });
-      setPlanTableRows(Array.isArray(res.data) ? res.data : []);
+      const [opDocsRes, partDocsRes, bocRes] = await Promise.all([
+        op.operation_id
+          ? axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${op.operation_id}`)
+          : Promise.resolve({ data: [] }),
+        op.part_id
+          ? axios.get(`${QUALITY_API_BASE_URL}/documents/part/${op.part_id}`)
+          : Promise.resolve({ data: [] }),
+        axios.get(`${QUALITY_API_BASE_URL}/quality/master-boc`, {
+          params: {
+            part_id: op.part_number,
+            sales_order_id: Number(op.order_id),
+            op_no: Number.isFinite(opNo) ? opNo : undefined,
+          },
+        }),
+      ]);
+
+      const opDocs = Array.isArray(opDocsRes.data) ? opDocsRes.data : [];
+      const partDocs = Array.isArray(partDocsRes.data) ? partDocsRes.data : [];
+      const { url, isPdf, name, apiDocumentId, endpoint } = resolveBaseDrawingDocument(opDocs, partDocs);
+
+      if (url && apiDocumentId) {
+        setPlanDrawingUrl(url);
+        setPlanDrawingIsPdf(isPdf);
+        setPlanDrawingFileName(name || '');
+        setPlanBalloonDocumentId(apiDocumentId);
+        setPlanDrawingEndpoint(endpoint);
+      } else if (op.preview_document_id != null && op.preview_endpoint) {
+        const drawUrl = `${QUALITY_API_BASE_URL}/${op.preview_endpoint}/${op.preview_document_id}/preview`;
+        const docName = (op.preview_document_name || '').toLowerCase();
+        setPlanDrawingUrl(drawUrl);
+        setPlanDrawingIsPdf(docName.endsWith('.pdf') || docName.includes('pdf'));
+        setPlanDrawingFileName(op.preview_document_name || '');
+        setPlanBalloonDocumentId(op.preview_document_id);
+        setPlanDrawingEndpoint(op.preview_endpoint);
+      }
+
+      setPlanTableRows(Array.isArray(bocRes.data) ? bocRes.data : []);
     } catch (err) {
       console.error(err);
       const detail = err.response?.data?.detail;
@@ -207,11 +245,16 @@ const InspectionResults = () => {
 
   const handleDownloadPlanDrawing = () => {
     if (!planDrawingUrl) return;
+    const id =
+      planBalloonDocumentId ??
+      planDrawingUrl.match(/(?:operation-documents|documents)\/(\d+)\//)?.[1];
+    if (!id) return;
+    const endpoint = planDrawingEndpoint || 'operation-documents';
     const a = document.createElement('a');
-    a.href = planDrawingUrl;
+    a.href = `${QUALITY_API_BASE_URL}/${endpoint}/${id}/download`;
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
-    a.download = `operation_${planViewMeta?.opNo || 'plan'}_balloon.pdf`;
+    a.download = planDrawingFileName || `operation_${planViewMeta?.opNo || 'plan'}_balloon.pdf`;
     a.click();
   };
 
@@ -424,194 +467,76 @@ const InspectionResults = () => {
   );
 
   return (
-    <ConfigProvider theme={themeInspectionQueue}>
-      <div
-        style={{
-          width: '100%',
-          maxWidth: '100%',
-          boxSizing: 'border-box',
-          margin: 0,
-          padding: '8px 0 24px',
-          fontFamily: FONT_STACK,
-          minHeight: '100%',
-        }}
+    <div style={{ padding: '16px' }}>
+      <Card
+        style={{ borderRadius: 8, marginBottom: '16px' }}
+        styles={{ body: { padding: '16px' } }}
       >
-        <Card
-          bordered={false}
-          style={{
-            borderRadius: 16,
-            marginBottom: 20,
-            border: '1px solid rgba(226, 232, 240, 0.95)',
-            boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04)',
-            background: 'linear-gradient(145deg, #f8fafc 0%, #ffffff 48%, #f1f5f9 100%)',
-            overflow: 'hidden',
-          }}
-          bodyStyle={{ padding: '22px 26px 20px' }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-start',
-              gap: 20,
-              marginBottom: 14,
-              flexWrap: 'wrap',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18 }}>
-              <div
-                style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 14,
-                  background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 8px 20px rgba(37, 99, 235, 0.35)',
-                  flexShrink: 0,
-                }}
-              >
-                <ExperimentOutlined style={{ fontSize: 26, color: '#fff' }} />
-              </div>
-              <div>
-                <Title
-                  level={3}
-                  style={{
-                    margin: 0,
-                    fontSize: 22,
-                    fontWeight: 700,
-                    letterSpacing: '-0.03em',
-                    color: '#0f172a',
-                    fontFamily: FONT_STACK,
-                  }}
-                >
-                  Inspection Queue
-                </Title>
-                <Text type="secondary" style={{ fontSize: 13, display: 'block', marginTop: 6, lineHeight: 1.5 }}>
-                  In-progress operations — open the plan or measure characteristics on the drawing.
-                </Text>
-              </div>
-            </div>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => void load()}
-              style={{ borderRadius: 10, fontWeight: 600, height: 38 }}
-            >
-              Refresh
-            </Button>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div>
+            <Title level={3} style={{ margin: 0, marginBottom: '8px' }}>
+              Inspection Queue
+            </Title>
+            <Text type="secondary">
+              In-progress operations — open the plan or measure characteristics on the drawing.
+            </Text>
           </div>
-          <Space size={10} wrap>
-            {machineLabel ? (
-              <Tag
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 999,
-                  border: '1px solid #bfdbfe',
-                  background: '#eff6ff',
-                  color: '#1e40af',
-                  fontWeight: 600,
-                  fontSize: 12,
-                  margin: 0,
-                }}
-              >
-                <ToolOutlined style={{ marginRight: 8 }} />
-                {machineLabel}
-              </Tag>
-            ) : null}
-            <Tag
-              style={{
-                padding: '6px 14px',
-                borderRadius: 999,
-                border: '1px solid #e2e8f0',
-                background: '#f8fafc',
-                color: '#475569',
-                fontWeight: 600,
-                fontSize: 12,
-                margin: 0,
-              }}
-            >
-              Active · {total}
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => void load()}
+          >
+            Refresh
+          </Button>
+        </div>
+        <Space size={10} wrap>
+          {machineLabel ? (
+            <Tag>
+              <ToolOutlined style={{ marginRight: 8 }} />
+              {machineLabel}
             </Tag>
-          </Space>
-        </Card>
+          ) : null}
+          <Tag>Active · {total}</Tag>
+        </Space>
+      </Card>
 
         <Spin spinning={loading}>
           {machineId == null && !loading ? (
-            <Card
-              style={{
-                borderRadius: 16,
-                border: '1px solid #e2e8f0',
-                boxShadow: '0 2px 12px rgba(15, 23, 42, 0.04)',
-              }}
-              bodyStyle={{ padding: 48 }}
-            >
-              <Empty
-                description={
-                  <span style={{ color: '#64748b', fontSize: 13 }}>
-                    Log in with a machine first (operator login) to see in-progress operations.
-                  </span>
-                }
-              />
+            <Card style={{ borderRadius: 8 }}>
+              <Empty description="Log in with a machine first (operator login) to see in-progress operations." />
             </Card>
           ) : null}
 
           {machineId != null && error ? (
-            <Card
-              style={{ borderRadius: 16, border: '1px solid #fecaca', background: '#fef2f2' }}
-              bodyStyle={{ padding: 24 }}
-            >
-              <Text type="danger" style={{ fontSize: 13 }}>
-                {error}
-              </Text>
+            <Card style={{ borderRadius: 8 }}>
+              <Text type="danger">{error}</Text>
               <div style={{ marginTop: 14 }}>
-                <Button onClick={() => void load()} style={{ borderRadius: 10, fontWeight: 600 }}>
-                  Retry
-                </Button>
+                <Button onClick={() => void load()}>Retry</Button>
               </div>
             </Card>
           ) : null}
 
           {machineId != null && !error && !loading && total === 0 ? (
-            <Card
-              style={{
-                borderRadius: 16,
-                border: '1px dashed #cbd5e1',
-                background: '#fafafa',
-              }}
-              bodyStyle={{ padding: 48 }}
-            >
-              <Empty
-                description={
-                  <span style={{ color: '#64748b', fontSize: 13 }}>No in-progress operations for this machine.</span>
-                }
-              />
+            <Card style={{ borderRadius: 8 }}>
+              <Empty description="No in-progress operations for this machine." />
             </Card>
           ) : null}
 
           {machineId != null && !error && !loading && total > 0 ? (
-            <Card
-              bordered={false}
-              style={{
-                borderRadius: 16,
-                border: '1px solid rgba(226, 232, 240, 0.95)',
-                boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06)',
-                overflow: 'hidden',
-              }}
-              bodyStyle={{ padding: 0 }}
-            >
+            <Card style={{ borderRadius: 8 }}>
               <Table
                 columns={columns}
                 dataSource={tableData}
                 pagination={false}
-                style={{ width: '100%' }}
                 scroll={{ x: 'max-content' }}
-                size="middle"
-                onRow={(_, index) => ({
-                  style: {
-                    background: index % 2 === 0 ? '#ffffff' : '#f8fafc',
+                components={{
+                  header: {
+                    cell: (props) => (
+                      <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                        {props.children}
+                      </th>
+                    ),
                   },
-                })}
+                }}
               />
             </Card>
           ) : null}
@@ -626,8 +551,8 @@ const InspectionResults = () => {
         open={planViewOpen}
         styles={{ body: { padding: 12, height: '80vh', background: '#f7f8fa' } }}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1.45fr 1fr', gap: 14, height: '100%', ...monoStyle }}>
-          <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.05fr) minmax(0, 1.35fr)', gap: 12, height: '100%', alignItems: 'stretch', ...monoStyle }}>
+          <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #eef0f3', background: '#fafbfc' }}>
               <Text strong style={{ color: '#111827', fontSize: 22, lineHeight: 1.2, ...monoStyle }}>Inspection Details</Text>
               <div style={{ marginTop: 10, fontSize: 16, color: '#374151' }}>
@@ -636,14 +561,18 @@ const InspectionResults = () => {
                 <Text style={{ fontSize: 16, marginLeft: 18, ...monoStyle }}><b>Operation:</b> {planViewMeta?.opNo || '—'}</Text>
               </div>
             </div>
-            <div style={{ padding: '0 10px 10px', flex: 1, minHeight: 0 }}>
+            <div ref={planBocBodyRef} style={{ padding: '0 10px 10px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <Table
                 size="small"
                 loading={planViewLoading}
                 dataSource={planTableRows}
                 rowKey="id"
-                pagination={{ pageSize: 14, showSizeChanger: false }}
-                scroll={{ x: 'max-content', y: 520 }}
+                pagination={false}
+                scroll={
+                  planBocTableScrollY
+                    ? { x: 'max-content', y: planBocTableScrollY }
+                    : { x: 'max-content' }
+                }
                 columns={[
                   { title: 'S.No', key: 'sno', width: 82, render: (_, __, idx) => <Text style={{ ...monoStyle, fontSize: 13 }}>{idx + 1}</Text> },
                   { title: 'Zone', dataIndex: 'zone', key: 'zone', width: 90, render: (z) => <Tag color="geekblue" style={{ margin: 0, borderRadius: 10, ...monoStyle }}>{z || '—'}</Tag> },
@@ -651,45 +580,61 @@ const InspectionResults = () => {
                   { title: 'Nominal', dataIndex: 'nominal', key: 'nominal', width: 130, render: (v) => <Text style={{ ...monoStyle, color: '#1f2937', fontSize: 13 }}>{v ?? '—'}</Text> },
                   { title: 'Upper Tol', dataIndex: 'uppertol', key: 'uppertol', width: 130, render: (v) => <Text style={{ ...monoStyle, color: Number(v) > 0 ? '#15803d' : '#6b7280', fontSize: 13 }}>{fmtTol(v)}</Text> },
                   { title: 'Lower Tol', dataIndex: 'lowertol', key: 'lowertol', width: 130, render: (v) => <Text style={{ ...monoStyle, color: Number(v) < 0 ? '#b91c1c' : '#6b7280', fontSize: 13 }}>{fmtTol(v)}</Text> },
+                  {
+                    title: 'Instrument',
+                    dataIndex: 'measured_instrument',
+                    key: 'measured_instrument',
+                    width: 160,
+                    render: (v) => {
+                      const label = (v || '').trim() || 'default';
+                      return (
+                        <Text
+                          style={{
+                            ...monoStyle,
+                            fontSize: 13,
+                            color: label === 'default' ? '#94a3b8' : '#334155',
+                          }}
+                          ellipsis={{ tooltip: label }}
+                        >
+                          {label}
+                        </Text>
+                      );
+                    },
+                  },
                 ]}
               />
             </div>
           </div>
-          <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
+          <div style={{ border: '1px solid #dfe4ea', borderRadius: 10, overflow: 'hidden', background: '#fff', display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%', boxShadow: '0 2px 10px rgba(15,23,42,0.04)' }}>
             <div style={{ padding: '10px 14px', borderBottom: '1px solid #eef0f3', background: '#fafbfc', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text strong style={{ color: '#111827', ...monoStyle }}>Drawing View</Text>
               <Button size="small" icon={<CloudDownloadOutlined />} onClick={handleDownloadPlanDrawing} disabled={!planDrawingUrl}>
                 Download Drawing
               </Button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
+            <div style={{ flex: 1, minHeight: 0, padding: 10, display: 'flex', flexDirection: 'column', background: '#f8fafc' }}>
               {planViewLoading ? (
                 <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Spin /></div>
-              ) : planDrawingUrl ? (
-                planDrawingIsPdf ? (
-                  <iframe
-                    title="Balloon document"
-                    src={pdfEmbedSrcForReview(planDrawingUrl)}
-                    style={{ width: '100%', minHeight: 480, height: 'min(72vh, 900px)', border: '1px solid #e5e7eb', borderRadius: 10, background: '#fff', boxShadow: '0 2px 10px rgba(15,23,42,0.08)' }}
-                  />
-                ) : (
-                  <img
-                    src={planDrawingUrl}
-                    alt="Ballooned drawing"
-                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', border: '1px solid #e5e7eb', borderRadius: 10, background: '#fff', boxShadow: '0 2px 10px rgba(15,23,42,0.08)' }}
-                  />
-                )
+              ) : planDrawingUrl && planBalloonDocumentId ? (
+                <InteractiveDrawing
+                  pdfId={planBalloonDocumentId}
+                  directImageSrc={!planDrawingIsPdf ? planDrawingUrl : null}
+                  pageNumber={1}
+                  balloons={planInteractiveBalloons}
+                  activeBalloonId={activeBalloonId}
+                  onBalloonClick={(b) => setActiveBalloonId(b.id)}
+                  balloonColor="blue"
+                />
               ) : (
                 <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Empty description="No balloon document found for this operation" />
+                  <Empty description="No drawing found for this operation" />
                 </div>
               )}
             </div>
           </div>
         </div>
       </Modal>
-      </div>
-    </ConfigProvider>
+    </div>
   );
 };
 

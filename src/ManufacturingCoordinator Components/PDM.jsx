@@ -9,6 +9,7 @@ import DocumentsPanel from "./PDM Components/DocumentsPanel";
 import AssemblyDocumentsPanel from "./PDM Components/AssemblyDocumentsPanel";
 import ProcessPlanning from "../PPS Components/ProcessPlanning";
 import Recyclebin from "./Recyclebin";
+import MCDocumentNotifications from "./MCDocumentNotifications";
 
 const { Sider, Content } = Layout;
 
@@ -81,9 +82,12 @@ const PDM = () => {
                 { key: "recycle-bin", label: "Recycle Bin" },
               ]}
             />
-            <Button size="small" onClick={() => navigate("/manufacturing_coordinator/oms/orders")}>
-              Back to Orders
-            </Button>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <MCDocumentNotifications orderId={initialOrderId} />
+              <Button size="small" onClick={() => navigate("/manufacturing_coordinator/oms/orders")}>
+                Back to Orders
+              </Button>
+            </div>
           </div>
         )}
 

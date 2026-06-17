@@ -399,11 +399,6 @@ const SimpleGanttChart = ({
           step: VIEW_MODES[viewMode].step
         },
         
-        // Visual features
-        showCurrentTime: true,
-        showMajorLabels: true,
-        showMinorLabels: true,
-        
         // Tooltip
         tooltip: {
           followMouse: true,

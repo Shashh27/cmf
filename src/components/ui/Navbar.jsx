@@ -119,6 +119,7 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/oms/orders')) return 'Orders';
     if (path.includes('/oms/product/')) return 'Product Data Management';
     if (path.includes('/order-tracking')) return 'Order Tracking';
+    if (path.includes('/production-logs')) return 'Production Logs History';
     if (path.includes('/oms/parts-priority')) {
       const params = new URLSearchParams(location.search);
       const tab = params.get('tab');
@@ -129,6 +130,9 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/pdm')) return 'Product Data Management';
     if (path.includes('/pps')) return 'Production Planning System';
     if (path.includes('/configuration')) return 'Configuration';
+    if (path.includes('/pokayoke-operation-checklists')) return 'PokaYoke Checklist';
+    if (path.includes('/product-monitoring/pokayoke-checklists')) return 'Preventive Maintenance';
+    if (path.includes('/create-inspection-plan')) return 'Inspection Plan';
     if (path.includes('/product-monitoring')) return 'Production Monitoring';
     if (path.includes('/quality-management')) return 'Quality Management';
     if (path.includes('/maintenance-management')) return 'Maintenance Management';

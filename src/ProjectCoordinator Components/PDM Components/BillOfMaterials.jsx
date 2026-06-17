@@ -627,6 +627,7 @@ const BillOfMaterials = ({
     if (!matchesFilter(part, activeFilter)) return null;
     const isSelected = activeItemId === part.id && activeItemType === 'part';
     const isInRecycleBin = part.recycle_bin === true;
+    const hasUnacknowledgedDocs = part.has_unacknowledged_documents === true;
     const revision = getLatestRevision(part.documents);
     const partNumDisplay = revision ? `${part.part_number} (${revision})` : part.part_number;
 
@@ -636,6 +637,8 @@ const BillOfMaterials = ({
         className={`flex items-center justify-between px-2 py-1 rounded-md cursor-pointer transition-colors mb-0.5 border-l-2 ${
           isInRecycleBin
             ? 'bg-gray-100 border-gray-300 text-gray-400 opacity-60'
+            : hasUnacknowledgedDocs
+            ? 'bg-amber-50 border-amber-500 text-amber-900'
             : isSelected
             ? 'bg-indigo-50 border-indigo-500 text-indigo-800'
             : 'hover:bg-slate-100 border-transparent'
@@ -651,6 +654,8 @@ const BillOfMaterials = ({
               <Text className={`text-sm font-medium truncate leading-tight ${
                 isInRecycleBin
                   ? 'text-gray-400'
+                  : hasUnacknowledgedDocs
+                  ? 'text-amber-900'
                   : isSelected
                   ? 'text-indigo-800'
                   : 'text-slate-700'
@@ -661,6 +666,8 @@ const BillOfMaterials = ({
                 <Text className={`text-xs truncate ${
                   isInRecycleBin
                     ? 'text-gray-400'
+                    : hasUnacknowledgedDocs
+                    ? 'text-amber-700'
                     : isSelected
                     ? 'text-indigo-500'
                     : 'text-slate-400'

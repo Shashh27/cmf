@@ -161,14 +161,24 @@ const Inventory = () => {
   const [requestForm] = Form.useForm();
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
+  const [operations, setOperations] = useState([]);
   const [requestLoading, setRequestLoading] = useState(false);
   const [selectedToolId, setSelectedToolId] = useState(null);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [isJobSelected, setIsJobSelected] = useState(false);
 
   const fetchingTree  = useRef(false);
   const fetchingTable = useRef(false);
 
   // Dynamic scroll Y — accounts for topbar + title row + pagination + gaps
   const tableScrollY = useTableScrollY(topBarRef, titleRowRef, 56, 32);
+
+  // Load job details when modal opens
+  useEffect(() => {
+    if (isRequestModalVisible) {
+      loadJobDetails();
+    }
+  }, [isRequestModalVisible]);
 
   useEffect(() => {
     fetchTree();
@@ -243,6 +253,99 @@ const Inventory = () => {
     }
   };
 
+  const fetchOperations = async (partId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/operations/part/${partId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setOperations(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch operations:', error);
+      message.error('Failed to fetch operations');
+    }
+  };
+
+  const fetchProjectIdFromSaleOrder = async (saleOrderNumber) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders/`);
+      if (response.ok) {
+        const data = await response.json();
+        const order = data.find(o => o.sale_order_number === saleOrderNumber);
+        return order ? order.id : null;
+      }
+    } catch (error) {
+      console.error('Failed to fetch project id:', error);
+      return null;
+    }
+  };
+
+  const fetchPartIdFromPartNumber = async (partNumber) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/parts/`);
+      if (response.ok) {
+        const data = await response.json();
+        const part = data.find(p => p.part_number === partNumber);
+        return part ? part.id : null;
+      }
+    } catch (error) {
+      console.error('Failed to fetch part id:', error);
+      return null;
+    }
+  };
+
+  const loadJobDetails = async () => {
+    try {
+      const storedJob = localStorage.getItem('selectedJob');
+      console.log('Loading job details, storedJob:', storedJob);
+      
+      if (storedJob) {
+        const job = JSON.parse(storedJob);
+        console.log('Parsed job:', job);
+        setSelectedJob(job);
+        setIsJobSelected(true);
+
+        // Use direct IDs from the job object
+        const projectId = job.sale_order_id;
+        const partId = job.part_id;
+        const operationId = job.operation_id;
+        const saleOrderNumber = job.sale_order_number;
+
+        console.log('Project ID:', projectId, 'Part ID:', partId, 'Operation ID:', operationId, 'Sale Order:', saleOrderNumber);
+
+        // Ensure orders are loaded
+        if (orders.length === 0) {
+          await fetchOrders();
+        }
+
+        if (projectId && saleOrderNumber) {
+          requestForm.setFieldsValue({ project_id: projectId });
+          console.log('Set project_id:', projectId);
+          // Fetch parts for this project to populate the dropdown
+          await fetchParts(saleOrderNumber);
+        }
+
+        if (partId) {
+          requestForm.setFieldsValue({ part_id: partId });
+          console.log('Set part_id:', partId);
+          // Fetch operations for the part dropdown
+          await fetchOperations(partId);
+        }
+
+        if (operationId) {
+          requestForm.setFieldsValue({ operation_id: operationId });
+          console.log('Set operation_id:', operationId);
+        }
+      } else {
+        console.log('No stored job found');
+        setIsJobSelected(false);
+        setSelectedJob(null);
+      }
+    } catch (error) {
+      console.error('Error loading job details:', error);
+    }
+  };
+
   useEffect(() => {
     if (selected?.sub_category && selected?.category) {
       fetchBySubCategory(selected.category, selected.sub_category);
@@ -281,6 +384,7 @@ const Inventory = () => {
         operator_id: operatorId,
         project_id: values.project_id,
         part_id: values.part_id,
+        operation_id: values.operation_id || null,
         quantity: values.quantity,
         purpose_of_use: values.purpose_of_use || ""
       };
@@ -358,6 +462,7 @@ const Inventory = () => {
           disabled={record.quantity <= 0}
           onClick={() => {
             setSelectedToolId(record.id);
+            requestForm.resetFields();
             setIsRequestModalVisible(true);
             if (orders.length === 0) fetchOrders();
           }}
@@ -580,6 +685,15 @@ const Inventory = () => {
                   onChange: (page, size) => setPagination({ current: page, pageSize: size }),
                 }}
                 rowClassName={(_, i) => i % 2 === 0 ? '' : 'row-alt'}
+                components={{
+                  header: {
+                    cell: (props) => (
+                      <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                        {props.children}
+                      </th>
+                    ),
+                  },
+                }}
               />
             </div>
           </>
@@ -595,6 +709,8 @@ const Inventory = () => {
         onCancel={() => {
           setIsRequestModalVisible(false);
           requestForm.resetFields();
+          setIsJobSelected(false);
+          setSelectedJob(null);
         }}
         footer={null}
         maskClosable={false}
@@ -609,10 +725,13 @@ const Inventory = () => {
               placeholder="Select a project"
               showSearch
               optionFilterProp="label"
+              disabled={isJobSelected}
               onChange={(value) => {
-                const selectedOrder = orders.find(o => o.id === value);
-                if (selectedOrder) fetchParts(selectedOrder.sale_order_number);
-                requestForm.setFieldsValue({ part_id: undefined });
+                if (!isJobSelected) {
+                  const selectedOrder = orders.find(o => o.id === value);
+                  if (selectedOrder) fetchParts(selectedOrder.sale_order_number);
+                  requestForm.setFieldsValue({ part_id: undefined });
+                }
               }}
             >
               {orders.map(o => (
@@ -628,13 +747,38 @@ const Inventory = () => {
           >
             <Select
               placeholder="Select a part"
-              disabled={!parts.length}
+              disabled={!parts.length || isJobSelected}
               showSearch
               optionFilterProp="label"
+              onChange={(value) => {
+                if (!isJobSelected) {
+                  fetchOperations(value);
+                  requestForm.setFieldsValue({ operation_id: undefined });
+                }
+              }}
             >
               {parts.map(p => (
                 <Option key={p.id} value={p.id} label={`${p.part_name || ''} (${p.part_number || ''})`}>
                   {p.part_name || p.part_number} ({p.part_number || p.part_name})
+                </Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="operation_id"
+            label="Operation"
+            rules={[{ required: true, message: 'Please select an operation' }]}
+          >
+            <Select
+              placeholder="Select an operation"
+              disabled={!operations.length || isJobSelected}
+              showSearch
+              optionFilterProp="label"
+            >
+              {operations.map(op => (
+                <Option key={op.id} value={op.id} label={`${op.operation_number || ''} - ${op.operation_name || ''}`}>
+                  {op.operation_number} - {op.operation_name}
                 </Option>
               ))}
             </Select>

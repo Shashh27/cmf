@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Table, Button, Space, message, Input, Upload, Tag, Breadcrumb, Spin, Badge, Popconfirm, Tooltip
+  Table, Button, Space, message, Input, Tag, Breadcrumb, Spin, Badge, Popconfirm, Tooltip
 } from 'antd';
 import {
   EditOutlined, DeleteOutlined, SearchOutlined, UploadOutlined,
@@ -13,6 +13,7 @@ import {
 } from '@ant-design/icons';
 import { API_BASE_URL } from '../../../Config/auth';
 import ToolsHistory from './ToolsHistory';
+import ToolsBulkUpload from './ToolsBulkUpload';
 import * as XLSX from 'xlsx';
 
 const { Search } = Input;
@@ -195,6 +196,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
   const [collapsed,    setCollapsed]    = useState(false);
   const [historyVisible, setHistoryVisible] = useState(false);
   const [historyTool,    setHistoryTool]    = useState(null);
+  const [bulkUploadVisible, setBulkUploadVisible] = useState(false);
 
   const fetchingTree  = useRef(false);
   const fetchingTable = useRef(false);
@@ -346,22 +348,16 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
     }
   };
 
-  const handleBulkUpload = async (file) => {
-    setTableLoading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    try {
-      const res = await fetch(`${API_BASE_URL}/tools-list/upload-excel`, {
-        method: 'POST', body: formData,
-      });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Upload failed'); }
-      const result = await res.json();
-      message.success(`Uploaded ${result.length} tools successfully`);
-      fetchTree();
-    } catch (e) {
-      message.error('Upload failed: ' + e.message);
-    } finally {
-      setTableLoading(false);
+  const handleBulkUpload = () => {
+    setBulkUploadVisible(true);
+  };
+
+  const handleBulkUploadSuccess = () => {
+    fetchTree();
+    if (selected?.sub_category) {
+      fetchBySubCategory(selected.category, selected.sub_category);
+    } else if (selected?.category) {
+      fetchByCategory(selected.category);
     }
   };
 
@@ -612,9 +608,7 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
                     Add Row
                   </Button>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <Upload beforeUpload={file => { handleBulkUpload(file); return false; }} showUploadList={false} accept=".xlsx,.xls">
-                      <Button icon={<UploadOutlined />} size="large" style={{ borderRadius: 10, fontWeight: 500, height: 44 }}>Import</Button>
-                    </Upload>
+                    <Button icon={<UploadOutlined />} size="large" onClick={handleBulkUpload} style={{ borderRadius: 10, fontWeight: 500, height: 44 }}>Import</Button>
                     <Button icon={<DownloadOutlined />} size="large" onClick={handleExportExcel} style={{ borderRadius: 10, fontWeight: 500, height: 44 }}>Export</Button>
                     <Button
                       icon={<ReloadOutlined />}
@@ -664,6 +658,11 @@ const ToolsList = ({ onEdit, onDelete, onCreateNew }) => {
         )}
       </div>
       <ToolsHistory tool={historyTool} visible={historyVisible} onClose={() => { setHistoryVisible(false); setHistoryTool(null); }} />
+      <ToolsBulkUpload 
+        visible={bulkUploadVisible} 
+        onCancel={() => setBulkUploadVisible(false)} 
+        onSuccess={handleBulkUploadSuccess} 
+      />
       <style>{`
         .row-alt td { background: #fafafa !important; }
         .ant-table-row:hover td { background: #f0f7ff !important; }

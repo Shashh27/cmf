@@ -45,6 +45,11 @@ import {
   withBalloonNumbers,
 } from './InspectorComponents/bocMappers';
 import { DEFAULT_MEASURED_INSTRUMENT } from './InspectorComponents/inspectorConstants';
+import { exportBalloonedPdf } from './InspectorComponents/exportBalloonedPdf';
+import {
+  isBalloonDocumentName,
+  resolveBaseDrawingDocument,
+} from './InspectorComponents/drawingDocumentUtils';
 
 const QMSInspector = () => {
   const { message } = App.useApp();
@@ -64,26 +69,43 @@ const QMSInspector = () => {
   const projectName = searchParams.get('projectName') || '';
   const partName = searchParams.get('partName') || '';
   const operationName = searchParams.get('operationName') || '';
-  const [fetchedDocumentId, setFetchedDocumentId] = useState(null);
-  const [fetchedFileName, setFetchedFileName] = useState(null);
-  const [isOpDoc, setIsOpDoc] = useState(false);
+  const [resolvedDrawing, setResolvedDrawing] = useState(null);
 
-  const documentId = documentIdParam || fetchedDocumentId;
-  const fileName = fetchedFileName || fileNameParam;
+  const queryParamsLookBallooned = useMemo(
+    () => isBalloonDocumentName(fileNameParam),
+    [fileNameParam],
+  );
+
+  const fileName = resolvedDrawing?.name
+    || (queryParamsLookBallooned ? null : fileNameParam)
+    || 'Drawing.pdf';
 
   const fileIsPdf = useMemo(() => {
+    if (resolvedDrawing != null) return resolvedDrawing.isPdf;
     const p = searchParams.get('isPdf');
     if (p != null) return p !== 'false';
     if (!fileName) return true;
     return fileName.toLowerCase().endsWith('.pdf');
-  }, [searchParams, fileName]);
+  }, [resolvedDrawing, searchParams, fileName]);
+
+  const isOperationDocument = useMemo(() => {
+    if (resolvedDrawing?.endpoint) return resolvedDrawing.endpoint === 'operation-documents';
+    if (drawingUrl && !queryParamsLookBallooned) return drawingUrl.includes('/operation-documents/');
+    return false;
+  }, [resolvedDrawing, drawingUrl, queryParamsLookBallooned]);
 
   const fileUrl = useMemo(() => {
-    if (drawingUrl) return drawingUrl;
-    if (!documentId) return null;
-    const endpoint = isOpDoc ? 'operation-documents' : 'documents';
-    return `${QUALITY_API_BASE_URL}/${endpoint}/${documentId}/preview`;
-  }, [drawingUrl, documentId, isOpDoc]);
+    if (resolvedDrawing?.url) return resolvedDrawing.url;
+    if (drawingUrl && !queryParamsLookBallooned) return drawingUrl;
+    if (documentIdParam && !queryParamsLookBallooned) {
+      const endpoint = isOperationDocument ? 'operation-documents' : 'documents';
+      return `${QUALITY_API_BASE_URL}/${endpoint}/${documentIdParam}/preview`;
+    }
+    return null;
+  }, [resolvedDrawing, drawingUrl, queryParamsLookBallooned, documentIdParam, isOperationDocument]);
+
+  const documentId = resolvedDrawing?.apiDocumentId
+    || (queryParamsLookBallooned ? null : documentIdParam);
 
   const [quantityNo, setQuantityNo] = useState(() => {
     const q = searchParams.get('quantityNo');
@@ -110,7 +132,6 @@ const QMSInspector = () => {
 
   const viewerWrapRef = useRef(null);
   const drawingRef = useRef(null);
-  const exportBalloonedRef = useRef(null);
   const quantityClearSkipRef = useRef(true);
   const [viewerWidth, setViewerWidth] = useState(880);
   const [viewerHeight, setViewerHeight] = useState(600);
@@ -181,60 +202,32 @@ const QMSInspector = () => {
   }, [orderId]);
 
   useEffect(() => {
-    if (documentIdParam || drawingUrl) return;
     const pid = partId ? Number(partId) : null;
     const oid = operationId ? Number(operationId) : null;
     if (!pid && !oid) return;
-    
+
     let cancelled = false;
     (async () => {
       try {
-        // Try Part documents first
-        if (pid) {
-          const res = await axios.get(`${QUALITY_API_BASE_URL}/documents/part/${pid}`);
-          const docs = Array.isArray(res.data) ? res.data : [];
-          const nonBalloonDocs = docs.filter(d => {
-            const t = String(d.document_type || '').toLowerCase();
-            return !(t === 'baloon' || t === 'balloon' || t.includes('balloon'));
-          });
-          const best = nonBalloonDocs.find(d => 
-            d.document_type?.toLowerCase().includes('2d') || 
-            d.document_name?.toLowerCase().includes('drawing')
-          ) || nonBalloonDocs[0] || docs[0];
-          
-          if (best && !cancelled) {
-            setFetchedDocumentId(best.id);
-            setFetchedFileName(best.document_name);
-            setIsOpDoc(false);
-            return;
-          }
-        }
-
-        // Try Operation documents if no part doc found
-        if (oid) {
-          const res = await axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${oid}`);
-          const docs = Array.isArray(res.data) ? res.data : [];
-          const nonBalloonDocs = docs.filter(d => {
-            const t = String(d.document_type || '').toLowerCase();
-            return !(t === 'baloon' || t === 'balloon' || t.includes('balloon'));
-          });
-          const best = nonBalloonDocs.find(d => 
-            d.document_type?.toLowerCase().includes('2d') || 
-            d.document_name?.toLowerCase().includes('drawing')
-          ) || nonBalloonDocs[0] || docs[0];
-
-          if (best && !cancelled) {
-            setFetchedDocumentId(best.id);
-            setFetchedFileName(best.document_name);
-            setIsOpDoc(true);
-          }
-        }
+        const [partRes, opRes] = await Promise.all([
+          pid
+            ? axios.get(`${QUALITY_API_BASE_URL}/documents/part/${pid}`).catch(() => ({ data: [] }))
+            : Promise.resolve({ data: [] }),
+          oid
+            ? axios.get(`${QUALITY_API_BASE_URL}/operation-documents/operation/${oid}`).catch(() => ({ data: [] }))
+            : Promise.resolve({ data: [] }),
+        ]);
+        if (cancelled) return;
+        const partDocs = Array.isArray(partRes.data) ? partRes.data : [];
+        const opDocs = Array.isArray(opRes.data) ? opRes.data : [];
+        setResolvedDrawing(resolveBaseDrawingDocument(opDocs, partDocs));
       } catch (err) {
-        console.warn('Auto-fetch document failed', err);
+        console.warn('Resolve base drawing failed', err);
+        if (!cancelled) setResolvedDrawing(null);
       }
     })();
     return () => { cancelled = true; };
-  }, [partId, operationId, documentIdParam, drawingUrl]);
+  }, [partId, operationId]);
 
   useEffect(() => {
     const pid = partId ? Number(partId) : null;
@@ -268,20 +261,13 @@ const QMSInspector = () => {
     });
   }, [partQtyMax, canNavigateToOthers]);
 
-  const quantityOptions = useMemo(
-    () => {
-      const limit = canNavigateToOthers ? partQtyMax : 1;
-      const opts = Array.from({ length: limit }, (_, i) => ({
-        value: i + 1,
-        label: `Quantity ${i + 1}`,
-      }));
-      if (canNavigateToOthers) {
-        opts.push({ value: 'consolidated', label: 'Consolidated' });
-      }
-      return opts;
-    },
-    [partQtyMax, canNavigateToOthers],
-  );
+  const quantityOptions = useMemo(() => {
+    const limit = canNavigateToOthers ? partQtyMax : 1;
+    return Array.from({ length: limit }, (_, i) => ({
+      value: i + 1,
+      label: `Quantity ${i + 1}`,
+    }));
+  }, [partQtyMax, canNavigateToOthers]);
 
   const fetchMasterBoc = useCallback(async () => {
     const oid = Number(salesOrderId);
@@ -405,12 +391,29 @@ const QMSInspector = () => {
   /** Block BOC edits only when the plan is confirmed and at least one measurement exists. */
   const bocEditLocked = planStatus === 'confirmed' && hasStageMeasurements;
 
+  const noteScopeParams = useMemo(
+    () => ({
+      op_no: Number.isFinite(Number(opNo)) ? Number(opNo) : 0,
+      is_operation_document: isOperationDocument,
+    }),
+    [opNo, isOperationDocument],
+  );
+
   const loadNotes = useCallback(async () => {
     const pid = partId ? Number(partId) : null;
-    if (!pid) return;
+    const docId = documentId ? Number(documentId) : null;
+    if (!pid || !docId) {
+      setNotes([]);
+      return;
+    }
     try {
       setNotesLoading(true);
-      const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/notes/part/${pid}`);
+      const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/notes/part/${pid}`, {
+        params: {
+          document_id: docId,
+          ...noteScopeParams,
+        },
+      });
       setNotes(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.warn('Failed to load notes', err);
@@ -418,9 +421,10 @@ const QMSInspector = () => {
     } finally {
       setNotesLoading(false);
     }
-  }, [partId]);
+  }, [partId, documentId, noteScopeParams]);
 
   useEffect(() => {
+    setSelectedNoteId(null);
     void loadNotes();
   }, [loadNotes]);
 
@@ -442,24 +446,6 @@ const QMSInspector = () => {
     const oid = Number(salesOrderId);
     if (!pid || !oid || !partNumber) return;
 
-    // 1. Handle Consolidated / ALL view: Fetch existing measurements without 'ensuring' (POST)
-    // The 'ensure' endpoint requires a specific integer quantity_no.
-    const isNumericQty = typeof quantityNo === 'number';
-
-    if (!isNumericQty) {
-      try {
-        const res = await axios.get(`${QUALITY_API_BASE_URL}/quality/stage-inspection`, {
-          params: { part_id: pid, sale_order_id: oid, op_no: opNo },
-        });
-        setStageRows(Array.isArray(res.data) ? res.data : []);
-      } catch (err) {
-        console.error('[QMSInspector] Failed to fetch consolidated rows:', err);
-        setStageRows([]);
-      }
-      return;
-    }
-
-    // 2. Handle specific quantity view: Ensure rows exist before fetching
     if (quantityNo > 1 && !ftpApproved) return;
 
     try {
@@ -511,6 +497,52 @@ const QMSInspector = () => {
     [message, refreshMeasurementSummary],
   );
 
+  const handleSetInstrument = useCallback(
+    async (record, instrument) => {
+      if (isOperatorView) return;
+      if (bocEditLocked && inspectorMode !== 'MEASURE') {
+        message.warning('Plan is confirmed. Instrument cannot be changed.');
+        return;
+      }
+      const val = (instrument || '').trim() || DEFAULT_MEASURED_INSTRUMENT;
+      try {
+        if (inspectorMode === 'MEASURE' && record.stageInspectionId) {
+          await handleMeasurePatch(record.stageInspectionId, { measured_instrument: val });
+        }
+        if (record.id) {
+          await axios.patch(`${QUALITY_API_BASE_URL}/quality/master-boc/${record.id}`, {
+            measured_instrument: val,
+          });
+          setBocRowsRaw((prev) =>
+            prev.map((r) => (r.id === record.id ? { ...r, instrument: val } : r)),
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        const detail = err.response?.data?.detail;
+        message.error(typeof detail === 'string' ? detail : err.message || 'Failed to update instrument');
+        throw err;
+      }
+    },
+    [bocEditLocked, inspectorMode, handleMeasurePatch, message, isOperatorView],
+  );
+
+  const handleSetUsedInstrument = useCallback(
+    async (record, usedInst) => {
+      if (!record.stageInspectionId) {
+        message.error('Save measurements context is not ready for this row.');
+        return;
+      }
+      const val = (usedInst || '').trim();
+      if (!val) {
+        message.warning('Select an instrument from the list.');
+        return;
+      }
+      await handleMeasurePatch(record.stageInspectionId, { used_inst: val });
+    },
+    [handleMeasurePatch, message],
+  );
+
   const bocFiltered = useMemo(() => {
     return bocRowsRaw.filter((r) => {
       if (filterDimTypes.length && !filterDimTypes.includes(r.dimType)) return false;
@@ -553,6 +585,7 @@ const QMSInspector = () => {
         actualValue: st?.measured_mean ?? '',
         meanValue: st?.measured_mean ?? '',
         instrument: st?.measured_instrument || r.instrument,
+        usedInstrument: st?.used_inst ?? '',
         stageInspectionId: st?.id ?? null,
         measureLocked: Boolean(st?.is_done) || (quantityNo === 1 && ftpApproved),
       };
@@ -899,18 +932,29 @@ const QMSInspector = () => {
     [bocEditLocked, salesOrderId, partNumber, pendingStampRegion, opNo, ipid, message, fetchMasterBoc, detectZoneForRegion],
   );
 
-  const handleConfirmPlan = useCallback(() => {
+  const handleConfirmPlan = useCallback(async () => {
     const oid = Number(salesOrderId);
-    const opIdStr = searchParams.get('operationId');
-    const opIdInt = opIdStr ? parseInt(opIdStr, 10) : 0;
     const opNoStr = searchParams.get('operationNumber');
     const opNoInt = opNoStr != null ? parseInt(opNoStr, 10) : 10;
     const isFinalPart = opNoInt === 0;
+    let opIdInt = operationId ? parseInt(operationId, 10) : 0;
 
     if (!partNumber || !oid) {
       message.error('Order and part are required.');
       return;
     }
+
+    if (!isFinalPart && (!opIdInt || opIdInt <= 0) && partId) {
+      try {
+        const opsRes = await axios.get(`${QUALITY_API_BASE_URL}/operations/part/${partId}`);
+        const ops = Array.isArray(opsRes.data) ? opsRes.data : [];
+        const match = ops.find((o) => Number(o.operation_number) === opNoInt);
+        if (match?.id) opIdInt = Number(match.id);
+      } catch (err) {
+        console.warn('Could not resolve operation id from part', err);
+      }
+    }
+
     if (!isFinalPart && (!opIdInt || opIdInt <= 0)) {
       message.error('Operation is required to store ballooned drawing.');
       return;
@@ -926,25 +970,29 @@ const QMSInspector = () => {
       okText: 'Confirm',
       onOk: async () => {
         try {
-          // Only attempt PDF export and upload for real operations (not op 0 / Final Part)
-          // Note: With InteractiveDrawing, we rely on DB coordinates, but we still try to upload a snapshot if available.
+          // Export ballooned PDF and upload to MinIO (operation-documents). Re-confirm uploads a new revision.
           if (!isFinalPart && opIdInt > 0) {
-            const exporter = exportBalloonedRef.current;
-            if (typeof exporter === 'function') {
-              const blob = await exporter();
-              if (blob) {
-                const fd = new FormData();
-                const safePart = (partNumber || 'part').replace(/[^a-zA-Z0-9_-]+/g, '_');
-                const fileName = `${safePart}_op${opNoInt}_balloon.pdf`;
-                fd.append('operation_id', String(opIdInt));
-                fd.append('document_type', 'Balloon document');
-                fd.append('document_version', '1.0');
-                fd.append('files', new File([blob], fileName, { type: 'application/pdf' }));
-                await axios.post(`${QUALITY_API_BASE_URL}/operation-documents/upload/`, fd, {
-                  headers: { 'Content-Type': 'multipart/form-data' },
-                });
-              }
+            if (!fileUrl) {
+              throw new Error('Drawing is not loaded. Cannot store ballooned PDF.');
             }
+            const blob = await exportBalloonedPdf({
+              fileUrl,
+              isPdf: fileIsPdf,
+              balloonOverlays,
+            });
+            if (!blob) {
+              throw new Error('Could not generate ballooned PDF from the drawing and characteristics.');
+            }
+            const fd = new FormData();
+            const safePart = (partNumber || 'part').replace(/[^a-zA-Z0-9_-]+/g, '_');
+            const fileName = `${safePart}_op${opNoInt}_balloon.pdf`;
+            fd.append('operation_id', String(opIdInt));
+            fd.append('document_type', 'IPID');
+            fd.append('document_version', '1.0');
+            fd.append('files', new File([blob], fileName, { type: 'application/pdf' }));
+            await axios.post(`${QUALITY_API_BASE_URL}/operation-documents/upload/`, fd, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
           }
 
           let confirmUser = '';
@@ -971,21 +1019,6 @@ const QMSInspector = () => {
           setConfirmedByUsername(confirmUser);
           await fetchMasterBoc();
           await refreshMeasurementSummary();
-
-          // Create notification record for this confirmation
-          try {
-            await axios.post(`${QUALITY_API_BASE_URL}/operator/request-inspection-plan`, {
-              machine_id: 0,
-              order_id: oid,
-              part_id: Number(partId),
-              operation_id: opIdInt,
-              part_number: partNumber,
-              op_no: opNoInt,
-              requested_by_username: `Plan Confirmed by ${confirmUser || 'Supervisor'}`,
-            });
-          } catch (notifErr) {
-            console.warn('Silent notification creation failed', notifErr);
-          }
         } catch (err) {
           console.error(err);
           const detail = err.response?.data?.detail;
@@ -993,7 +1026,20 @@ const QMSInspector = () => {
         }
       },
     });
-  }, [salesOrderId, partNumber, partId, searchParams, bocRowsRaw.length, message, fetchMasterBoc, refreshMeasurementSummary]);
+  }, [
+    salesOrderId,
+    partNumber,
+    partId,
+    operationId,
+    searchParams,
+    bocRowsRaw.length,
+    fileUrl,
+    fileIsPdf,
+    balloonOverlays,
+    message,
+    fetchMasterBoc,
+    refreshMeasurementSummary,
+  ]);
 
   useEffect(() => {
     if (!bocRowsRaw.length || !partId || !documentId || bocEditLocked) return;
@@ -1066,6 +1112,7 @@ const QMSInspector = () => {
         message.error('Part or document is missing for notes.');
         return;
       }
+      setSaving(true);
       try {
         const textRes = await axios.post(`${QUALITY_API_BASE_URL}/pdf-annotation/extract-text`, {
           part_id: pid,
@@ -1102,6 +1149,7 @@ const QMSInspector = () => {
             axios.post(`${QUALITY_API_BASE_URL}/quality/notes`, {
               part_id: pid,
               document_id: Number(documentId),
+              ...noteScopeParams,
               x: region.x,
               y: region.y,
               width: region.width,
@@ -1112,14 +1160,17 @@ const QMSInspector = () => {
           ),
         );
         message.success('Note saved.');
+        setActiveTab('notes');
         await loadNotes();
       } catch (err) {
         console.error(err);
         const detail = err.response?.data?.detail;
         message.error(typeof detail === 'string' ? detail : err.message || 'Failed to create note');
+      } finally {
+        setSaving(false);
       }
     },
-    [partId, documentId, loadNotes, message],
+    [partId, documentId, noteScopeParams, loadNotes, message],
   );
 
   const handleZoomIn = useCallback(() => {
@@ -1292,21 +1343,7 @@ const QMSInspector = () => {
 
       {/* Plain divs — Ant Sider's internal wrapper breaks flex height chains */}
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row', overflow: 'hidden' }}>
-        <InspectorSidebar
-          activeTool={activeTool}
-          onToolChange={handleToolChange}
-          onZoomIn={handleZoomIn}
-          onZoomOut={handleZoomOut}
-          onRotate={handleRotate}
-          onResetView={handleResetView}
-          onAutoBalloon={handleAutoBalloon}
-          onClearAll={handleClearAll}
-          clearAllDisabled={!bocRowsRaw.length}
-          planEditLocked={bocEditLocked}
-          operatorRestricted={isOperatorView}
-        />
-
-        {/* PDF viewer */}
+        {/* PDF viewer — full width; toolbar floats over canvas */}
         <div
           style={{
             flex: 1,
@@ -1316,8 +1353,22 @@ const QMSInspector = () => {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
+            position: 'relative',
           }}
         >
+          <InspectorSidebar
+            activeTool={activeTool}
+            onToolChange={handleToolChange}
+            onZoomIn={handleZoomIn}
+            onZoomOut={handleZoomOut}
+            onRotate={handleRotate}
+            onResetView={handleResetView}
+            onAutoBalloon={handleAutoBalloon}
+            onClearAll={handleClearAll}
+            clearAllDisabled={!bocRowsRaw.length}
+            planEditLocked={bocEditLocked}
+            operatorRestricted={isOperatorView}
+          />
           {!fileUrl && (
             <Alert type="error" message="No drawing URL. Open this page from Quality Management → Create Plan." showIcon />
           )}
@@ -1349,8 +1400,9 @@ const QMSInspector = () => {
                 notes={notes}
                 activeNoteId={selectedNoteId}
                 isLoading={saving}
+                processingTip={activeTool === 'notes' ? 'Extracting notes…' : 'Detecting…'}
                 balloonColor="blue"
-                sidebarOffset={50}
+                sidebarOffset={0}
                 rotation={pdfRotation}
               />
             </div>
@@ -1398,10 +1450,42 @@ const QMSInspector = () => {
               )}
             </div>
           )}
+          <style>{`
+            .qms-inspector-tabs {
+              flex: 1;
+              min-height: 0;
+              display: flex;
+              flex-direction: column;
+            }
+            .qms-inspector-tabs > .ant-tabs-nav {
+              flex-shrink: 0;
+            }
+            .qms-inspector-tabs > .ant-tabs-content-holder {
+              flex: 1;
+              min-height: 0;
+              display: flex;
+              flex-direction: column;
+            }
+            .qms-inspector-tabs .ant-tabs-content {
+              flex: 1;
+              min-height: 0;
+              height: 100%;
+            }
+            .qms-inspector-tabs .ant-tabs-tabpane-active {
+              height: 100%;
+              display: flex !important;
+              flex-direction: column;
+            }
+          `}</style>
           <Tabs
             className="qms-inspector-tabs"
             activeKey={activeTab}
-            onChange={setActiveTab}
+            onChange={(key) => {
+              setActiveTab(key);
+              if (key === 'notes') void loadNotes();
+            }}
+            destroyInactiveTabPane={false}
+            style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
             items={[
               {
                 key: 'characteristics',
@@ -1419,7 +1503,10 @@ const QMSInspector = () => {
                     onFilterDimTypesChange={setFilterDimTypes}
                     onFilterZonesChange={setFilterZones}
                     measureMode={inspectorMode === 'MEASURE'}
+                    operatorMeasureMode={isOperatorView && inspectorMode === 'MEASURE'}
                     onMeasurePatch={handleMeasurePatch}
+                    onSetInstrument={isOperatorView ? undefined : handleSetInstrument}
+                    onSetUsedInstrument={isOperatorView ? handleSetUsedInstrument : undefined}
                     quantityOptions={quantityOptions}
                     quantityNo={quantityNo}
                     onQuantityChange={(newQty) => {
@@ -1453,6 +1540,7 @@ const QMSInspector = () => {
                       await axios.post(`${QUALITY_API_BASE_URL}/quality/notes`, {
                         part_id: pid,
                         document_id: Number(documentId),
+                        ...noteScopeParams,
                         x: 0,
                         y: 0,
                         width: 1,
@@ -1472,8 +1560,14 @@ const QMSInspector = () => {
                     }}
                     onDeleteAll={isOperatorView ? undefined : async () => {
                       const pid = partId ? Number(partId) : null;
-                      if (!pid) return;
-                      await axios.delete(`${QUALITY_API_BASE_URL}/quality/notes/part/${pid}`);
+                      const docId = documentId ? Number(documentId) : null;
+                      if (!pid || !docId) return;
+                      await axios.delete(`${QUALITY_API_BASE_URL}/quality/notes/part/${pid}`, {
+                        params: {
+                          document_id: docId,
+                          ...noteScopeParams,
+                        },
+                      });
                       await loadNotes();
                     }}
                   />

@@ -4,6 +4,15 @@ import { API_BASE_URL } from '../../Config/auth.js';
 
 const { Option } = Select;
 
+export const roleLabels = {
+  admin: 'Admin',
+  project_coordinator: 'Project Coordinator',
+  manufacturing_coordinator: 'Manufacturing Coordinator',
+  supervisor: 'Supervisor',
+  inventory_supervisor: 'Supervisor-Tool Crib',
+  operator: 'Operator',
+};
+
 const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] }) => {
   const [form] = Form.useForm();
 
@@ -81,6 +90,13 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
             {
               validator: (_, value) => {
                 if (!value) return Promise.resolve();
+                if (value !== value.trim()) {
+                  return Promise.reject(new Error('Username cannot have leading or trailing spaces'));
+                }
+                // Add this check for consecutive spaces
+                if (/  +/.test(value)) {
+                  return Promise.reject(new Error('Username cannot have consecutive spaces'));
+                }
                 const isDuplicate = existingUsers.some(
                   (u) =>
                     u.username?.toLowerCase() === value.toLowerCase() &&
@@ -105,7 +121,7 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
             {
               validator: (_, value) => {
                 if (!value) return Promise.resolve();
-                if (/^[A-Z]/.test(value)) return Promise.reject(new Error('please enter valid email'));
+                if (/^[A-Z]/.test(value)) return Promise.reject(new Error('Please enter valid email'));
                 if (!value.includes('@')) return Promise.reject(new Error('Email must contain @'));
                 const isDuplicate = existingUsers.some(
                   (u) =>
@@ -128,12 +144,9 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
           rules={[{ required: true, message: 'Please select role' }]}
         >
           <Select placeholder="Select role">
-            <Option value="admin">Admin</Option>
-            <Option value="project_coordinator">Project Coordinator</Option>
-            <Option value="manufacturing_coordinator">Manufacturing Coordinator</Option>
-            <Option value="supervisor">Supervisor</Option>
-            <Option value="inventory_supervisor">Inventory Supervisor</Option>
-            <Option value="operator">Operator</Option>
+            {Object.entries(roleLabels).map(([value, label]) => (
+              <Option key={value} value={value}>{label}</Option>
+            ))}
           </Select>
         </Form.Item>
 
@@ -156,7 +169,18 @@ const UserModal = ({ open, onCancel, onSuccess, editingUser, existingUsers = [] 
         <Form.Item
           name="password"
           label="Password"
-          rules={[{ required: true, message: 'Please enter password' }]}
+          rules={[
+            { required: true, message: 'Please enter password' },
+            {
+              validator: (_, value) => {
+                if (!value) return Promise.resolve();
+                if (value.includes(' ')) {
+                  return Promise.reject(new Error('Password cannot contain spaces'));
+                }
+                return Promise.resolve();
+              }
+            }
+          ]}
         >
           <Input.Password placeholder="Enter password" />
         </Form.Item>

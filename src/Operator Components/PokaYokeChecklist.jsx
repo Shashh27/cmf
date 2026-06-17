@@ -45,19 +45,10 @@ const PokaYokeChecklist = ({
   const [items, setItems] = useState([]);
   const [activeStep, setActiveStep] = useState(1);
   const [responses, setResponses] = useState({});
-  const [orders, setOrders] = useState([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
-  const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [comments, setComments] = useState('');
-  const [parts, setParts] = useState([]);
-  const [partsLoading, setPartsLoading] = useState(false);
-  const [selectedPartId, setSelectedPartId] = useState(null);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [successMeta, setSuccessMeta] = useState({ orderText: '', partText: '' });
-  // Display labels for the order/part in redo mode (read from rejection_details)
-  const [redoOrderLabel, setRedoOrderLabel] = useState('');
-  const [redoPartLabel, setRedoPartLabel] = useState('');
+  const [successMeta, setSuccessMeta] = useState({});
 
   const isRedo = useMemo(() => {
     if (!selected) return false;
@@ -136,10 +127,16 @@ const PokaYokeChecklist = ({
   useEffect(() => {
     if (!open) {
       setShowSuccess(false);
-      setSuccessMeta({ orderText: '', partText: '' });
+      setSuccessMeta({});
       // Reset the open guard so next open triggers a fresh fetch
       prevOpenRef.current = false;
       submittedRef.current = false;
+      // Reset to step 1 and clear selected checklist
+      setSelected(null);
+      setActiveStep(1);
+      setItems([]);
+      setResponses({});
+      setComments('');
     }
   }, [open]);
 
@@ -359,57 +356,11 @@ const PokaYokeChecklist = ({
           });
           setResponses(prevResponses);
           
-          if (rejectionDetails.production_order_id) {
-            setSelectedOrderId(rejectionDetails.production_order_id);
-          }
-          if (rejectionDetails.part_id) {
-            setSelectedPartId(rejectionDetails.part_id);
-          }
           if (rejectionDetails.comments) {
             setComments(rejectionDetails.comments);
           }
-
-          // Try to set labels from existing orders list first
-          const existingOrder = orders.find(o => o.id === rejectionDetails.production_order_id);
-          if (existingOrder) {
-            const label = existingOrder.sale_order_number ?? existingOrder.order_number ?? existingOrder.name ?? existingOrder.title ?? `Order #${rejectionDetails.production_order_id}`;
-            setRedoOrderLabel(label);
-          }
-
-          // Fetch order label for redo display if not found or to ensure latest
-          if (rejectionDetails.production_order_id) {
-            try {
-              const orderRes = await fetch(`${API_BASE_URL}/orders/${rejectionDetails.production_order_id}`, {
-                headers: { accept: 'application/json' },
-              });
-              if (orderRes.ok) {
-                const orderData = await orderRes.json();
-                const label = orderData?.sale_order_number ?? orderData?.order_number ?? orderData?.name ?? orderData?.title ?? `Order #${rejectionDetails.production_order_id}`;
-                setRedoOrderLabel(label);
-
-                if (rejectionDetails.part_id) {
-                  try {
-                    const saleOrderNumber = orderData?.sale_order_number ?? orderData?.order_number ?? orderData?.id;
-                    const partsRes = await fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, {
-                      headers: { accept: 'application/json' },
-                    });
-                    if (partsRes.ok) {
-                      const partsData = await partsRes.json();
-                      const partsArr = Array.isArray(partsData) ? partsData : [];
-                      setParts(partsArr);
-                      const partObj = partsArr.find(p => String(p?.part_id ?? p?.id) === String(rejectionDetails.part_id));
-                      const partLabel = partObj?.part_name ?? partObj?.name ?? partObj?.part_number ?? `Part #${rejectionDetails.part_id}`;
-                      setRedoPartLabel(partLabel);
-                    }
-                  } catch (e) { console.error('Error fetching redo parts:', e); }
-                }
-              }
-            } catch (e) { console.error('Error fetching redo order:', e); }
-          }
         } else {
           setResponses({});
-          setRedoOrderLabel('');
-          setRedoPartLabel('');
         }
       } catch {
         setItems([]);
@@ -417,56 +368,6 @@ const PokaYokeChecklist = ({
     };
     run();
   }, [selected]);
-
-  useEffect(() => {
-    const loadOrders = async () => {
-      if (activeStep !== 2) return;
-      setOrdersLoading(true);
-      try {
-        const res = await fetch(`${API_BASE_URL}/orders/`, {
-          headers: { accept: 'application/json' },
-        });
-        const data = await res.json();
-        const arr = Array.isArray(data) ? data : [];
-        setOrders(arr);
-      } catch {
-        setOrders([]);
-      } finally {
-        setOrdersLoading(false);
-      }
-    };
-    loadOrders();
-  }, [activeStep]);
-
-  useEffect(() => {
-    const loadParts = async () => {
-      if (!isRedo) {
-        setSelectedPartId(null);
-      }
-      setParts([]);
-      if (!selectedOrderId) return;
-      setPartsLoading(true);
-      try {
-        const orderObj = orders.find(o => o.id === selectedOrderId);
-        const saleOrderNumber = orderObj?.sale_order_number || orderObj?.order_number || orderObj?.id;
-        if (!saleOrderNumber) {
-           setParts([]);
-           return;
-        }
-        const res = await fetch(`${API_BASE_URL}/orders/sale-order/${saleOrderNumber}/parts`, {
-          headers: { accept: 'application/json' },
-        });
-        const data = await res.json();
-        const arr = Array.isArray(data) ? data : [];
-        setParts(arr);
-      } catch {
-        setParts([]);
-      } finally {
-        setPartsLoading(false);
-      }
-    };
-    loadParts();
-  }, [selectedOrderId, orders]);
 
   // Compute if any response is non-conforming
   const hasNonConforming = useMemo(() => {
@@ -549,21 +450,13 @@ const PokaYokeChecklist = ({
     null;
 
   const canSubmit = useMemo(() => {
-    const hasBaseFields =
+    return (
       Boolean(machineId) &&
       Boolean(checklistId) &&
-      Boolean(selectedOrderId) &&
       Boolean(operatorId) &&
-      allRequiredComplete;
-
-    if (!hasBaseFields) return false;
-
-    // In redo mode, we should have a part ID if it was originally there.
-    // Otherwise, if the parts list has loaded and has entries, one must be selected.
-    const hasPartSelection = isRedo ? Boolean(selectedPartId) : (parts.length === 0 || Boolean(selectedPartId));
-    
-    return hasPartSelection;
-  }, [machineId, checklistId, selectedOrderId, operatorId, allRequiredComplete, isRedo, selectedPartId, parts.length]);
+      allRequiredComplete
+    );
+  }, [machineId, checklistId, operatorId, allRequiredComplete]);
 
   const handleSubmit = async () => {
     if (!canSubmit || submitLoading) return;
@@ -592,9 +485,6 @@ const PokaYokeChecklist = ({
         assignment_id: assignmentId,
         frequency: assignmentFrequency,
         shift: assignmentShift,
-        production_order_id: selectedOrderId,
-        order_id: selectedOrderId,
-        part_id: selectedPartId ?? null,
         operator_id: operatorId ?? null,
         comments: comments ?? '',
         completed_at: nowIST(),
@@ -718,23 +608,6 @@ const PokaYokeChecklist = ({
           }
         }
       }
-      const chosenOrder = orders.find((o) => String(o?.id) === String(selectedOrderId));
-      const orderText =
-        chosenOrder?.sale_order_number ??
-        chosenOrder?.order_number ??
-        chosenOrder?.order_name ??
-        chosenOrder?.name ??
-        chosenOrder?.title ??
-        (selectedOrderId != null ? String(selectedOrderId) : '');
-
-      const chosenPart = parts.find((p) => String(p?.part_id ?? p?.id) === String(selectedPartId));
-      const partText =
-        chosenPart?.part_number ??
-        chosenPart?.part_name ??
-        chosenPart?.name ??
-        (selectedPartId != null ? String(selectedPartId) : '');
-
-      setSuccessMeta({ orderText, partText });
       setShowSuccess(true);
       
       // Optimistically update local state so the selector reflects submission
@@ -760,14 +633,11 @@ const PokaYokeChecklist = ({
 
   const handleNewChecklist = () => {
     setShowSuccess(false);
-    setSuccessMeta({ orderText: '', partText: '' });
+    setSuccessMeta({});
     setSelected(null);
     setItems([]);
     setResponses({});
     setActiveStep(1);
-    setSelectedOrderId(null);
-    setRedoOrderLabel('');
-    setRedoPartLabel('');
     setComments('');
   };
 
@@ -822,7 +692,7 @@ const PokaYokeChecklist = ({
               fontSize: showSuccess ? 14 : 16,
             }}
           >
-            Poka Yoke Checklist
+            Preventive Maintenance Checklist
           </span>
         </div>
         <button
@@ -878,10 +748,6 @@ const PokaYokeChecklist = ({
             <div style={{ fontSize: 20, fontWeight: 600, color: '#0f172a' }}>
               Checklist Completed Successfully!
             </div>
-            <div style={{ fontSize: 12, color: '#94a3b8' }}>
-              {successMeta?.orderText ? `Production Order: ${successMeta.orderText}` : 'Production Order: —'}
-              {successMeta?.partText ? ` | Part: ${successMeta.partText}` : ''}
-            </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
               <Button type="primary" onClick={handleNewChecklist} style={{ borderRadius: 8 }}>
                 New Checklist
@@ -906,7 +772,7 @@ const PokaYokeChecklist = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
             <FileTextOutlined style={{ fontSize: 24, color: '#1677FF' }} />
             <Title level={4} style={{ margin: 0 }}>
-              Poka Yoke Checklist
+              Preventive Maintenance Checklist
             </Title>
           </div>
           <Text style={{ color: '#64748b', fontSize: 14 }}>
@@ -1006,14 +872,6 @@ const PokaYokeChecklist = ({
             items={items}
             responses={responses}
             setResponses={setResponses}
-            orders={orders}
-            ordersLoading={ordersLoading}
-            selectedOrderId={selectedOrderId}
-            setSelectedOrderId={setSelectedOrderId}
-            parts={parts}
-            partsLoading={partsLoading}
-            selectedPartId={selectedPartId}
-            setSelectedPartId={setSelectedPartId}
             comments={comments}
             setComments={setComments}
             hasNonConforming={hasNonConforming}
@@ -1022,8 +880,6 @@ const PokaYokeChecklist = ({
             onSubmit={handleSubmit}
             onBack={() => setSelected(null)}
             approvalInfo={approvalStatuses[`${selected?.checklist_id ?? selected?.pokayoke_checklist_id ?? selected?.checklistId ?? selected?.checklist?.id}-${(selected?.frequency || '').toLowerCase()}-${(selected?.shift || '').toLowerCase()}`]}
-            redoOrderLabel={redoOrderLabel}
-            redoPartLabel={redoPartLabel}
           />
         )}
           </>
@@ -1032,5 +888,4 @@ const PokaYokeChecklist = ({
     </Modal>
   );
 };
-
 export default PokaYokeChecklist;

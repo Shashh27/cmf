@@ -369,7 +369,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       try {
         const orderId = record.source_order_id || record.order_id;
         if (orderId) {
-          const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+          const res = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${orderId}`);
           setOrderHierarchyMap(prev => ({ ...prev, [orderId]: res.data }));
         }
       } catch (error) {
@@ -539,7 +539,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       if (orderId) {
         let hierarchy = orderHierarchyMap[orderId];
         if (!hierarchy) {
-          const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+          const res = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${orderId}`);
           hierarchy = res.data;
           setOrderHierarchyMap(prev => ({ ...prev, [orderId]: hierarchy }));
         }

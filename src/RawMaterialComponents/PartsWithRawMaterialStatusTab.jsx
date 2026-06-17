@@ -82,6 +82,12 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
   const [quickStatusRecord, setQuickStatusRecord] = useState(null);
   const [quickStatusReceivedVendorId, setQuickStatusReceivedVendorId] = useState(null);
 
+  // Vendor selection modal for auto-extracted materials
+  const [vendorSelectModalOpen, setVendorSelectModalOpen] = useState(false);
+  const [vendorSelectRecord, setVendorSelectRecord] = useState(null);
+  const [selectedVendors, setSelectedVendors] = useState([]);
+  const [vendorSelectLoading, setVendorSelectLoading] = useState(false);
+
   const fetching = useRef(false);
   const initializedRef = useRef(false);
 
@@ -103,6 +109,20 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
     if (initializedRef.current) return;
     initializedRef.current = true;
     fetchLinkedMaterials();
+    fetchVendors();
+  }, []);
+
+  // Listen for auto-extract completion to refresh data
+  useEffect(() => {
+    const handleRefresh = () => {
+      fetchLinkedMaterials();
+    };
+
+    window.addEventListener('rawMaterialChanged', handleRefresh);
+
+    return () => {
+      window.removeEventListener('rawMaterialChanged', handleRefresh);
+    };
   }, []);
 
   const fetchLinkedMaterials = async () => {
@@ -355,7 +375,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       try {
         const orderId = record.source_order_id || record.order_id;
         if (orderId) {
-          const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+          const res = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${orderId}`);
           setOrderHierarchyMap(prev => ({ ...prev, [orderId]: res.data }));
         }
       } catch (error) {
@@ -525,7 +545,7 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       if (orderId) {
         let hierarchy = orderHierarchyMap[orderId];
         if (!hierarchy) {
-          const res = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+          const res = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${orderId}`);
           hierarchy = res.data;
           setOrderHierarchyMap(prev => ({ ...prev, [orderId]: hierarchy }));
         }
@@ -568,6 +588,49 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
     // Remove special characters but keep alphanumeric, spaces, and decimal points for number search
     const cleanedValue = (value || '').replace(/[^a-zA-Z0-9 .]/g, '');
     setSearchText(cleanedValue.toLowerCase().slice(0, 50));
+  };
+
+  const handleOpenVendorSelect = async (record) => {
+    // Fetch vendors if not already loaded
+    if (vendors.length === 0) {
+      await fetchVendors();
+    }
+    setVendorSelectRecord(record);
+    setSelectedVendors(record.vendor_id ? record.vendor_id.split(',').map(id => parseInt(id)) : []);
+    setVendorSelectModalOpen(true);
+  };
+
+  const handleCloseVendorSelect = () => {
+    setVendorSelectModalOpen(false);
+    setVendorSelectRecord(null);
+    setSelectedVendors([]);
+  };
+
+  const handleSaveVendorSelection = async () => {
+    if (!vendorSelectRecord) return;
+    
+    if (selectedVendors.length === 0) {
+      message.error('Please select at least one vendor');
+      return;
+    }
+
+    setVendorSelectLoading(true);
+    try {
+      const response = await axios.put(
+        `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${vendorSelectRecord.id}`,
+        {
+          vendor_id: selectedVendors.join(',')
+        }
+      );
+
+      message.success('Vendors linked successfully');
+      handleCloseVendorSelect();
+      await fetchLinkedMaterials();
+    } catch (error) {
+      message.error(error.response?.data?.detail || 'Failed to link vendors');
+    } finally {
+      setVendorSelectLoading(false);
+    }
   };
 
   const fetchAvailableUnits = async (stockId) => {
@@ -956,7 +1019,8 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
   const fetchVendors = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
-      setVendors(response.data || []);
+      const vendorsData = response.data || [];
+      setVendors(vendorsData);
     } catch (error) {
       console.error("Error fetching vendors:", error);
       setVendors([]);
@@ -1268,6 +1332,17 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
       key: 'status_actions',
       render: (_, record, index) => (
         <Space>
+          {record.creation_source === 'auto_extract' && (!record.vendor_id || record.vendor_id === '') && (
+            <Tooltip title="Link Vendors">
+              <Button 
+                type="text" 
+                size="small" 
+                icon={<ShoppingCartOutlined />} 
+                className="text-purple-600 hover:bg-purple-50" 
+                onClick={() => handleOpenVendorSelect(record)} 
+              />
+            </Tooltip>
+          )}
           <Tooltip title="Quick Status Change">
             <Button 
               type="text" 
@@ -1419,6 +1494,54 @@ const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRa
         onFetchVendors={fetchVendors}
         handleProcureDimensionChange={handleProcureDimensionChange}
       />
+
+      {/* Vendor Selection Modal for Auto-Extracted Materials */}
+      <Modal
+        open={vendorSelectModalOpen}
+        onCancel={handleCloseVendorSelect}
+        title={<div className="flex items-center gap-2"><ShoppingCartOutlined className="text-purple-500" /><span className="font-bold text-gray-800">Link Vendors for Enquiry</span></div>}
+        width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }}
+        centered
+        footer={[
+          <Button key="cancel" onClick={handleCloseVendorSelect}>Cancel</Button>,
+          <Button key="save" type="primary" loading={vendorSelectLoading} onClick={handleSaveVendorSelection}>Send for Enquiry</Button>
+        ]}
+      >
+        <div className="py-4 space-y-4">
+          {vendorSelectRecord && (
+            <div className="space-y-2">
+              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Material</Text>
+              <div className="bg-gray-50 p-3 rounded">
+                <Text strong>{vendorSelectRecord.material_name}</Text>
+                <br />
+                <Text type="secondary" className="text-sm">
+                  {vendorSelectRecord.form_type} | Qty: {vendorSelectRecord.quantity} | 
+                  {vendorSelectRecord.diameter && ` Ø${vendorSelectRecord.diameter}`}
+                  {vendorSelectRecord.length && ` × ${vendorSelectRecord.length}mm`}
+                </Text>
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Select Vendors</Text>
+            <Select
+              mode="multiple"
+              placeholder="Select vendors to send for enquiry"
+              value={selectedVendors}
+              onChange={setSelectedVendors}
+              style={{ width: '100%' }}
+              options={vendors.map(v => ({
+                label: v.company_name || v.vendor_name || v.name || `Vendor ${v.id}`,
+                value: v.id
+              }))}
+              showSearch
+              filterOption={(input, option) =>
+                option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
+              }
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

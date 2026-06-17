@@ -280,14 +280,6 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
       render: (operator) => operator?.user_name || '-',
     },
     {
-      title: 'Production Order',
-      dataIndex: 'order',
-      key: 'production_order',
-      width: 160,
-      className: 'table-header-styled',
-      render: (order) => order?.sale_order_number || '-',
-    },
-    {
       title: 'Completed At',
       dataIndex: 'completed_at',
       key: 'completed_at',
@@ -561,24 +553,24 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
                       {selectedLogDetails.operator?.user_name || '-'}
                     </div>
                   </div>
-                  <div>
+                  {/* <div>
                     <Text type="secondary">Production Order</Text>
                     <div style={{ fontWeight: 500 }}>
                       {selectedLogDetails.order?.sale_order_number || '-'}
                     </div>
-                  </div>
+                  </div> */}
                   <div>
                     <Text type="secondary">Completed At</Text>
                     <div style={{ fontWeight: 500 }}>
                       {formatDateTime(selectedLogDetails.completed_at)}
                     </div>
                   </div>
-                  <div>
+                  {/* <div>
                     <Text type="secondary">Part</Text>
                     <div style={{ fontWeight: 500 }}>
                       {selectedLogDetails.part?.part_name || '-'}
                     </div>
-                  </div>
+                  </div> */}
                   <div>
                     <Text type="secondary">Frequency</Text>
                     <div style={{ fontWeight: 500 }}>

@@ -57,7 +57,6 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
 
   useEffect(() => {
     fetchOrders();
-    fetchGeneralStock();
   }, []);
 
   
@@ -91,7 +90,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const fetchOrderHierarchy = async (orderId) => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${orderId}`);
       setOrderHierarchy(response.data.product_hierarchy);
       setExpandedKeys(['all']);
     } catch (error) {
@@ -124,6 +123,8 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
       setSelectedUnit(null);
       setRequiredLength(null);
     }
+    // Fetch general stock only when opening the link modal
+    fetchGeneralStock();
     setLinkModalVisible(true);
   };
 
@@ -137,7 +138,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           {part.part.raw_material_unit_id && (
             <div>
               <p><strong>Currently Assigned:</strong></p>
-              <p>Unit #{part.part.raw_material_unit_id}</p>
+              <p>Stock Dimensions: {part.part.raw_material_stock_dimensions || '—'}</p>
               <p>Material: {part.part.raw_material_name} </p>
             </div>
           )}
@@ -360,7 +361,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const renderPartCard = (part) => {
     const isLinked = part.part.raw_material_unit_id !== null;
     const linkedMaterialName = part.part.raw_material_name;
-    const linkedMaterialDimensions = part.part.raw_material_stock_dimensions;
+    const linkedMaterialDimensions = part.part.raw_material_stock_dimensions || part.part.raw_material_unit_details?.stock_dimensions;
     const linkedMaterialFormType = part.part.raw_material_unit_details?.form_type || part.part.raw_material_form_type;
     const stockSourceType = part.part.raw_material_stock_details?.source_type || part.part.raw_material_unit_details?.source_type || null;
     const linkedUnitId = part.part.raw_material_unit_id;
@@ -480,7 +481,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   </Text>
                   <span style={{ margin: '0 4px', color: '#d9d9d9' }}>|</span>
                   <Text style={{ color: '#1890ff', fontWeight: '500' }}>
-                    #{linkedUnitId}
+                    {linkedMaterialDimensions || '—'}
                   </Text>
                   {linkedRequiredLength && (
                     <>
@@ -768,6 +769,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                           {filteredParts().map(part => {
                             const isLinked = part.part.raw_material_unit_id !== null;
                             const linkedMaterialName = part.part.raw_material_name;
+                            const linkedMaterialDimensions = part.part.raw_material_stock_dimensions || part.part.raw_material_unit_details?.stock_dimensions;
                             const linkedMaterialFormType = part.part.raw_material_unit_details?.form_type || part.part.raw_material_form_type;
                             const linkedUnitId = part.part.raw_material_unit_id;
                             const linkedRequiredLength = part.part.required_length;
@@ -839,7 +841,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                       <div style={{ fontSize: '9px', lineHeight: '1.3' }}>
                                         <span style={{ color: '#595959' }}>{linkedMaterialFormType || 'Unknown'}</span>
                                         <span style={{ margin: '0 2px', color: '#d9d9d9' }}>|</span>
-                                        <span style={{ color: '#1890ff', fontWeight: '500' }}>#{linkedUnitId}</span>
+                                        <span style={{ color: '#1890ff', fontWeight: '500' }}>{linkedMaterialDimensions || '—'}</span>
                                         {linkedRequiredLength && (
                                           <>
                                             <span style={{ margin: '0 2px', color: '#d9d9d9' }}>|</span>
@@ -1025,7 +1027,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                 title="Warning"
                 description={
                   <div>
-                    This part is already assigned to Unit #{selectedPart.part.raw_material_unit_id}.
+                    This part is already assigned to unit with stock dimensions: {selectedPart.part.raw_material_stock_dimensions || selectedPart.part.raw_material_unit_details?.stock_dimensions || '—'}.
                     Selecting a new unit will replace the current assignment.
                     <br />
                    

@@ -6,7 +6,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { API_BASE_URL } from '../Config/auth.js';
-import UserModal, { roleLabels } from '../Access Control Components/UserModal';
+import UserModal, { roleLabels } from './Access Control Components/UserModal';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -42,7 +42,7 @@ const AccessControl = () => {
             animationData: LockAnimation,
           });
         }
-      } catch { }
+      } catch {}
     });
   }, []);
 
@@ -122,6 +122,8 @@ const AccessControl = () => {
       title: 'Username',
       dataIndex: 'username',
       key: 'username',
+      sorter: (a, b) => a.username.localeCompare(b.username),
+      sortDirections: ['ascend', 'descend'],
     },
     {
       title: 'E-mail',
@@ -132,6 +134,15 @@ const AccessControl = () => {
       title: 'Role',
       dataIndex: 'role',
       key: 'role',
+      filters: [
+        { text: 'Admin', value: 'admin' },
+        { text: 'Project Coordinator', value: 'project_coordinator' },
+        { text: 'Manufacturing Coordinator', value: 'manufacturing_coordinator' },
+        { text: 'Supervisor', value: 'supervisor' },
+        { text: 'Supervisor-Tool Crib', value: 'inventory_supervisor' },
+        { text: 'Operator', value: 'operator' },
+      ],
+      onFilter: (value, record) => record.role === value,
       render: (role) => {
         let color = 'geekblue';
         if (role === 'admin') color = 'volcano';
@@ -157,12 +168,24 @@ const AccessControl = () => {
       title: 'Created At',
       dataIndex: 'createdAt',
       key: 'createdAt',
+      sorter: (a, b) => {
+        const dateA = a.createdAt ? dayjs(a.createdAt).valueOf() : 0;
+        const dateB = b.createdAt ? dayjs(b.createdAt).valueOf() : 0;
+        return dateA - dateB;
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (text) => text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '-',
     },
     {
       title: 'Updated At',
       dataIndex: 'updatedAt',
       key: 'updatedAt',
+      sorter: (a, b) => {
+        const dateA = a.updatedAt ? dayjs(a.updatedAt).valueOf() : 0;
+        const dateB = b.updatedAt ? dayjs(b.updatedAt).valueOf() : 0;
+        return dateA - dateB;
+      },
+      sortDirections: ['ascend', 'descend'],
       render: (text) => text ? dayjs(text).format('DD/MM/YYYY HH:mm') : '-',
     },
     {
@@ -180,7 +203,7 @@ const AccessControl = () => {
             <span>{displayText}</span>
             <Button
               type="text"
-              icon={isVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+              icon={isVisible ? <EyeOutlined /> : <EyeInvisibleOutlined />}
               onClick={() => togglePasswordVisibility(record.id)}
             />
           </Space>

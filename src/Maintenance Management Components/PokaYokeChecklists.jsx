@@ -518,7 +518,7 @@ const PokaYokeChecklists = () => {
                       }}
                     >
                       <option value="">Select item type</option>
-                      <option value="boolean">Boolean</option>
+                      <option value="boolean">Yes/No</option>
                       <option value="numerical">Numerical</option>
                       <option value="text">Text</option>
                     </select>
@@ -759,7 +759,7 @@ const PokaYokeChecklists = () => {
               }}
             >
               <option value="">Select item type</option>
-              <option value="boolean">Boolean</option>
+              <option value="boolean">Yes/No</option>
               <option value="numerical">Numerical</option>
               <option value="text">Text</option>
             </select>

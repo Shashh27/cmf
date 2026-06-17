@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message } from 'antd';
+import { Card, Tabs, Table, Tag, Button, Empty, Spin, Typography, Space, Modal, Form, Input, InputNumber, DatePicker, notification, Select, message, Tooltip } from 'antd';
 import { FileTextOutlined, EyeOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
 import ModelViewer3D from './ModelViewer3D';
+import OperationChecklist from './OperationChecklist';
 
 
 const { TabPane } = Tabs;
@@ -47,6 +48,16 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const [completeLoading, setCompleteLoading] = useState(false);
   const [completeForm] = Form.useForm();
 
+  // Activate Confirmation Modal State
+  const [isActivateModalVisible, setIsActivateModalVisible] = useState(false);
+  const [operationToActivate, setOperationToActivate] = useState(null);
+
+  // Poka-Yoke Checklist State
+  const [isChecklistVisible, setIsChecklistVisible] = useState(false);
+  const [checklistOperationId, setChecklistOperationId] = useState(null);
+  const [submissionStatuses, setSubmissionStatuses] = useState({});
+  const [checklistAssigned, setChecklistAssigned] = useState({});
+
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
   const [productionStats, setProductionStats] = useState({
@@ -69,6 +80,12 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     setSessionActivationTime(null);
     setProductionStats({ totalProduced: 0, totalRework: 0, totalApproved: 0, hasRework: false, reworkRemarks: '', operatorStatus: null });
   }, [selectedJob?.schedule_id]);
+
+  useEffect(() => {
+    if (partData) {
+      fetchSubmissionStatuses();
+    }
+  }, [partData]);
 
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -173,10 +190,21 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         if (partOps.length > 0) {
           let initialOp = partOps[0];
           if (selectedJob.operation_name || selectedJob.operation_number) {
-            const matchedOp = partOps.find(op =>
-              (selectedJob.operation_name && (op.operation_name === selectedJob.operation_name || op.name === selectedJob.operation_name)) ||
-              (selectedJob.operation_number && (op.operation_number === selectedJob.operation_number || op.number === selectedJob.operation_number))
-            );
+            const matchedOp = partOps.find(op => {
+              const opNameMatch = selectedJob.operation_name && (op.operation_name === selectedJob.operation_name || op.name === selectedJob.operation_name);
+              const opNumMatch = selectedJob.operation_number && (op.operation_number === selectedJob.operation_number || op.number === selectedJob.operation_number);
+              
+              // If both are provided, both must match for precise identification
+              if (selectedJob.operation_name && selectedJob.operation_number) {
+                return opNameMatch && opNumMatch;
+              }
+              // If only operation_number is provided, match by number (more specific)
+              if (selectedJob.operation_number) {
+                return opNumMatch;
+              }
+              // If only operation_name is provided, match by name
+              return opNameMatch;
+            });
 
             if (matchedOp) initialOp = matchedOp;
 
@@ -249,7 +277,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const operationColumns = [
     {
-      title: 'Operation Number', key: 'op_num',
+      title: 'Operation No', key: 'op_num',
       render: (record) => record.operation_number || record.number || record.op_no || '-'
     },
     {
@@ -294,6 +322,38 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
       render: (record) => record.part_type_name || record.operation_type || record.type || record.op_type || '-'
     },
     {
+      title: 'Work Instructions', key: 'work_instructions',
+      render: (record) => {
+        const instructions = record.work_instructions || '-';
+        // If instructions are long, truncate and show full text in tooltip
+        const isLong = instructions.length > 50;
+        const displayText = isLong ? instructions.substring(0, 50) + '...' : instructions;
+        return (
+          <Tooltip title={isLong ? instructions : undefined} placement="topLeft">
+            <Text style={{ fontSize: 12 }}>
+              {displayText}
+            </Text>
+          </Tooltip>
+        );
+      }
+    },
+    {
+      title: 'Notes', key: 'notes',
+      render: (record) => {
+        const notes = record.notes || '-';
+        const isLong = notes.length > 30;
+        const displayText = isLong ? notes.substring(0, 30) + '...' : notes;
+        return (
+          <Tooltip title={isLong ? notes : undefined} placement="topLeft">
+            <Text style={{ fontSize: 12 }}>
+              {displayText}
+            </Text>
+          </Tooltip>
+        );
+      }
+    },
+    
+    {
       title: 'Activation Time', key: 'activation_time',
       render: (record) => {
         const opId = record.operation_id || record.id || record.operation_number || record.number;
@@ -324,7 +384,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
           // Re-format nicely
           const d = dayjs(activationTime);
           if (d.isValid()) {
-            return d.format('DD-MM-YYYY HH:mm:ss');
+            return d.format('DD-MM-YYYY, HH:mm:ss');
           }
           return activationTime; // Fallback to raw string if dayjs fails
         } catch (e) {
@@ -352,12 +412,32 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         return (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Button
+              type="default"
+              size="small"
+              block
+              onClick={(e) => {
+                e.stopPropagation();
+                if (submissionStatuses[record.id] === 'pending') {
+                  message.info('Supervisor approval required');
+                } else {
+                  handleShowChecklist(record);
+                }
+              }}
+              style={{
+                backgroundColor: submissionStatuses[record.id] === 'approved' ? '#52c41a' : submissionStatuses[record.id] === 'rejected' ? '#ff4d4f' : '#fa8c16',
+                borderColor: submissionStatuses[record.id] === 'approved' ? '#52c41a' : submissionStatuses[record.id] === 'rejected' ? '#ff4d4f' : '#fa8c16',
+                color: '#fff'
+              }}
+            >
+              Poka-Yoke
+            </Button>
+            <Button
               type="primary"
               size="small"
               block
-              disabled={isDisabled}
+              disabled={isDisabled || (checklistAssigned[record.id] && (!submissionStatuses[record.id] || submissionStatuses[record.id] !== 'approved'))}
               loading={activating}
-              onClick={(e) => { e.stopPropagation(); handleActivate(record); }}
+              onClick={(e) => { e.stopPropagation(); handleShowActivateModal(record); }}
               style={effectivelyActivated ? {
                 background: '#52c41a', borderColor: '#52c41a', color: '#fff', cursor: 'not-allowed'
               } : isCompleted ? {
@@ -393,25 +473,26 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     if (!selectedJob) return true;
     if (!selectedJob.operation_name && !selectedJob.operation_number) return true;
 
-    // Prioritize operation_number matching when available
+    const opNameMatch = selectedJob.operation_name && (
+      (op.operation_name && op.operation_name.toLowerCase() === selectedJob.operation_name.toLowerCase()) ||
+      (op.name && op.name.toLowerCase() === selectedJob.operation_name.toLowerCase())
+    );
+    
+    const opNumMatch = selectedJob.operation_number && (
+      (op.operation_number && op.operation_number.toString() === selectedJob.operation_number.toString()) ||
+      (op.number && op.number.toString() === selectedJob.operation_number.toString())
+    );
+
+    // If both are provided, both must match for precise identification
+    if (selectedJob.operation_name && selectedJob.operation_number) {
+      return opNameMatch && opNumMatch;
+    }
+    // If only operation_number is provided, match by number (more specific)
     if (selectedJob.operation_number) {
-      const opNumMatch = (
-        (op.operation_number && op.operation_number.toString() === selectedJob.operation_number.toString()) ||
-        (op.number && op.number.toString() === selectedJob.operation_number.toString())
-      );
-      if (opNumMatch) return true;
+      return opNumMatch;
     }
-
-    // Only use operation_name as fallback if operation_number is not available
-    if (selectedJob.operation_name && !selectedJob.operation_number) {
-      const opNameMatch = (
-        (op.operation_name && op.operation_name.toLowerCase() === selectedJob.operation_name.toLowerCase()) ||
-        (op.name && op.name.toLowerCase() === selectedJob.operation_name.toLowerCase())
-      );
-      if (opNameMatch) return true;
-    }
-
-    return false;
+    // If only operation_name is provided, match by name
+    return opNameMatch;
   });
 
 
@@ -453,6 +534,70 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     });
   };
 
+  const handleShowChecklist = (operation) => {
+    const opId = operation.operation_id || operation.id;
+    setChecklistOperationId(opId);
+    setIsChecklistVisible(true);
+  };
+
+  const fetchSubmissionStatuses = async () => {
+    try {
+      const allOperations = partData?.operations || partData?.part_operations || partData?.partOperations || [];
+      let operatorId = null;
+      try {
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          operatorId = user.id;
+        }
+      } catch (e) {
+        console.error('Error parsing user from local storage', e);
+      }
+
+      if (!operatorId) return;
+
+      const statuses = {};
+      const checklistAssigned = {};
+
+      for (const op of allOperations) {
+        // Check if checklist is assigned to this operation
+        try {
+          const assignmentResponse = await axios.get(
+            `${API_BASE_URL}/operation-checklists/assignments?operation_id=${op.id}`
+          );
+          if (assignmentResponse.status === 200 && assignmentResponse.data && assignmentResponse.data.length > 0) {
+            checklistAssigned[op.id] = true;
+          } else {
+            checklistAssigned[op.id] = false;
+          }
+        } catch (error) {
+          checklistAssigned[op.id] = false;
+        }
+
+        // Fetch submission status
+        try {
+          const response = await axios.get(
+            `${API_BASE_URL}/operation-checklists/submissions/latest?operation_id=${op.id}&operator=${operatorId}`
+          );
+          if (response.status === 200 && response.data.status) {
+            statuses[op.id] = response.data.status;
+          }
+        } catch (error) {
+          // No submission for this operation - don't set status
+        }
+      }
+      setSubmissionStatuses(statuses);
+      setChecklistAssigned(checklistAssigned);
+    } catch (error) {
+      console.error('Failed to fetch submission statuses:', error);
+    }
+  };
+
+  const handleShowActivateModal = (operation) => {
+    setOperationToActivate(operation);
+    setIsActivateModalVisible(true);
+  };
+
   const handleActivate = async (operation) => {
     const opId = operation.operation_id || operation.id;
     if (!opId) {
@@ -488,6 +633,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         });
 
         onActivate(operation);
+        setIsActivateModalVisible(false);
+        setOperationToActivate(null);
       }
     } catch (error) {
       console.error('Error activating operation:', error);
@@ -619,8 +766,67 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
     }, 50);
   };
 
+  const getLatestVersionDocuments = (docs) => {
+    if (!docs || docs.length === 0) return [];
+
+    // Create a map to track document chains by their root document (parent_id = null)
+    // Documents in the same chain have the same root (the one with parent_id = null)
+    const docChains = new Map();
+
+    // First, identify all root documents (parent_id = null)
+    docs.forEach(doc => {
+      if (doc.parent_id === null) {
+        docChains.set(doc.id, [doc]);
+      }
+    });
+
+    // Then, add child documents to their respective chains
+    docs.forEach(doc => {
+      if (doc.parent_id !== null) {
+        // Find the root by traversing up the parent chain
+        let rootId = doc.parent_id;
+        let currentDoc = doc;
+        
+        // Traverse up to find the ultimate root
+        while (true) {
+          const parentDoc = docs.find(d => d.id === rootId);
+          if (!parentDoc || parentDoc.parent_id === null) {
+            break;
+          }
+          rootId = parentDoc.parent_id;
+        }
+
+        if (docChains.has(rootId)) {
+          docChains.get(rootId).push(doc);
+        } else {
+          // If root not found, this might be an orphan, add it as its own chain
+          docChains.set(doc.id, [doc]);
+        }
+      }
+    });
+
+    // For each chain, keep only the document with the highest version
+    const latestDocs = [];
+    docChains.forEach(chain => {
+      if (chain.length === 0) return;
+      
+      // Sort by version (descending) and take the first one
+      const sorted = chain.sort((a, b) => {
+        const versionA = a.document_version || '00';
+        const versionB = b.document_version || '00';
+        return versionB.localeCompare(versionA);
+      });
+      
+      latestDocs.push(sorted[0]);
+    });
+
+    return latestDocs;
+  };
+
   const renderDocuments = (docs, filter) => {
-    const filtered = filter === 'all' ? docs : docs.filter(d => (d.document_type || d.type || '').toLowerCase().includes(filter));
+    // Filter to show only latest versions for operators
+    const latestDocs = getLatestVersionDocuments(docs);
+    const filtered = filter === 'all' ? latestDocs : latestDocs.filter(d => (d.document_type || d.type || '').toLowerCase().includes(filter));
     if (filtered.length === 0) return <Empty description="No documents found." />;
     return filtered.map((doc, i) => (
       <Card key={i} size="small" style={{ marginBottom: 8 }}>
@@ -629,6 +835,9 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             <FileTextOutlined style={{ color: '#1677FF' }} />
             <div>
               <Text strong>{doc.document_name || doc.name}</Text>
+              <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
+                Version: {doc.document_version || '00'}
+              </div>
             </div>
           </Space>
           <Space>
@@ -790,6 +999,31 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
         </Form>
       </Modal>
 
+      {/* Activate Confirmation Modal */}
+      <Modal
+        title="Activate Operation"
+        open={isActivateModalVisible}
+        onCancel={() => { setIsActivateModalVisible(false); setOperationToActivate(null); }}
+        footer={[
+          <Button key="cancel" onClick={() => { setIsActivateModalVisible(false); setOperationToActivate(null); }}>
+            Cancel
+          </Button>,
+          <Button key="activate" type="primary" loading={activating} onClick={() => handleActivate(operationToActivate)}>
+            Activate
+          </Button>
+        ]}
+      >
+        {operationToActivate && (
+          <div>
+            <p>Are you sure you want to activate the following operation?</p>
+            <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 8 }}>
+              <div><strong>Operation Number:</strong> {operationToActivate.operation_number || operationToActivate.number || '-'}</div>
+              <div><strong>Operation Name:</strong> {operationToActivate.operation_name || operationToActivate.name || '-'}</div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* Preview Modal */}
       <Modal
         title={previewDoc?.document_name || previewDoc?.name || "Document Preview"}
@@ -824,6 +1058,13 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
             <Empty description="No preview available for this file type. Please download to view." />
          )}
       </Modal>
+
+      {/* Poka-Yoke Checklist Popup */}
+      <OperationChecklist
+        visible={isChecklistVisible}
+        onClose={() => setIsChecklistVisible(false)}
+        operationId={checklistOperationId}
+      />
 
       {/* Complete Operation Modal */}
       <Modal
