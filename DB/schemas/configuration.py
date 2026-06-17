@@ -437,7 +437,9 @@ class SimpleCompletedLog(BaseModel):
     overall_status: str  # 'approved', 'rejected', 'pending'
     supervisor_name: Optional[str] = None
     operator_acknowledged: bool = False
+    operator_acknowledged_at: Optional[datetime] = None
     supervisor_acknowledged: bool = False
+    supervisor_acknowledged_at: Optional[datetime] = None
     items: List[SimpleItemResponse] = []
 
 

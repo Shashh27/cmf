@@ -592,7 +592,7 @@ def get_all_completed_logs_simple(db: Session = Depends(get_db)):
 
         # Get machine name
         machine = db.query(Machine).filter(Machine.id == log.machine_id).first()
-        machine_name = f"{machine.make} {machine.model}" if machine and machine.make and machine.model else (machine.type if machine else 'Unknown')
+        machine_name = f"({machine.make}) {machine.model}" if machine and machine.make and machine.model else (machine.type if machine else 'Unknown')
 
         # Get checklist name
         checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == log.checklist_id).first()
@@ -653,7 +653,9 @@ def get_all_completed_logs_simple(db: Session = Depends(get_db)):
             overall_status=overall_status,
             supervisor_name=supervisor_name,
             operator_acknowledged=log.operator_acknowledged,
+            operator_acknowledged_at=log.operator_acknowledged_at,
             supervisor_acknowledged=log.supervisor_acknowledged,
+            supervisor_acknowledged_at=log.supervisor_acknowledged_at,
             items=items_data
         ))
 
@@ -812,7 +814,9 @@ def get_machine_completed_logs_simple(machine_id: int, db: Session = Depends(get
             overall_status=overall_status,
             supervisor_name=supervisor_name,
             operator_acknowledged=log.operator_acknowledged,
+            operator_acknowledged_at=log.operator_acknowledged_at,
             supervisor_acknowledged=log.supervisor_acknowledged,
+            supervisor_acknowledged_at=log.supervisor_acknowledged_at,
             items=items_data
         ))
 
