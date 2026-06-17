@@ -433,6 +433,25 @@ const PCNotifications = () => {
                           </Text>
                         </div>
                       )}
+                      {notif.part_name && (
+                        <div style={{ marginTop: "4px" }}>
+                          <Text type="secondary" style={{ fontSize: "12px" }}>
+                            Part: {notif.part_name}
+                          </Text>
+                          {notif.part_number && (
+                            <Text type="secondary" style={{ fontSize: "12px", marginLeft: "8px" }}>
+                              ({notif.part_number})
+                            </Text>
+                          )}
+                        </div>
+                      )}
+                      {notif.document_version && (
+                        <div style={{ marginTop: "4px" }}>
+                          <Tag color="cyan" style={{ fontSize: "11px" }}>
+                            Revision: {notif.document_version}
+                          </Tag>
+                        </div>
+                      )}
                     </div>
                     <div style={{ marginTop: "8px" }}>
                       <Space size="small" wrap style={{ marginTop: "4px" }}>
@@ -523,6 +542,29 @@ const PCNotifications = () => {
                 <Text strong>Product:</Text>
                 <br />
                 <Text>{selectedNotification.product_name}</Text>
+              </div>
+            )}
+            
+            {selectedNotification.part_name && (
+              <div>
+                <Text strong>Part:</Text>
+                <br />
+                <Text>{selectedNotification.part_name}</Text>
+                {selectedNotification.part_number && (
+                  <Text type="secondary" style={{ marginLeft: "8px" }}>
+                    ({selectedNotification.part_number})
+                  </Text>
+                )}
+              </div>
+            )}
+            
+            {selectedNotification.document_version && (
+              <div>
+                <Text strong>Document Version:</Text>
+                <br />
+                <Tag color="cyan" style={{ fontSize: "14px" }}>
+                  Revision: {selectedNotification.document_version}
+                </Tag>
               </div>
             )}
             

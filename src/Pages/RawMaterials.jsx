@@ -21,6 +21,8 @@ import PartsWithRawMaterialStatusTab from "../RawMaterialComponents/PartsWithRaw
 
 import RawMaterialHistoryTab from "../RawMaterialComponents/RawMaterialHistoryTab";
 
+import RawMaterialSummaryTab from "../RawMaterialComponents/RawMaterialSummaryTab";
+
 
 
 const { Title, Text } = Typography;
@@ -87,6 +89,17 @@ const RawMaterialsContent = () => {
 
     },
 
+     {
+
+      key: 'summary',
+
+      label: <span className="flex items-center gap-2 px-2"><ExperimentOutlined /> RM Summary</span>,
+
+      children: <RawMaterialSummaryTab />
+
+    },
+
+
     {
 
       key: 'link-general-stock',
@@ -116,8 +129,9 @@ const RawMaterialsContent = () => {
 
       children: <RawMaterialHistoryTab materials={sharedRawMaterials} />
 
-    }
+    },
 
+   
   ];
 
 
@@ -221,6 +235,8 @@ const RawMaterials = () => (
 
 
 export default RawMaterials;
+
+
 
 
 

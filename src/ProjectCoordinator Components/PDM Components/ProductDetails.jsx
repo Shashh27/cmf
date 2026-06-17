@@ -100,7 +100,7 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
       if (selectedItem.raw_materials && Array.isArray(selectedItem.raw_materials) && selectedItem.raw_materials.length > 0) {
         materials = [...selectedItem.raw_materials];
       } else if (selectedItem.raw_material_name) {
-        materials = [{ id: selectedItem.raw_material_id || 'N/A', material_name: selectedItem.raw_material_name }];
+        materials = [{ id: selectedItem.raw_material_id || 'N/A', material_name: selectedItem.raw_material_name, stock_dimensions: selectedItem.stock_dimensions || null }];
       }
       setRawMaterials(materials);
 
@@ -279,33 +279,6 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
       },
     });
   };
-
-  const baseMaterialColumns = [
-    { title: 'Material', dataIndex: 'material_name', key: 'name', ellipsis: true },
-  ];
-
-  const materialColumns =
-    itemType === "part"
-      ? [
-        ...baseMaterialColumns,
-        // {
-        //   title: 'Actions',
-        //   key: 'actions',
-        //   width: 80,
-        //   render: (_, record) => (
-        //     <Tooltip title="Remove from part">
-        //       <Button
-        //         type="text"
-        //         size="small"
-        //         danger
-        //         icon={<DeleteOutlined />}
-        //         onClick={() => handleClearRawMaterial(record)}
-        //       />
-        //     </Tooltip>
-        //   ),
-        // },
-      ]
-      : baseMaterialColumns;
 
   const headerNoWrap = () => ({ style: { whiteSpace: 'nowrap' } });
 
@@ -525,21 +498,42 @@ const ProductDetails = ({ selectedItem, partDocuments, children }) => {
               title={
                 <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
                   <FileTextOutlined className="text-slate-400" />
-                  Raw Materials ({rawMaterials.length})
+                  Assigned Raw Material ({rawMaterials.length})
                 </span>
               }
-              styles={{ body: { padding: 0 } }}
+              styles={{ body: { padding: '8px' } }}
             >
               {rawMaterials.length > 0 ? (
-                <Table
-                  dataSource={rawMaterials}
-                  columns={materialColumns}
-                  rowKey="id"
-                  size="small"
-                  pagination={false}
-                  scroll={{ y: 150 }}
-                  className="border-none"
-                />
+                <div className="flex flex-col gap-2 max-h-40 overflow-y-auto">
+                  {rawMaterials.map((material) => (
+                    <div key={material.id} className="bg-white border border-slate-200 rounded p-2">
+                      <div className="flex flex-col gap-2">
+                        <div className="border-b border-slate-200 pb-2">
+                          <div className="flex items-center gap-2">
+                            <Text className="text-xs font-medium text-slate-600">Material:</Text>
+                            <Tooltip title={material.material_name}>
+                              <Tag color="blue" style={{ margin: 0, fontSize: '11px', fontWeight: 500 }}>
+                                {material.material_name}
+                              </Tag>
+                            </Tooltip>
+                          </div>
+                        </div>
+                        {material.stock_dimensions && (
+                          <div className="pt-1">
+                            <div className="flex items-center gap-2">
+                              <Text className="text-xs font-medium text-slate-600">Stock Dimensions:</Text>
+                              <Tooltip title={material.stock_dimensions}>
+                                <Tag color="cyan" style={{ margin: 0, fontSize: '11px', fontWeight: 500 }}>
+                                  {material.stock_dimensions}
+                                </Tag>
+                              </Tooltip>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <div className="py-6 text-center">
                   <Text className="text-xs text-gray-400">No raw materials assigned</Text>

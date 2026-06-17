@@ -32,6 +32,7 @@
     "dayjs": "^1.11.19",
     "exceljs": "^4.4.0",
     "framer-motion": "^12.34.0",
+    "gantt-task-react": "^0.3.9",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lottie-react": "^2.4.0",

@@ -22,6 +22,7 @@ import {
   FileTextOutlined
 } from "@ant-design/icons";
 import OrderRequirementsDisplay from "./OrderRequirementsDisplay";
+import AutoExtractRawMaterialPreview from "./AutoExtractRawMaterialPreview";
 
 const { Text, Title } = Typography;
 const { Panel } = Collapse;
@@ -51,13 +52,14 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const [filterStatus, setFilterStatus] = useState('all');
   const [showOrderRequirements, setShowOrderRequirements] = useState(false);
   const [externalDocument, setExternalDocument] = useState(null);
+  const [autoExtractModalVisible, setAutoExtractModalVisible] = useState(false);
+  const [selectedPartForAutoExtract, setSelectedPartForAutoExtract] = useState(null);
 
   const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
   const userId = storedUser?.id;
 
   useEffect(() => {
     fetchOrders();
-    fetchGeneralStock();
   }, []);
 
 
@@ -91,7 +93,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const fetchOrderHierarchy = async (orderId) => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchical`);
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${orderId}`);
       setOrderHierarchy(response.data.product_hierarchy);
       setExpandedKeys(['all']);
     } catch (error) {
@@ -124,6 +126,8 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
       setSelectedUnit(null);
       setRequiredLength(null);
     }
+    // Fetch general stock only when opening the link modal
+    fetchGeneralStock();
     setLinkModalVisible(true);
   };
 
@@ -137,7 +141,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           {part.part.raw_material_unit_id && (
             <div>
               <p><strong>Currently Assigned:</strong></p>
-              <p>Unit #{part.part.raw_material_unit_id}</p>
+              <p>Stock Dimensions: {part.part.raw_material_stock_dimensions || '—'}</p>
               <p>Material: {part.part.raw_material_name} </p>
             </div>
           )}
@@ -193,6 +197,17 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const handleOrderRequirementsClose = () => {
     setShowOrderRequirements(false);
     setExternalDocument(null);
+  };
+
+  const handleAutoExtract = (part) => {
+    setSelectedPartForAutoExtract(part);
+    setAutoExtractModalVisible(true);
+  };
+
+  const handleAutoExtractSuccess = () => {
+    if (selectedOrder) {
+      fetchOrderHierarchy(selectedOrder.id);
+    }
   };
 
   const handleSaveLink = async () => {
@@ -366,7 +381,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
   const renderPartCard = (part) => {
     const isLinked = part.part.raw_material_unit_id !== null;
     const linkedMaterialName = part.part.raw_material_name;
-    const linkedMaterialDimensions = part.part.raw_material_stock_dimensions;
+    const linkedMaterialDimensions = part.part.raw_material_stock_dimensions || part.part.raw_material_unit_details?.stock_dimensions;
     const linkedMaterialFormType = part.part.raw_material_unit_details?.form_type || part.part.raw_material_form_type;
     const stockSourceType = part.part.raw_material_stock_details?.source_type || part.part.raw_material_unit_details?.source_type || null;
     const linkedUnitId = part.part.raw_material_unit_id;
@@ -486,7 +501,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                   </Text>
                   <span style={{ margin: '0 4px', color: '#d9d9d9' }}>|</span>
                   <Text style={{ color: '#1890ff', fontWeight: '500' }}>
-                    #{linkedUnitId}
+                    {linkedMaterialDimensions || '—'}
                   </Text>
                   {linkedRequiredLength && (
                     <>
@@ -774,6 +789,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                           {filteredParts().map(part => {
                             const isLinked = part.part.raw_material_unit_id !== null;
                             const linkedMaterialName = part.part.raw_material_name;
+                            const linkedMaterialDimensions = part.part.raw_material_stock_dimensions || part.part.raw_material_unit_details?.stock_dimensions;
                             const linkedMaterialFormType = part.part.raw_material_unit_details?.form_type || part.part.raw_material_form_type;
                             const linkedUnitId = part.part.raw_material_unit_id;
                             const linkedRequiredLength = part.part.required_length;
@@ -844,7 +860,7 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
                                       <div style={{ fontSize: '9px', lineHeight: '1.3' }}>
                                         <span style={{ color: '#595959' }}>{linkedMaterialFormType || 'Unknown'}</span>
                                         <span style={{ margin: '0 2px', color: '#d9d9d9' }}>|</span>
-                                        <span style={{ color: '#1890ff', fontWeight: '500' }}>#{linkedUnitId}</span>
+                                        <span style={{ color: '#1890ff', fontWeight: '500' }}>{linkedMaterialDimensions || '—'}</span>
                                         {linkedRequiredLength && (
                                           <>
                                             <span style={{ margin: '0 2px', color: '#d9d9d9' }}>|</span>
@@ -1024,13 +1040,59 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
               </div>
             </Card>
 
+            {/* Auto-Extract Option */}
+            <Card size="small" style={{ marginBottom: '16px', backgroundColor: '#e6f7ff', borderColor: '#91d5ff' }}>
+              <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <Text strong style={{ color: '#0050b3' }}>Extracted Raw Material</Text>
+                    <div style={{ fontSize: '12px', color: '#595959', marginTop: '4px' }}>
+                      {(() => {
+                        const latestExtractedData = getLatestExtractedData(selectedPart.extracted_data);
+                        if (latestExtractedData) {
+                          return (
+                            <>
+                              Material: {latestExtractedData.material || 'N/A'}
+                              {latestExtractedData.stock_size && <span> | Stock Size: {latestExtractedData.stock_size}</span>}
+                            </>
+                          );
+                        }
+                        return 'Select material details to order';
+                      })()}
+                    </div>
+                  </div>
+                  <Button
+                    type="primary"
+                    onClick={() => handleAutoExtract(selectedPart)}
+                    style={selectedPart.part.raw_material_unit_id == null ? { backgroundColor: '#1890ff', borderColor: '#1890ff' } : {}}
+                    disabled={selectedPart.part.raw_material_unit_id != null}
+                  >
+                    Procure
+                  </Button>
+                </div>
+              </Space>
+            </Card>
+
+            {/* Divider or Option Selection */}
+            {(() => {
+              const latestExtractedData = getLatestExtractedData(selectedPart.extracted_data);
+              if (latestExtractedData) {
+                return (
+                  <div style={{ marginBottom: '16px', textAlign: 'center' }}>
+                    <Text type="secondary" style={{ fontSize: '12px' }}>OR manually select from general stock below</Text>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
             {/* Warning for existing assignment */}
             {selectedPart.part.raw_material_unit_id && (
               <Alert
                 title="Warning"
                 description={
                   <div>
-                    This part is already assigned to Unit #{selectedPart.part.raw_material_unit_id}.
+                    This part is already assigned to unit with stock dimensions: {selectedPart.part.raw_material_stock_dimensions || '—'}.
                     Selecting a new unit will replace the current assignment.
                     <br />
 
@@ -1255,6 +1317,17 @@ const LinkGeneralStockTab = ({ rawMaterials }) => {
           externalDocument={externalDocument}
         />
       </Modal>
+
+      {/* Auto-Extract Raw Material Modal */}
+      <AutoExtractRawMaterialPreview
+        visible={autoExtractModalVisible}
+        onCancel={() => setAutoExtractModalVisible(false)}
+        part={selectedPartForAutoExtract}
+        extractedData={getLatestExtractedData(selectedPartForAutoExtract?.extracted_data)}
+        onSuccess={handleAutoExtractSuccess}
+        userId={userId}
+        rawMaterials={rawMaterials}
+      />
 
     </div>
   );

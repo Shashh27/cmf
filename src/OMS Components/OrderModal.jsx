@@ -727,8 +727,8 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder, customers, 
           </Row>
         </div>
 
-        {/* Approval Section - Only for Admin when editing */}
-        {editingOrder && getCurrentUserRole() === 'admin' && (
+        {/* Approval Section - Only for Admin when editing, and only if order was not created by admin */}
+        {editingOrder && getCurrentUserRole() === 'admin' && editingOrder.user_role !== 'admin' && (
           <div className="bg-blue-50 p-3 sm:p-4 rounded-lg lg:rounded-xl border border-blue-200 mb-4 sm:mb-6 shadow-sm">
             <div className="flex items-center gap-2 mb-3">
               <InfoCircleOutlined className="text-blue-500" />

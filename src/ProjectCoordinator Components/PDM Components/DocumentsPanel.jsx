@@ -54,7 +54,7 @@ const OperationDocumentsList = ({ operationId, onPreview }) => {
   );
 
   const grouped = docs.reduce((acc, d) => { const r = d.parent_id || d.id; (acc[r] = acc[r] || []).push(d); return acc; }, {});
-  const latest = Object.values(grouped).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]);
+  const latest = Object.values(grouped).map(g => [...g].sort((a, b) => b.id - a.id)[0]);
 
   const columns = [
     { title: 'Type', dataIndex: 'document_type', width: 120, render: t => <Tag color="blue" variant="filled" className="mr-0">{t || 'DOC'}</Tag> },
@@ -201,7 +201,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
     [documents]);
 
   const latestPartDocs = useMemo(() =>
-    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => parseV(b.document_version) - parseV(a.document_version))[0]),
+    Object.values(groupedPartDocs).map(g => [...g].sort((a, b) => b.id - a.id)[0]),
     [groupedPartDocs]);
 
   useEffect(() => {
@@ -634,6 +634,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
         return <Tag color="blue" className="m-0 text-xs px-1 leading-4 uppercase border-none bg-blue-100 text-blue-700">{cur.document_type || '2D'}</Tag>;
       }
     },
+    
     {
       title: <span className="text-xs font-semibold">REVISION</span>, key: 'ver', width: 150,
       render: (_, r) => {
@@ -656,7 +657,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
               );
             }}
           >
-            {[...group].sort((a, b) => parseV(b.document_version) - parseV(a.document_version)).map(ver => (
+            {[...group].sort((a, b) => b.id - a.id).map(ver => (
               <Select.Option key={ver.id} value={ver.id}>
                 <div className="flex justify-between items-center w-full py-1">
                   <div className="flex items-center gap-2">
@@ -669,6 +670,13 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
             ))}
           </Select>
         );
+      }
+    },
+    {
+      title: <span className="text-xs font-semibold">UPLOADED BY</span>, key: 'uploaded_by', width: 150,
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
       }
     },
     {
