@@ -695,7 +695,26 @@ class DocumentExtractedData(Base):
 
     net_wt_kg = Column(String, nullable=True)
 
+    # Planned raw material columns - only dimension input fields
+    planned_form_type = Column(String, nullable=True)  # "Round", "Square", "Pipe"
+
+    planned_diameter = Column(Float, nullable=True)
+
+    planned_length = Column(Float, nullable=True)
+
+    planned_breadth = Column(Float, nullable=True)
+
+    planned_height = Column(Float, nullable=True)
+
+    planned_inner_diameter = Column(Float, nullable=True)
+
+    planned_outer_diameter = Column(Float, nullable=True)
+
+    planned_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now(), nullable=True)
 
 
 

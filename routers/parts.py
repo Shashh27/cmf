@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func, text
 from pydantic import BaseModel
-import re, tempfile, os
+import re, tempfile, os, io
 
-from DB.database import get_db
+from DB.database import get_db, MINIO_BUCKET_NAME
+from DB.minio_client import get_minio_client
 from DB.models.oms import (
     Part as PartModel, 
     PartType, 
@@ -683,53 +685,57 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# UPDATED /parse-doc endpoint for the NEW Parts Template
+#
+# New template columns (6 cols, col index 0-based):
+#   0: Sl.No
+#   1: Name of Part
+#   2: Part No
+#   3: Size
+#   4: Part Quantity
+#   5: Part Type (In-house/Out-source/Standard)
+#
+# Part Type normalisation handles ALL case variations:
+#   "In-house", "INHOUSE", "in house", "In House"  → type_id = 1
+#   "Out-source", "OUTSOURCE", "out source"          → type_id = 2
+#   "Standard", "STANDARD", "standard"               → type_id = 3
+# ─────────────────────────────────────────────────────────────────────────────
+
 # ADD THESE IMPORTS at the top of parts.py (merge with existing imports)
-# ─────────────────────────────────────────────────────────────────────────────
 # from fastapi import UploadFile, File
-# import subprocess, tempfile, os, re
-# from bs4 import BeautifulSoup
-# ─────────────────────────────────────────────────────────────────────────────
-# ADD THIS ENDPOINT inside parts.py  (after existing routes, before end of file)
-# ─────────────────────────────────────────────────────────────────────────────
+# import tempfile, os, re
+# from docx import Document
+
 @router.post("/parse-doc", status_code=status.HTTP_200_OK)
 async def parse_parts_doc(file: UploadFile = File(...)):
     """
-    Accept a .docx BOM file and return extracted part rows from ALL pages.
- 
-    Document structure (CMTI-style BOM):
-    ─────────────────────────────────────
-    One Word table spans the entire document. For every page the layout is:
- 
-        [data row]          ← part entry
-        [data row]          ← part entry
-        …
-        [HEADER ROW]        ← "Name of Part | No. of Parts | Size | Part (Assy) No.…"
-        [footer 1]          Date / Prepared by …
-        [footer 2]          Replaced … Superceded …
-        [footer 3]          Central Mfg … | Assembly No. …
-        [footer 4]          … | <sheet number> …
-        [data row page 2]   ← next page begins
- 
-    Fixed column indices (merged cells just repeat the text):
-        col 3  → Size
-        col 5  → Material / Standard
-        col 6  → No. of Parts   ← ALWAYS non-empty on real part rows
-        col 7  → Name of Part
-        col 9  → Part (Assy) No., Drg. Size
+    Accept a .docx BOM file and return extracted part rows.
+
+    New Template Structure (6 columns):
+    ─────────────────────────────────────────────────────
+    Col 0  → Sl.No
+    Col 1  → Name of Part
+    Col 2  → Part No
+    Col 3  → Size
+    Col 4  → Part Quantity
+    Col 5  → Part Type (In-house/Out-source/Standard)
+
+    Row 0 is always the header row.
+    Rows with empty Name of Part AND empty Part No are skipped (blank filler rows).
     """
     from docx import Document
- 
+
     suffix = os.path.splitext(file.filename or "")[-1].lower()
     if suffix != ".docx":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only .docx files are supported. Please convert .doc to .docx first.",
         )
- 
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
- 
+
     try:
         doc = Document(tmp_path)
     except Exception as exc:
@@ -740,118 +746,136 @@ async def parse_parts_doc(file: UploadFile = File(...)):
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
- 
+
     if not doc.tables:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="No tables found in the document.",
         )
- 
-    # ── Column-discovery helpers ──────────────────────────────────────────────
-    def _is_header(cells: list) -> bool:
-        joined = " ".join(c.lower() for c in cells)
-        return "name of part" in joined and (
-            "no. of parts" in joined or "no of parts" in joined
-        )
 
-    def find_col(header_row, keywords):
-        # Pass 1: exact match (whole cell == keyword)
-        for i, c in enumerate(header_row):
-            if any(c.strip().lower() == kw for kw in keywords):
-                return i
-        # Pass 2: substring match (fallback)
-        for i, c in enumerate(header_row):
-            if any(kw in c.lower() for kw in keywords):
-                return i
-        return -1
-
-    # ── Page-metadata row guard ───────────────────────────────────────────────
-    PAGE_META_KEYWORDS = [
-        "central manufacturing", "assembly no", "sheet no", "prepared by",
-        "replaced", "superceded", "type of machine", "group overall",
-    ]
-
-    def _is_page_meta(cells: list) -> bool:
-        """Return True when a row contains document-metadata text (not a part)."""
-        joined = " ".join(c.lower() for c in cells)
-        return any(kw in joined for kw in PAGE_META_KEYWORDS)
+    # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _cell(row_cells: list, idx: int) -> str:
+        """Return cleaned cell text at index, or '' if out of range."""
         if idx < 0 or idx >= len(row_cells):
             return ""
         return re.sub(r"\s+", " ", row_cells[idx]).strip()
+
+    def _is_header(cells: list) -> bool:
+        """Detect header row by checking for 'name of part' in joined text."""
+        joined = " ".join(c.lower() for c in cells)
+        return "name of part" in joined
+
+    def _normalize_part_type(raw: str) -> int:
+        """
+        Map any casing/spacing variation of part type text to a type_id.
+
+        Accepted values (case-insensitive, ignores hyphens/spaces):
+          in-house  / in house  / inhouse   → 1
+          out-source / out source / outsource → 2
+          standard                            → 3
+
+        Defaults to 1 (In-house) if unrecognised or empty.
+        """
+        if not raw:
+            return 1
+
+        # Normalise: lowercase, strip hyphens and extra spaces
+        normalised = re.sub(r"[-\s]+", "", raw.lower())
+
+        if "inhouse" in normalised:
+            return 1
+        if "outsource" in normalised:
+            return 2
+        if "standard" in normalised:
+            return 3
+
+        return 1  # default
+
+    # ── Column indices for the new template ──────────────────────────────────
+    COL_SLNO     = 0
+    COL_NAME     = 1
+    COL_PARTNO   = 2
+    COL_SIZE     = 3
+    COL_QTY      = 4
+    COL_TYPE     = 5
 
     parts: list[dict] = []
 
     for table in doc.tables:
         all_rows = [[c.text for c in row.cells] for row in table.rows]
 
-        header_indices = [i for i, r in enumerate(all_rows) if _is_header(r)]
-        if not header_indices:
-            continue  # not a BOM table
+        # Skip tables that don't look like a parts BOM
+        if not any(_is_header(r) for r in all_rows):
+            continue
 
-        # ── Dynamically discover column positions from the FIRST header row ──
-        first_header = [c.lower().strip() for c in all_rows[header_indices[0]]]
-        COL_NAME     = find_col(first_header, ["name of part"])
-        COL_QTY      = find_col(first_header, ["no. of parts", "no of parts"])
-        COL_PARTNO   = find_col(first_header, ["part (assy) no"])
-        COL_MATERIAL = find_col(first_header, ["material"])
-        COL_SIZE     = find_col(first_header, ["size"])
-
-        for ri, row_cells in enumerate(all_rows):
-            if _is_header(row_cells) or _is_page_meta(row_cells):
+        for row_cells in all_rows:
+            # Skip header rows
+            if _is_header(row_cells):
                 continue
- 
+
             part_name   = _cell(row_cells, COL_NAME)
             part_number = _cell(row_cells, COL_PARTNO)
             qty_raw     = _cell(row_cells, COL_QTY)
             size_raw    = _cell(row_cells, COL_SIZE)
- 
-            # 1. Both name and number empty → spacer row
+            type_raw    = _cell(row_cells, COL_TYPE)
+
+            # Skip blank filler rows (both name and number empty)
             if not part_name and not part_number:
                 continue
- 
-            # 2. Only one non-empty cell in whole row → row-number spacer
-            if len([c for c in row_cells if c.strip()]) == 1:
+
+            # Skip rows where the entire row is effectively one value
+            # (e.g., serial-number-only rows: only Sl.No is filled)
+            non_empty = [c for c in row_cells if c.strip()]
+            if len(non_empty) == 1:
                 continue
- 
-            # 3. qty is empty → not a real part row (address block, notes, etc.)
-            #    Every real part in a CMTI BOM always has a quantity.
-            #    Vendor address/notes rows always have an empty qty column —
-            #    this single check is sufficient to exclude all of them.
-            if not qty_raw.strip():
-                continue
- 
-            # Parse qty: first integer ("57 (55+2)" → 57, "50\n(49+1)" → 50)
+
+            # Parse quantity: extract the first integer
+            # Handles formats like "57", "57 (55+2)", "50\n(49+1)"
             qty: int | None = None
             m = re.search(r"\d+", qty_raw.replace(",", ""))
             if m:
                 qty = int(m.group())
- 
+
             parts.append(
                 {
                     "part_name":         part_name,
                     "part_number":       part_number,
                     "qty":               qty,
                     "size":              size_raw or None,
-                    "raw_material_name": _cell(row_cells, COL_MATERIAL) or None,
-                    "type_id":           1,    # default: In-house; user can change in UI
+                    "raw_material_name": None,          # not in new template
+                    "type_id":           _normalize_part_type(type_raw),
                     "part_detail":       None,
                 }
             )
- 
+
     if not parts:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
                 "No part rows could be extracted. "
                 "Ensure the BOM table has columns: "
-                "'Name of Part', 'No. of Parts', 'Size', 'Part (Assy) No., Drg. Size'."
+                "'Sl.No', 'Name of Part', 'Part No', 'Size', "
+                "'Part Quantity', 'Part Type (In-house/Out-source/Standard)'."
             ),
         )
- 
+
     return {"parts": parts, "count": len(parts)}
- 
+
+
+# ── Part-type normalisation summary ──────────────────────────────────────────
+#
+#  Input (any case)              │ Stored type_id │ Display label
+# ───────────────────────────────┼────────────────┼──────────────
+#  In-house / IN-HOUSE / inhouse │       1        │ In-house
+#  Out-source / OUTSOURCE        │       2        │ Out-source
+#  Standard / STANDARD           │       3        │ Standard
+#  (empty / unrecognised)        │       1        │ In-house  ← default
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
  
 # ══════════════════════════════════════════════════════════════════════════════
 #  2.  NEW  /bulk  — create many parts in a single POST request
@@ -1310,3 +1334,98 @@ def bulk_delete_parts_by_product(product_id: int, db: Session = Depends(get_db))
         deleted_count=len(part_ids),
         part_ids=part_ids,
     )
+
+
+# ── Parts Template ───────────────────────────────────────────────────────────
+
+PARTS_TEMPLATE_OBJECT_NAME = "templates/parts_template.docx"
+
+
+@router.post("/template/upload")
+async def upload_parts_template(file: UploadFile = File(...)):
+    """
+    Upload the parts template file to MinIO.
+    This replaces any existing template file.
+    """
+    if not file.filename or not file.filename.lower().endswith('.docx'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .docx files are allowed for the parts template"
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file"
+        )
+
+    minio_client = get_minio_client()
+
+    try:
+        # Upload to MinIO with fixed object name
+        file_stream = io.BytesIO(content)
+        url = minio_client.upload_file(
+            file_data=file_stream,
+            object_name=PARTS_TEMPLATE_OBJECT_NAME,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+
+        return {
+            "message": "Parts template uploaded successfully",
+            "url": url
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload template: {str(e)}"
+        )
+
+
+@router.get("/template/download")
+async def download_parts_template():
+    """
+    Download the parts template file from MinIO.
+    """
+    minio_client = get_minio_client()
+
+    try:
+        # Check if template exists
+        if not minio_client.file_exists(PARTS_TEMPLATE_OBJECT_NAME):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Parts template not found. Please upload the template first."
+            )
+
+        # Download from MinIO
+        content = minio_client.download_file(PARTS_TEMPLATE_OBJECT_NAME)
+
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": "attachment; filename=PartsTemplate.docx"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to download template: {str(e)}"
+        )
+
+
+@router.get("/template/exists")
+async def check_parts_template_exists():
+    """
+    Check if the parts template exists in MinIO.
+    """
+    minio_client = get_minio_client()
+
+    try:
+        exists = minio_client.file_exists(PARTS_TEMPLATE_OBJECT_NAME)
+        return {"exists": exists}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to check template: {str(e)}"
+        )

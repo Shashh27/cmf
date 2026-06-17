@@ -1311,6 +1311,7 @@ def fetch_simplified_hierarchy(db: Session, product_id: int):
                     'material_name': stock.material.material_name if stock.material else None,
                     'source_type': stock.source_type,
                     'stock_dimensions': stock_dimensions,
+                    'order_status': stock.order_status,
                 }
                 raw_material_stock_form_type = stock.form_type
                 raw_material_stock_dimensions = stock_dimensions
@@ -1481,6 +1482,8 @@ class AutoExtractRequest(BaseModel):
     required_length: Optional[float] = None
     user_id: int
     process_type: Optional[str] = 'Barstocks'
+    form_type: Optional[str] = None
+    dimensions: Optional[dict] = None
 
 
 @router.post("/auto-extract-process")
@@ -1500,7 +1503,9 @@ def process_auto_extract_material(request: AutoExtractRequest, db: Session = Dep
         'stock_size': request.stock_size or '',
         'quantity': request.quantity,
         'required_length': request.required_length,
-        'process_type': request.process_type
+        'process_type': request.process_type,
+        'form_type': request.form_type,
+        'dimensions': request.dimensions
     }
 
     # Process and create stock using auto-extract service
@@ -1512,3 +1517,229 @@ def process_auto_extract_material(request: AutoExtractRequest, db: Session = Dep
     )
 
     return result
+
+
+# ==================== Group/Ungroup Orders ====================
+
+class GroupOrdersRequest(BaseModel):
+    """Request model for grouping multiple order stock items"""
+    stock_ids: List[int]
+
+
+class UngroupOrdersRequest(BaseModel):
+    """Request model for ungrouping stock items"""
+    stock_ids: List[int]
+
+
+@router.post("/order-parts-raw-material-linked/group")
+def group_orders(request: GroupOrdersRequest, db: Session = Depends(get_db)):
+    """
+    Group multiple order stock items together for bulk vendor linking.
+    All selected items will share the same merge_group_id.
+    """
+    import uuid
+    
+    # Validate stock IDs
+    stocks = db.query(RawMaterialStockModel).filter(
+        RawMaterialStockModel.id.in_(request.stock_ids)
+    ).all()
+    
+    if len(stocks) != len(request.stock_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more stock items not found"
+        )
+    
+    # Validate all are order-type stock
+    for stock in stocks:
+        if stock.source_type != "order":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stock ID {stock.id} is not an order-type stock"
+            )
+    
+    # Check if any stock is already grouped
+    for stock in stocks:
+        if stock.merge_group_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Stock ID {stock.id} is already grouped with merge_group_id: {stock.merge_group_id}. Please ungroup it first."
+            )
+    
+    try:
+        # Generate a sequential group number
+        # Get the highest existing group number from the database
+        from sqlalchemy import func
+        existing_groups = db.query(RawMaterialStockModel.merge_group_id).filter(
+            RawMaterialStockModel.merge_group_id.isnot(None)
+        ).distinct().all()
+        
+        # Extract numeric group numbers (assuming format "Group #N")
+        max_group_num = 0
+        for (group_id,) in existing_groups:
+            if group_id and group_id.startswith("Group #"):
+                try:
+                    num = int(group_id.replace("Group #", ""))
+                    if num > max_group_num:
+                        max_group_num = num
+                except ValueError:
+                    pass
+        
+        # Generate new group number
+        new_group_num = max_group_num + 1
+        merge_group_id = f"Group #{new_group_num}"
+        
+        # Set merge_group_id for all selected stocks
+        for stock in stocks:
+            stock.merge_group_id = merge_group_id
+        
+        db.commit()
+        
+        return {
+            "message": f"Successfully grouped {len(stocks)} orders",
+            "merge_group_id": merge_group_id,
+            "group_number": new_group_num,
+            "stock_ids": request.stock_ids
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error merging orders: {str(e)}"
+        )
+
+
+@router.post("/order-parts-raw-material-linked/ungroup")
+def ungroup_orders(request: UngroupOrdersRequest, db: Session = Depends(get_db)):
+    """
+    Ungroup order stock items from their group.
+    Each item will have its merge_group_id cleared.
+    """
+    # Validate stock IDs
+    stocks = db.query(RawMaterialStockModel).filter(
+        RawMaterialStockModel.id.in_(request.stock_ids)
+    ).all()
+    
+    if len(stocks) != len(request.stock_ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more stock items not found"
+        )
+    
+    try:
+        # Clear merge_group_id for all selected stocks
+        for stock in stocks:
+            stock.merge_group_id = None
+            db.flush()  # Ensure the change is written immediately
+        
+        db.commit()
+        
+        # Verify the changes were applied
+        verification = db.query(RawMaterialStockModel).filter(
+            RawMaterialStockModel.id.in_(request.stock_ids)
+        ).all()
+        
+        still_grouped = [s.id for s in verification if s.merge_group_id is not None]
+        if still_grouped:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to ungroup stock IDs: {still_grouped}. merge_group_id still present."
+            )
+        
+        return {
+            "message": f"Successfully ungrouped {len(stocks)} orders",
+            "stock_ids": request.stock_ids,
+            "cleared_merge_group_ids": [s.id for s in stocks]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error unmerging orders: {str(e)}"
+        )
+
+
+@router.put("/order-parts-raw-material-linked/group/{merge_group_id}")
+def update_group(
+    merge_group_id: str,
+    update_data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Update all stock items in a group (bulk update for vendor linking, status change, etc.)
+    """
+    from routers.rawmaterials import _stock_with_details
+    
+    # Get all stocks in the group
+    stocks = db.query(RawMaterialStockModel).filter(
+        RawMaterialStockModel.merge_group_id == merge_group_id
+    ).all()
+    
+    if not stocks:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No stocks found for group {merge_group_id}"
+        )
+    
+    try:
+        # Update all stocks in the group
+        for stock in stocks:
+            update_fields = update_data.copy()
+            
+            # Handle vendor_id update (for enquiry)
+            if 'vendor_id' in update_fields:
+                stock.vendor_id = update_fields['vendor_id']
+            
+            # Handle received_vendor_id update (for PO/received)
+            if 'received_vendor_id' in update_fields:
+                stock.received_vendor_id = update_fields['received_vendor_id']
+            
+            # Handle order_status update
+            if 'order_status' in update_fields:
+                stock.order_status = update_fields['order_status']
+                
+                # Update stock and units status based on order_status
+                if update_fields['order_status'] == 'received':
+                    stock.status = 'available'
+                    units = db.query(RawMaterialUnitModel).filter(
+                        RawMaterialUnitModel.stock_id == stock.id
+                    ).all()
+                    for unit in units:
+                        unit.status = 'available'
+                elif update_fields['order_status'] in ['enquiry', 'purchase_request', 'purchase_order']:
+                    stock.status = 'not_available'
+                    units = db.query(RawMaterialUnitModel).filter(
+                        RawMaterialUnitModel.stock_id == stock.id
+                    ).all()
+                    for unit in units:
+                        unit.status = 'not_available'
+            
+            # Handle final_cost update
+            if 'final_cost' in update_fields:
+                stock.final_cost = update_fields['final_cost']
+        
+        db.commit()
+        
+        # Update stock status based on unit statuses
+        for stock in stocks:
+            StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+        
+        # Return updated stocks with details
+        result = [_stock_with_details(stock, db) for stock in stocks]
+        
+        return {
+            "message": f"Successfully updated {len(stocks)} items in group",
+            "merge_group_id": merge_group_id,
+            "updated_stocks": result
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error updating group: {str(e)}"
+        )

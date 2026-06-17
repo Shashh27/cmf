@@ -51,8 +51,10 @@ class Machine(Base):
     cnc_controller = Column(String)
     cnc_controller_service = Column(String)
     remarks = Column(String)
+    mhr = Column(Integer, nullable=True)
     calibration_date = Column(TIMESTAMP)
     calibration_due_date = Column(TIMESTAMP)
+    calibration_frequency = Column(String)  # e.g., '6 months', '1 year', '2 years'
     password = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 

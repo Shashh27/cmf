@@ -8,6 +8,10 @@ from DB.models import Base
 
 from DB.minio_client import init_minio_client
 
+from scheduler_service import start_scheduler, stop_scheduler
+
+
+
 
 
 # Import all routers
@@ -70,8 +74,14 @@ from routers import (
     production_analytics_router,
 )
 
+# Import planned raw materials router
+from routers.planned_raw_materials import router as planned_raw_materials_router
+
 # Import recycle bin router
 from recyclebin_router.recyclebin import router as recycle_bin_router
+
+# Import chatbot router
+from chatbot.chatbot import router as chatbot_router
 
 # Import scheduling router
 
@@ -169,6 +179,8 @@ async def startup_event():
 
     - Initializes MinIO client
 
+    - Starts the scheduler for automated notifications
+
     """
 
     print("=" * 60)
@@ -225,6 +237,13 @@ async def startup_event():
 
 
 
+    # Start the scheduler for automated notifications
+    try:
+        start_scheduler()
+    except Exception as e:
+        print(f"ERROR: Error starting scheduler: {e}")
+
+
     print("=" * 60)
 
     print("CMF Backend API is ready!")
@@ -232,6 +251,18 @@ async def startup_event():
     print(f"Documentation available at: http://localhost:8765/docs")
 
     print("=" * 60)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    Shutdown event handler
+    - Stops the scheduler
+    """
+    try:
+        stop_scheduler()
+    except Exception as e:
+        print(f"ERROR: Error stopping scheduler: {e}")
 
 
 
@@ -310,6 +341,10 @@ app.include_router(production_analytics_router, prefix="/api/v1")
 app.include_router(raw_material_summary_router, prefix="/api/v1")
 
 app.include_router(recycle_bin_router, prefix="/api/v1")
+
+app.include_router(planned_raw_materials_router, prefix="/api/v1")
+
+app.include_router(chatbot_router, prefix="/api/chatbot")
 
 # app.include_router(production_logs_router, prefix="/api/v1")
 

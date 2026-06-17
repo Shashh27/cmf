@@ -10,7 +10,6 @@ from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.configuration import Machine, WorkCenter
 from DB.schemas.notifications import (
     MachineCalibrationNotification as MachineCalibrationNotificationSchema,
-    MachineCalibrationNotificationCreate as MachineCalibrationNotificationCreateSchema,
     MachineCalibrationNotificationWithDetails,
 )
 
@@ -55,7 +54,8 @@ def list_machine_calibration_notifications(
     end_date: datetime | None = None,
     db: Session = Depends(get_db),
 ):
-    _generate_due_calibration_notifications(db)
+    # Note: Notifications are now generated automatically by the scheduler
+    # This endpoint only retrieves existing notifications
     q = db.query(MachineCalibrationNotificationModel)
     if start_date:
         q = q.filter(MachineCalibrationNotificationModel.created_at >= start_date)
@@ -94,6 +94,7 @@ def list_machine_calibration_notifications(
             model=getattr(m, "model", None) if m else None,
             calibration_date=getattr(m, "calibration_date", None) if m else None,
             calibration_due_date=getattr(m, "calibration_due_date", None) if m else None,
+            calibration_frequency=getattr(m, "calibration_frequency", None) if m else None,
             created_by=None,
         ))
     return response
@@ -126,6 +127,22 @@ def list_pending_machine_calibration_notifications(
             continue
         result.append(n)
     return result
+
+
+@router.post("/generate", response_model=dict)
+def generate_calibration_notifications_manually(db: Session = Depends(get_db)):
+    """
+    Manually trigger calibration notification generation.
+    Useful for testing or immediate notification creation.
+    """
+    try:
+        _generate_due_calibration_notifications(db)
+        return {"message": "Calibration notifications generated successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating notifications: {str(e)}"
+        )
 
 
 

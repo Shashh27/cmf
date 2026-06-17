@@ -62,6 +62,13 @@ def detect_file_type_from_content(file_content: bytes) -> str:
     if file_content.startswith(b'BM'): return 'image/bmp'
     if file_content.startswith(b'<svg') or b'<svg' in file_content[:100]: return 'image/svg+xml'
     
+    # Video magic bytes
+    if file_content.startswith(b'\x00\x00\x00') and len(file_content) > 8 and file_content[4:8] in (b'ftyp', b'moov', b'mdat', b'free', b'skip'): return 'video/mp4'
+    if file_content.startswith(b'\x1aE\xdf\xa3'): return 'video/webm'
+    if file_content[:4] == b'RIFF' and file_content[8:12] == b'AVI ': return 'video/x-msvideo'
+    if file_content.startswith(b'FLV'): return 'video/x-flv'
+    if file_content.startswith(b'\x30\x26\xb2\x75'): return 'video/x-ms-wmv'
+    
     return 'application/octet-stream'
 
 
@@ -91,7 +98,29 @@ def get_content_type_from_detection(file_content: bytes, filename: str = None) -
         '.h': 'text/plain',
         '.step': 'application/step',
         '.stp': 'application/step',
-        '.stl': 'application/sla'
+        '.stl': 'application/sla',
+        # Video formats
+        '.mp4': 'video/mp4',
+        '.m4v': 'video/mp4',
+        '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo',
+        '.mkv': 'video/x-matroska',
+        '.webm': 'video/webm',
+        '.flv': 'video/x-flv',
+        '.wmv': 'video/x-ms-wmv',
+        '.mpeg': 'video/mpeg',
+        '.mpg': 'video/mpeg',
+        '.3gp': 'video/3gpp',
+        '.3g2': 'video/3gpp2',
+        '.ts': 'video/mp2t',
+        '.mts': 'video/mp2t',
+        '.m2ts': 'video/mp2t',
+        '.ogv': 'video/ogg',
+        '.mxf': 'application/mxf',
+        '.vob': 'video/dvd',
+        '.divx': 'video/divx',
+        '.rm': 'application/vnd.rn-realmedia',
+        '.rmvb': 'application/vnd.rn-realmedia-vbr'
     }
     return content_types.get(ext, 'application/octet-stream')
 
@@ -731,6 +760,14 @@ def delete_operation_document(document_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Operation document with id {document_id} not found"
+        )
+
+    # Prevent deletion of parent document when child revisions exist
+    child_documents = db.query(OperationDocumentModel).filter(OperationDocumentModel.parent_id == document_id).all()
+    if child_documents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete this document because it has child revisions. Please delete the child revisions first."
         )
 
     # Log operation document deletion for PC notifications before deletion

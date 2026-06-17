@@ -1803,6 +1803,8 @@ def get_all_part_priorities(
 
             "part_type_name": p.part.type.type_name if p.part and p.part.type else None,
 
+            "due_date": p.order.due_date if p.order else None,
+
             "created_at": p.created_at,
 
             "updated_at": p.updated_at,

@@ -541,27 +541,6 @@ def get_submission_details(
     return details
 
 
-@router.put("/submission-details/{detail_id}", response_model=SubmissionDetailSchema)
-def update_submission_detail(
-    detail_id: int,
-    detail_update: SubmissionDetailUpdate,
-    db: Session = Depends(get_db)
-):
-    """Update a submission detail (for operator to edit when rejected)"""
-    db_detail = db.query(SubmissionDetail).filter(SubmissionDetail.id == detail_id).first()
-    if not db_detail:
-        raise HTTPException(status_code=404, detail="Submission detail not found")
-    
-    update_data = detail_update.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_detail, key, value)
-    
-    db_detail.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(db_detail)
-    return db_detail
-
-
 @router.get("/submission-details/{detail_id}", response_model=SubmissionDetailWithChecklist)
 def get_submission_detail(detail_id: int, db: Session = Depends(get_db)):
     """Get a specific submission detail by ID"""

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 from typing import List
 from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel
 
 from DB.database import get_db
 from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock as RawMaterialStockModel, Vendors as VendorsModel, RawMaterialUnit as RawMaterialUnitModel, RawMaterialUsage as RawMaterialUsageModel
@@ -18,11 +19,23 @@ from DB.schemas.inventory import (
 )
 from services.raw_material_calculations import RawMaterialCalculationService
 from services.stock_auto_update import StockAutoUpdateService
+from services.stock_recommendation_service import StockRecommendationService
 
 router = APIRouter(
     prefix="/rawmaterials",
     tags=["rawmaterials"]
 )
+
+
+class StockRecommendationRequest(BaseModel):
+    material_name: str
+    dimensions_str: str
+    min_score: float = 0.3
+    max_recommendations: int = 10
+
+
+class BatchStockRecommendationRequest(BaseModel):
+    requests: List[StockRecommendationRequest]
 
 
 @router.post("/", response_model=RawMaterial, status_code=status.HTTP_201_CREATED)
@@ -47,7 +60,7 @@ def create_raw_material(raw_material: RawMaterialCreate, db: Session = Depends(g
 
 @router.get("/", response_model=List[RawMaterial])
 def get_raw_materials(
-    user_id: int = None, 
+    user_id: int = None,
     manufacturing_coordinator_id: int = None,
     db: Session = Depends(get_db)
 ):
@@ -107,6 +120,177 @@ def get_raw_materials(
         materials_with_status.append(material_dict)
     
     return materials_with_status
+
+
+@router.get("/inventory-view")
+def get_inventory_view(db: Session = Depends(get_db)):
+    """
+    Single endpoint returning full inventory hierarchy:
+    materials -> stocks (general + order) -> units (with usages).
+    Replaces multiple /stock/ and /stock/{id}/units calls.
+    """
+    from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
+    from sqlalchemy.orm import joinedload
+
+    # 1. All materials
+    materials = db.query(RawMaterialModel).order_by(RawMaterialModel.id.asc()).all()
+    material_ids = [m.id for m in materials]
+
+    if not material_ids:
+        return []
+
+    # 2. All stocks for all materials (bulk)
+    stocks = (
+        db.query(RawMaterialStockModel)
+        .filter(RawMaterialStockModel.material_id.in_(material_ids))
+        .order_by(RawMaterialStockModel.material_id.asc(), RawMaterialStockModel.id.asc())
+        .all()
+    )
+    stock_ids = [s.id for s in stocks]
+
+    # 3. All units for all stocks (bulk)
+    units = []
+    if stock_ids:
+        units = (
+            db.query(RawMaterialUnit)
+            .filter(RawMaterialUnit.stock_id.in_(stock_ids))
+            .order_by(RawMaterialUnit.stock_id.asc(), RawMaterialUnit.id.asc())
+            .all()
+        )
+
+    unit_ids = [u.id for u in units]
+
+    # 4. All usages for all units (bulk)
+    usages_by_unit = {}
+    if unit_ids:
+        usages = (
+            db.query(RawMaterialUsage)
+            .options(joinedload(RawMaterialUsage.part))
+            .filter(RawMaterialUsage.raw_material_unit_id.in_(unit_ids))
+            .all()
+        )
+        for usage in usages:
+            uid = usage.raw_material_unit_id
+            if uid not in usages_by_unit:
+                usages_by_unit[uid] = []
+            usages_by_unit[uid].append({
+                "id": usage.id,
+                "part_id": usage.part_id,
+                "used_length": usage.used_length,
+                "part_number": usage.part.part_number if usage.part else None,
+                "part_name": usage.part.part_name if usage.part else None,
+            })
+
+    # 5. All orders needed for source_order_number (bulk)
+    source_order_ids = list({s.source_order_id for s in stocks if s.source_order_id})
+    order_map = {}
+    if source_order_ids:
+        orders = db.query(OrderModel).filter(OrderModel.id.in_(source_order_ids)).all()
+        order_map = {o.id: o.sale_order_number for o in orders}
+
+    # 6. All parts needed for part_numbers (bulk)
+    all_part_id_strs = set()
+    for s in stocks:
+        if s.part_id:
+            for pid in s.part_id.split(","):
+                pid = pid.strip()
+                if pid.isdigit():
+                    all_part_id_strs.add(int(pid))
+    part_map = {}
+    if all_part_id_strs:
+        parts = db.query(PartModel).filter(PartModel.id.in_(all_part_id_strs)).all()
+        part_map = {p.id: p for p in parts}
+
+    # Build units by stock map
+    units_by_stock = {}
+    for u in units:
+        units_by_stock.setdefault(u.stock_id, []).append({
+            "id": u.id,
+            "status": u.status,
+            "total_length": u.total_length,
+            "remaining_length": u.remaining_length,
+            "volume": u.volume,
+            "mass": u.mass,
+            "weight": u.weight,
+            "cost": u.cost,
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "usages": usages_by_unit.get(u.id, []),
+        })
+
+    # Build stocks by material map
+    stocks_by_material = {}
+    for s in stocks:
+        # Resolve part numbers
+        part_numbers = []
+        if s.part_id:
+            for pid in s.part_id.split(","):
+                pid = pid.strip()
+                if pid.isdigit():
+                    part = part_map.get(int(pid))
+                    if part:
+                        part_numbers.append(part.part_number)
+
+        # Determine status from units
+        stock_units = units_by_stock.get(s.id, [])
+        if stock_units:
+            has_avail = any(u["status"] in ("available", "partially_used") for u in stock_units)
+            if s.source_type == "order":
+                computed_status = "available" if (has_avail and s.order_status == "received") else "not_available"
+            else:
+                computed_status = "available" if has_avail else "exhausted"
+        else:
+            if s.source_type == "general":
+                computed_status = "available" if s.available_quantity > 0 else "exhausted"
+            else:
+                computed_status = "available" if (s.available_quantity > 0 and s.order_status == "received") else "not_available"
+
+        # Dimensions string
+        if s.form_type == "Round":
+            dims = f"⌀{s.diameter} × {s.length}mm"
+        elif s.form_type == "Square":
+            dims = f"{s.breadth} × {s.height} × {s.length}mm"
+        elif s.form_type == "Pipe":
+            dims = f"⌀{s.outer_diameter}/{s.inner_diameter} × {s.length}mm"
+        else:
+            dims = None
+
+        stocks_by_material.setdefault(s.material_id, []).append({
+            "id": s.id,
+            "process_type": s.process_type,
+            "form_type": s.form_type,
+            "diameter": s.diameter,
+            "length": s.length,
+            "breadth": s.breadth,
+            "height": s.height,
+            "inner_diameter": s.inner_diameter,
+            "outer_diameter": s.outer_diameter,
+            "dimensions": dims,
+            "quantity": s.quantity,
+            "available_quantity": s.available_quantity,
+            "mass": s.mass,
+            "volume": s.volume,
+            "cost": s.cost,
+            "source_type": s.source_type,
+            "order_status": s.order_status,
+            "source_order_number": order_map.get(s.source_order_id) if s.source_order_id else None,
+            "part_numbers": part_numbers,
+            "status": computed_status,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "units": stock_units,
+        })
+
+    # Build final result
+    result = []
+    for m in materials:
+        result.append({
+            "id": m.id,
+            "material_name": m.material_name,
+            "density": m.density,
+            "cost_per_kg": m.cost_per_kg,
+            "stocks": stocks_by_material.get(m.id, []),
+        })
+
+    return result
 
 
 # =======================
@@ -858,6 +1042,7 @@ def create_raw_material_stock(stock: RawMaterialStockCreate, db: Session = Depen
 
 @router.get("/stock/", response_model=List[RawMaterialStockWithDetails])
 def get_raw_material_stock(
+    material_name: str | None = None,
     material_id: int | None = None,
     source_type: str | None = None,
     db: Session = Depends(get_db)
@@ -869,6 +1054,27 @@ def get_raw_material_stock(
         joinedload(RawMaterialStockModel.vendor),
         joinedload(RawMaterialStockModel.creator)
     )
+    
+    if material_name is not None:
+        # Normalize material name by removing spaces to match variations like "EN8", "EN 8", "EN+8"
+        normalized_material_name = material_name.replace(" ", "").replace("+", "").replace("-", "").replace("_", "").lower()
+        
+        # Get all materials and filter by normalized name
+        all_materials = db.query(RawMaterialModel).all()
+        matching_material_ids = []
+        
+        for material in all_materials:
+            normalized_db_name = material.material_name.replace(" ", "").replace("-", "").replace("_", "").lower()
+            if normalized_material_name in normalized_db_name or normalized_db_name in normalized_material_name:
+                matching_material_ids.append(material.id)
+        
+        if matching_material_ids:
+            query = query.filter(RawMaterialStockModel.material_id.in_(matching_material_ids))
+        else:
+            # Fallback to original ilike if no matches found
+            query = query.join(RawMaterialModel).filter(
+                RawMaterialModel.material_name.ilike(f"%{material_name}%")
+            )
     
     if material_id is not None:
         query = query.filter(RawMaterialStockModel.material_id == material_id)
@@ -893,10 +1099,131 @@ def get_raw_material_stock_item(stock_id: int, db: Session = Depends(get_db)):
     if not stock:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Stock item with id {stock_id} not found"
+            detail=f"Stock with id {stock_id} not found"
         )
     
     return _stock_with_details(stock, db)
+
+
+@router.post("/recommend-stocks")
+def recommend_stocks(request: StockRecommendationRequest, db: Session = Depends(get_db)):
+    """
+    Recommend stocks based on extracted raw material dimensions.
+
+    Returns a list of recommended general stocks that match the material name
+    and have dimensions close to the extracted dimensions.
+    """
+    recommendations = StockRecommendationService.recommend_stocks(
+        db=db,
+        extracted_material_name=request.material_name,
+        extracted_dimensions_str=request.dimensions_str,
+        min_score=request.min_score,
+        max_recommendations=request.max_recommendations
+    )
+
+    return {
+        "success": True,
+        "recommendations": recommendations,
+        "total": len(recommendations)
+    }
+
+
+@router.post("/recommend-stocks/batch")
+def recommend_stocks_batch(request: BatchStockRecommendationRequest, db: Session = Depends(get_db)):
+    """
+    Batch recommend stocks for multiple extracted raw materials.
+
+    Returns a dictionary with recommendations for each request.
+    """
+    results = {}
+    for idx, req in enumerate(request.requests):
+        recommendations = StockRecommendationService.recommend_stocks(
+            db=db,
+            extracted_material_name=req.material_name,
+            extracted_dimensions_str=req.dimensions_str,
+            min_score=req.min_score,
+            max_recommendations=req.max_recommendations
+        )
+        results[idx] = {
+            "success": True,
+            "recommendations": recommendations,
+            "total": len(recommendations)
+        }
+
+    return {
+        "success": True,
+        "results": results
+    }
+
+
+@router.get("/debug/stock/{stock_id}")
+def debug_stock(stock_id: int, db: Session = Depends(get_db)):
+    """Debug endpoint to check stock details"""
+    stock = db.query(RawMaterialStockModel).options(
+        joinedload(RawMaterialStockModel.material)
+    ).filter(RawMaterialStockModel.id == stock_id).first()
+
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
+    stock_dims = StockRecommendationService.get_stock_dimensions(stock)
+
+    return {
+        "stock_id": stock.id,
+        "material_id": stock.material_id,
+        "material_name": stock.material.material_name if stock.material else "",
+        "source_type": stock.source_type,
+        "status": stock.status,
+        "form_type": stock.form_type,
+        "dimensions": stock_dims,
+        "available_quantity": stock.available_quantity
+    }
+
+
+@router.post("/debug/recommend")
+def debug_recommend(request: StockRecommendationRequest, db: Session = Depends(get_db)):
+    """Debug endpoint to show recommendation details"""
+    normalized_name = StockRecommendationService.normalize_material_name(request.material_name)
+    extracted_dims, form_type = StockRecommendationService.parse_extracted_dimensions(request.dimensions_str)
+
+    all_materials = db.query(RawMaterialModel).all()
+    matching_materials = []
+    for material in all_materials:
+        if StockRecommendationService.normalize_material_name(material.material_name) == normalized_name:
+            matching_materials.append({
+                "id": material.id,
+                "material_name": material.material_name,
+                "normalized": StockRecommendationService.normalize_material_name(material.material_name)
+            })
+
+    stocks = db.query(RawMaterialStockModel).filter(
+        RawMaterialStockModel.material_id.in_([m["id"] for m in matching_materials]),
+        RawMaterialStockModel.source_type == "general"
+    ).all()
+
+    stock_details = []
+    for stock in stocks:
+        stock_dims = StockRecommendationService.get_stock_dimensions(stock)
+        score = StockRecommendationService.calculate_dimension_match_score(extracted_dims, stock_dims, form_type)
+        stock_details.append({
+            "stock_id": stock.id,
+            "material_name": stock.material.material_name if stock.material else "",
+            "form_type": stock.form_type,
+            "dimensions": stock_dims,
+            "match_score": score,
+            "status": stock.status
+        })
+
+    return {
+        "extracted_material_name": request.material_name,
+        "normalized_extracted_name": normalized_name,
+        "extracted_dimensions_str": request.dimensions_str,
+        "extracted_dims": extracted_dims,
+        "detected_form_type": form_type,
+        "matching_materials": matching_materials,
+        "stocks_found": len(stocks),
+        "stock_details": stock_details
+    }
 
 
 @router.put("/stock/{stock_id}", response_model=RawMaterialStockWithDetails)
@@ -1141,6 +1468,40 @@ def delete_raw_material_stock(stock_id: int, db: Session = Depends(get_db)):
         )
 
 
+@router.delete("/stock/units/{unit_id}", status_code=status.HTTP_200_OK)
+def delete_raw_material_unit(unit_id: int, db: Session = Depends(get_db)):
+    """Delete a single raw material unit with cascade cleanup of usages and part references"""
+    unit = db.query(RawMaterialUnitModel).filter(RawMaterialUnitModel.id == unit_id).first()
+    if not unit:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unit {unit_id} not found")
+    try:
+        stock_id = unit.stock_id
+        # Clear part references
+        referencing_parts = db.query(PartModel).filter(PartModel.raw_material_unit_id == unit_id).all()
+        for part in referencing_parts:
+            part.raw_material_unit_id = None
+            part.raw_material_id = None
+            part.required_length = None
+        db.flush()
+        # Delete usages
+        db.query(RawMaterialUsageModel).filter(
+            RawMaterialUsageModel.raw_material_unit_id == unit_id
+        ).delete(synchronize_session=False)
+        # Decrement stock total quantity
+        stock_item = db.query(RawMaterialStockModel).filter(RawMaterialStockModel.id == stock_id).first()
+        if stock_item and stock_item.quantity > 0:
+            stock_item.quantity -= 1
+        # Delete unit
+        db.delete(unit)
+        db.commit()
+        # Update stock status and available_quantity from remaining units
+        StockAutoUpdateService.update_stock_status_from_units(db, stock_id)
+        return {"message": f"Unit {unit_id} deleted successfully", "parts_updated": len(referencing_parts)}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error deleting unit: {str(e)}")
+
+
 @router.post("/stock/{stock_id}/use", status_code=status.HTTP_200_OK)
 def use_raw_material_stock(stock_id: int, used_quantity: int, db: Session = Depends(get_db)):
     """Deduct quantity from stock item"""
@@ -1286,6 +1647,7 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
         "vendor_id": stock.vendor_id,  # Comma-separated vendor IDs for enquiry
         "received_vendor_id": stock.received_vendor_id,  # Final vendor who received the order
         "user_id": stock.user_id,
+        "merge_group_id": stock.merge_group_id,  # UUID to track merged orders for bulk vendor linking
         "status": get_stock_status(stock),  # Calculate status based on unit statuses
         "created_at": stock.created_at,
         "updated_at": stock.updated_at,
@@ -1295,6 +1657,17 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
     # Add material name
     if stock.material:
         result["material_name"] = stock.material.material_name
+    
+    # Build stock dimensions string
+    stock_dimensions = None
+    if stock.form_type:
+        if stock.form_type == 'Round':
+            stock_dimensions = f'Ø{stock.diameter} × {stock.length}mm'
+        elif stock.form_type == 'Square':
+            stock_dimensions = f'{stock.breadth} × {stock.height} × {stock.length}mm'
+        elif stock.form_type == 'Pipe':
+            stock_dimensions = f'Ø{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm'
+    result["stock_dimensions"] = stock_dimensions
     
     # Add source order details
     if stock.source_order_id:
@@ -1351,15 +1724,31 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
                 existing_part_names = result.get("part_names", [])
                 existing_part_ids = result.get("part_ids", "")
                 
-                result["part_numbers"] = existing_part_numbers + [part.part_number for part in linked_parts]
-                result["part_names"] = existing_part_names + [f"{part.part_number} - {part.part_name}" for part in linked_parts]
-                
-                # Handle part_ids concatenation properly
-                new_part_ids = ",".join([str(part.id) for part in linked_parts])
+                # Remove duplicates by checking part IDs
+                existing_part_ids_set = set()
                 if existing_part_ids:
-                    result["part_ids"] = existing_part_ids + "," + new_part_ids
-                else:
-                    result["part_ids"] = new_part_ids
+                    existing_part_ids_set = set(int(pid.strip()) for pid in existing_part_ids.split(',') if pid.strip())
+                
+                # Only add parts that don't already exist
+                new_part_numbers = []
+                new_part_names = []
+                new_part_ids = []
+                for part in linked_parts:
+                    if part.id not in existing_part_ids_set:
+                        new_part_numbers.append(part.part_number)
+                        new_part_names.append(f"{part.part_number} - {part.part_name}")
+                        new_part_ids.append(str(part.id))
+                        existing_part_ids_set.add(part.id)
+                
+                result["part_numbers"] = existing_part_numbers + new_part_numbers
+                result["part_names"] = existing_part_names + new_part_names
+                
+                # Handle part_ids concatenation properly with deduplication
+                if new_part_ids:
+                    if existing_part_ids:
+                        result["part_ids"] = existing_part_ids + "," + ",".join(new_part_ids)
+                    else:
+                        result["part_ids"] = ",".join(new_part_ids)
                 
                 # 🔥 NEW: Fetch order information from linked parts and build order-to-part mapping
                 for part in linked_parts:

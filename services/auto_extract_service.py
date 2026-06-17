@@ -117,10 +117,27 @@ class AutoExtractService:
     
     @staticmethod
     def find_material_by_name(db: Session, material_name: str) -> Optional[RawMaterialModel]:
-        """Find material by name (case-insensitive)"""
-        return db.query(RawMaterialModel).filter(
-            RawMaterialModel.material_name.ilike(f"%{material_name}%")
-        ).first()
+        """Find material by name (case-insensitive, ignores spaces and special characters)"""
+        import re
+        # Normalize the search term: remove spaces, special characters, convert to lowercase
+        normalized_search = re.sub(r'[^a-zA-Z0-9]', '', material_name).lower()
+        
+        # Get all materials and normalize their names for comparison
+        all_materials = db.query(RawMaterialModel).all()
+        for material in all_materials:
+            if material.material_name:
+                normalized_db_name = re.sub(r'[^a-zA-Z0-9]', '', material.material_name).lower()
+                if normalized_search == normalized_db_name:
+                    return material
+        
+        # Fallback to partial match if exact normalized match fails
+        for material in all_materials:
+            if material.material_name:
+                normalized_db_name = re.sub(r'[^a-zA-Z0-9]', '', material.material_name).lower()
+                if normalized_search in normalized_db_name or normalized_db_name in normalized_search:
+                    return material
+        
+        return None
     
     @staticmethod
     def check_general_stock_availability(
@@ -388,11 +405,16 @@ class AutoExtractService:
         required_length = extracted_data.get('required_length')
         process_type = extracted_data.get('process_type', 'Barstocks')
 
-        # Parse dimensions
-        dimensions = AutoExtractService.parse_dimensions(stock_size)
-
-        # Auto-detect form type
-        form_type = AutoExtractService.auto_detect_form_type(dimensions)
+        # Use directly provided dimensions/form_type if available (from planned data)
+        # Otherwise fall back to parsing stock_size string
+        if extracted_data.get('dimensions') and extracted_data.get('form_type'):
+            dimensions = extracted_data['dimensions']
+            form_type = extracted_data['form_type']
+        else:
+            # Parse dimensions from stock_size string
+            dimensions = AutoExtractService.parse_dimensions(stock_size)
+            # Auto-detect form type
+            form_type = AutoExtractService.auto_detect_form_type(dimensions)
 
         # Check if material exists
         material = AutoExtractService.find_material_by_name(db, material_name)

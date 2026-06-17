@@ -682,6 +682,7 @@ class OrderPartPriority(OrderPartPriorityBase):
     project_name: Optional[str] = None
     product_name: Optional[str] = None
     part_type_name: Optional[str] = None
+    due_date: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -714,6 +715,15 @@ class DocumentExtractedDataBase(BaseModel):
     material: Optional[str] = None
     stocksize_kg: Optional[str] = None
     net_wt_kg: Optional[str] = None
+    # Planned raw material fields - only dimension input fields
+    planned_form_type: Optional[str] = None
+    planned_diameter: Optional[float] = None
+    planned_length: Optional[float] = None
+    planned_breadth: Optional[float] = None
+    planned_height: Optional[float] = None
+    planned_inner_diameter: Optional[float] = None
+    planned_outer_diameter: Optional[float] = None
+    planned_by: Optional[int] = None
 
 
 class DocumentExtractedDataCreate(DocumentExtractedDataBase):
@@ -729,6 +739,15 @@ class DocumentExtractedDataUpdate(BaseModel):
     material: Optional[str] = None
     stocksize_kg: Optional[str] = None
     net_wt_kg: Optional[str] = None
+    # Planned raw material fields - only dimension input fields
+    planned_form_type: Optional[str] = None
+    planned_diameter: Optional[float] = None
+    planned_length: Optional[float] = None
+    planned_breadth: Optional[float] = None
+    planned_height: Optional[float] = None
+    planned_inner_diameter: Optional[float] = None
+    planned_outer_diameter: Optional[float] = None
+    planned_by: Optional[int] = None
 
 
 class DocumentExtractedData(DocumentExtractedDataBase):

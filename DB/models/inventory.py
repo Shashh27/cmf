@@ -27,6 +27,22 @@ from sqlalchemy.orm import relationship
 from ..database import Base
 
 
+# =======================
+# Category Table (for Tools hierarchical structure)
+# =======================
+
+class Category(Base):
+    __tablename__ = "categories"
+    __table_args__ = {'schema': 'inventory'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    parent_id = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)
+    
+    # Self-referential relationship for hierarchy
+    parent = relationship("Category", remote_side=[id], backref="children")
+
+
 
 
 
@@ -134,6 +150,8 @@ class RawMaterialStock(Base):
     received_vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)  # Final vendor who received the order
 
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    
+    merge_group_id = Column(String, nullable=True)  # UUID to track merged orders for bulk vendor linking
 
     status = Column(String, nullable=False, default="available")
     
@@ -245,9 +263,9 @@ class ToolsList(Base):
 
     issues_qty          = Column(Integer, nullable=True)      # aggregate issued qty
 
-    category            = Column(String, nullable=True)       # "Tools" / "Instruments" / "Misc"
+    category_id         = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)      # Foreign key to categories table (for top-level categories only, without sub-category)
 
-    sub_category        = Column(String, nullable=True)       # "Drills", "Micrometers", etc.
+    sub_category_id     = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)      # Foreign key to categories table (for sub-categories, parent_id points to parent category)
 
 
 
