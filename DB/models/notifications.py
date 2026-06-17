@@ -107,3 +107,20 @@ class PCNotification(Base):
     read_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False, index=True)
 
+
+class MCNotification(Base):
+    """Links document uploads to Manufacturing Coordinators for acknowledgment workflow"""
+    __tablename__ = "mc_notifications"
+    __table_args__ = {"schema": "notifications"}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    document_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=False, index=True)
+    mc_user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False, index=True)  # MC user to notify
+    is_acknowledged = Column(Boolean, nullable=False, server_default=text("false"), index=True)
+    ack_remarks = Column(String, nullable=True)  # Remarks when acknowledging
+    ack_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    is_rejected = Column(Boolean, nullable=False, server_default=text("false"), index=True)
+    reject_remarks = Column(String, nullable=True)  # Remarks when rejecting
+    reject_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+

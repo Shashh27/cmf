@@ -50,6 +50,7 @@ class OrderNotificationWithDetails(OrderNotification):
     order_status: Optional[str] = None
 
 
+
 class MachineNotificationBase(BaseModel):
     machine_breakdown_id: int
     is_ack: Optional[bool] = False
@@ -258,3 +259,6 @@ class PCNotificationWithDetails(PCNotification):
     user_role: Optional[str] = None
     timestamp: Optional[datetime] = None
     details: Optional[Dict[str, Any]] = None
+    part_name: Optional[str] = None
+    part_number: Optional[str] = None
+    document_version: Optional[str] = None

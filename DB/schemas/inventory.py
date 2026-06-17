@@ -113,6 +113,8 @@ class RawMaterialStockBase(BaseModel):
 
     order_status: Optional[str] = None  # "enquiry", "purchase_request", "purchase_order", "received", etc.
 
+    creation_source: str = "manual"  # "manual" or "auto_extract"
+
     # New linking fields
     part_id: Optional[str] = None  # Can be single ID or comma-separated IDs like "1,2,3"
 

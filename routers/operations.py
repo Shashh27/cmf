@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 from typing import List, Optional
@@ -13,7 +14,7 @@ from docx import Document as DocxDocument
 import openpyxl
 
 
-from DB.database import get_db
+from DB.database import get_db, MINIO_BUCKET_NAME
 from DB.minio_client import get_minio_client
 from DB.models.oms import (
     Operation as OperationModel,
@@ -900,3 +901,98 @@ async def parse_mpp_file(file: UploadFile = File(...)):
             detail="Could not extract operations from file. Make sure the file contains columns: Op Number, Operation Name, Setup Time, Cycle Time, Work Instructions, Notes.",
         )
     return operations
+
+
+# ── Operations Template ──────────────────────────────────────────────────────────
+
+TEMPLATE_OBJECT_NAME = "templates/operations_template.docx"
+
+
+@router.post("/template/upload")
+async def upload_operations_template(file: UploadFile = File(...)):
+    """
+    Upload the operations template file to MinIO.
+    This replaces any existing template file.
+    """
+    if not file.filename or not file.filename.lower().endswith('.docx'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .docx files are allowed for the operations template"
+        )
+    
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file"
+        )
+    
+    minio_client = get_minio_client()
+    
+    try:
+        # Upload to MinIO with fixed object name
+        file_stream = io.BytesIO(content)
+        url = minio_client.upload_file(
+            file_data=file_stream,
+            object_name=TEMPLATE_OBJECT_NAME,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        
+        return {
+            "message": "Operations template uploaded successfully",
+            "url": url
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload template: {str(e)}"
+        )
+
+
+@router.get("/template/download")
+async def download_operations_template():
+    """
+    Download the operations template file from MinIO.
+    """
+    minio_client = get_minio_client()
+    
+    try:
+        # Check if template exists
+        if not minio_client.file_exists(TEMPLATE_OBJECT_NAME):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Operations template not found. Please upload the template first."
+            )
+        
+        # Download from MinIO
+        content = minio_client.download_file(TEMPLATE_OBJECT_NAME)
+        
+        return Response(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": "attachment; filename=Operations_Template.docx"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to download template: {str(e)}"
+        )
+
+
+@router.get("/template/exists")
+async def check_template_exists():
+    """
+    Check if the operations template exists in MinIO.
+    """
+    minio_client = get_minio_client()
+    
+    try:
+        exists = minio_client.file_exists(TEMPLATE_OBJECT_NAME)
+        return {"exists": exists}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to check template: {str(e)}"
+        )

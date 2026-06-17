@@ -1289,6 +1289,7 @@ def _stock_with_details(stock: RawMaterialStockModel, db: Session) -> dict:
         "status": get_stock_status(stock),  # Calculate status based on unit statuses
         "created_at": stock.created_at,
         "updated_at": stock.updated_at,
+        "creation_source": stock.creation_source,  # Identify auto-extracted materials
     }
     
     # Add material name

@@ -322,7 +322,11 @@ class DocumentBase(BaseModel):
     parent_id: Optional[int] = None
     user_id: Optional[int] = None
     user_name: Optional[str] = None
+    user_role: Optional[str] = None
     is_acknowledged: bool = False
+    mc_ack_remarks: Optional[str] = None
+    mc_reject_remarks: Optional[str] = None
+    mc_is_rejected: bool = False
 
 
 class DocumentCreate(DocumentBase):
@@ -514,6 +518,7 @@ class Order(OrderBase):
     company_name: Optional[str] = None
     product_name: Optional[str] = None
     user_name: Optional[str] = None
+    user_role: Optional[str] = None
     project_coordinator_name: Optional[str] = None
     admin_name: Optional[str] = None
     manufacturing_coordinator_name: Optional[str] = None
