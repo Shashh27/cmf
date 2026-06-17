@@ -379,9 +379,13 @@ class ToolsListBase(BaseModel):
 
     type:                Optional[str]   = None       # CONSUMABLES / NON-CONSUMABLES
 
-    category:            Optional[str]   = None       # Tools / Instruments / Misc
+    category:            Optional[str]   = None       # Tools / Instruments / Misc (for convenience, will be resolved to ID)
 
-    sub_category:        Optional[str]   = None       # Keys & Wrenches, Micrometers …
+    sub_category:        Optional[str]   = None       # Keys & Wrenches, Micrometers … (for convenience, will be resolved to ID)
+
+    category_id:         Optional[int]   = None       # Foreign key to categories table
+
+    sub_category_id:     Optional[int]   = None       # Foreign key to categories table (for sub-categories)
 
  
 
@@ -444,6 +448,10 @@ class ToolsListBulkDelete(BaseModel):
 class ToolsList(ToolsListBase):
 
     id: int
+    
+    # Additional fields for display (not in DB, computed from joins)
+    category_name: Optional[str] = None
+    sub_category_name: Optional[str] = None
 
  
 
