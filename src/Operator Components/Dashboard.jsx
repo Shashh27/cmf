@@ -49,9 +49,23 @@ const Dashboard = () => {
   const [cachedLogs, setCachedLogs] = useState([]);
   const [cachedApprovalStatuses, setCachedApprovalStatuses] = useState({});
 
-  // Clear localStorage on mount to always start fresh
+  // Load selected job from localStorage on mount
   useEffect(() => {
-    localStorage.removeItem('selectedJob');
+    try {
+      const storedJob = localStorage.getItem('selectedJob');
+      const storedActivation = localStorage.getItem('isActivated');
+      if (storedJob) {
+        const job = JSON.parse(storedJob);
+        setSelectedJob(job);
+        if (storedActivation) {
+          setIsActivated(JSON.parse(storedActivation));
+        }
+        const operationId = job.id || job.operation_id || job.job_id || job.schedule_id;
+        fetchReworkData(operationId);
+      }
+    } catch (e) {
+      console.error('Error loading selected job from localStorage', e);
+    }
   }, []);
 
   // Prevents checkChecklistStatus from running more than once per machineId load.
@@ -736,6 +750,9 @@ const Dashboard = () => {
           setShowSelectJob(false);
           const operationId = job.id || job.operation_id || job.job_id || job.schedule_id;
           fetchReworkData(operationId);
+          // Save to localStorage for persistence
+          localStorage.setItem('selectedJob', JSON.stringify(job));
+          localStorage.setItem('isActivated', JSON.stringify(isJobActivated));
         }}
       />
     </div>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Form, Input as TextArea, App } from "antd";
+import { Table, Badge, Button, message, Spin, Typography, Space, Modal, Card, Tag, Tooltip, Empty, Input, DatePicker, Form, Input as TextArea, App, Select } from "antd";
 import { ShoppingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, FileTextOutlined, AppstoreOutlined,UserOutlined,CalendarOutlined,
   SearchOutlined,ClockCircleOutlined,CheckCircleOutlined, FilterOutlined, SyncOutlined, CheckOutlined, CloseOutlined } from "@ant-design/icons";
 import OrderModal from "../OMS Components/OrderModal";
@@ -28,6 +28,8 @@ const OMS = () => {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [searchText, setSearchText] = useState("");
   const [dateRange, setDateRange] = useState(null);
+  const [filterCustomers, setFilterCustomers] = useState([]);
+  const [filterProjects, setFilterProjects] = useState([]);
   const hasFetchedData = useRef(false);
   const [ordersPagination, setOrdersPagination] = useState({ current: 1, pageSize: 10 });
   const [approvalModalOpen, setApprovalModalOpen] = useState(false);
@@ -247,9 +249,33 @@ const OMS = () => {
     return !orderDatesSet.has(current.format('YYYY-MM-DD'));
   };
 
+  const uniqueCustomerOptions = useMemo(() => {
+    const seen = new Set();
+    return orders
+      .map(o => ({ id: o.customer_id, label: getCustomerName(o.customer_id, o) }))
+      .filter(({ id, label }) => { if (!id || seen.has(id)) return false; seen.add(id); return true; })
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(({ id, label }) => ({ value: id, label }));
+  }, [orders, customers]);
+
+  const uniqueProjectOptions = useMemo(() => {
+    const seen = new Set();
+    return orders
+      .map(o => ({ id: o.product_id, label: getProductName(o.product_id, o) }))
+      .filter(({ id, label }) => { if (!id || seen.has(id)) return false; seen.add(id); return true; })
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .map(({ id, label }) => ({ value: id, label }));
+  }, [orders]);
+
   const filteredOrders = orders.filter((order, index) => {
     // 0. Product ID Filter (from URL)
     if (productId && order.product_id?.toString() !== productId) return false;
+
+    // Customer multi-select filter
+    if (filterCustomers.length > 0 && !filterCustomers.includes(order.customer_id)) return false;
+
+    // Project multi-select filter
+    if (filterProjects.length > 0 && !filterProjects.includes(order.product_id)) return false;
 
     // 1. Date Range Filter
     if (dateRange && dateRange[0] && dateRange[1]) {
@@ -400,6 +426,7 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Order Date</span>,
       dataIndex: "order_date",
       key: "order_date",
+      sorter: (a, b) => dayjs(a.order_date || 0).unix() - dayjs(b.order_date || 0).unix(),
       render: (date) => (
         <Space className="text-gray-500">
             <CalendarOutlined />
@@ -411,6 +438,7 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Due Date</span>,
       dataIndex: "due_date",
       key: "due_date",
+      sorter: (a, b) => dayjs(a.due_date || 0).unix() - dayjs(b.due_date || 0).unix(),
       render: (date) => (
         <Space className="text-gray-500">
             <CalendarOutlined />
@@ -422,6 +450,8 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Project Coordinator</span>,
       dataIndex: "project_coordinator_name",
       key: "project_coordinator_name",
+      filters: Array.from(new Set(orders.map(o => o.project_coordinator_name || o.project_coordinator_id || o.admin_name || o.admin_id).filter(Boolean))).sort().map(v => ({ text: v, value: v })),
+      onFilter: (value, record) => (record.project_coordinator_name || record.project_coordinator_id || record.admin_name || record.admin_id) === value,
       render: (text, record) => (
         <Space>
           <UserOutlined className="text-gray-400" />
@@ -435,6 +465,8 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Mfg Coordinator</span>,
       dataIndex: "manufacturing_coordinator_name",
       key: "manufacturing_coordinator_name",
+      filters: Array.from(new Set(orders.map(o => o.manufacturing_coordinator_name || o.manufacturing_coordinator_id).filter(Boolean))).sort().map(v => ({ text: v, value: v })),
+      onFilter: (value, record) => (record.manufacturing_coordinator_name || record.manufacturing_coordinator_id) === value,
       render: (text, record) => (
         <Space>
           <UserOutlined className="text-gray-400" />
@@ -448,12 +480,16 @@ const OMS = () => {
       title: <span className="font-semibold text-gray-700">Status</span>,
       dataIndex: "status",
       key: "status",
+      filters: ['Pending', 'Scheduled', 'In Progress', 'Completed'].map(s => ({ text: s, value: s })),
+      onFilter: (value, record) => record.status === value,
       render: (status) => getStatusBadge(status),
     },
     {
       title: <span className="font-semibold text-gray-700">Approval Status</span>,
       dataIndex: "approval_status",
       key: "approval_status",
+      filters: ['Pending Approval', 'Approved', 'Rejected', 'Auto-Approved'].map(s => ({ text: s, value: s })),
+      onFilter: (value, record) => record.approval_status === value,
       render: (approvalStatus) => getApprovalStatusBadge(approvalStatus),
     },
 
@@ -686,6 +722,28 @@ const OMS = () => {
                 value={searchText}
                 maxLength={20}
                 className="w-full sm:w-64 lg:w-80"
+                size="middle"
+              />
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder="Filter by Project"
+                value={filterProjects}
+                onChange={setFilterProjects}
+                options={uniqueProjectOptions}
+                maxTagCount="responsive"
+                style={{ minWidth: 180 }}
+                size="middle"
+              />
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder="Filter by Customer"
+                value={filterCustomers}
+                onChange={setFilterCustomers}
+                options={uniqueCustomerOptions}
+                maxTagCount="responsive"
+                style={{ minWidth: 180 }}
                 size="middle"
               />
               <div className="flex gap-2">

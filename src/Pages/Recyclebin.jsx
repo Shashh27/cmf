@@ -16,10 +16,13 @@ const Recyclebin = ({ orderId }) => {
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [expandedKeys, setExpandedKeys] = useState([]);
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [allParts, setAllParts] = useState([]);
   const [allAssemblies, setAllAssemblies] = useState([]);
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [checkedKeys, setCheckedKeys] = useState([]);
 
   const getCurrentUser = () => {
     try {
@@ -136,49 +139,52 @@ const Recyclebin = ({ orderId }) => {
       const sourceAssemblies = assembliesData || allAssemblies;
       const productParts = sourceParts.filter(part => part.product_id === productId);
       const productAssemblies = sourceAssemblies.filter(assembly => assembly.product_id === productId);
-      
-      // Group parts by assembly_id using only recycle bin data
-      const assemblyMap = {};
-      productParts.forEach(part => {
-        if (part.assembly_id) {
-          if (!assemblyMap[part.assembly_id]) {
-            assemblyMap[part.assembly_id] = {
-              id: part.assembly_id,
-              assembly_name: part.assembly_name,
-              parts: []
-            };
-          }
-          assemblyMap[part.assembly_id].parts.push(part);
-        }
-      });
-      
-      // Convert assembly map to array
-      const assemblies = Object.values(assemblyMap);
-      
+
+      // Use the hierarchical structure directly from the backend
+      // The backend already returns assemblies with child_assemblies
+      const directParts = productParts.filter(part => !part.assembly_id);
+
       // Build the final BOM structure
       const bomData = {
         product: {
           id: productId,
           product_name: selectedProject?.product_name || productParts[0]?.product_name || productAssemblies[0]?.product_name || ''
         },
-        parts: productParts.filter(part => !part.assembly_id), // Direct parts (no assembly)
-        assemblies: assemblies
+        parts: directParts,
+        assemblies: productAssemblies
       };
-      
+
       setBomData(bomData);
       setFilteredBomData(bomData);
-      // Preserve current expanded keys, only ensure product is expanded
-      setExpandedKeys(prev => {
-        const keys = new Set(prev);
-        keys.add('product-' + productId);
-        return Array.from(keys);
-      });
     } catch (error) {
       console.error("Error filtering BOM:", error);
       antMessage.error("Failed to load BOM");
     } finally {
       setLoading(false);
     }
+  };
+
+  // Expand all tree keys when filteredBomData changes
+  useEffect(() => {
+    if (filteredBomData) {
+      setTreeRefreshKey(prev => prev + 1);
+    }
+  }, [filteredBomData]);
+
+  const collectAllTreeKeys = (treeData) => {
+    const keys = [];
+    const traverse = (nodes) => {
+      nodes.forEach(node => {
+        if (node.key) {
+          keys.push(node.key);
+        }
+        if (node.children) {
+          traverse(node.children);
+        }
+      });
+    };
+    traverse(treeData);
+    return keys;
   };
 
   const handleProjectClick = (project) => {
@@ -202,6 +208,9 @@ const Recyclebin = ({ orderId }) => {
             await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/restore`);
             antMessage.success(`Assembly "${item.assembly_name}" and all its parts restored successfully`);
           }
+          // Clear selection
+          setCheckedKeys([]);
+          setSelectedItems([]);
           const data = await fetchProjects();
           if (selectedProject) {
             await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
@@ -254,6 +263,9 @@ const Recyclebin = ({ orderId }) => {
             await axios.delete(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/permanent-delete`);
             antMessage.success(`Assembly "${item.assembly_name}" permanently deleted`);
           }
+          // Clear selection
+          setCheckedKeys([]);
+          setSelectedItems([]);
           const data = await fetchProjects();
           if (selectedProject) {
             await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
@@ -271,6 +283,142 @@ const Recyclebin = ({ orderId }) => {
     });
   };
 
+  const handleBulkRestore = async () => {
+    if (selectedItems.length === 0) {
+      antMessage.warning("Please select items to restore");
+      return;
+    }
+
+    modal.confirm({
+      title: `Restore ${selectedItems.length} ${selectedItems.length > 1 ? 'items' : 'item'}`,
+      content: `Are you sure you want to restore ${selectedItems.length} ${selectedItems.length > 1 ? 'items' : 'item'}?`,
+      okText: "Yes",
+      okType: "primary",
+      cancelText: "No",
+      onOk: async () => {
+        try {
+          let successCount = 0;
+          let errorCount = 0;
+
+          for (const item of selectedItems) {
+            try {
+              if (item.type === 'part') {
+                await axios.post(`${API_BASE_URL}/recycle-bin/parts/${item.id}/restore`);
+                successCount++;
+              } else if (item.type === 'assembly') {
+                await axios.post(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/restore`);
+                successCount++;
+              }
+            } catch (error) {
+              errorCount++;
+              console.error(`Error restoring ${item.type}:`, error);
+            }
+          }
+
+          setCheckedKeys([]);
+          setSelectedItems([]);
+          
+          if (errorCount > 0) {
+            antMessage.warning(`${successCount} items restored, ${errorCount} failed`);
+          } else {
+            antMessage.success(`${successCount} items restored successfully`);
+          }
+
+          const data = await fetchProjects();
+          if (selectedProject) {
+            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
+          }
+        } catch (error) {
+          console.error("Error in bulk restore:", error);
+          antMessage.error("Error performing bulk restore");
+        }
+      },
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedItems.length === 0) {
+      antMessage.warning("Please select items to delete");
+      return;
+    }
+
+    modal.confirm({
+      title: `Permanently Delete ${selectedItems.length} ${selectedItems.length > 1 ? 'items' : 'item'}`,
+      content: (
+        <div>
+          <Text>Are you sure you want to permanently delete {selectedItems.length} {selectedItems.length > 1 ? 'items' : 'item'}?</Text>
+          <br />
+          <Text type="danger" strong>
+            This action cannot be undone.
+          </Text>
+        </div>
+      ),
+      okText: "Delete Permanently",
+      okType: "danger",
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          let successCount = 0;
+          let errorCount = 0;
+
+          for (const item of selectedItems) {
+            try {
+              if (item.type === 'part') {
+                await axios.delete(`${API_BASE_URL}/recycle-bin/parts/${item.id}/permanent-delete`);
+                successCount++;
+              } else if (item.type === 'assembly') {
+                await axios.delete(`${API_BASE_URL}/recycle-bin/assemblies/${item.id}/permanent-delete`);
+                successCount++;
+              }
+            } catch (error) {
+              errorCount++;
+              console.error(`Error deleting ${item.type}:`, error);
+            }
+          }
+
+          setCheckedKeys([]);
+          setSelectedItems([]);
+
+          if (errorCount > 0) {
+            antMessage.warning(`${successCount} items deleted, ${errorCount} failed`);
+          } else {
+            antMessage.success(`${successCount} items permanently deleted`);
+          }
+
+          const data = await fetchProjects();
+          if (selectedProject) {
+            await fetchProductBOM(selectedProject.product_id, data?.allParts, data?.allAssemblies);
+          }
+        } catch (error) {
+          console.error("Error in bulk delete:", error);
+          antMessage.error("Error performing bulk delete");
+        }
+      },
+    });
+  };
+
+  const onCheck = (checkedKeys, info) => {
+    setCheckedKeys(checkedKeys);
+    
+    const items = [];
+    checkedKeys.forEach(key => {
+      if (key.startsWith('part-')) {
+        const partId = parseInt(key.replace('part-', ''));
+        const part = allParts.find(p => p.id === partId);
+        if (part) {
+          items.push({ id: partId, type: 'part', ...part });
+        }
+      } else if (key.startsWith('assembly-')) {
+        const assemblyId = parseInt(key.replace('assembly-', ''));
+        const assembly = allAssemblies.find(a => a.id === assemblyId);
+        if (assembly) {
+          items.push({ id: assemblyId, type: 'assembly', ...assembly });
+        }
+      }
+    });
+    setSelectedItems(items);
+  };
+
   const buildBOMTreeData = (data) => {
     if (!data) return [];
     
@@ -285,92 +433,15 @@ const Recyclebin = ({ orderId }) => {
     
     // Add assemblies (only if in recycle bin or have children in recycle bin)
     assemblies.forEach(assembly => {
-      const assemblyChildren = [];
-      
-      // Add parts in assembly (only if in recycle bin)
-      if (assembly.parts && assembly.parts.length > 0) {
-        assembly.parts.forEach(part => {
-          if (part.recycle_bin) {
-            assemblyChildren.push({
-              title: (
-                <div className="flex items-center justify-between w-full pr-2">
-                  <span className="flex items-center gap-2">
-                    <span>{part.part_name}</span>
-                    <Tag color="blue" className="text-xs">{part.part_number}</Tag>
-                  </span>
-                  <div className="flex gap-1 items-center">
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<UndoOutlined />}
-                      onClick={(e) => { e.stopPropagation(); handleRestore(part, 'part'); }}
-                      className="text-green-600"
-                    />
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<DeleteOutlined />}
-                      onClick={(e) => { e.stopPropagation(); handlePermanentDelete(part, 'part'); }}
-                      className="text-red-600"
-                    />
-                  </div>
-                </div>
-              ),
-              key: `part-${part.id}`,
-              isLeaf: true,
-            });
-          }
-        });
-      }
-      
-      // Add child assemblies recursively (only if in recycle bin or have children in recycle bin)
-      if (assembly.child_assemblies && assembly.child_assemblies.length > 0) {
-        assembly.child_assemblies.forEach(child => {
-          const childData = buildAssemblyTreeNode(child);
-          if (childData) {
-            assemblyChildren.push(childData);
-          }
-        });
-      }
-      
-      // Only add assembly if it's in recycle bin or has children in recycle bin
-      if (assembly.recycle_bin || assemblyChildren.length > 0) {
-        treeData.push({
-          title: (
-            <div className="flex items-center justify-between w-full pr-2">
-              <span className="flex items-center gap-2">
-                <span>{assembly.assembly_name}</span>
-                <Tag color="orange" className="text-xs">{assembly.assembly_number}</Tag>
-              </span>
-              {assembly.recycle_bin && (
-                <div className="flex gap-1 items-center">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<UndoOutlined />}
-                    onClick={(e) => { e.stopPropagation(); handleRestore(assembly, 'assembly'); }}
-                    className="text-green-600"
-                  />
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={(e) => { e.stopPropagation(); handlePermanentDelete(assembly, 'assembly'); }}
-                    className="text-red-600"
-                  />
-                </div>
-              )}
-            </div>
-          ),
-          key: `assembly-${assembly.id}`,
-          children: assemblyChildren.length > 0 ? assemblyChildren : undefined,
-        });
+      const assemblyNode = buildAssemblyTreeNode(assembly);
+      if (assemblyNode) {
+        productChildren.push(assemblyNode);
       }
     });
     
-    // Add direct parts (only if in recycle bin)
+    // Add direct parts (parts without assembly)
     parts.forEach(part => {
-      if (part.recycle_bin) {
+      if (!part.assembly_id) {
         productChildren.push({
           title: (
             <div className="flex items-center justify-between w-full pr-2">
@@ -412,6 +483,7 @@ const Recyclebin = ({ orderId }) => {
         ),
         key: `product-${product.id}`,
         children: [...treeData, ...productChildren],
+        disableCheckbox: true,
       }];
     }
     
@@ -423,53 +495,51 @@ const Recyclebin = ({ orderId }) => {
     
     const children = [];
     
-    // Add parts in assembly (only if in recycle bin)
+    // Add parts in this assembly
     if (assembly.parts && assembly.parts.length > 0) {
       assembly.parts.forEach(part => {
-        if (part.recycle_bin) {
-          children.push({
-            title: (
-              <div className="flex items-center justify-between w-full pr-2">
-                <span className="flex items-center gap-2">
-                  <span>{part.part_name}</span>
-                  <Tag color="blue" className="text-xs">{part.part_number}</Tag>
-                </span>
-                <div className="flex gap-1 items-center">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<UndoOutlined />}
-                    onClick={(e) => { e.stopPropagation(); handleRestore(part, 'part'); }}
-                    className="text-green-600"
-                  />
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={(e) => { e.stopPropagation(); handlePermanentDelete(part, 'part'); }}
-                    className="text-red-600"
-                  />
-                </div>
+        children.push({
+          title: (
+            <div className="flex items-center justify-between w-full pr-2">
+              <span className="flex items-center gap-2">
+                <span>{part.part_name}</span>
+                <Tag color="blue" className="text-xs">{part.part_number}</Tag>
+              </span>
+              <div className="flex gap-1 items-center">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<UndoOutlined />}
+                  onClick={(e) => { e.stopPropagation(); handleRestore(part, 'part'); }}
+                  className="text-green-600"
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  onClick={(e) => { e.stopPropagation(); handlePermanentDelete(part, 'part'); }}
+                  className="text-red-600"
+                />
               </div>
-            ),
-            key: `part-${part.id}`,
-            isLeaf: true,
-          });
-        }
+            </div>
+          ),
+          key: `part-${part.id}`,
+          isLeaf: true,
+        });
       });
     }
     
-    // Add child assemblies recursively (only if in recycle bin or have children in recycle bin)
+    // Add child assemblies recursively
     if (assembly.child_assemblies && assembly.child_assemblies.length > 0) {
       assembly.child_assemblies.forEach(child => {
-        const childData = buildAssemblyTreeNode(child);
-        if (childData) {
-          children.push(childData);
+        const childNode = buildAssemblyTreeNode(child);
+        if (childNode) {
+          children.push(childNode);
         }
       });
     }
     
-    // Only return assembly node if it's in recycle bin or has children in recycle bin
+    // Only return assembly node if it's in recycle bin or has children
     if (assembly.recycle_bin || children.length > 0) {
       return {
         title: (
@@ -477,6 +547,9 @@ const Recyclebin = ({ orderId }) => {
             <span className="flex items-center gap-2">
               <span>{assembly.assembly_name}</span>
               <Tag color="orange" className="text-xs">{assembly.assembly_number}</Tag>
+              {assembly.parent_assembly_name && (
+                <Tag color="gray" className="text-xs">Sub-assembly of {assembly.parent_assembly_name}</Tag>
+              )}
             </span>
             {assembly.recycle_bin && (
               <div className="flex gap-1 items-center">
@@ -718,7 +791,28 @@ const Recyclebin = ({ orderId }) => {
       <Content style={{ padding: '16px', background: '#f5f5f5', overflow: 'auto', width: '60%' }}>
         {selectedProject ? (
           <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', minHeight: '100%' }}>
-            <div className="flex justify-end mb-4">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex gap-2 items-center">
+                <span className="text-sm text-gray-600">Selected: {selectedItems.length}</span>
+                <Button
+                  type="primary"
+                  icon={<UndoOutlined />}
+                  onClick={handleBulkRestore}
+                  disabled={selectedItems.length === 0}
+                  size="small"
+                >
+                  Restore Selected
+                </Button>
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={handleBulkDelete}
+                  disabled={selectedItems.length === 0}
+                  size="small"
+                >
+                  Delete Selected
+                </Button>
+              </div>
               <Input
                 placeholder="Search by name or number"
                 prefix={<SearchOutlined />}
@@ -735,12 +829,14 @@ const Recyclebin = ({ orderId }) => {
             ) : filteredBomData ? (
               <div style={{ overflowX: 'auto' }}>
                 <Tree
+                  key={treeRefreshKey}
                   treeData={buildBOMTreeData(filteredBomData)}
                   defaultExpandAll
                   showLine
+                  checkable
+                  checkedKeys={checkedKeys}
+                  onCheck={onCheck}
                   switcherIcon={({ expanded }) => expanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
-                  expandedKeys={expandedKeys}
-                  onExpand={(keys) => setExpandedKeys(keys)}
                 />
               </div>
             ) : (

@@ -61,7 +61,7 @@ const EditOperationModal = ({
   const [parentId, setParentId]                 = useState(null);
   const [parentDocName, setParentDocName]       = useState('');
   const [uploadVersion, setUploadVersion]       = useState('');
-  const [uploadType, setUploadType]             = useState('IPID');
+  const [uploadType, setUploadType]             = useState('Image');
   const [uploadTypeOther, setUploadTypeOther]   = useState('');
   const [selectedFileList, setSelectedFileList] = useState([]);
   const [workCenters, setWorkCenters]           = useState([]);
@@ -196,7 +196,7 @@ const EditOperationModal = ({
   }, [open, operation?.id, showAddToolForm]);
 
   // ── handlers ───────────────────────────────────────────────────────────────
-  const resetUpload = () => { setParentId(null); setParentDocName(''); setUploadVersion(''); setUploadType('IPID'); setUploadTypeOther(''); setSelectedFileList([]); setViewingDoc(null); };
+  const resetUpload = () => { setParentId(null); setParentDocName(''); setUploadVersion(''); setUploadType('Image'); setUploadTypeOther(''); setSelectedFileList([]); setViewingDoc(null); };
 
   const handleUpload = async () => {
     if (!selectedFileList.length) { message.warning('Please select a file first'); return; }
@@ -246,6 +246,7 @@ const EditOperationModal = ({
     if (['jpg','jpeg','png','gif','svg'].includes(ext)) type = 'image';
     else if (ext === 'pdf') type = 'pdf';
     else if (['cnc','gcode','nc','m','tap','mpf','iso','fan','h','txt','csv'].includes(ext)) type = 'text';
+    else if (['mp4','m4v','mov','avi','mkv','webm','flv','wmv','mpeg','mpg','3gp','3g2','ts','mts','m2ts','ogv'].includes(ext)) type = 'video';
     
     // Open preview modal instead of showing in right panel
     setPreview({ url, title: doc.document_name, type, id: doc.id, name: doc.document_name });
@@ -364,7 +365,7 @@ const EditOperationModal = ({
   const parseV          = (v) => parseFloat(String(v).replace(/[^0-9.]/g, ''));
 
   // ── documents tab ──────────────────────────────────────────────────────────
-  const DocActions = ({ doc, rootId, latestV }) => (
+  const DocActions = ({ doc, rootId, latestV, hasChildren }) => (
     <div className="flex gap-1 shrink-0">
       <Tooltip title="View"><Button type="text" size="small" icon={<EyeOutlined className="text-blue-500" />} onClick={() => handlePreview(doc)} /></Tooltip>
       <Tooltip title="Upload New Revision">
@@ -374,9 +375,11 @@ const EditOperationModal = ({
       <Tooltip title="Download">
         <Button type="text" size="small" icon={<DownloadOutlined className="text-green-600" />} onClick={() => handleDownloadFile(doc)} />
       </Tooltip>
-      <Popconfirm title="Delete?" onConfirm={() => handleDeleteDocument(doc.id)} okText="Yes" cancelText="No" icon={<ExclamationCircleOutlined className="text-red-500" />}>
-        <Button type="text" danger size="small" icon={<DeleteOutlined />} />
-      </Popconfirm>
+      <Tooltip title={hasChildren ? 'Delete child revisions first before deleting parent' : 'Delete'}>
+        <Popconfirm title="Delete?" onConfirm={() => handleDeleteDocument(doc.id)} okText="Yes" cancelText="No" icon={<ExclamationCircleOutlined className="text-red-500" />} disabled={hasChildren}>
+          <Button type="text" danger size="small" icon={<DeleteOutlined />} disabled={hasChildren} />
+        </Popconfirm>
+      </Tooltip>
     </div>
   );
 
@@ -412,7 +415,7 @@ const EditOperationModal = ({
                               </div>
                             </div>
                           </div>
-                          <DocActions doc={item} rootId={item.id} latestV={latestV} />
+                          <DocActions doc={item} rootId={item.id} latestV={latestV} hasChildren={versions.length > 0} />
                         </div>
                         {versions.map(ver => (
                           <div key={ver.id} className="bg-gray-50 p-2 ml-6 rounded-lg border border-gray-100 flex items-start justify-between gap-4 border-l-4 border-l-orange-400">
@@ -450,6 +453,12 @@ const EditOperationModal = ({
                     </div>
                   ) : viewingDoc.type === 'pdf' ? (
                     <iframe src={`${viewingDoc.url}#toolbar=0`} title={viewingDoc.title} width="100%" height="100%" style={{ border: 'none' }} />
+                  ) : viewingDoc.type === 'video' ? (
+                    <div className="flex items-center justify-center h-full bg-black">
+                      <video controls style={{ maxWidth: '100%', maxHeight: '100%' }} src={viewingDoc.url}>
+                        Your browser does not support the video tag.
+                      </video>
+                    </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full p-8 text-center">
                       <FileTextOutlined className="text-5xl text-gray-300 mb-4" />
@@ -505,7 +514,7 @@ const EditOperationModal = ({
                       <p className="ant-upload-text text-[11px] font-bold text-gray-600">
                         {selectedFileList.length ? 'Drag another to replace' : 'Click or drag file here'}
                       </p>
-                      {!selectedFileList.length && <p className="ant-upload-hint text-[9px] text-gray-400">PDF, DOC, XLS, STEP, STL...</p>}
+                      {!selectedFileList.length && <p className="ant-upload-hint text-[9px] text-gray-400">PDF, DOC, XLS, STEP, STL, MP4, MKV...</p>}
                     </div>
                   </Dragger>
                 </div>
@@ -514,7 +523,7 @@ const EditOperationModal = ({
                   <Col xs={14}>
                     <div className="text-[10px] font-bold text-gray-500 mb-1 uppercase tracking-wider">Type</div>
                     <Select value={uploadType} onChange={setUploadType} className="w-full custom-select-sm">
-                      {['IPID','Image','CNC','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
+                      {['Image','CNC','Video','Other'].map(t => <Select.Option key={t} value={t}>{t}</Select.Option>)}
                     </Select>
                     {uploadType === 'Other' && <Input className="mt-2 text-xs" placeholder="Custom type" value={uploadTypeOther} onChange={e => setUploadTypeOther(e.target.value)} autoComplete="off" />}
                   </Col>
@@ -766,6 +775,17 @@ const EditOperationModal = ({
                   whiteSpace: 'pre'
                 }} 
               />
+            </div>
+          ) : preview.type === 'video' ? (
+            <div className="flex items-center justify-center h-full bg-black">
+              <video
+                controls
+                autoPlay
+                style={{ maxWidth: '100%', maxHeight: '100%' }}
+                src={preview.url}
+              >
+                Your browser does not support the video tag.
+              </video>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-gray-50">

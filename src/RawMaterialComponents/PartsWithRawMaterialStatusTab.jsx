@@ -1,1549 +1,1701 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
+
 import axios from "axios";
+
 import { API_BASE_URL } from "../Config/auth";
+
 import { 
-  Card, Table, Button, Select, message, Spin, Tree, 
-  Modal, InputNumber, Tag, Typography, Space, Collapse,
-  Empty, Row, Col, Alert, App, Input, Tooltip
+
+  Card, Button, Select, message, Spin, 
+
+  Modal, InputNumber, Tag, Typography, Space,
+
+  Empty, Alert, App, Input, Tooltip
+
 } from "antd";
+
 import { 
+
   ShoppingCartOutlined, 
-  LinkOutlined, 
+
   CheckCircleOutlined,
-  CloseCircleOutlined,
-  ReloadOutlined,
+
   DeleteOutlined,
-  SafetyCertificateOutlined,
-  EditOutlined,
-  AppstoreOutlined
+
+  SafetyCertificateOutlined
+
 } from "@ant-design/icons";
-import DimensionInputs from "./DimensionInputs";
-import ProcureRawMaterialModal from "./ProcureRawMaterialModal";
-import EditLinkedPartsModal from "./EditLinkedPartsModal";
-import { PartsWithRawMaterialsStatusPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
+
+import OrderMaterialsPdfDownload from "../DownloadReports/OrderMaterialsPdfDownload";
+
+
 
 const { Text } = Typography;
+
 const { Option } = Select;
 
-const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRawMaterials }) => {
-  const [linkedMaterials, setLinkedMaterials] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [searchText, setSearchText] = useState("");
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 15 });
-  const [statusEditModalOpen, setStatusEditModalOpen] = useState(false);
-  const [statusEditRecord, setStatusEditRecord] = useState(null);
-  const [statusEditOrderQty, setStatusEditOrderQty] = useState(null);
-  const [statusEditDimensions, setStatusEditDimensions] = useState({
-    diameter: '',
-    length: '',
-    breadth: '',
-    height: '',
-    inner_diameter: '',
-    outer_diameter: ''
-  });
-  const [statusEditCurrentLinkages, setStatusEditCurrentLinkages] = useState([]);
-  const [statusEditPartQuantities, setStatusEditPartQuantities] = useState({});
-  const [statusEditPartRequiredLengths, setStatusEditPartRequiredLengths] = useState({});
-  const [statusEditPartRawMaterialUnits, setStatusEditPartRawMaterialUnits] = useState({});
-  const [availableUnits, setAvailableUnits] = useState([]);
-  const [loadingUnits, setLoadingUnits] = useState(false);
-  const [orderHierarchyMap, setOrderHierarchyMap] = useState({});
-  const [statusEditReceivedVendorId, setStatusEditReceivedVendorId] = useState(null);
-  const [pendingUnlinks, setPendingUnlinks] = useState(new Set());
-  
-  // Procure modal states
-  const [procureModalOpen, setProcureModalOpen] = useState(false);
-  const [procureForm, setProcureForm] = useState({
-    material_id: null,
-    form_type: null,
-    diameter: '',
-    length: '',
-    breadth: '',
-    height: '',
-    inner_diameter: '',
-    outer_diameter: '',
-    quantity: 1,
-    order_id: null,
-    selected_vendor_id: [],
-    order_status: 'enquiry'
-  });
-  const [procureLoading, setProcureLoading] = useState(false);
-  const [orders, setOrders] = useState([]);
-  const [vendors, setVendors] = useState([]);
-  const [ordersLoading, setOrdersLoading] = useState(false);
-  
-  // Filter states
-  const [filterProjectNumber, setFilterProjectNumber] = useState(null);
-  const [filterVendorName, setFilterVendorName] = useState(null);
-  const [filterMaterialName, setFilterMaterialName] = useState(null);
-  
-  // Quick status modal states
-  const [quickStatusModalOpen, setQuickStatusModalOpen] = useState(false);
-  const [quickStatusRecord, setQuickStatusRecord] = useState(null);
-  const [quickStatusReceivedVendorId, setQuickStatusReceivedVendorId] = useState(null);
-
-  // Vendor selection modal for auto-extracted materials
-  const [vendorSelectModalOpen, setVendorSelectModalOpen] = useState(false);
-  const [vendorSelectRecord, setVendorSelectRecord] = useState(null);
-  const [selectedVendors, setSelectedVendors] = useState([]);
-  const [vendorSelectLoading, setVendorSelectLoading] = useState(false);
-
-  const fetching = useRef(false);
-  const initializedRef = useRef(false);
-
-  const { modal, message } = App.useApp();
-
-  const getCurrentUserId = () => {
-    try {
-      const stored = localStorage.getItem("user");
-      if (!stored) return null;
-      const u = JSON.parse(stored);
-      if (u?.id == null) return null;
-      return u.id;
-    } catch {
-      return null;
-    }
-  };
-
+// ── Column filter dropdown ────────────────────────────────────────────────────
+const FilterHeader = ({ label, options, value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
   useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-    fetchLinkedMaterials();
-    fetchVendors();
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, []);
-
-  // Listen for auto-extract completion to refresh data
-  useEffect(() => {
-    const handleRefresh = () => {
-      fetchLinkedMaterials();
-    };
-
-    window.addEventListener('rawMaterialChanged', handleRefresh);
-
-    return () => {
-      window.removeEventListener('rawMaterialChanged', handleRefresh);
-    };
-  }, []);
-
-  const fetchLinkedMaterials = async () => {
-    if (fetching.current) return;
-    fetching.current = true;
-    setLoading(true);
-    try {
-      const uid = getCurrentUserId();
-      // Admin dashboard - use combined filtering to see all materials from orders where admin is involved
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/`, {
-        params: uid != null ? { admin_id: uid } : undefined,
-      });
-      
-      setLinkedMaterials(response.data);
-    } catch (error) {
-      console.error("Error:", error);
-    } finally {
-      setLoading(false);
-      fetching.current = false;
-    }
-  };
-
-  // Extract unique project numbers from linkedMaterials
-  const getUniqueProjectNumbers = () => {
-    const projectNumbers = linkedMaterials
-      .map(item => item.source_order_number)
-      .filter(pn => pn && pn.trim() !== '');
-    return [...new Set(projectNumbers)].sort();
-  };
-
-  // Extract unique vendor names from linkedMaterials (using backend response)
-  const getUniqueVendorNames = () => {
-    const vendorNames = new Set();
-    linkedMaterials.forEach(item => {
-      if (item.vendor_name) {
-        // Split by comma if multiple vendors
-        const names = item.vendor_name.split(',').map(name => name.trim()).filter(name => name);
-        names.forEach(name => vendorNames.add(name));
-      }
-    });
-    return Array.from(vendorNames).sort();
-  };
-
-  const getUniqueMaterialNames = () => {
-    const materialNames = linkedMaterials
-      .map(item => item.material_name)
-      .filter(mn => mn && mn.trim() !== '');
-    return [...new Set(materialNames)].sort();
-  };
-
-  const getStatusColor = (status) => {
-    const colors = {
-      enquiry: 'cyan',
-      purchase_request: 'orange',
-      purchase_order: 'warning',
-      received: 'success',
-      available: 'success',
-      exhausted: 'error'
-    };
-    return colors[status] || 'default';
-  };
-
-  const handleQuickStatusChange = (record) => {
-    // Open the quick status modal with current record data
-    setQuickStatusRecord({ 
-      ...record, 
-      order_status: record.order_status || record.material_status || 'enquiry',
-      material_status: record.material_status || record.order_status || 'enquiry'
-    });
-    setQuickStatusReceivedVendorId(record.received_vendor_id || null);
-    setQuickStatusModalOpen(true);
-  };
-
-  const handleSaveQuickStatus = async () => {
-    if (!quickStatusRecord) return;
-    try {
-      const record = quickStatusRecord;
-      const stockId = record.id;
-      const newStatus = record.order_status || record.material_status;
-      const newVendor = quickStatusReceivedVendorId;
-
-      // Validate vendor selection when status is purchase_request, purchase_order, or received
-      if (newStatus === 'purchase_request' || newStatus === 'purchase_order' || newStatus === 'received') {
-        if (!quickStatusReceivedVendorId) {
-          message.error('Vendor selection is required when status is purchase_request, purchase_order, or received');
-          return;
-        }
-      }
-
-      // Always call PUT endpoint to update status and vendor
-      const updateData = {
-        order_status: newStatus
-      };
-
-      if (newVendor) {
-        updateData.received_vendor_id = newVendor;
-      }
-
-      // Always include final_cost in updateData (even if null/erased)
-      updateData.final_cost = quickStatusRecord.final_cost;
-
-      await axios.put(
-        `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${stockId}`,
-        updateData,
-        { headers: { "Content-Type": "application/json" } }
-      );
-
-      // Force refresh the table data
-      await new Promise(resolve => setTimeout(resolve, 500));
-      await fetchLinkedMaterials();
-      if (typeof onDataChanged === "function") {
-        onDataChanged();
-      }
-      message.success("Status updated successfully");
-      setQuickStatusModalOpen(false);
-      setQuickStatusRecord(null);
-      setQuickStatusReceivedVendorId(null);
-    } catch (error) {
-      message.error(error?.response?.data?.detail || error?.response?.data?.message || "Error updating status");
-    }
-  };
-
-  const handleSaveStatusEdit = async () => {
-    if (!statusEditRecord) return;
-    try {
-      const record = statusEditRecord;
-      const stockId = record.id;
-
-      // Validate that if unit is selected, required length must be entered
-      for (const linkage of statusEditCurrentLinkages) {
-        const partId = linkage.part_id;
-
-        // Skip validation for parts that are pending unlink
-        if (pendingUnlinks.has(partId)) {
-          continue;
-        }
-
-        const unitId = statusEditPartRawMaterialUnits[partId];
-        const requiredLength = statusEditPartRequiredLengths[partId];
-
-        if (unitId && !requiredLength) {
-          message.error('Please enter required length for all linked parts');
-          return;
-        }
-
-        // Validate that required length does not exceed available unit length
-        if (unitId && requiredLength) {
-          const selectedUnit = availableUnits.find(u => u.id === unitId);
-          if (selectedUnit) {
-            const lengthValue = parseFloat(requiredLength);
-            if (lengthValue > selectedUnit.remaining_length) {
-              message.error(`Required length (${lengthValue}mm) exceeds available length of selected unit (${selectedUnit.remaining_length}mm)`);
-              return;
-            }
-
-            // Calculate total required length for this unit across all parts (excluding pending unlinks)
-            let totalForUnit = lengthValue;
-            Object.entries(statusEditPartRawMaterialUnits).forEach(([otherPartId, otherUnitId]) => {
-              if (otherUnitId === unitId && otherPartId !== partId.toString() && !pendingUnlinks.has(parseInt(otherPartId))) {
-                totalForUnit += (parseFloat(statusEditPartRequiredLengths[otherPartId]) || 0);
-              }
-            });
-
-            if (totalForUnit > selectedUnit.remaining_length) {
-              message.error(`Total required length (${totalForUnit}mm) exceeds available unit length (${selectedUnit.remaining_length}mm)`);
-              return;
-            }
-          }
-        }
-      }
-
-      // Process pending unlinks first
-      for (const partId of pendingUnlinks) {
-        try {
-          await axios.delete(`${API_BASE_URL}/rawmaterials/parts/${partId}/unlink-material`);
-        } catch (error) {
-          console.error(`Error unlinking part ${partId}:`, error);
-          const detail =
-            error?.response?.data?.detail ||
-            error?.response?.data?.message ||
-            `Error unlinking part ${partId}`;
-          message.error(detail);
-          return;
-        }
-      }
-
-      // Remove pending unlinks from local state before PUT
-      const filteredLinkages = statusEditCurrentLinkages.filter(l => !pendingUnlinks.has(l.part_id));
-      const filteredQuantities = {};
-      const filteredRequiredLengths = {};
-      const filteredUnits = {};
-      
-      filteredLinkages.forEach(l => {
-        if (!pendingUnlinks.has(l.part_id)) {
-          filteredQuantities[l.part_id] = statusEditPartQuantities[l.part_id] || 1;
-          filteredRequiredLengths[l.part_id] = statusEditPartRequiredLengths[l.part_id] || '';
-          filteredUnits[l.part_id] = statusEditPartRawMaterialUnits[l.part_id];
-        }
-      });
-
-      // Always call PUT endpoint to update stock details
-      const updateData = {
-        quantity: statusEditOrderQty || record.quantity,
-        form_type: record.form_type || "Round",
-        part_ids: filteredLinkages.map(l => l.part_id).join(','),
-        part_quantities: filteredQuantities,
-        required_lengths: filteredRequiredLengths
-      };
-      
-      // Add dimensions based on form type
-      if (record.form_type === 'Round') {
-        updateData.diameter = statusEditDimensions.diameter;
-        updateData.length = statusEditDimensions.length;
-      } else if (record.form_type === 'Square') {
-        updateData.length = statusEditDimensions.length;
-        updateData.breadth = statusEditDimensions.breadth;
-        updateData.height = statusEditDimensions.height;
-      } else if (record.form_type === 'Pipe') {
-        updateData.outer_diameter = statusEditDimensions.outer_diameter;
-        updateData.inner_diameter = statusEditDimensions.inner_diameter;
-        updateData.length = statusEditDimensions.length;
-      }
-      
-      await axios.put(
-        `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${stockId}`,
-        updateData,
-        { headers: { "Content-Type": "application/json" } }
-      );
-      
-      // Assign units to parts using the assign-material endpoint
-      for (const linkage of filteredLinkages) {
-        const partId = linkage.part_id;
-        const requiredLength = filteredRequiredLengths[partId];
-        const unitId = filteredUnits[partId];
-        
-        // Only assign if both unit and length are provided
-        if (unitId && requiredLength) {
-          await axios.post(`${API_BASE_URL}/rawmaterials/assign-material/`, null, {
-            params: {
-              unit_id: unitId,
-              part_id: partId,
-              required_length: parseFloat(requiredLength),
-              user_id: getCurrentUserId()
-            }
-          });
-        }
-      }
-
-      // Call hierarchy endpoint immediately after save
-      try {
-        const orderId = record.source_order_id || record.order_id;
-        if (orderId) {
-          const res = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${orderId}`);
-          setOrderHierarchyMap(prev => ({ ...prev, [orderId]: res.data }));
-        }
-      } catch (error) {
-        console.error("Error fetching hierarchy:", error);
-      }
-
-      // Call units endpoint to refresh available units after save
-      try {
-        if (record.id) {
-          await fetchAvailableUnits(record.id);
-        }
-      } catch (error) {
-        console.error("Error fetching units:", error);
-      }
-
-      // Update local state to reflect the unlinks
-      setStatusEditCurrentLinkages(filteredLinkages);
-      setStatusEditPartQuantities(filteredQuantities);
-      setStatusEditPartRequiredLengths(filteredRequiredLengths);
-      setStatusEditPartRawMaterialUnits(filteredUnits);
-
-      await fetchLinkedMaterials();
-      message.success("Status updated successfully");
-      
-      // Clear pending unlinks but keep modal open
-      setPendingUnlinks(new Set());
-    } catch (error) {
-      message.error(error?.response?.data?.detail || "Error updating status");
-    }
-  };
-
-  const resetModalStates = () => {
-    setStatusEditRecord(null);
-    setStatusEditOrderQty(0);
-    setStatusEditDimensions({
-      diameter: '',
-      length: '',
-      breadth: '',
-      height: '',
-      inner_diameter: '',
-      outer_diameter: ''
-    });
-    setStatusEditCurrentLinkages([]);
-    setStatusEditPartQuantities({});
-    setStatusEditPartRequiredLengths({});
-    setStatusEditPartRawMaterialUnits({});
-    setAvailableUnits([]);
-    setStatusEditReceivedVendorId(null);
-    setPendingUnlinks(new Set());
-  };
-
-  const getOrderHierarchy = async (orderId) => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/orders/${orderId}/hierarchy`);
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching order hierarchy:", error);
-      return { parts: [], meta: {} };
-    }
-  };
-
-  const getAvailablePartsForOrder = (orderHierarchy) => {
-    if (!orderHierarchy || !orderHierarchy.product_hierarchy) return { parts: [], meta: {} };
-    const { assemblies = [], direct_parts = [] } = orderHierarchy.product_hierarchy || {};
-    const parts = [];
-    const meta = {};
-    const visitAssemblies = (assemblyDetailsList, parentPath = []) => {
-      (assemblyDetailsList || []).forEach((ad) => {
-        const a = ad.assembly || ad;
-        const currentPath = a && a.assembly_name ? [...parentPath, a.assembly_name] : parentPath;
-        (ad.parts || []).forEach((pd) => {
-          const p = pd.part || pd;
-          if (p && p.id && (!p.type_name || p.type_name === "IN-House")) {
-            parts.push(p);
-            meta[p.id] = {
-              path: currentPath,
-              isDirect: false,
-            };
-          }
-        });
-        const subs = ad.subassemblies || [];
-        if (subs.length) visitAssemblies(subs, currentPath);
-      });
-    };
-    visitAssemblies(assemblies, []);
-    (direct_parts || []).forEach((pd) => {
-      const p = pd.part || pd;
-      if (p && p.id && (!p.type_name || p.type_name === "IN-House")) {
-        parts.push(p);
-        if (!meta[p.id]) {
-          meta[p.id] = {
-            path: [],
-            isDirect: true,
-          };
-        }
-      }
-    });
-    return { parts, meta };
-  };
-
-  const openStatusEditModal = async (record) => {
-    setStatusEditRecord(record);
-    setStatusEditModalOpen(true);
-    setPendingUnlinks(new Set()); // Clear pending unlinks when opening modal
-    
-    // Initialize dimensions from record
-    setStatusEditDimensions({
-      diameter: record.diameter || '',
-      length: record.length || '',
-      breadth: record.breadth || '',
-      height: record.height || '',
-      inner_diameter: record.inner_diameter || '',
-      outer_diameter: record.outer_diameter || ''
-    });
-    
-    // Use quantity field
-    const qty = record.quantity ?? record.available_quantity ?? record.allocated_quantity ?? 0;
-    setStatusEditOrderQty(qty);
-    setStatusEditReceivedVendorId(record.received_vendor_id || null);
-    
-    // Extract linked parts from record
-    let currentLinkages = [];
-    if (record.part_ids) {
-      let partIds = record.part_ids;
-      if (typeof partIds === 'string') {
-        partIds = partIds.split(',').map(id => id.trim()).filter(id => id);
-      }
-      
-      currentLinkages = partIds.map((partId, index) => ({
-        id: `${record.id}-${partId}`,
-        part_id: parseInt(partId),
-        part_number: record.part_numbers?.[index] || `Part-${partId}`,
-        part_name: record.part_names?.[index] || 'Unknown Part',
-        raw_material_id: record.raw_material_id,
-        order_id: record.source_order_id || record.order_id,
-        linkage_group_id: record.linkage_group_id
-      }));
-    }
-    
-    setStatusEditCurrentLinkages(currentLinkages);
-    
-    // Initialize part quantities
-    const initialQuantities = {};
-    const initialRequiredLengths = {};
-    const initialRawMaterialUnits = {};
-    currentLinkages.forEach(linkage => {
-      initialQuantities[linkage.part_id] = linkage.raw_material_required_quantity || 1;
-      initialRequiredLengths[linkage.part_id] = linkage.required_length || '';
-      // Only set unit ID if it exists in the linkage, otherwise leave empty for user to select
-      if (linkage.raw_material_unit_id) {
-        initialRawMaterialUnits[linkage.part_id] = linkage.raw_material_unit_id;
-      }
-    });
-    setStatusEditPartQuantities(initialQuantities);
-    setStatusEditPartRequiredLengths(initialRequiredLengths);
-    setStatusEditPartRawMaterialUnits(initialRawMaterialUnits);
-    
-    // Fetch available units for this stock
-    if (record.id) {
-      await fetchAvailableUnits(record.id);
-    }
-    
-    // Fetch order hierarchy
-    try {
-      const orderId = record.source_order_id || record.order_id;
-      
-      if (orderId) {
-        let hierarchy = orderHierarchyMap[orderId];
-        if (!hierarchy) {
-          const res = await axios.get(`${API_BASE_URL}/rawmaterials/order-raw-material-hierarchy/${orderId}`);
-          hierarchy = res.data;
-          setOrderHierarchyMap(prev => ({ ...prev, [orderId]: hierarchy }));
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching order hierarchy:", error);
-    }
-  };
-
-  const handleDeleteLinkGroup = (record) => {
-    modal.confirm({
-      title: 'Confirm Delete',
-      content: 'Are you sure you want to remove this material from the order and parts?',
-      okText: 'Delete',
-      okType: 'danger',
-      cancelText: 'Cancel',
-      onOk: async () => {
-        try {
-          await axios.delete(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${record.id}`, {
-            params: { user_id: getCurrentUserId() ?? undefined },
-          });
-      await fetchLinkedMaterials();
-      if (typeof onDataChanged === "function") {
-        onDataChanged();
-      }
-          message.success("Linked material removed successfully");
-        } catch (error) {
-          console.error("Error deleting linked material:", error);
-          const detail =
-            error?.response?.data?.detail ||
-            error?.response?.data?.message ||
-            "Error deleting linked material";
-          message.error(detail);
-        }
-      },
-    });
-  };
-
-  const handleLinkedMaterialsSearch = (value) => {
-    // Remove special characters but keep alphanumeric, spaces, and decimal points for number search
-    const cleanedValue = (value || '').replace(/[^a-zA-Z0-9 .]/g, '');
-    setSearchText(cleanedValue.toLowerCase().slice(0, 50));
-  };
-
-  const handleOpenVendorSelect = async (record) => {
-    // Fetch vendors if not already loaded
-    if (vendors.length === 0) {
-      await fetchVendors();
-    }
-    setVendorSelectRecord(record);
-    setSelectedVendors(record.vendor_id ? record.vendor_id.split(',').map(id => parseInt(id)) : []);
-    setVendorSelectModalOpen(true);
-  };
-
-  const handleCloseVendorSelect = () => {
-    setVendorSelectModalOpen(false);
-    setVendorSelectRecord(null);
-    setSelectedVendors([]);
-  };
-
-  const handleSaveVendorSelection = async () => {
-    if (!vendorSelectRecord) return;
-    
-    if (selectedVendors.length === 0) {
-      message.error('Please select at least one vendor');
-      return;
-    }
-
-    setVendorSelectLoading(true);
-    try {
-      const response = await axios.put(
-        `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${vendorSelectRecord.id}`,
-        {
-          vendor_id: selectedVendors.join(',')
-        }
-      );
-
-      message.success('Vendors linked successfully');
-      handleCloseVendorSelect();
-      await fetchLinkedMaterials();
-    } catch (error) {
-      message.error(error.response?.data?.detail || 'Failed to link vendors');
-    } finally {
-      setVendorSelectLoading(false);
-    }
-  };
-
-  const fetchAvailableUnits = async (stockId) => {
-    try {
-      setLoadingUnits(true);
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/stock/${stockId}/units`);
-      setAvailableUnits(response.data || []);
-    } catch (error) {
-      console.error('Error fetching available units:', error);
-      setAvailableUnits([]);
-    } finally {
-      setLoadingUnits(false);
-    }
-  };
-
-  const buildTreeData = (hierarchy) => {
-    if (!hierarchy || !hierarchy.product_hierarchy) return [];
-    
-    const { assemblies = [], direct_parts = [] } = hierarchy.product_hierarchy;
-    const treeData = [];
-    
-    // Process assemblies
-    assemblies.forEach(assembly => {
-      const assemblyNode = {
-        title: assembly.assembly?.assembly_name || 'Unknown Assembly',
-        key: `assembly-${assembly.assembly?.id}`,
-        type: 'assembly',
-        children: []
-      };
-      
-      // Process parts in this assembly
-      if (assembly.parts && Array.isArray(assembly.parts)) {
-        assembly.parts.forEach(partDetail => {
-          if (partDetail.part && partDetail.part.id) {
-            const part = partDetail.part;
-            const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
-            const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
-            const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
-            const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
-            
-            // Skip STANDARD and Out-Source WITHOUT_RAW_MATERIAL
-            if (part.type_name === "STANDARD" || 
-                (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
-              return;
-            }
-            
-            assemblyNode.children.push({
-              title: `${part.part_number} - ${part.part_name}`,
-              key: `part-${part.id}`,
-              type: 'part',
-              part: part,
-              isAlreadyLinked: isAlreadyLinked,
-              isLinkedToGeneralStock: isLinkedToGeneralStock,
-              isLinkedToOrderStock: isLinkedToOrderStock,
-              sourceType: sourceType
-            });
-          }
-        });
-      }
-      
-      // Process subassemblies
-      if (assembly.subassemblies && Array.isArray(assembly.subassemblies)) {
-        assembly.subassemblies.forEach(subassembly => {
-          const subNode = {
-            title: subassembly.assembly?.assembly_name || 'Unknown Subassembly',
-            key: `subassembly-${subassembly.assembly?.id}`,
-            type: 'assembly',
-            children: []
-          };
-          
-          if (subassembly.parts && Array.isArray(subassembly.parts)) {
-            subassembly.parts.forEach(partDetail => {
-              if (partDetail.part && partDetail.part.id) {
-                const part = partDetail.part;
-                const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
-                const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
-                const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
-                const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
-                
-                if (part.type_name === "STANDARD" || 
-                    (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
-                  return;
-                }
-                
-                subNode.children.push({
-                  title: `${part.part_number} - ${part.part_name}`,
-                  key: `part-${part.id}`,
-                  type: 'part',
-                  part: part,
-                  isAlreadyLinked: isAlreadyLinked,
-                  isLinkedToGeneralStock: isLinkedToGeneralStock,
-                  isLinkedToOrderStock: isLinkedToOrderStock,
-                  sourceType: sourceType
-                });
-              }
-            });
-          }
-          
-          assemblyNode.children.push(subNode);
-        });
-      }
-      
-      treeData.push(assemblyNode);
-    });
-    
-    // Process direct parts
-    if (direct_parts && Array.isArray(direct_parts)) {
-      const directNode = {
-        title: 'Direct Parts',
-        key: 'direct-parts',
-        type: 'assembly',
-        children: []
-      };
-      
-      direct_parts.forEach(partDetail => {
-        if (partDetail.part && partDetail.part.id) {
-          const part = partDetail.part;
-          const sourceType = part.raw_material_source_type || part.raw_material_unit_details?.source_type;
-          const isAlreadyLinked = part.raw_material_unit_id !== null && part.raw_material_unit_id !== undefined;
-          const isLinkedToGeneralStock = sourceType === 'general' && isAlreadyLinked;
-          const isLinkedToOrderStock = sourceType === 'order' && isAlreadyLinked;
-          
-          if (part.type_name === "STANDARD" || 
-              (part.type_name === "Out-Source" && part.part_detail === "WITHOUT_RAW_MATERIAL")) {
-            return;
-          }
-          
-          directNode.children.push({
-            title: `${part.part_number} - ${part.part_name}`,
-            key: `part-${part.id}`,
-            type: 'part',
-            part: part,
-            isAlreadyLinked: isAlreadyLinked,
-            isLinkedToGeneralStock: isLinkedToGeneralStock,
-            isLinkedToOrderStock: isLinkedToOrderStock,
-            sourceType: sourceType
-          });
-        }
-      });
-      
-      if (directNode.children.length > 0) {
-        treeData.push(directNode);
-      }
-    }
-    
-    return treeData;
-  };
-
-  const renderTreeNode = (nodeData) => {
-    if (nodeData.type === 'part') {
-      const { part, isAlreadyLinked, isLinkedToGeneralStock, isLinkedToOrderStock, sourceType } = nodeData;
-      const isLinkedToCurrentStock = statusEditCurrentLinkages.some(l => l.part_id === part.id);
-      const hasUnitAndLength = statusEditPartRawMaterialUnits[part.id] && statusEditPartRequiredLengths[part.id];
-      const isPendingUnlink = pendingUnlinks.has(part.id);
-      
-      return (
-        <div className="flex items-center justify-between w-full pr-4 py-1">
-          <div className="flex items-center gap-3 flex-1">
-            <div className="flex flex-col">
-              <span className="font-semibold text-sm text-gray-800">{part.part_number}</span>
-              <span className="text-xs text-gray-500">{part.part_name}</span>
-            </div>
-            <div className="flex gap-1">
-              {isLinkedToGeneralStock ? (
-                <Tag color="green" className="text-[10px] border-green-200">✓ Linked to General Stock</Tag>
-              ) : isLinkedToOrderStock ? (
-                <Tag color="blue" className="text-[10px] border-blue-200">✓ Linked to Order Stock</Tag>
-              ) : (
-                <>
-                  {sourceType === 'general' && (
-                    <Tag color="orange" className="text-[10px] border-orange-200">General Stock Type</Tag>
-                  )}
-                  {sourceType === 'order' && (
-                    <Tag color="purple" className="text-[10px] border-purple-200">Order Stock Type</Tag>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-          {(isLinkedToGeneralStock || isLinkedToOrderStock) && (
-            <div className="flex items-center gap-2">
-              <div className="bg-blue-50 border border-blue-200 rounded px-2 py-1 text-xs">
-                <span className="font-semibold text-blue-800">Unit #{part.raw_material_unit_id || 'N/A'}</span>
-                <span className="text-blue-600 ml-1">| Length: {part.required_length || 0}mm</span>
-              </div>
-              {!isLinkedToGeneralStock && isLinkedToCurrentStock && (
-                <Button
-                  size="small"
-                  danger
-                  disabled={isPendingUnlink}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setPendingUnlinks(prev => new Set([...prev, part.id]));
-                  }}
-                >
-                  {isPendingUnlink ? 'Unlinking...' : 'Unlink'}
-                </Button>
-              )}
-            </div>
-          )}
-          {!isLinkedToGeneralStock && !isLinkedToOrderStock && (
-            <div className="flex items-center gap-2">
-              <Select
-                size="small"
-                placeholder="Unit"
-                value={statusEditPartRawMaterialUnits[part.id] || null}
-                allowClear
-                getPopupContainer={(triggerNode) => triggerNode.parentNode}
-                onChange={(value) => {
-                  const currentLength = statusEditPartRequiredLengths[part.id];
-
-                  // Validate current length against new unit's available length
-                  if (currentLength && value) {
-                    const selectedUnit = availableUnits.find(u => u.id === value);
-                    if (selectedUnit) {
-                      const lengthValue = parseFloat(currentLength);
-                      if (lengthValue > selectedUnit.remaining_length) {
-                        message.error(`Required length (${lengthValue}mm) exceeds available length of selected unit (${selectedUnit.remaining_length}mm)`);
-                        return;
-                      }
-
-                      // Calculate total required length for this unit across all parts
-                      let totalForUnit = lengthValue;
-                      Object.entries(statusEditPartRawMaterialUnits).forEach(([otherPartId, otherUnitId]) => {
-                        if (otherUnitId === value && otherPartId !== part.id.toString()) {
-                          totalForUnit += (parseFloat(statusEditPartRequiredLengths[otherPartId]) || 0);
-                        }
-                      });
-
-                      if (totalForUnit > selectedUnit.remaining_length) {
-                        message.error(`Total required length (${totalForUnit}mm) exceeds available unit length (${selectedUnit.remaining_length}mm)`);
-                        return;
-                      }
-                    }
-                  }
-
-                  setStatusEditPartRawMaterialUnits(prev => ({ ...prev, [part.id]: value }));
-                  // Auto-link if not already linked
-                  if (!isLinkedToCurrentStock) {
-                    handleLinkPart(part);
-                  }
-                }}
-                style={{ width: '200px' }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {availableUnits.map(unit => (
-                  <Option key={unit.id} value={unit.id} disabled={unit.status === 'exhausted'}>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-semibold">Unit #{unit.id}</span>
-                      <span className="text-[10px] text-gray-600">Total: {unit.total_length}mm | Remaining: {unit.remaining_length}mm</span>
-                      {unit.status === 'exhausted' && (
-                        <span className="text-[10px] text-red-500">Exhausted</span>
-                      )}
-                    </div>
-                  </Option>
-                ))}
-              </Select>
-              <Input
-                size="small"
-                placeholder="Length"
-                value={statusEditPartRequiredLengths[part.id] || ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  const selectedUnitId = statusEditPartRawMaterialUnits[part.id];
-
-                  // Always update the state so the value remains in the input field
-                  setStatusEditPartRequiredLengths(prev => ({ ...prev, [part.id]: value }));
-
-                  // Auto-link if not already linked
-                  if (!isLinkedToCurrentStock) {
-                    handleLinkPart(part);
-                  }
-
-                  // Validate length against available unit length (only show warning, don't block input)
-                  if (value && selectedUnitId) {
-                    const selectedUnit = availableUnits.find(u => u.id === selectedUnitId);
-                    if (selectedUnit) {
-                      const newLength = parseFloat(value);
-                      if (newLength > selectedUnit.remaining_length) {
-                        message.warning(`Required length (${newLength}mm) exceeds available length (${selectedUnit.remaining_length}mm). Save will be blocked.`);
-                        return;
-                      }
-
-                      // Calculate total required length for this unit across all parts
-                      let totalForUnit = newLength;
-                      Object.entries(statusEditPartRawMaterialUnits).forEach(([partId, unitId]) => {
-                        if (unitId === selectedUnitId && partId !== part.id.toString()) {
-                          totalForUnit += (parseFloat(statusEditPartRequiredLengths[partId]) || 0);
-                        }
-                      });
-
-                      // Also add already linked parts for this unit
-                      if (statusEditRecord && statusEditRecord.id === selectedUnit.stock_id) {
-                        statusEditCurrentLinkages.forEach(linkage => {
-                          if (linkage.raw_material_unit_id === selectedUnitId && linkage.part_id !== part.id) {
-                            totalForUnit += (parseFloat(linkage.required_length) || 0);
-                          }
-                        });
-                      }
-
-                      if (totalForUnit > selectedUnit.remaining_length) {
-                        message.warning(`Total required length (${totalForUnit}mm) exceeds available unit length (${selectedUnit.remaining_length}mm). Save will be blocked.`);
-                        return;
-                      }
-                    }
-                  }
-                }}
-                style={{ width: '80px' }}
-                onClick={(e) => e.stopPropagation()}
-              />
-            </div>
-          )}
-        </div>
-      );
-    }
-    
-    // Assembly node
-    return (
-      <span className="font-semibold text-gray-700 flex items-center gap-2">
-        <span className="text-blue-600">📁</span>
-        {nodeData.title}
-      </span>
-    );
-  };
-
-  const handleLinkPart = (part) => {
-    const newLinkage = {
-      id: `${statusEditRecord.id}-${part.id}`,
-      part_id: part.id,
-      part_number: part.part_number,
-      part_name: part.part_name,
-      raw_material_id: statusEditRecord.raw_material_id || statusEditRecord.material_id,
-      order_id: statusEditRecord.source_order_id || statusEditRecord.order_id,
-      linkage_group_id: statusEditRecord.linkage_group_id
-    };
-    
-    setStatusEditCurrentLinkages(prev => [...prev, newLinkage]);
-    setStatusEditPartQuantities(prev => ({ ...prev, [part.id]: 1 }));
-    setStatusEditPartRequiredLengths(prev => ({ ...prev, [part.id]: '' }));
-    // Don't set unit ID here - let the user select it from dropdown
-  };
-
-  const handleInputKeyDown = (e) => {
-    // Allow: Backspace, Delete, Tab, Escape, Enter, Arrow keys
-    if ([8, 9, 27, 13, 37, 38, 39, 40].includes(e.keyCode)) {
-      return;
-    }
-    // Allow: Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X
-    if (e.ctrlKey && [65, 67, 86, 88].includes(e.keyCode)) {
-      return;
-    }
-    // Block: non-digit characters
-    if (e.key && !/^\d$/.test(e.key)) {
-      e.preventDefault();
-    }
-  };
-
-  const flattenPartsFromOrderHierarchy = (hierarchy) => {
-    // This function is no longer needed with tree approach
-    return { parts: [], meta: {} };
-  };
-
-  // Procure modal functions
-  const handleProcureDimensionChange = (field, value) => {
-    setProcureForm(prev => ({ ...prev, [field]: value }));
-  };
-
-  const fetchOrders = async () => {
-    setOrdersLoading(true);
-    try {
-      const uid = getCurrentUserId();
-      const response = await axios.get(`${API_BASE_URL}/orders/`, {
-        params: uid != null ? { admin_id: uid } : undefined,
-      });
-      // Filter out orders that already have raw materials linked
-      const availableOrders = (response.data || []).filter(order => !order.has_raw_materials);
-      setOrders(availableOrders);
-    } catch (error) {
-      console.error("Error fetching orders:", error);
-      setOrders([]);
-    } finally {
-      setOrdersLoading(false);
-    }
-  };
-
-  const fetchVendors = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
-      const vendorsData = response.data || [];
-      setVendors(vendorsData);
-    } catch (error) {
-      console.error("Error fetching vendors:", error);
-      setVendors([]);
-    }
-  };
-
-  const handleAddStock = async () => {
-    const userId = getCurrentUserId();
-    if (!userId) {
-      message.error('User not authenticated');
-      return;
-    }
-
-    // Require all details
-    if (!procureForm.material_id) {
-      message.error('Please select a material');
-      return;
-    }
-
-    if (!procureForm.process_type) {
-      message.error('Please select a process type');
-      return;
-    }
-
-    if (!procureForm.form_type) {
-      message.error('Please select a form type');
-      return;
-    }
-
-    if (!procureForm.quantity || procureForm.quantity <= 0) {
-      message.error('Please enter a valid quantity');
-      return;
-    }
-
-    if (!procureForm.estimated_cost || procureForm.estimated_cost <= 0) {
-      message.error('Please enter estimated cost');
-      return;
-    }
-
-    if (!procureForm.selected_vendor_id || procureForm.selected_vendor_id.length === 0) {
-      message.error('Please select at least one vendor');
-      return;
-    }
-
-    if (!procureForm.order_id) {
-      message.error('Please select an order - this tab is for order-linked stock only');
-      return;
-    }
-
-    setProcureLoading(true);
-    try {
-      const requestData = {
-        raw_material_id: procureForm.material_id,
-        process_type: procureForm.process_type,
-        form_type: procureForm.form_type,
-        diameter: procureForm.diameter || null,
-        length: procureForm.length,
-        breadth: procureForm.breadth || null,
-        height: procureForm.height || null,
-        inner_diameter: procureForm.inner_diameter || null,
-        outer_diameter: procureForm.outer_diameter || null,
-        order_id: procureForm.order_id,
-        part_ids: [],
-        required_lengths: [],
-        vendor_id: procureForm.selected_vendor_id || null,
-        quantity: procureForm.quantity,
-        estimated_cost: procureForm.estimated_cost,
-        user_id: userId
-      };
-
-      const response = await axios.post(`${API_BASE_URL}/rawmaterials/order-materials/link`, requestData);
-      
-      if (response.data) {
-        message.success('Stock added successfully!');
-        
-        // Reset form
-        setProcureForm({
-          material_id: null,
-          form_type: null,
-          diameter: '',
-          length: '',
-          breadth: '',
-          height: '',
-          inner_diameter: '',
-          outer_diameter: '',
-          quantity: 1,
-          order_id: null,
-          selected_vendor_id: [],
-          order_status: 'enquiry'
-        });
-        
-        // Close modal
-        setProcureModalOpen(false);
-        
-        // Refresh linked materials list
-        await fetchLinkedMaterials();
-        if (typeof onDataChanged === "function") {
-          onDataChanged();
-        }
-      }
-    } catch (error) {
-      message.error('Failed to add stock: ' + (error.response?.data?.detail || error.message));
-    } finally {
-      setProcureLoading(false);
-    }
-  };
-
-  const filtered = linkedMaterials.filter(item => {
-    if (!searchText) return true;
-    const searchLower = searchText.toLowerCase();
-    return (
-      (item.source_order_number?.toLowerCase() || '').includes(searchLower) ||
-      (item.material_name?.toLowerCase() || '').includes(searchLower) ||
-      (item.vendor_name?.toLowerCase() || '').includes(searchLower) ||
-      (item.order_status?.toLowerCase() || '').includes(searchLower) ||
-      (item.part_numbers?.join(' ').toLowerCase() || '').includes(searchLower)
-    );
-  }).filter(item => {
-    // Apply project number filter
-    if (filterProjectNumber) {
-      if (item.source_order_number !== filterProjectNumber) {
-        return false;
-      }
-    }
-    // Apply vendor filter (using vendor_name from backend response)
-    if (filterVendorName) {
-      if (!item.vendor_name) {
-        return false;
-      }
-      const vendorNames = item.vendor_name.split(',').map(name => name.trim()).filter(name => name);
-      if (!vendorNames.includes(filterVendorName)) {
-        return false;
-      }
-    }
-    // Apply material name filter
-    if (filterMaterialName) {
-      if (item.material_name !== filterMaterialName) {
-        return false;
-      }
-    }
-    return true;
-  });
-
-
-  const columns = [
-    {
-      title: <span className="font-semibold text-gray-700">SL NO</span>,
-      key: 'index',
-      width: 50,
-      render: (_, __, index) => {
-        const { current, pageSize } = pagination;
-        return <span className="text-gray-500 font-mono">{(current - 1) * pageSize + index + 1}</span>;
-      },
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Project Number</span>,
-      dataIndex: 'source_order_number',
-      key: 'source_order_number',
-      render: (text) => <span className="font-mono text-gray-700">{text || '-'}</span>
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Material Name</span>,
-      dataIndex: 'material_name',
-      key: 'material_name',
-      ellipsis: true,
-      render: (text) => <span className="font-medium text-gray-800">{text}</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Process Type</span>,
-      dataIndex: 'process_type',
-      key: 'process_type',
-      render: (value) => value || <span className="text-gray-400">-</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Form Type</span>,
-      dataIndex: 'form_type',
-      key: 'form_type',
-      render: (formType) => {
-        let color = 'default';
-        if (formType === 'Round') color = 'blue';
-        if (formType === 'Square') color = 'green';
-        if (formType === 'Pipe') color = 'orange';
-        
-        return <Tag color={color}>{formType || '-'}</Tag>;
-      },
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Quantity</span>,
-      dataIndex: 'quantity',
-      key: 'quantity',
-      width: 80,
-      render: (value) => value != null ? value : <span className="text-gray-400">-</span>,
-    },
-    
-    {
-      title: <span className="font-semibold text-gray-700">Volume (m³)</span>,
-      dataIndex: 'volume',
-      key: 'volume',
-      render: (value) => {
-        if (value == null) return <span className="text-gray-400">-</span>;
-        const color = value > 0 ? 'text-green-600' : 'text-red-600';
-        return <span className={`font-medium ${color}`}>{value}</span>;
-      },
-    },
-    
-    {
-      title: <span className="font-semibold text-gray-700">Mass (kg)</span>,
-      dataIndex: 'mass',
-      key: 'mass',
-      render: (value) => value != null ? value?.toFixed(3) : <span className="text-gray-400">-</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Weight (N)</span>,
-      dataIndex: 'weight',
-      key: 'weight',
-      render: (value) => value != null ? value?.toFixed(3) : <span className="text-gray-400">-</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Est. Cost (₹)</span>,
-      dataIndex: 'estimated_cost',
-      key: 'estimated_cost',
-      render: (value) => value != null ? `₹${value?.toFixed(2)}` : <span className="text-gray-400">-</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Final Cost (₹)</span>,
-      dataIndex: 'final_cost',
-      key: 'final_cost',
-      render: (value) => value != null ? `₹${value?.toFixed(2)}` : <span className="text-gray-400">-</span>,
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Vendor</span>,
-      dataIndex: 'vendor_name',
-      key: 'vendor_name',
-      ellipsis: false, // Remove ellipsis to show all vendor names
-      render: (vendorName, record) => {
-        // Show received vendor if available, otherwise show enquiry vendors
-        if (record.received_vendor_name) {
-          return (
-            <div>
-              <span className="font-medium text-green-700">{record.received_vendor_name}</span>
-              <br />
-             
-            </div>
-          );
-        } else if (vendorName) {
-          // Show vendor names separated by commas
-          return (
-            <div className="text-gray-700">
-              {vendorName}
-            </div>
-          );
-        }
-        return <span className="text-gray-400">-</span>;
-      },
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Status</span>,
-      dataIndex: 'status',
-      key: 'status',
-      render: (status, record) => {
-        // Use the status from backend response directly
-        if (!status) {
-          return <span className="text-gray-400">-</span>;
-        }
-        
-        let color = 'default';
-        if (status === 'available') color = 'success';
-        if (status === 'not_available') color = 'error';
-        if (status === 'exhausted') color = 'warning';
-        
-        return <Tag color={color}>{status}</Tag>;
-      },
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Order Status</span>,
-      dataIndex: 'order_status',
-      key: 'order_status',
-      ellipsis: true,
-      render: (orderStatus, record) => {
-        // Use the order_status from backend response directly
-        if (record.source_type === 'general') {
-          return <span className="text-gray-400">-</span>; // No order status for general stock
-        }
-        
-        if (!orderStatus) {
-          return <span className="text-gray-400">-</span>;
-        }
-        
-        let color = 'default';
-        let displayStatus = orderStatus;
-
-        if (orderStatus === 'enquiry') {
-          color = 'cyan';
-          displayStatus = 'Purchase Request';
-        } else if (orderStatus === 'purchase_request') {
-          color = 'orange';
-          displayStatus = 'Purchase Request'; // or maybe something else? User only specified enquiry -> Purchase Request
-        } else if (orderStatus === 'purchase_order') {
-          color = 'warning';
-        } else if (orderStatus === 'received') {
-          color = 'success';
-        }
-        
-        return <Tag color={color}>{displayStatus}</Tag>;
-      },
-    },
-    {
-      title: <span className="font-semibold text-gray-700">Actions</span>,
-      key: 'status_actions',
-      render: (_, record, index) => (
-        <Space>
-          {record.creation_source === 'auto_extract' && (!record.vendor_id || record.vendor_id === '') && (
-            <Tooltip title="Link Vendors">
-              <Button 
-                type="text" 
-                size="small" 
-                icon={<ShoppingCartOutlined />} 
-                className="text-purple-600 hover:bg-purple-50" 
-                onClick={() => handleOpenVendorSelect(record)} 
-              />
-            </Tooltip>
-          )}
-          <Tooltip title="Quick Status Change">
-            <Button 
-              type="text" 
-              size="small" 
-              icon={<CheckCircleOutlined />} 
-              className="text-green-600 hover:bg-green-50" 
-              onClick={() => handleQuickStatusChange(record, 'purchase_request')} 
-            />
-          </Tooltip>
-          <Tooltip title="Edit Link"><Button type="text" size="small" icon={<EditOutlined />} className="text-blue-600 hover:bg-blue-50" onClick={() => openStatusEditModal(record)} /></Tooltip>
-          <Tooltip title="Delete Link"><Button type="text" size="small" icon={<DeleteOutlined />} className="text-red-500 hover:bg-red-50" onClick={() => handleDeleteLinkGroup(record)} /></Tooltip>
-        </Space>
-      ),
-    },
-  ];
-
+  const active = value && value.length > 0;
   return (
-    <div className="mt-4">
-      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500 text-lg sm:text-xl" /><span className="font-bold text-gray-800 text-sm sm:text-base">Procure Raw Material</span></div><Space className="w-full lg:w-auto flex flex-col sm:flex-row flex-wrap gap-2" size="small"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-auto min-w-[150px] xs:min-w-[200px]" size="middle" /><Select placeholder="Material" allowClear value={filterMaterialName} onChange={setFilterMaterialName} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueMaterialNames().map(mname => <Option key={mname} value={mname}>{mname}</Option>)}</Select><Select placeholder="Project" allowClear value={filterProjectNumber} onChange={setFilterProjectNumber} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueProjectNumbers().map(pn => <Option key={pn} value={pn}>{pn}</Option>)}</Select><Select placeholder="Vendor" allowClear value={filterVendorName} onChange={setFilterVendorName} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children">{getUniqueVendorNames().map(vname => <Option key={vname} value={vname}>{vname}</Option>)}</Select><PartsWithRawMaterialsStatusPdfDownload linkedMaterials={linkedMaterials} /><Button type="primary" icon={<AppstoreOutlined />} onClick={() => setProcureModalOpen(true)} style={{ backgroundColor: '#2563eb' }} className="w-full sm:w-auto">Procure Raw Material</Button></Space></div>}>
-        <Table columns={columns} dataSource={filtered} rowKey="id" size="small" bordered pagination={{ current: pagination.current, pageSize: pagination.pageSize, showSizeChanger: true, showQuickJumper: true, showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`, pageSizeOptions: ['10', '20', '50', '100'], placement: 'bottom', responsive: true }} onChange={p => setPagination(p)} locale={{ emptyText: <Empty description="No linked materials found" /> }} className="modern-table responsive-table" scroll={{ x: 'max-content' }} loading={loading} />
-      </Card>
-
-      {/* Quick Status Modal - for dropdown status changes */}
-      <Modal open={quickStatusModalOpen} onCancel={() => setQuickStatusModalOpen(false)} title={<div className="flex items-center gap-2"><EditOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">Update Order Status & Vendor</span></div>} width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }} centered footer={[<Button key="cancel" onClick={() => setQuickStatusModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveQuickStatus} className="w-full sm:w-auto">Update Status</Button>]}>
-        <div className="py-4 space-y-4">
-          {/* Order Status */}
-          <div className="space-y-1">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Order Status</Text>
-            <Select
-              style={{ width: '100%' }}
-              placeholder="Select Order Status"
-              value={quickStatusRecord?.order_status && quickStatusRecord.order_status !== 'enquiry' ? quickStatusRecord.order_status : undefined}
-              onChange={(value) => {
-                setQuickStatusRecord(prev => ({ ...prev, order_status: value, material_status: value }));
-              }}
-              size="middle"
-              className="rounded-md"
-            >
-       
-              <Option value="purchase_order">Purchase Order</Option>
-              <Option value="received">Received</Option>
-            </Select>
-          </div>
-          
-          {/* Vendor Selection - Always visible */}
-          <div className="space-y-1">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Selected Vendor *</Text>
-            <Select
-              style={{ width: '100%' }}
-              placeholder="Select the vendor for this order"
-              value={quickStatusReceivedVendorId}
-              onChange={(value) => setQuickStatusReceivedVendorId(value)}
-              size="middle"
-              className="rounded-md"
-              showSearch
-              optionFilterProp="children"
-            >
-              {quickStatusRecord?.vendor_name ? (
-                quickStatusRecord.vendor_name.split(',').map((name, idx) => {
-                  const vendorIds = quickStatusRecord.vendor_id?.split(',').map(id => parseInt(id.trim())) || [];
-                  return (
-                    <Option key={vendorIds[idx] || idx} value={vendorIds[idx]}>
-                      {name.trim()}
-                    </Option>
-                  );
-                })
-              ) : (
-                <Option disabled>No vendors available</Option>
-              )}
-            </Select>
-            <Text type="secondary" className="text-xs">Select from vendors contacted during enquiry</Text>
-          </div>
-
-          {/* Final Cost - Always visible */}
-          <div className="space-y-1">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Final Cost (₹) *</Text>
-            <InputNumber
-              min={0}
-              precision={0}
-              controls={false}
-              style={{ width: '100%' }}
-              placeholder="Enter final cost"
-              value={quickStatusRecord?.final_cost}
-              onChange={(value) => {
-                // Only accept non-negative integers
-                if (value !== null && value >= 0 && Number.isInteger(value)) {
-                  setQuickStatusRecord(prev => ({ ...prev, final_cost: value }));
-                } else if (value === null) {
-                  setQuickStatusRecord(prev => ({ ...prev, final_cost: null }));
-                }
-              }}
-              onKeyPress={(e) => {
-                // Prevent non-numeric characters
-                const charCode = e.which ? e.which : e.keyCode;
-                if (charCode < 48 || charCode > 57) {
-                  e.preventDefault();
-                }
-              }}
-              size="middle"
-              className="rounded-md"
-            />
-          </div>
-        </div>
-      </Modal>
-
-      {/* Edit Linked Parts & Status Modal */}
-      <EditLinkedPartsModal
-        open={statusEditModalOpen}
-        onCancel={() => setStatusEditModalOpen(false)}
-        onSave={handleSaveStatusEdit}
-        statusEditRecord={statusEditRecord}
-        statusEditOrderQty={statusEditOrderQty}
-        setStatusEditOrderQty={setStatusEditOrderQty}
-        statusEditDimensions={statusEditDimensions}
-        setStatusEditDimensions={setStatusEditDimensions}
-        statusEditCurrentLinkages={statusEditCurrentLinkages}
-        statusEditPartQuantities={statusEditPartQuantities}
-        setStatusEditPartQuantities={setStatusEditPartQuantities}
-        statusEditPartRequiredLengths={statusEditPartRequiredLengths}
-        setStatusEditPartRequiredLengths={setStatusEditPartRequiredLengths}
-        statusEditPartRawMaterialUnits={statusEditPartRawMaterialUnits}
-        setStatusEditPartRawMaterialUnits={setStatusEditPartRawMaterialUnits}
-        availableUnits={availableUnits}
-        loadingUnits={loadingUnits}
-        orderHierarchyMap={orderHierarchyMap}
-        statusEditReceivedVendorId={statusEditReceivedVendorId}
-        setStatusEditReceivedVendorId={setStatusEditReceivedVendorId}
-        pendingUnlinks={pendingUnlinks}
-        setPendingUnlinks={setPendingUnlinks}
-        loading={loading}
-        handleInputKeyDown={handleInputKeyDown}
-        handleLinkPart={handleLinkPart}
-        vendors={vendors}
-      />
-
-      {/* Procure Raw Material Modal */}
-      <ProcureRawMaterialModal
-        open={procureModalOpen}
-        onCancel={() => setProcureModalOpen(false)}
-        onSubmit={handleAddStock}
-        loading={procureLoading}
-        procureForm={procureForm}
-        setProcureForm={setProcureForm}
-        externalRawMaterials={externalRawMaterials}
-        orders={orders}
-        vendors={vendors}
-        ordersLoading={ordersLoading}
-        onFetchOrders={fetchOrders}
-        onFetchVendors={fetchVendors}
-        handleProcureDimensionChange={handleProcureDimensionChange}
-      />
-
-      {/* Vendor Selection Modal for Auto-Extracted Materials */}
-      <Modal
-        open={vendorSelectModalOpen}
-        onCancel={handleCloseVendorSelect}
-        title={<div className="flex items-center gap-2"><ShoppingCartOutlined className="text-purple-500" /><span className="font-bold text-gray-800">Link Vendors for Enquiry</span></div>}
-        width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }}
-        centered
-        footer={[
-          <Button key="cancel" onClick={handleCloseVendorSelect}>Cancel</Button>,
-          <Button key="save" type="primary" loading={vendorSelectLoading} onClick={handleSaveVendorSelection}>Send for Enquiry</Button>
-        ]}
-      >
-        <div className="py-4 space-y-4">
-          {vendorSelectRecord && (
-            <div className="space-y-2">
-              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Material</Text>
-              <div className="bg-gray-50 p-3 rounded">
-                <Text strong>{vendorSelectRecord.material_name}</Text>
-                <br />
-                <Text type="secondary" className="text-sm">
-                  {vendorSelectRecord.form_type} | Qty: {vendorSelectRecord.quantity} | 
-                  {vendorSelectRecord.diameter && ` Ø${vendorSelectRecord.diameter}`}
-                  {vendorSelectRecord.length && ` × ${vendorSelectRecord.length}mm`}
-                </Text>
-              </div>
+    <div ref={ref} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', userSelect: 'none' }}
+      onClick={() => setOpen(o => !o)}>
+      <span>{label}</span>
+      <span style={{ fontSize: 9, color: active ? '#2563eb' : '#aaa' }}>▼</span>
+      {active && <span style={{ background: '#2563eb', color: '#fff', borderRadius: 8, fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>{value.length}</span>}
+      {open && (
+        <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: '#fff', border: '1px solid #d9d9d9', borderRadius: 6, boxShadow: '0 4px 12px rgba(0,0,0,.15)', zIndex: 9999, minWidth: 180, maxHeight: 260, overflowY: 'auto', padding: '6px 0' }}>
+          <div style={{ padding: '2px 10px', fontSize: 10, color: '#999', borderBottom: '1px solid #f0f0f0', marginBottom: 3 }}>Filter</div>
+          {options.map(opt => (
+            <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input type="checkbox" checked={value.includes(opt)} onChange={() => onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt])} />
+              {opt}
+            </label>
+          ))}
+          {value.length > 0 && (
+            <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 3, padding: '3px 10px' }}>
+              <span onClick={() => onChange([])} style={{ fontSize: 10, color: '#2563eb', cursor: 'pointer' }}>Clear</span>
             </div>
           )}
-          <div className="space-y-2">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Select Vendors</Text>
-            <Select
-              mode="multiple"
-              placeholder="Select vendors to send for enquiry"
-              value={selectedVendors}
-              onChange={setSelectedVendors}
-              style={{ width: '100%' }}
-              options={vendors.map(v => ({
-                label: v.company_name || v.vendor_name || v.name || `Vendor ${v.id}`,
-                value: v.id
-              }))}
-              showSearch
-              filterOption={(input, option) =>
-                option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
-              }
-            />
-          </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 };
 
+
+
+const PartsWithRawMaterialStatusTab = ({ onDataChanged, rawMaterials: externalRawMaterials, refreshTrigger }) => {
+
+  const [linkedMaterials, setLinkedMaterials] = useState([]);
+
+  const [loading, setLoading] = useState(false);
+
+  const [searchText, setSearchText] = useState("");
+
+  
+
+  // Group/Ungroup state
+
+  const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+
+  const [groupLoading, setGroupLoading] = useState(false);
+
+  
+
+  // Vendors state
+
+  const [vendors, setVendors] = useState([]);
+
+  
+
+  // Filter states
+
+  const [filterProjectNumber, setFilterProjectNumber] = useState([]);
+
+  const [filterVendorName, setFilterVendorName] = useState([]);
+
+  const [filterMaterialName, setFilterMaterialName] = useState([]);
+
+  const [filterGroup, setFilterGroup] = useState([]);
+
+  // Column header filters
+  const [colProcess, setColProcess] = useState([]);
+  const [colForm, setColForm] = useState([]);
+  const [colOrderStatus, setColOrderStatus] = useState([]);
+
+  
+
+  // Quick status modal states
+
+  const [quickStatusModalOpen, setQuickStatusModalOpen] = useState(false);
+
+  const [quickStatusRecord, setQuickStatusRecord] = useState(null);
+
+  const [quickStatusReceivedVendorId, setQuickStatusReceivedVendorId] = useState(null);
+
+
+
+  // Vendor selection modal for auto-extracted materials
+
+  const [vendorSelectModalOpen, setVendorSelectModalOpen] = useState(false);
+
+  const [vendorSelectRecord, setVendorSelectRecord] = useState(null);
+
+  const [selectedVendors, setSelectedVendors] = useState([]);
+
+  const [vendorSelectLoading, setVendorSelectLoading] = useState(false);
+
+
+
+  const fetching = useRef(false);
+
+  const initializedRef = useRef(false);
+
+
+
+  const { modal, message } = App.useApp();
+
+  const dispatchRMChanged = () => window.dispatchEvent(new Event('rawMaterialChanged'));
+
+
+
+  const getCurrentUserId = () => {
+
+    try {
+
+      const stored = localStorage.getItem("user");
+
+      if (!stored) return null;
+
+      const u = JSON.parse(stored);
+
+      if (u?.id == null) return null;
+
+      return u.id;
+
+    } catch {
+
+      return null;
+
+    }
+
+  };
+
+
+
+  useEffect(() => {
+
+    if (initializedRef.current) return;
+
+    initializedRef.current = true;
+
+    fetchLinkedMaterials();
+
+    fetchVendors();
+
+  }, []);
+
+
+
+  // Refresh when parent signals this tab became active after a mutation
+
+  useEffect(() => {
+
+    if (refreshTrigger > 0) fetchLinkedMaterials();
+
+  }, [refreshTrigger]);
+
+
+
+  const fetchLinkedMaterials = async () => {
+
+    if (fetching.current) return;
+
+    fetching.current = true;
+
+    setLoading(true);
+
+    try {
+
+      const uid = getCurrentUserId();
+
+      // Admin dashboard - use combined filtering to see all materials from orders where admin is involved
+
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/`, {
+
+        params: uid != null ? { admin_id: uid } : undefined,
+
+      });
+
+      
+
+      setLinkedMaterials(response.data);
+
+    } catch (error) {
+
+      console.error("Error:", error);
+
+    } finally {
+
+      setLoading(false);
+
+      fetching.current = false;
+
+    }
+
+  };
+
+
+
+  // Extract unique project numbers from linkedMaterials
+
+  const getUniqueProjectNumbers = () => {
+
+    const projectNumbers = linkedMaterials
+
+      .map(item => item.source_order_number)
+
+      .filter(pn => pn && pn.trim() !== '');
+
+    return [...new Set(projectNumbers)].sort();
+
+  };
+
+
+
+  // Extract unique vendor names from linkedMaterials (using backend response)
+
+  const getUniqueVendorNames = () => {
+
+    const vendorNames = new Set();
+
+    linkedMaterials.forEach(item => {
+
+      if (item.vendor_name) {
+
+        // Split by comma if multiple vendors
+
+        const names = item.vendor_name.split(',').map(name => name.trim()).filter(name => name);
+
+        names.forEach(name => vendorNames.add(name));
+
+      }
+
+    });
+
+    return Array.from(vendorNames).sort();
+
+  };
+
+
+
+  const getUniqueMaterialNames = () => {
+
+    const materialNames = linkedMaterials
+
+      .map(item => item.material_name)
+
+      .filter(mn => mn && mn.trim() !== '');
+
+    return [...new Set(materialNames)].sort();
+
+  };
+
+
+
+  const getUniqueGroups = () => {
+
+    const groups = linkedMaterials
+
+      .map(item => item.merge_group_id)
+
+      .filter(group => group && group.trim() !== '');
+
+    return [...new Set(groups)].sort();
+  };
+
+
+
+  const getStatusColor = (status) => {
+
+    const colors = {
+
+      enquiry: 'cyan',
+
+      purchase_request: 'orange',
+
+      purchase_order: 'warning',
+
+      received: 'success',
+
+      available: 'success',
+
+      exhausted: 'error'
+
+    };
+
+    return colors[status] || 'default';
+
+  };
+
+
+
+  const handleQuickStatusChange = (record) => {
+
+    // Open the quick status modal with current record data
+
+    setQuickStatusRecord({ 
+
+      ...record, 
+
+      order_status: record.order_status || record.material_status || 'enquiry',
+
+      material_status: record.material_status || record.order_status || 'enquiry'
+
+    });
+
+    setQuickStatusReceivedVendorId(record.received_vendor_id || null);
+
+    setQuickStatusModalOpen(true);
+
+  };
+
+
+
+  const handleSaveQuickStatus = async () => {
+
+    if (!quickStatusRecord) return;
+
+    try {
+
+      const record = quickStatusRecord;
+
+      const stockId = record.id;
+
+      const newStatus = record.order_status || record.material_status;
+
+      const newVendor = quickStatusReceivedVendorId;
+
+
+
+      // Validate vendor selection when status is purchase_request, purchase_order, or received
+
+      if (newStatus === 'purchase_request' || newStatus === 'purchase_order' || newStatus === 'received') {
+
+        if (!quickStatusReceivedVendorId) {
+
+          message.error('Vendor selection is required when status is purchase_request, purchase_order, or received');
+
+          return;
+
+        }
+
+      }
+
+
+
+      // Always call PUT endpoint to update status and vendor
+
+      const updateData = {
+
+        order_status: newStatus
+
+      };
+
+
+
+      if (newVendor) {
+
+        updateData.received_vendor_id = newVendor;
+
+      }
+
+
+
+      // Always include final_cost in updateData (even if null/erased)
+
+      updateData.final_cost = quickStatusRecord.final_cost;
+
+
+
+      // Check if this record is part of a group
+
+      if (record.merge_group_id) {
+
+        // Update all items in the group
+
+        await axios.put(
+
+          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group/${record.merge_group_id}`,
+
+          updateData,
+
+          { headers: { "Content-Type": "application/json" } }
+
+        );
+
+        const count = await getGroupCount(record.merge_group_id);
+
+        message.success(`Status updated successfully for ${count} grouped orders`);
+
+      } else {
+
+        // Update single record
+
+        await axios.put(
+
+          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${stockId}`,
+
+          updateData,
+
+          { headers: { "Content-Type": "application/json" } }
+
+        );
+
+        message.success("Status updated successfully");
+
+      }
+
+
+
+      // Force refresh the table data
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      await fetchLinkedMaterials();
+
+      dispatchRMChanged();
+
+      if (typeof onDataChanged === "function") {
+
+        onDataChanged();
+
+      }
+
+      setQuickStatusModalOpen(false);
+
+      setQuickStatusRecord(null);
+
+      setQuickStatusReceivedVendorId(null);
+
+    } catch (error) {
+
+      message.error(error?.response?.data?.detail || error?.response?.data?.message || "Error updating status");
+
+    }
+
+  };
+
+
+
+  const handleDeleteLinkGroup = (record) => {
+
+    modal.confirm({
+
+      title: 'Confirm Delete',
+
+      content: 'Are you sure you want to remove this material from the order and parts?',
+
+      okText: 'Delete',
+
+      okType: 'danger',
+
+      cancelText: 'Cancel',
+
+      onOk: async () => {
+
+        try {
+
+          await axios.delete(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${record.id}`, {
+
+            params: { user_id: getCurrentUserId() ?? undefined },
+
+          });
+
+          await fetchLinkedMaterials();
+
+          dispatchRMChanged();
+
+          if (typeof onDataChanged === "function") {
+
+            onDataChanged();
+
+          }
+
+          message.success("Linked material removed successfully");
+
+        } catch (error) {
+
+          console.error("Error deleting linked material:", error);
+
+          const detail =
+
+            error?.response?.data?.detail ||
+
+            error?.response?.data?.message ||
+
+            "Error deleting linked material";
+
+          message.error(detail);
+
+        }
+
+      },
+
+    });
+
+  };
+
+
+
+  const handleLinkedMaterialsSearch = (value) => {
+
+    // Remove special characters but keep alphanumeric, spaces, and decimal points for number search
+
+    const cleanedValue = (value || '').replace(/[^a-zA-Z0-9 .]/g, '');
+
+    setSearchText(cleanedValue.toLowerCase().slice(0, 50));
+
+  };
+
+
+
+  const handleOpenVendorSelect = async (record) => {
+
+    // Fetch vendors if not already loaded
+
+    if (vendors.length === 0) {
+
+      await fetchVendors();
+
+    }
+
+    setVendorSelectRecord(record);
+
+    setSelectedVendors(record.vendor_id ? record.vendor_id.split(',').map(id => parseInt(id)) : []);
+
+    setVendorSelectModalOpen(true);
+
+  };
+
+
+
+  const handleCloseVendorSelect = () => {
+
+    setVendorSelectModalOpen(false);
+
+    setVendorSelectRecord(null);
+
+    setSelectedVendors([]);
+
+  };
+
+
+
+  const handleSaveVendorSelection = async () => {
+
+    if (!vendorSelectRecord) return;
+
+    
+
+    if (selectedVendors.length === 0) {
+
+      message.error('Please select at least one vendor');
+
+      return;
+
+    }
+
+
+
+    setVendorSelectLoading(true);
+
+    try {
+
+      // Check if this record is part of a group
+
+      if (vendorSelectRecord.merge_group_id) {
+
+        // Update all items in the group
+
+        await axios.put(
+
+          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group/${vendorSelectRecord.merge_group_id}`,
+
+          {
+
+            vendor_id: selectedVendors.join(',')
+
+          }
+
+        );
+
+        message.success(`Vendors linked successfully to ${await getGroupCount(vendorSelectRecord.merge_group_id)} grouped orders`);
+
+      } else {
+
+        // Update single record
+
+        await axios.put(
+
+          `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/${vendorSelectRecord.id}`,
+
+          {
+
+            vendor_id: selectedVendors.join(',')
+
+          }
+
+        );
+
+        message.success('Vendors linked successfully');
+
+      }
+
+      handleCloseVendorSelect();
+
+      await fetchLinkedMaterials();
+
+      dispatchRMChanged();
+
+    } catch (error) {
+
+      message.error(error.response?.data?.detail || 'Failed to link vendors');
+
+    } finally {
+
+      setVendorSelectLoading(false);
+
+    }
+
+  };
+
+
+
+  const getGroupCount = async (groupId) => {
+
+    try {
+
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/`);
+
+      const count = response.data.filter(item => item.merge_group_id === groupId).length;
+
+      return count;
+
+    } catch (error) {
+
+      return 0;
+
+    }
+
+  };
+
+
+
+  // Check if any selected row is already in a group
+
+  const areSelectedRowsAlreadyGrouped = () => {
+
+    if (selectedRowKeys.length < 2) return false;
+
+    
+
+    const selectedRows = filteredDataWithRowSpans.filter(row => selectedRowKeys.includes(row.id));
+
+    if (selectedRows.length === 0) return false;
+
+    
+
+    // If any selected row has a merge_group_id, they are already grouped
+
+    const hasGroupedRow = selectedRows.some(row => row.merge_group_id !== null && row.merge_group_id !== undefined);
+
+    
+
+    return hasGroupedRow;
+
+  };
+
+
+
+  // Check if any selected row can be ungrouped (has a merge_group_id)
+
+  const canUngroupSelectedRows = () => {
+
+    if (selectedRowKeys.length === 0) return false;
+
+    
+
+    const selectedRows = filteredDataWithRowSpans.filter(row => selectedRowKeys.includes(row.id));
+
+    if (selectedRows.length === 0) return false;
+
+    
+
+    // If any selected row has a merge_group_id, it can be ungrouped
+
+    const hasGroupedRow = selectedRows.some(row => row.merge_group_id !== null && row.merge_group_id !== undefined);
+
+    
+
+    return hasGroupedRow;
+
+  };
+
+
+
+  const fetchVendors = async () => {
+
+    try {
+
+      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
+
+      const vendorsData = response.data || [];
+
+      setVendors(vendorsData);
+
+    } catch (error) {
+
+      console.error("Error fetching vendors:", error);
+
+      setVendors([]);
+
+    }
+
+  };
+
+
+
+  const handleGroupOrders = async () => {
+
+    if (selectedRowKeys.length < 2) {
+
+      message.warning('Please select at least 2 orders to group');
+
+      return;
+
+    }
+
+    
+
+    modal.confirm({
+
+      title: 'Confirm Group',
+
+      content: `Are you sure you want to group ${selectedRowKeys.length} orders? After grouping, vendor linking and status changes will apply to ALL grouped orders together.`,
+
+      okText: 'Yes, Group',
+
+      cancelText: 'Cancel',
+
+      onOk: async () => {
+
+        setGroupLoading(true);
+
+        try {
+
+          // Refresh data before group to ensure we have latest state
+
+          await fetchLinkedMaterials();
+
+          
+
+          await axios.post(
+
+            `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/group`,
+
+            { stock_ids: selectedRowKeys }
+
+          );
+
+          message.success('Orders grouped successfully. Now you can link vendors or change status for all grouped orders at once.');
+
+          setSelectedRowKeys([]);
+
+          await fetchLinkedMaterials();
+
+        } catch (error) {
+
+          message.error(error?.response?.data?.detail || 'Failed to group orders');
+
+        } finally {
+
+          setGroupLoading(false);
+
+        }
+
+      }
+
+    });
+
+  };
+
+
+
+  const handleUngroupOrders = async () => {
+
+    if (selectedRowKeys.length === 0) {
+
+      message.warning('Please select orders to ungroup');
+
+      return;
+
+    }
+
+    
+
+    modal.confirm({
+
+      title: 'Confirm Ungroup',
+
+      content: `Are you sure you want to ungroup ${selectedRowKeys.length} orders? After ungrouping, you will need to manage vendor linking and status changes individually for each order.`,
+
+      okText: 'Yes, Ungroup',
+
+      cancelText: 'Cancel',
+
+      onOk: async () => {
+
+        setGroupLoading(true);
+
+        try {
+
+          await axios.post(
+
+            `${API_BASE_URL}/rawmaterials/order-parts-raw-material-linked/ungroup`,
+
+            { stock_ids: selectedRowKeys }
+
+          );
+
+          message.success('Orders ungrouped successfully');
+
+          setSelectedRowKeys([]);
+
+          // Force refresh to ensure latest data from DB
+
+          await fetchLinkedMaterials();
+
+          // Small delay to ensure data is fully refreshed
+
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+        } catch (error) {
+
+          message.error(error?.response?.data?.detail || 'Failed to ungroup orders');
+
+        } finally {
+
+          setGroupLoading(false);
+
+        }
+
+      }
+
+    });
+
+  };
+
+
+
+  const colFilterOptions = useMemo(() => ({
+    process: [...new Set(linkedMaterials.map(i => i.process_type).filter(Boolean))].sort(),
+    form: [...new Set(linkedMaterials.map(i => i.form_type).filter(Boolean))].sort(),
+    orderStatus: [...new Set(linkedMaterials.map(i => i.order_status).filter(Boolean))].sort(),
+  }), [linkedMaterials]);
+
+  const filtered = linkedMaterials.filter(item => {
+
+    if (!searchText) return true;
+
+    const searchLower = searchText.toLowerCase();
+
+    return (
+
+      (item.source_order_number?.toLowerCase() || '').includes(searchLower) ||
+
+      (item.material_name?.toLowerCase() || '').includes(searchLower) ||
+
+      (item.vendor_name?.toLowerCase() || '').includes(searchLower) ||
+
+      (item.order_status?.toLowerCase() || '').includes(searchLower) ||
+
+      (item.part_numbers?.join(' ').toLowerCase() || '').includes(searchLower)
+
+    );
+
+  }).filter(item => {
+
+    // Apply project number filter (multi-select)
+    if (filterProjectNumber.length > 0 && !filterProjectNumber.includes(item.source_order_number)) return false;
+
+    // Apply vendor filter (multi-select)
+    if (filterVendorName.length > 0) {
+      if (!item.vendor_name) return false;
+      const vendorNames = item.vendor_name.split(',').map(n => n.trim());
+      if (!filterVendorName.some(v => vendorNames.includes(v))) return false;
+    }
+
+    // Apply material name filter (multi-select)
+    if (filterMaterialName.length > 0 && !filterMaterialName.includes(item.material_name)) return false;
+
+    // Apply group filter (multi-select)
+    if (filterGroup.length > 0 && !filterGroup.includes(item.merge_group_id)) return false;
+
+    // Column header filters
+    if (colProcess.length > 0 && !colProcess.includes(item.process_type)) return false;
+    if (colForm.length > 0 && !colForm.includes(item.form_type)) return false;
+    if (colOrderStatus.length > 0 && !colOrderStatus.includes(item.order_status)) return false;
+
+    return true;
+
+  });
+
+
+
+
+
+  // Transform data to use row spans.
+  // Grouping logic:
+  //   - Material Name column: spans rows within each sub-group only.
+  //     For a merged group of 3 it spans 3; for each ungrouped item it spans 1.
+  //     This means the material name cell repeats once per sub-group.
+  //   - Project Number column: spans rows that share the same order number AND the same
+  //     merge_group_id. Ungrouped items each get their own cell.
+
+  const filteredDataWithRowSpans = useMemo(() => {
+
+    const rows = [];
+
+    // Step 1: group by material name
+    const materialGroups = {};
+
+    filtered.forEach(item => {
+
+      const materialName = item.material_name || 'Unknown';
+
+      if (!materialGroups[materialName]) {
+
+        materialGroups[materialName] = { materialName, subGroups: [] };
+
+      }
+
+      materialGroups[materialName].subGroups.push(item);
+
+    });
+
+    let globalIndex = 0;
+
+    Object.values(materialGroups).forEach(materialGroup => {
+
+      const allItems = materialGroup.subGroups;
+
+      // Step 2: build ordered sub-groups.
+      // Grouped items (merge_group_id set)      → keyed by merge_group_id alone.
+      // Ungrouped + no vendor (vendor_id null)  → share one "__unlinked__" key → single merged row.
+      // Ungrouped + has vendor (vendor_id set)  → unique key per item → separate row each.
+      const subGroupMap = new Map();
+      let vendorLinkedCounter = 0;
+
+      allItems.forEach(item => {
+
+        let subKey;
+
+        if (item.merge_group_id) {
+
+          // Explicitly grouped — use group id as key
+          subKey = `__grouped__${item.merge_group_id}`;
+
+        } else if (!item.vendor_id) {
+
+          // Ungrouped and no vendor linked yet — collapse into one shared row
+          subKey = `__unlinked__`;
+
+        } else {
+
+          // Ungrouped but vendor already linked — show as its own separate row
+          subKey = `__vendor_linked__${vendorLinkedCounter++}__${item.id}`;
+
+        }
+
+        if (!subGroupMap.has(subKey)) {
+
+          subGroupMap.set(subKey, []);
+
+        }
+
+        subGroupMap.get(subKey).push(item);
+
+      });
+
+      // Step 3: flatten into rows with spans.
+      // For grouped sub-groups (merge_group_id set):
+      //   materialRowSpan and orderRowSpan both span the full sub-group size.
+      // For unlinked sub-groups (__unlinked__ key, no vendor):
+      //   materialRowSpan spans all items (EN8 shown once for the whole unlinked set),
+      //   but orderRowSpan = 1 per item so each row shows its own Project Number separately.
+      // For vendor-linked individual rows:
+      //   both spans = 1 (single row each).
+
+      subGroupMap.forEach((subItems, subKey) => {
+
+        const isUnlinkedGroup = subKey === '__unlinked__';
+
+        // groupOrderNumbers only relevant for grouped sub-groups (merge_group_id set)
+        // where one spanned cell must show all distinct orders.
+        // For unlinked items each row shows its own order number — no groupOrderNumbers needed.
+        const groupOrderNumbers = isUnlinkedGroup
+          ? null
+          : [...new Set(subItems.map(it => it.source_order_number).filter(Boolean))];
+
+        subItems.forEach((item, i) => {
+
+          rows.push({
+
+            ...item,
+
+            key: item.id,
+
+            materialRowSpan: i === 0 ? subItems.length : 0,
+
+            orderRowSpan: isUnlinkedGroup ? 1 : (i === 0 ? subItems.length : 0),
+
+            groupOrderNumbers,
+
+            index: globalIndex + 1
+
+          });
+
+          globalIndex++;
+
+        });
+
+      });
+
+    });
+
+    return rows;
+
+  }, [filtered]);
+
+
+
+
+
+  return (
+
+    <div className="mt-4">
+
+      <Card className="shadow-sm rounded-lg lg:rounded-xl border border-gray-100" styles={{ body: { padding: 0 } }} title={<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 lg:gap-4"><div className="flex items-center gap-2"><SafetyCertificateOutlined className="text-blue-500 text-lg sm:text-xl" /><span className="font-bold text-gray-800 text-sm sm:text-base">Ordered Raw Materials</span></div><Space className="w-full lg:w-auto flex flex-col sm:flex-row flex-wrap gap-2" size="small"><Input.Search placeholder="Search..." allowClear onSearch={handleLinkedMaterialsSearch} onChange={(e) => handleLinkedMaterialsSearch(e.target.value)} value={searchText} maxLength={50} className="w-full sm:w-auto min-w-[150px] xs:min-w-[200px]" size="middle" /><Select mode="multiple" placeholder="Material" allowClear value={filterMaterialName} onChange={v => setFilterMaterialName(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount="responsive">{getUniqueMaterialNames().map(mname => <Option key={mname} value={mname}>{mname}</Option>)}</Select><Select mode="multiple" placeholder="Project" allowClear value={filterProjectNumber} onChange={v => setFilterProjectNumber(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount="responsive">{getUniqueProjectNumbers().map(pn => <Option key={pn} value={pn}>{pn}</Option>)}</Select><Select mode="multiple" placeholder="Vendor" allowClear value={filterVendorName} onChange={v => setFilterVendorName(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount="responsive">{getUniqueVendorNames().map(vname => <Option key={vname} value={vname}>{vname}</Option>)}</Select><Select mode="multiple" placeholder="Group" allowClear value={filterGroup} onChange={v => setFilterGroup(v || [])} size="middle" className="w-full sm:w-auto min-w-[120px] xs:min-w-[140px]" showSearch optionFilterProp="children" maxTagCount="responsive">{getUniqueGroups().map(group => <Option key={group} value={group}>{group}</Option>)}</Select><Button type="primary" size="middle" onClick={handleGroupOrders} loading={groupLoading} disabled={selectedRowKeys.length < 2 || areSelectedRowsAlreadyGrouped()} className="bg-blue-600">Group ({filteredDataWithRowSpans.filter(r => selectedRowKeys.includes(r.id) && !r.merge_group_id).length})</Button><Button size="middle" onClick={handleUngroupOrders} loading={groupLoading} disabled={!canUngroupSelectedRows()}>Ungroup ({filteredDataWithRowSpans.filter(r => selectedRowKeys.includes(r.id) && r.merge_group_id).length})</Button><OrderMaterialsPdfDownload rows={filteredDataWithRowSpans} label={[filterProjectNumber, filterMaterialName, filterVendorName].filter(Boolean).join(" | ") || "All Records"} /></Space></div>}>
+
+        {loading ? (
+
+          <div style={{ padding: 40, textAlign: 'center' }}><Spin size="large" /><div style={{ marginTop: 12 }}>Loading...</div></div>
+
+        ) : filteredDataWithRowSpans.length === 0 ? (
+
+          <div style={{ padding: 40, textAlign: 'center' }}><Empty description="No linked materials found" /></div>
+
+        ) : (
+
+          <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
+
+            <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '100%', border: '1px solid #000' }}>
+
+              <thead>
+
+                <tr>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0', width: '40px' }}>
+
+                    <input
+
+                      type="checkbox"
+
+                      checked={selectedRowKeys.length > 0 && selectedRowKeys.length === filteredDataWithRowSpans.length}
+
+                      onChange={(e) => {
+
+                        if (e.target.checked) {
+
+                          setSelectedRowKeys(filteredDataWithRowSpans.map(row => row.id));
+
+                        } else {
+
+                          setSelectedRowKeys([]);
+
+                        }
+
+                      }}
+
+                    />
+
+                  </th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}><FilterHeader label="Material Name" options={getUniqueMaterialNames()} value={colProcess.length === 0 && colForm.length === 0 && colOrderStatus.length === 0 ? filterMaterialName : filterMaterialName} onChange={setFilterMaterialName} /></th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}><FilterHeader label="Project Number" options={getUniqueProjectNumbers()} value={filterProjectNumber} onChange={setFilterProjectNumber} /></th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Part Number</th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Stock Dimensions</th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}><FilterHeader label="Process Type" options={colFilterOptions.process} value={colProcess} onChange={setColProcess} /></th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}><FilterHeader label="Form Type" options={colFilterOptions.form} value={colForm} onChange={setColForm} /></th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Quantity</th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Volume (m³)</th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Mass (kg)</th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Weight (N)</th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Est. Cost (₹)</th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Final Cost (₹)</th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}><FilterHeader label="Vendor" options={getUniqueVendorNames()} value={filterVendorName} onChange={setFilterVendorName} /></th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}><FilterHeader label="Order Status" options={colFilterOptions.orderStatus} value={colOrderStatus} onChange={setColOrderStatus} /></th>
+
+                  <th style={{ border: '1px solid #000', padding: '8px 12px', textAlign: 'center', fontWeight: 600, fontSize: 12, background: '#f0f0f0' }}>Actions</th>
+
+                </tr>
+
+              </thead>
+
+              <tbody>
+
+                {filteredDataWithRowSpans.map((row, index) => {
+
+                  // For grouped rows: isFirstOfGroup = first item in the sub-group (orderRowSpan > 0).
+                  // groupRowSpan reuses orderRowSpan which already holds the exact sub-group size.
+
+                  const isFirstOfGroup = row.merge_group_id && row.orderRowSpan > 0;
+
+                  const groupRowSpan = isFirstOfGroup ? row.orderRowSpan : 0;
+
+                  
+
+                  return (
+
+                  <tr key={row.id} style={{ backgroundColor: row.merge_group_id ? '#e6f7ff' : 'inherit' }}>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>
+
+                      <input
+
+                        type="checkbox"
+
+                        checked={selectedRowKeys.includes(row.id)}
+
+                        onChange={(e) => {
+
+                          if (e.target.checked) {
+
+                            setSelectedRowKeys([...selectedRowKeys, row.id]);
+
+                          } else {
+
+                            setSelectedRowKeys(selectedRowKeys.filter(key => key !== row.id));
+
+                          }
+
+                        }}
+
+                      />
+
+                    </td>
+
+                    {row.materialRowSpan > 0 && <td rowSpan={row.materialRowSpan} style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'left', color: '#000' }}>{row.material_name}</td>}
+
+                    {row.orderRowSpan > 0 && (
+                      <td rowSpan={row.orderRowSpan} style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'left', color: '#000' }}>
+                        {row.groupOrderNumbers && row.groupOrderNumbers.length > 1
+                          ? row.groupOrderNumbers.map((on, idx) => (
+                              <div key={idx}>
+                                <div style={{ fontWeight: 500, paddingBottom: idx < row.groupOrderNumbers.length - 1 ? 4 : 0 }}>{on}</div>
+                                {idx < row.groupOrderNumbers.length - 1 && (
+                                  <div style={{ borderBottom: '1px solid #000', margin: '0 -8px' }} />
+                                )}
+                              </div>
+                            ))
+                          : (row.source_order_number || '-')}
+                        {row.merge_group_id && <Tag color="blue" style={{ marginTop: 4, fontSize: 9 }}>{row.merge_group_id}</Tag>}
+                      </td>
+                    )}
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'left', color: '#000' }}>
+
+                      {row.part_numbers && row.part_numbers.length > 0 ? (
+
+                        <div>
+
+                          {[...new Set(row.part_numbers)].slice(0, 3).map((part, idx) => (
+
+                            <div key={idx} style={{ fontSize: '10px' }}>{part}</div>
+
+                          ))}
+
+                          {[...new Set(row.part_numbers)].length > 3 && (
+
+                            <div style={{ fontSize: '9px', color: '#999' }}>+{[...new Set(row.part_numbers)].length - 3} more</div>
+
+                          )}
+
+                        </div>
+
+                      ) : '-'}
+
+                    </td>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'left', color: '#000' }}>{row.stock_dimensions || '-'}</td>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>{row.process_type || '-'}</td>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>
+
+                      {row.form_type ? <Tag color={row.form_type === 'Round' ? 'blue' : row.form_type === 'Square' ? 'green' : row.form_type === 'Pipe' ? 'orange' : 'default'}>{row.form_type}</Tag> : '-'}
+
+                    </td>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>{row.quantity != null ? row.quantity : '-'}</td>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>{row.volume != null ? row.volume : '-'}</td>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>{row.mass != null ? row.mass.toFixed(3) : '-'}</td>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>{row.weight != null ? row.weight.toFixed(3) : '-'}</td>
+
+                    <td style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>{row.estimated_cost != null ? `₹${Number(row.estimated_cost).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}</td>
+
+                    {/* Final Cost - row-span for groups */}
+
+                    {(!row.merge_group_id || isFirstOfGroup) ? (
+
+                      <td rowSpan={groupRowSpan > 0 ? groupRowSpan : undefined} style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>{row.final_cost != null ? `₹${Number(row.final_cost).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}</td>
+
+                    ) : null}
+
+                    {/* Vendor - row-span for groups */}
+
+                    {(!row.merge_group_id || isFirstOfGroup) ? (
+
+                      <td rowSpan={groupRowSpan > 0 ? groupRowSpan : undefined} style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'left', color: '#000' }}>
+
+                        {row.received_vendor_name ? (
+
+                          <span className="font-medium text-green-700">{row.received_vendor_name}</span>
+
+                        ) : row.vendor_name ? (
+
+                          row.vendor_name
+
+                        ) : '-'}
+
+                      </td>
+
+                    ) : null}
+
+                    {/* Order Status - row-span for groups */}
+
+                    {(!row.merge_group_id || isFirstOfGroup) ? (
+
+                      <td rowSpan={groupRowSpan > 0 ? groupRowSpan : undefined} style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>
+
+                        {row.source_type === 'general' ? '-' : row.order_status ? (
+
+                          <Tag color={
+
+                            row.order_status === 'enquiry' ? 'cyan' :
+
+                            row.order_status === 'purchase_request' ? 'orange' :
+
+                            row.order_status === 'purchase_order' ? 'warning' :
+
+                            row.order_status === 'received' ? 'success' : 'default'
+
+                          }>
+
+                            {row.order_status === 'enquiry' ? 'Purchase Request' : row.order_status}
+
+                          </Tag>
+
+                        ) : '-'}
+
+                      </td>
+
+                    ) : null}
+
+                    {/* Actions column - use rowspan for groups */}
+
+                    {(!row.merge_group_id || isFirstOfGroup) ? (
+
+                      <td rowSpan={groupRowSpan > 0 ? groupRowSpan : undefined} style={{ border: '1px solid #000', padding: '4px 8px', fontSize: 11, verticalAlign: 'middle', textAlign: 'center', color: '#000' }}>
+
+                        {row.merge_group_id ? (
+
+                          // For grouped orders (first row only), show action buttons with tooltip indicating it applies to all
+
+                          <Space>
+
+                            {/* Only show link vendors button if vendors are not already linked */}
+
+                            {!row.vendor_id && (
+
+                              <Tooltip title="Link Vendors (applies to all grouped orders)">
+
+                                <Button type="text" size="small" icon={<ShoppingCartOutlined />} className="text-purple-600 hover:bg-purple-50" onClick={() => handleOpenVendorSelect(row)} />
+
+                              </Tooltip>
+
+                            )}
+
+                            <Tooltip title="Quick Status Change (applies to all grouped orders)">
+
+                              <Button type="text" size="small" icon={<CheckCircleOutlined />} className="text-green-600 hover:bg-green-50" onClick={() => handleQuickStatusChange(row, 'purchase_request')} />
+
+                            </Tooltip>
+
+                            <Tooltip title="Delete Link (applies to all grouped orders)">
+
+                              <Button type="text" size="small" icon={<DeleteOutlined />} className="text-red-500 hover:bg-red-50" onClick={() => handleDeleteLinkGroup(row)} />
+
+                            </Tooltip>
+
+                          </Space>
+
+                        ) : (
+
+                          // For non-grouped orders, show normal action buttons
+
+                          <Space>
+
+                            {/* Only show link vendors button if vendors are not already linked */}
+
+                            {row.creation_source === 'auto_extract' && (!row.vendor_id || row.vendor_id === '') && (
+
+                              <Tooltip title="Link Vendors">
+
+                                <Button type="text" size="small" icon={<ShoppingCartOutlined />} className="text-purple-600 hover:bg-purple-50" onClick={() => handleOpenVendorSelect(row)} />
+
+                              </Tooltip>
+
+                            )}
+
+                            <Tooltip title="Quick Status Change">
+
+                              <Button type="text" size="small" icon={<CheckCircleOutlined />} className="text-green-600 hover:bg-green-50" onClick={() => handleQuickStatusChange(row, 'purchase_request')} />
+
+                            </Tooltip>
+
+                            <Tooltip title="Delete Link"><Button type="text" size="small" icon={<DeleteOutlined />} className="text-red-500 hover:bg-red-50" onClick={() => handleDeleteLinkGroup(row)} /></Tooltip>
+
+                          </Space>
+
+                        )}
+
+                      </td>
+
+                    ) : null}
+
+                  </tr>
+
+                  );
+
+                })}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+        )}
+
+      </Card>
+
+
+
+      {/* Quick Status Modal - for dropdown status changes */}
+
+      <Modal open={quickStatusModalOpen} onCancel={() => setQuickStatusModalOpen(false)} title={<div className="flex items-center gap-2"><CheckCircleOutlined className="text-blue-500" /><span className="font-bold text-gray-800 text-sm sm:text-base">{quickStatusRecord?.merge_group_id ? 'Update Order Status & Vendor (Merged Orders)' : 'Update Order Status & Vendor'}</span></div>} width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }} centered footer={[<Button key="cancel" onClick={() => setQuickStatusModalOpen(false)} className="w-full sm:w-auto">Cancel</Button>, <Button key="save" type="primary" style={{ backgroundColor: '#2563eb' }} onClick={handleSaveQuickStatus} className="w-full sm:w-auto">{quickStatusRecord?.merge_group_id ? 'Update All Merged' : 'Update Status'}</Button>]}>
+
+        <div className="py-4 space-y-4">
+
+          {quickStatusRecord?.merge_group_id && (
+
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+
+              <p className="text-sm text-purple-800">
+
+                <strong>⚠️ Merged Orders:</strong> This status change will apply to ALL orders in this merge group.
+
+              </p>
+
+            </div>
+
+          )}
+
+          {/* Order Status */}
+
+          <div className="space-y-1">
+
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Order Status</Text>
+
+            <Select
+
+              style={{ width: '100%' }}
+
+              placeholder="Select Order Status"
+
+              value={quickStatusRecord?.order_status && quickStatusRecord.order_status !== 'enquiry' ? quickStatusRecord.order_status : undefined}
+
+              onChange={(value) => {
+
+                setQuickStatusRecord(prev => ({ ...prev, order_status: value, material_status: value }));
+
+              }}
+
+              size="middle"
+
+              className="rounded-md"
+
+            >
+
+              <Option value="purchase_order">Purchase Order</Option>
+
+              <Option value="received">Received</Option>
+
+            </Select>
+
+          </div>
+
+          
+
+          {/* Vendor Selection - Always visible */}
+
+          <div className="space-y-1">
+
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Selected Vendor *</Text>
+
+            <Select
+
+              style={{ width: '100%' }}
+
+              placeholder="Select the vendor for this order"
+
+              value={quickStatusReceivedVendorId}
+
+              onChange={(value) => setQuickStatusReceivedVendorId(value)}
+
+              size="middle"
+
+              className="rounded-md"
+
+              showSearch
+
+              optionFilterProp="children"
+
+            >
+
+              {quickStatusRecord?.vendor_name ? (
+
+                quickStatusRecord.vendor_name.split(',').map((name, idx) => {
+
+                  const vendorIds = quickStatusRecord.vendor_id?.split(',').map(id => parseInt(id.trim())) || [];
+
+                  return (
+
+                    <Option key={vendorIds[idx] || idx} value={vendorIds[idx]}>
+
+                      {name.trim()}
+
+                    </Option>
+
+                  );
+
+                })
+
+              ) : (
+
+                <Option disabled>No vendors available</Option>
+
+              )}
+
+            </Select>
+
+            <Text type="secondary" className="text-xs">Select from vendors contacted during enquiry</Text>
+
+          </div>
+
+
+
+          {/* Final Cost - Always visible */}
+
+          <div className="space-y-1">
+
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Final Cost (₹) *</Text>
+
+            <InputNumber
+
+              min={0}
+
+              precision={0}
+
+              controls={false}
+
+              style={{ width: '100%' }}
+
+              placeholder="Enter final cost"
+
+              value={quickStatusRecord?.final_cost}
+
+              onChange={(value) => {
+
+                if (value !== null && value >= 0 && Number.isInteger(value)) {
+
+                  setQuickStatusRecord(prev => ({ ...prev, final_cost: value }));
+
+                } else if (value === null) {
+
+                  setQuickStatusRecord(prev => ({ ...prev, final_cost: null }));
+
+                }
+
+              }}
+
+              onKeyPress={(e) => {
+
+                const charCode = e.which ? e.which : e.keyCode;
+
+                if (charCode < 48 || charCode > 57) {
+
+                  e.preventDefault();
+
+                }
+
+              }}
+
+              size="middle"
+
+              className="rounded-md"
+
+            />
+
+          </div>
+
+        </div>
+
+      </Modal>
+
+
+
+      {/* Vendor Selection Modal for Auto-Extracted Materials */}
+
+      <Modal
+
+        open={vendorSelectModalOpen}
+
+        onCancel={handleCloseVendorSelect}
+
+        title={<div className="flex items-center gap-2"><ShoppingCartOutlined className="text-purple-500" /><span className="font-bold text-gray-800">{vendorSelectRecord?.merge_group_id ? 'Link Vendors for Enquiry (Merged Orders)' : 'Link Vendors for Enquiry'}</span></div>}
+
+        width={{ xs: '90%', sm: '80%', md: 500, lg: 500 }}
+
+        centered
+
+        footer={[
+
+          <Button key="cancel" onClick={handleCloseVendorSelect}>Cancel</Button>,
+
+          <Button key="save" type="primary" loading={vendorSelectLoading} onClick={handleSaveVendorSelection}>{vendorSelectRecord?.merge_group_id ? 'Send for Enquiry (All Merged)' : 'Send for Enquiry'}</Button>
+
+        ]}
+
+      >
+
+        <div className="py-4 space-y-4">
+
+          {vendorSelectRecord?.merge_group_id && (
+
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+
+              <p className="text-sm text-purple-800">
+
+                <strong>⚠️ Merged Orders:</strong> This will link the selected vendors to ALL orders in this merge group.
+
+              </p>
+
+            </div>
+
+          )}
+
+          {vendorSelectRecord && (
+
+            <div className="space-y-2">
+
+              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Material</Text>
+
+              <div className="bg-gray-50 p-3 rounded">
+
+                <Text strong>{vendorSelectRecord.material_name}</Text>
+
+                <br />
+
+                <Text type="secondary" className="text-sm">
+
+                  {vendorSelectRecord.form_type} | Qty: {vendorSelectRecord.quantity} | 
+
+                  {vendorSelectRecord.diameter && ` Ø${vendorSelectRecord.diameter}`}
+
+                  {vendorSelectRecord.length && ` × ${vendorSelectRecord.length}mm`}
+
+                </Text>
+
+              </div>
+
+            </div>
+
+          )}
+
+          <div className="space-y-2">
+
+            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Select Vendors</Text>
+
+            <Select
+
+              mode="multiple"
+
+              placeholder="Select vendors to send for enquiry"
+
+              value={selectedVendors}
+
+              onChange={setSelectedVendors}
+
+              style={{ width: '100%' }}
+
+              options={vendors.map(v => ({
+
+                label: v.company_name || v.vendor_name || v.name || `Vendor ${v.id}`,
+
+                value: v.id
+
+              }))}
+
+              showSearch
+
+              filterOption={(input, option) =>
+
+                option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
+
+              }
+
+            />
+
+          </div>
+
+        </div>
+
+      </Modal>
+
+    </div>
+
+  );
+
+};
+
+
+
 export default PartsWithRawMaterialStatusTab;
+

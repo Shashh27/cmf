@@ -19,6 +19,7 @@ const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }
         cnc_controller: machine.cnc_controller || "",
         cnc_controller_service: machine.cnc_controller_service || "",
         remarks: machine.remarks || "",
+        mhr: machine.mhr ?? null,
         calibration_date: machine.calibration_date ? dayjs(machine.calibration_date) : null,
         calibration_due_date: machine.calibration_due_date ? dayjs(machine.calibration_due_date) : null,
         password: machine.password || "",
@@ -42,6 +43,7 @@ const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }
       cnc_controller: values.cnc_controller || null,
       cnc_controller_service: values.cnc_controller_service || null,
       remarks: values.remarks || null,
+      mhr: values.mhr != null && values.mhr !== '' ? parseInt(values.mhr) : null,
       calibration_date: values.calibration_date ? values.calibration_date.toISOString() : null,
       calibration_due_date: values.calibration_due_date ? values.calibration_due_date.toISOString() : null,
     };
@@ -160,6 +162,23 @@ const MachineModal = ({ machine, workCenterId, userId, isOpen, onClose, onSave }
             label="CNC Controller Service"
           >
             <Input placeholder="Enter service provider" />
+          </Form.Item>
+
+          <Form.Item
+            name="mhr"
+            label="MHR (Machine Hourly Rate)"
+            rules={[{ type: 'integer', message: 'Only whole numbers allowed' }]}
+          >
+            <InputNumber
+              placeholder="Enter MHR"
+              style={{ width: '100%' }}
+              min={0}
+              precision={0}
+              step={1}
+              controls={false}
+              addonBefore="₹"
+              onKeyPress={(e) => { if (!/[0-9]/.test(e.key)) e.preventDefault(); }}
+            />
           </Form.Item>
 
           <Form.Item

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from "react";
-import { PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined, SearchOutlined } from "@ant-design/icons";
+import { PlusOutlined, PartitionOutlined, ToolOutlined, FileTextOutlined, EditOutlined, DeleteOutlined, DeploymentUnitOutlined, ClusterOutlined, CaretDownOutlined, CaretRightOutlined, CodepenOutlined, BlockOutlined, CodeSandboxOutlined, EyeOutlined, AppstoreOutlined, SearchOutlined, DownloadOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import { Input, Button, App, Tooltip, Empty, Spin, Tag, Typography } from "antd";
@@ -261,6 +261,37 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
   const handleCreateProduct = () => {
     if (disableProductCreate) return;
     openModal('product');
+  };
+
+  const downloadTemplate = async (templateType) => {
+    try {
+      const endpoint = templateType === 'parts'
+        ? `${API_BASE_URL}/parts/template/download`
+        : `${API_BASE_URL}/operations/template/download`;
+
+      const response = await axios.get(endpoint, {
+        responseType: 'blob',
+      });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute(
+        'download',
+        templateType === 'parts' ? 'PartsTemplate.docx' : 'Operations_Template.docx'
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      message.success(`${templateType === 'parts' ? 'Parts' : 'Operations'} template downloaded successfully`);
+    } catch (error) {
+      console.error('Template download error:', error);
+      message.error(
+        `Failed to download ${templateType} template. Please ensure the template has been uploaded to the server.`
+      );
+    }
   };
   const handleCreateAssembly = (product) => openModal('assembly', product);
   const handleCreatePart = (product, assembly = null) => {
@@ -1253,6 +1284,17 @@ const BillOfMaterials = ({ onItemSelected, onHierarchyLoaded, disableProductCrea
               </h2>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              <Tooltip title="Download Parts Template">
+                <Button
+                  type="default"
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={() => downloadTemplate('parts')}
+                  className="bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-300 text-xs font-medium px-2 py-1 rounded-md shadow-sm"
+                >
+                  <span className="hidden sm:inline">Parts Template</span>
+                </Button>
+              </Tooltip>
               {filteredProducts.length === 1 && (
                 <>
                   <AssemblyPartsUploadPanel

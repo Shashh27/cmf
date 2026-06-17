@@ -174,6 +174,13 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
       render: (text) => text || "-",
     },
     {
+      title: 'MHR',
+      dataIndex: 'mhr',
+      key: 'mhr',
+      align: 'center',
+      render: (val) => val != null ? `₹${val}` : "-",
+    },
+    {
       title: 'CALIBRATION DATE',
       dataIndex: 'calibration_date',
       key: 'calibration_date',

@@ -236,19 +236,7 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
     }
 
     children.push(
-      {
-        title: (
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <FolderOutlined style={{ color: '#722ed1' }} />
-            <span>Balloon</span>
-          </span>
-        ),
-        titleText: 'Balloon',
-        key: `balloon-${part.id}${orderId ? `-${orderId}` : ''}`,
-        isLeaf: true,
-        selectable: true,
-        nodeData: { type: 'part-category', category: 'Balloon', partId: part.id, partName: part.part_name, orderId }
-      },
+      
       // CNC Programs folder
       {
         title: (

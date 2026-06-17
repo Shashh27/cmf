@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 
 import { useSearchParams } from "react-router-dom";
 
-import { Tabs, Typography, App as AntApp } from "antd";
+import { Tabs, App as AntApp } from "antd";
 
-import { ExperimentOutlined, LinkOutlined, SafetyCertificateOutlined, ShoppingOutlined, HistoryOutlined } from "@ant-design/icons";
+import { ExperimentOutlined, LinkOutlined, SafetyCertificateOutlined, HistoryOutlined } from "@ant-design/icons";
 
 import axios from "axios";
 
@@ -15,17 +15,12 @@ import { API_BASE_URL } from "../Config/auth";
 
 import RawMaterialsTab from "../RawMaterialComponents/RawMaterialsTab";
 
-import LinkGeneralStockImproved from "../RawMaterialComponents/LinkGeneralStockImproved";
-
 import PartsWithRawMaterialStatusTab from "../RawMaterialComponents/PartsWithRawMaterialStatusTab";
 
 import RawMaterialHistoryTab from "../RawMaterialComponents/RawMaterialHistoryTab";
 
-import RawMaterialSummaryTab from "../RawMaterialComponents/RawMaterialSummaryTab";
+import OrderRMHierarchyTable from "../RawMaterialComponents/OrderRMHierarchyTable";
 
-
-
-const { Title, Text } = Typography;
 
 
 
@@ -40,6 +35,12 @@ const RawMaterialsContent = () => {
   const [rawMaterialsLoading, setRawMaterialsLoading] = useState(true);
 
   const initializedRef = useRef(false);
+
+  // Per-tab refresh triggers — increment to tell a tab to refetch
+  const [triggers, setTriggers] = useState({ 'order-rm-hierarchy': 0, 'order-status': 0 });
+
+  // Which tabs need a refresh next time they become active
+  const dirtyTabsRef = useRef(new Set());
 
 
 
@@ -75,6 +76,25 @@ const RawMaterialsContent = () => {
 
   };
 
+  // When any mutation happens, mark all tabs except the currently active one as dirty
+  useEffect(() => {
+    const handleRMChanged = () => {
+      const otherTabs = ['order-rm-hierarchy', 'order-status'].filter(t => t !== activeTab);
+      otherTabs.forEach(t => dirtyTabsRef.current.add(t));
+    };
+    window.addEventListener('rawMaterialChanged', handleRMChanged);
+    return () => window.removeEventListener('rawMaterialChanged', handleRMChanged);
+  }, [activeTab]);
+
+  // When tab changes, if that tab is dirty — increment its trigger to force a refetch
+  const handleTabChange = useCallback((key) => {
+    setSearchParams({ tab: key });
+    if (dirtyTabsRef.current.has(key)) {
+      dirtyTabsRef.current.delete(key);
+      setTriggers(prev => ({ ...prev, [key]: prev[key] + 1 }));
+    }
+  }, [setSearchParams]);
+
 
 
   const tabItems = [
@@ -89,35 +109,23 @@ const RawMaterialsContent = () => {
 
     },
 
-     {
-
-      key: 'summary',
-
-      label: <span className="flex items-center gap-2 px-2"><ExperimentOutlined /> RM Summary</span>,
-
-      children: <RawMaterialSummaryTab />
-
-    },
-
-
     {
 
-      key: 'link-general-stock',
+      key: 'order-rm-hierarchy',
 
-      label: <span className="flex items-center gap-2 px-2"><ShoppingOutlined /> Assign General Stock</span>,
+      label: <span className="flex items-center gap-2 px-2"><LinkOutlined /> Plan & Procure RM</span>,
 
-      children: <LinkGeneralStockImproved rawMaterials={sharedRawMaterials} />
+      children: <OrderRMHierarchyTable rawMaterials={sharedRawMaterials} refreshTrigger={triggers['order-rm-hierarchy']} />
 
     },
 
-    
     {
 
       key: 'order-status',
 
       label: <span className="flex items-center gap-2 px-2"><SafetyCertificateOutlined /> Procure Raw Material</span>,
 
-      children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} rawMaterials={sharedRawMaterials} />
+      children: <PartsWithRawMaterialStatusTab onDataChanged={refreshRawMaterials} rawMaterials={sharedRawMaterials} refreshTrigger={triggers['order-status']} />
 
     },
 
@@ -200,7 +208,7 @@ const RawMaterialsContent = () => {
 
             activeKey={activeTab} 
 
-            onChange={(key) => setSearchParams({ tab: key })} 
+            onChange={handleTabChange} 
 
             items={tabItems}
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Table, Card, Typography, message, Spin, InputNumber, Button, Space, Tag, Empty, Modal, Input } from "antd";
+import { Table, Card, Typography, message, Spin, InputNumber, Button, Space, Tag, Empty, Modal, Input, Select } from "antd";
 import { ExclamationCircleOutlined } from "@ant-design/icons";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -40,6 +40,8 @@ const PartsPriority = () => {
   const [editPriorityValue, setEditPriorityValue] = useState(null);
   const hasFetchedPartWise = useRef(false);
   const [partSearchText, setPartSearchText] = useState("");
+  const [filterProject, setFilterProject] = useState(null);
+  const [filterPartNumber, setFilterPartNumber] = useState(null);
 
   const getCurrentUserId = () => {
     try {
@@ -100,36 +102,27 @@ const PartsPriority = () => {
   };
 
   const filteredPartData = partData.filter((row, index) => {
+    if (filterProject && row.sale_order_number !== filterProject) return false;
+    if (filterPartNumber && row.part_number !== filterPartNumber) return false;
     if (!partSearchText) return true;
     const q = partSearchText.toLowerCase();
-    
-    // SL NO (index + 1)
     const slNo = String(index + 1);
-    
-    // Project Name & Number
     const pn = String(row.project_name || "").toLowerCase();
     const so = String(row.sale_order_number || "").toLowerCase();
-    
-    // Product Name & Number
     const prod = String(row.product_name || "").toLowerCase();
-    
-    // Part Name & Number
     const part = String(row.part_name || "").toLowerCase();
     const partNum = String(row.part_number || "").toLowerCase();
-    
-    // Priority
     const priority = String(row.priority || "");
-    
     return (
-      slNo.includes(q) ||
-      pn.includes(q) ||
-      so.includes(q) ||
-      prod.includes(q) ||
-      part.includes(q) ||
-      partNum.includes(q) ||
-      priority.includes(q)
+      slNo.includes(q) || pn.includes(q) || so.includes(q) ||
+      prod.includes(q) || part.includes(q) || partNum.includes(q) || priority.includes(q)
     );
   });
+
+  const projectOptions = [...new Set(partData.map(r => r.sale_order_number).filter(Boolean))].sort();
+  const partNumberOptions = filterProject
+    ? [...new Set(partData.filter(r => r.sale_order_number === filterProject).map(r => r.part_number).filter(Boolean))].sort()
+    : [];
 
 
   const handleUpdatePriority = async (id, newPriority) => {
@@ -252,12 +245,20 @@ const PartsPriority = () => {
       key: "sale_order_number",
       render: (text) => <span className="font-medium text-gray-800">{text || "-"}</span>,
     },
+    
     {
       title: <span className="font-semibold text-gray-700">Project Name</span>,
       dataIndex: "product_name",
       key: "product_name",
       ellipsis: true,
       render: (text) => <span className="text-blue-600 font-medium">{text || "-"}</span>,
+    },
+    {
+      title: <span className="font-semibold text-gray-700">Due Date</span>,
+      dataIndex: "due_date",
+      key: "due_date",
+      width: 120,
+      render: (text) => { if (!text) return <span className="text-gray-400">-</span>; const d = new Date(text); const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yyyy = d.getFullYear(); return <Tag color="orange">{`${dd}-${mm}-${yyyy}`}</Tag>; },
     },
     {
       title: <span className="font-semibold text-gray-700">Part Name</span>,
@@ -376,7 +377,7 @@ const PartsPriority = () => {
           <Typography.Text className="font-semibold text-gray-700 text-sm sm:text-base">
             Part Wise Priority
           </Typography.Text>
-          <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
+          <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2" wrap>
             <Input.Search
               placeholder="Search..."
               allowClear
@@ -387,6 +388,29 @@ const PartsPriority = () => {
               value={partSearchText}
               maxLength={20}
             />
+            <Select
+              placeholder="Project Number"
+              allowClear
+              showSearch
+              size="middle"
+              style={{ minWidth: 160 }}
+              value={filterProject}
+              onChange={(val) => { setFilterProject(val || null); setFilterPartNumber(null); }}
+            >
+              {projectOptions.map(p => <Select.Option key={p} value={p}>{p}</Select.Option>)}
+            </Select>
+            <Select
+              placeholder="Part Number"
+              allowClear
+              showSearch
+              size="middle"
+              style={{ minWidth: 160 }}
+              value={filterPartNumber}
+              disabled={!filterProject}
+              onChange={(val) => setFilterPartNumber(val || null)}
+            >
+              {partNumberOptions.map(p => <Select.Option key={p} value={p}>{p}</Select.Option>)}
+            </Select>
             <PartWisePriorityPdfDownload data={partData} />
           </Space>
         </div>

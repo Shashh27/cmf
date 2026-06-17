@@ -29,7 +29,7 @@ const SortableRow = (props) => {
 
   const style = {
     ...props.style,
-    transform: CSS.Transform.toString(transform && { ...transform, scaleY: 1 }),
+    transform: CSS.Transform.toString(transform && { x: 0, y: transform.y, scaleX: 1, scaleY: 1 }),
     transition,
     ...(isDragging ? { position: 'relative', zIndex: 9999, opacity: 0.8 } : {}),
   };
@@ -177,7 +177,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 1,
+        distance: 5,
       },
     })
   );
@@ -512,10 +512,10 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       render: (id, r) => <Tag color="geekblue" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.machine_name || id || 'N/A'}</Tag> },
     { title: <span className="font-semibold text-slate-700">Op Type</span>, dataIndex: 'part_type_id', key: 'type',
       render: (_, r) => <Tag color={r.part_type_name === 'Out-Source' ? 'orange' : 'blue'} className="m-0 px-1.5 py-0.5 text-xs">{r.part_type_name || 'IN-House'}</Tag> },
-    { title: <span className="font-semibold text-slate-700">From Date</span>, dataIndex: 'from_date', key: 'from',
-      render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
-    { title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to',
-      render: v => v ? <span className="text-sm text-slate-700">{new Date(v).toLocaleDateString()}</span> : <span className="text-slate-500">—</span> },
+    { title: <span className="font-semibold text-slate-700">From Date</span>, dataIndex: 'from_date', key: 'from', width: 120,
+      render: v => v ? <span className="text-sm text-slate-700 font-medium">{new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-slate-500">—</span> },
+    { title: <span className="font-semibold text-slate-700">To Date</span>, dataIndex: 'to_date', key: 'to', width: 120,
+      render: v => v ? <span className="text-sm text-slate-700 font-medium">{new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-slate-500">—</span> },
     { title: <span className="font-semibold text-slate-700 text-center block">Actions</span>, key: 'actions', align: 'center', width: 150, fixed: 'right',
       render: (_, r) => {
         const isOut = r.part_type_name === 'Out-Source' || r.part_type_id === 2;
@@ -609,6 +609,12 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       render: (_, r) => {
         const cur = selectedVersions[r.parent_id || r.id] || r;
         return <span className="text-xs text-slate-600">{cur.user_name || 'Unknown'}</span>;
+      }
+    },
+    { title: <span className="text-xs font-semibold">DATE</span>, key: 'date', width: 120,
+      render: (_, r) => {
+        const cur = selectedVersions[r.parent_id || r.id] || r;
+        return cur.created_at ? <span className="text-xs text-slate-700 font-medium">{new Date(cur.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span> : <span className="text-xs text-slate-400">—</span>;
       }
     },
     { title: <span className="text-xs font-semibold">ACKNOWLEDGED</span>, key: 'acknowledged', width: 150, align: 'center',
