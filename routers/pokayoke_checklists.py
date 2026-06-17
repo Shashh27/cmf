@@ -384,47 +384,75 @@ def delete_checklist_item(item_id: int, db: Session = Depends(get_db)):
 # POKAYOKE MACHINE ASSIGNMENTS CRUD
 # =======================
 
-@router.post("/{checklist_id}/assignments", response_model=PokayokeMachineAssignmentSchema, status_code=status.HTTP_201_CREATED)
-def create_machine_assignment(checklist_id: int, assignment: PokayokeMachineAssignmentCreate, db: Session = Depends(get_db)):
-    """Assign a Pokayoke checklist to a machine"""
-    # Verify checklist exists
-    checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == checklist_id).first()
-    if not checklist:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Checklist with id {checklist_id} not found"
-        )
+@router.post("/assignments", response_model=List[PokayokeMachineAssignmentSchema], status_code=status.HTTP_201_CREATED)
+def create_machine_assignment(assignment: PokayokeMachineAssignmentCreate, db: Session = Depends(get_db)):
+    """Assign one or more Pokayoke checklists to one or more machines"""
+    # Determine which checklists to assign
+    checklist_ids = assignment.checklist_ids if assignment.checklist_ids else ([assignment.checklist_id] if assignment.checklist_id else [])
     
-    # Verify machine exists
-    machine = db.query(Machine).filter(Machine.id == assignment.machine_id).first()
-    if not machine:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Machine with id {assignment.machine_id} not found"
-        )
-    
-    # Check if assignment already exists
-    existing_assignment = db.query(PokayokeMachineAssignment).filter(
-        PokayokeMachineAssignment.checklist_id == checklist_id,
-        PokayokeMachineAssignment.machine_id == assignment.machine_id
-    ).first()
-    
-    if existing_assignment:
+    if not checklist_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This checklist is already assigned to this machine"
+            detail="At least one checklist_id must be provided"
         )
     
-    # Create assignment with checklist_id from URL
-    assignment_data = assignment.model_dump()
-    assignment_data['checklist_id'] = checklist_id
-    assignment_data['assigned_at'] = datetime.now(IST).replace(tzinfo=None)
+    # Determine which machines to assign to
+    machine_ids = assignment.machine_ids if assignment.machine_ids else ([assignment.machine_id] if assignment.machine_id else [])
     
-    db_assignment = PokayokeMachineAssignment(**assignment_data)
-    db.add(db_assignment)
+    if not machine_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one machine_id must be provided"
+        )
+    
+    # Verify all checklists exist
+    checklists = db.query(PokayokeChecklist).filter(PokayokeChecklist.id.in_(checklist_ids)).all()
+    if len(checklists) != len(checklist_ids):
+        found_ids = {c.id for c in checklists}
+        missing_ids = set(checklist_ids) - found_ids
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Checklist(s) with id(s) {missing_ids} not found"
+        )
+    
+    # Verify all machines exist
+    machines = db.query(Machine).filter(Machine.id.in_(machine_ids)).all()
+    if len(machines) != len(machine_ids):
+        found_ids = {m.id for m in machines}
+        missing_ids = set(machine_ids) - found_ids
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Machine(s) with id(s) {missing_ids} not found"
+        )
+    
+    # Check for existing assignments and create new ones
+    created_assignments = []
+    for checklist_id in checklist_ids:
+        for machine_id in machine_ids:
+            existing_assignment = db.query(PokayokeMachineAssignment).filter(
+                PokayokeMachineAssignment.checklist_id == checklist_id,
+                PokayokeMachineAssignment.machine_id == machine_id
+            ).first()
+            
+            if existing_assignment:
+                continue  # Skip if already assigned
+            
+            # Create assignment
+            assignment_data = assignment.model_dump(exclude={'machine_id', 'machine_ids', 'checklist_id', 'checklist_ids'})
+            assignment_data['checklist_id'] = checklist_id
+            assignment_data['machine_id'] = machine_id
+            assignment_data['assigned_at'] = datetime.now(IST).replace(tzinfo=None)
+            
+            db_assignment = PokayokeMachineAssignment(**assignment_data)
+            db.add(db_assignment)
+            db.flush()
+            created_assignments.append(db_assignment)
+    
     db.commit()
-    db.refresh(db_assignment)
-    return db_assignment
+    for assignment in created_assignments:
+        db.refresh(assignment)
+    
+    return created_assignments
 
 
 @router.get("/{checklist_id}/assignments", response_model=List[PokayokeMachineAssignmentSchema])

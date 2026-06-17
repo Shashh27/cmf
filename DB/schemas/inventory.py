@@ -113,6 +113,8 @@ class RawMaterialStockBase(BaseModel):
 
     order_status: Optional[str] = None  # "enquiry", "purchase_request", "purchase_order", "received", etc.
 
+    creation_source: str = "manual"  # "manual" or "auto_extract"
+
     # New linking fields
     part_id: Optional[str] = None  # Can be single ID or comma-separated IDs like "1,2,3"
 
@@ -427,6 +429,18 @@ class ToolsListUpdate(BaseModel):
 
  
 
+class ToolsListBulkDelete(BaseModel):
+    """Request model for bulk deleting tools by IDs or filters"""
+    tool_ids: Optional[List[int]] = None  # Specific tool IDs to delete
+    delete_all: Optional[bool] = False  # Delete all tools
+    category: Optional[str] = None  # Filter by category
+    sub_category: Optional[str] = None  # Filter by sub_category
+    type: Optional[str] = None  # Filter by type (CONSUMABLES/NON-CONSUMABLES)
+
+ 
+
+ 
+
 class ToolsList(ToolsListBase):
 
     id: int
@@ -456,6 +470,10 @@ class ItemNode(BaseModel):
     item_description: str
 
     count: int
+
+    range: Optional[str] = None
+
+    identification_code: Optional[str] = None
 
  
 
@@ -503,6 +521,8 @@ class InventoryRequestBase(BaseModel):
 
     part_id: int
 
+    operation_id: int
+
     quantity: int
 
     purpose_of_use: Optional[str] = None
@@ -523,6 +543,8 @@ class InventoryRequestCreate(BaseModel):
 
     part_id: int
 
+    operation_id: int
+
     quantity: int
 
     purpose_of_use: Optional[str] = None
@@ -540,6 +562,8 @@ class InventoryRequestUpdate(BaseModel):
     project_id: Optional[int] = None
 
     part_id: Optional[int] = None
+
+    operation_id: Optional[int] = None
 
     quantity: Optional[int] = None
 
@@ -573,6 +597,10 @@ class InventoryRequestWithDetails(InventoryRequest):
 
     tool_type: Optional[str] = None
 
+    tool_range: Optional[str] = None
+
+    identification_code: Optional[str] = None
+
     operator_name: Optional[str] = None
 
     inventory_supervisor_name: Optional[str] = None
@@ -580,6 +608,14 @@ class InventoryRequestWithDetails(InventoryRequest):
     project_name: Optional[str] = None
 
     part_name: Optional[str] = None
+
+    part_number: Optional[str] = None
+
+    product_name: Optional[str] = None
+
+    operation_name: Optional[str] = None
+
+    operation_number: Optional[str] = None
 
 
 
@@ -871,11 +907,25 @@ class ToolIssueWithDetails(ToolIssue):
 
     tool_name: Optional[str] = None
 
+    tool_range: Optional[str] = None
+
+    identification_code: Optional[str] = None
+
     operator_name: Optional[str] = None
 
     inventory_supervisor_name: Optional[str] = None
 
     sale_order_number: Optional[str] = None
+
+    part_name: Optional[str] = None
+
+    part_number: Optional[str] = None
+
+    product_name: Optional[str] = None
+
+    operation_name: Optional[str] = None
+
+    operation_number: Optional[str] = None
 
 
 

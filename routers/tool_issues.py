@@ -10,7 +10,7 @@ import io
 from DB.database import get_db
 from DB.models.inventory import ToolIssue as ToolIssueModel, ToolsList as ToolsListModel, InventoryRequest as InventoryRequestModel, ToolIssueDocument as ToolIssueDocumentModel
 from DB.models.access_control import AccessUser as AccessUserModel
-from DB.models.oms import Order
+from DB.models.oms import Order, Part, Operation, Product
 from DB.schemas.inventory import (
     ToolIssue as ToolIssueSchema,
     ToolIssueCreate as ToolIssueCreateSchema,
@@ -208,14 +208,32 @@ async def create_tool_issue(
         db.rollback()
         # Do not fail the tool issue creation if notification insert fails
     
-    # Fetch sale_order_number for the response
+    # Fetch sale_order_number, part_name, part_number, product_name, operation_name, operation_number for the response
     sale_order_number = None
+    part_name = None
+    part_number = None
+    product_name = None
+    operation_name = None
+    operation_number = None
     if db_issue.request_id:
         inventory_request = db.query(InventoryRequestModel).filter(InventoryRequestModel.id == db_issue.request_id).first()
-        if inventory_request and inventory_request.project_id:
-            order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
-            if order:
-                sale_order_number = order.sale_order_number
+        if inventory_request:
+            if inventory_request.project_id:
+                order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
+                if order:
+                    sale_order_number = order.sale_order_number
+            if inventory_request.part_id:
+                part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+                if part:
+                    part_name = part.part_name
+                    part_number = part.part_number
+                    product = db.query(Product).filter(Product.id == part.product_id).first() if part.product_id else None
+                    product_name = product.product_name if product else None
+            if inventory_request.operation_id:
+                operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first()
+                if operation:
+                    operation_name = operation.operation_name
+                    operation_number = operation.operation_number
     
     # Get related details for the response
     tool = db.query(ToolsListModel).filter(ToolsListModel.id == db_issue.tool_id).first()
@@ -243,9 +261,16 @@ async def create_tool_issue(
             } for doc in db_issue.documents
         ],
         tool_name=tool.item_description if tool else None,
+        tool_range=tool.range if tool else None,
+        identification_code=tool.identification_code if tool else None,
         operator_name=operator.user_name if operator else None,
         inventory_supervisor_name=None,  # No inventory supervisor assigned yet on creation
-        sale_order_number=sale_order_number
+        sale_order_number=sale_order_number,
+        part_name=part_name,
+        part_number=part_number,
+        product_name=product_name,
+        operation_name=operation_name,
+        operation_number=operation_number
     )
 
 
@@ -258,14 +283,32 @@ def get_all_tool_issues(db: Session = Depends(get_db)):
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
         inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
         
-        # Fetch sale_order_number
+        # Fetch sale_order_number, part_name, part_number, product_name, operation_name, operation_number
         sale_order_number = None
+        part_name = None
+        part_number = None
+        product_name = None
+        operation_name = None
+        operation_number = None
         if issue.request_id:
             inventory_request = db.query(InventoryRequestModel).filter(InventoryRequestModel.id == issue.request_id).first()
-            if inventory_request and inventory_request.project_id:
-                order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
-                if order:
-                    sale_order_number = order.sale_order_number
+            if inventory_request:
+                if inventory_request.project_id:
+                    order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
+                    if order:
+                        sale_order_number = order.sale_order_number
+                if inventory_request.part_id:
+                    part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+                    if part:
+                        part_name = part.part_name
+                        part_number = part.part_number
+                        product = db.query(Product).filter(Product.id == part.product_id).first() if part.product_id else None
+                        product_name = product.product_name if product else None
+                if inventory_request.operation_id:
+                    operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first()
+                    if operation:
+                        operation_name = operation.operation_name
+                        operation_number = operation.operation_number
         
         results.append(ToolIssueWithDetailsSchema(
             id=issue.id,
@@ -289,9 +332,16 @@ def get_all_tool_issues(db: Session = Depends(get_db)):
                 } for doc in issue.documents
             ],
             tool_name=tool.item_description if tool else None,
+            tool_range=tool.range if tool else None,
+            identification_code=tool.identification_code if tool else None,
             operator_name=operator.user_name if operator else None,
             inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
-            sale_order_number=sale_order_number
+            sale_order_number=sale_order_number,
+            part_name=part_name,
+            part_number=part_number,
+            product_name=product_name,
+            operation_name=operation_name,
+            operation_number=operation_number
         ))
     return results
 
@@ -306,14 +356,30 @@ def get_tool_issue(issue_id: int, db: Session = Depends(get_db)):
     operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
     inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
     
-    # Fetch sale_order_number
+    # Fetch sale_order_number, part_name, operation_name, operation_number
     sale_order_number = None
+    part_name = None
+    operation_name = None
+    operation_number = None
     if issue.request_id:
         inventory_request = db.query(InventoryRequestModel).filter(InventoryRequestModel.id == issue.request_id).first()
-        if inventory_request and inventory_request.project_id:
-            order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
-            if order:
-                sale_order_number = order.sale_order_number
+        if inventory_request:
+            if inventory_request.project_id:
+                order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
+                if order:
+                    sale_order_number = order.sale_order_number
+            if inventory_request.part_id:
+                part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+                if part:
+                    part_name = part.part_name
+                    part_number = part.part_number
+                    product = db.query(Product).filter(Product.id == part.product_id).first() if part.product_id else None
+                    product_name = product.product_name if product else None
+            if inventory_request.operation_id:
+                operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first()
+                if operation:
+                    operation_name = operation.operation_name
+                    operation_number = operation.operation_number
     
     return ToolIssueWithDetailsSchema(
         id=issue.id,
@@ -337,9 +403,16 @@ def get_tool_issue(issue_id: int, db: Session = Depends(get_db)):
             } for doc in issue.documents
         ],
         tool_name=tool.item_description if tool else None,
+        tool_range=tool.range if tool else None,
+        identification_code=tool.identification_code if tool else None,
         operator_name=operator.user_name if operator else None,
         inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
-        sale_order_number=sale_order_number
+        sale_order_number=sale_order_number,
+        part_name=part_name,
+        part_number=part_number,
+        product_name=product_name,
+        operation_name=operation_name,
+        operation_number=operation_number
     )
 
 
@@ -561,14 +634,32 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
         inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
-        # Fetch sale_order_number for operator-specific listing
+        # Fetch sale_order_number, part_name, part_number, product_name, operation_name, operation_number for operator-specific listing
         sale_order_number = None
+        part_name = None
+        part_number = None
+        product_name = None
+        operation_name = None
+        operation_number = None
         if issue.request_id:
             inventory_request = db.query(InventoryRequestModel).filter(InventoryRequestModel.id == issue.request_id).first()
-            if inventory_request and inventory_request.project_id:
-                order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
-                if order:
-                    sale_order_number = order.sale_order_number
+            if inventory_request:
+                if inventory_request.project_id:
+                    order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
+                    if order:
+                        sale_order_number = order.sale_order_number
+                if inventory_request.part_id:
+                    part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+                    if part:
+                        part_name = part.part_name
+                        part_number = part.part_number
+                        product = db.query(Product).filter(Product.id == part.product_id).first() if part.product_id else None
+                        product_name = product.product_name if product else None
+                if inventory_request.operation_id:
+                    operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first()
+                    if operation:
+                        operation_name = operation.operation_name
+                        operation_number = operation.operation_number
         results.append(ToolIssueWithDetailsSchema(
             id=issue.id,
             tool_id=issue.tool_id,
@@ -591,9 +682,16 @@ def get_tool_issues_by_operator(operator_id: int, db: Session = Depends(get_db))
                 } for doc in issue.documents
             ],
             tool_name=tool.item_description if tool else None,
+            tool_range=tool.range if tool else None,
+            identification_code=tool.identification_code if tool else None,
             operator_name=operator.user_name if operator else None,
             inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
-            sale_order_number=sale_order_number
+            sale_order_number=sale_order_number,
+            part_name=part_name,
+            part_number=part_number,
+            product_name=product_name,
+            operation_name=operation_name,
+            operation_number=operation_number
         ))
     return results
 
@@ -606,6 +704,34 @@ def get_tool_issues_by_status(status: str, db: Session = Depends(get_db)):
         tool     = db.query(ToolsListModel).filter(ToolsListModel.id == issue.tool_id).first()
         operator = db.query(AccessUserModel).filter(AccessUserModel.id == issue.operator_id).first()
         inventory_supervisor = db.query(AccessUserModel).filter(AccessUserModel.id == issue.inventory_supervisor_id).first()
+        
+        # Fetch sale_order_number, part_name, part_number, product_name, operation_name, operation_number
+        sale_order_number = None
+        part_name = None
+        part_number = None
+        product_name = None
+        operation_name = None
+        operation_number = None
+        if issue.request_id:
+            inventory_request = db.query(InventoryRequestModel).filter(InventoryRequestModel.id == issue.request_id).first()
+            if inventory_request:
+                if inventory_request.project_id:
+                    order = db.query(Order).filter(Order.id == inventory_request.project_id).first()
+                    if order:
+                        sale_order_number = order.sale_order_number
+                if inventory_request.part_id:
+                    part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
+                    if part:
+                        part_name = part.part_name
+                        part_number = part.part_number
+                        product = db.query(Product).filter(Product.id == part.product_id).first() if part.product_id else None
+                        product_name = product.product_name if product else None
+                if inventory_request.operation_id:
+                    operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first()
+                    if operation:
+                        operation_name = operation.operation_name
+                        operation_number = operation.operation_number
+        
         results.append(ToolIssueWithDetailsSchema(
             id=issue.id,
             tool_id=issue.tool_id,
@@ -628,7 +754,15 @@ def get_tool_issues_by_status(status: str, db: Session = Depends(get_db)):
                 } for doc in issue.documents
             ],
             tool_name=tool.item_description if tool else None,
+            tool_range=tool.range if tool else None,
+            identification_code=tool.identification_code if tool else None,
             operator_name=operator.user_name if operator else None,
-            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None
+            inventory_supervisor_name=inventory_supervisor.user_name if inventory_supervisor else None,
+            sale_order_number=sale_order_number,
+            part_name=part_name,
+            part_number=part_number,
+            product_name=product_name,
+            operation_name=operation_name,
+            operation_number=operation_number
         ))
     return results

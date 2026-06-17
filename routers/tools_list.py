@@ -11,6 +11,7 @@ from DB.schemas.inventory import (
     ToolsList,
     ToolsListCreate,
     ToolsListUpdate,
+    ToolsListBulkDelete,
     ItemNode,
     SubCategoryNode,
     CategoryTree,
@@ -186,6 +187,63 @@ async def upload_tools_excel(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# BULK DELETE
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.delete("/bulk-delete", status_code=status.HTTP_200_OK)
+def bulk_delete_tools(request: ToolsListBulkDelete, db: Session = Depends(get_db)):
+    """Bulk delete tools by IDs, filters, or all tools"""
+    query = db.query(ToolsListModel)
+    
+    # If specific IDs are provided, use those
+    if request.tool_ids:
+        if not request.tool_ids:
+            raise HTTPException(status_code=400, detail="No tool IDs provided")
+        query = query.filter(ToolsListModel.id.in_(request.tool_ids))
+    
+    # If delete_all is True, delete all tools
+    elif request.delete_all:
+        pass  # No filter needed, will delete all
+    
+    # Otherwise, apply filters
+    else:
+        if not any([request.category, request.sub_category, request.type]):
+            raise HTTPException(
+                status_code=400, 
+                detail="Either tool_ids, delete_all, or at least one filter (category, sub_category, type) must be provided"
+            )
+        
+        if request.category:
+            query = query.filter(func.lower(ToolsListModel.category) == request.category.lower())
+        if request.sub_category:
+            query = query.filter(func.lower(ToolsListModel.sub_category) == request.sub_category.lower())
+        if request.type:
+            query = query.filter(ToolsListModel.type == request.type)
+    
+    # Get tools to delete
+    tools_to_delete = query.all()
+    
+    if not tools_to_delete:
+        raise HTTPException(status_code=404, detail="No tools found matching the criteria")
+
+    deleted_count = 0
+    deleted_ids = []
+    
+    for tool in tools_to_delete:
+        deleted_ids.append(tool.id)
+        db.delete(tool)
+        deleted_count += 1
+
+    db.commit()
+
+    return {
+        "message": f"Successfully deleted {deleted_count} tool(s)",
+        "deleted_count": deleted_count,
+        "deleted_ids": deleted_ids
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 3-LEVEL TREE  ←  SIDEBAR ENDPOINT
 #
 # Structure returned:
@@ -215,12 +273,16 @@ def get_category_tree(db: Session = Depends(get_db)):
             ToolsListModel.category,
             ToolsListModel.sub_category,
             ToolsListModel.item_description,
+            ToolsListModel.range,
+            ToolsListModel.identification_code,
             func.count(ToolsListModel.id).label("count"),
         )
         .group_by(
             ToolsListModel.category,
             ToolsListModel.sub_category,
             ToolsListModel.item_description,
+            ToolsListModel.range,
+            ToolsListModel.identification_code,
         )
         .order_by(
             ToolsListModel.category,
@@ -236,6 +298,8 @@ def get_category_tree(db: Session = Depends(get_db)):
         cat  = row.category         or "Misc"
         sub  = row.sub_category     or "General"
         item = row.item_description or "Unknown"
+        rng  = row.range
+        id_code = row.identification_code
         cnt  = row.count
 
         if cat not in tree:
@@ -249,7 +313,7 @@ def get_category_tree(db: Session = Depends(get_db)):
             }
 
         tree[cat]["sub_categories"][sub]["items"].append(
-            ItemNode(item_description=item, count=cnt)
+            ItemNode(item_description=item, count=cnt, range=rng, identification_code=id_code)
         )
         tree[cat]["sub_categories"][sub]["count"] += cnt
         tree[cat]["total_count"] += cnt

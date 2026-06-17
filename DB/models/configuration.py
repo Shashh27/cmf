@@ -271,5 +271,3 @@ class SubmissionDetail(Base):
     # Relationships
     submission = relationship("Submission", back_populates="details")
     checklist = relationship("OperationChecklist", back_populates="submission_details")
-
-

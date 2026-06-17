@@ -203,8 +203,12 @@ class PokayokeChecklistCreate(PokayokeChecklistBase):
     items: List[PokayokeChecklistItemCreate] = []
 
 
-class PokayokeMachineAssignmentCreate(PokayokeMachineAssignmentBase):
-    pass
+class PokayokeMachineAssignmentCreate(BaseModel):
+    machine_ids: List[int]
+    checklist_ids: List[int]
+    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
+    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
+    scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
 
 
 # Update schemas
@@ -444,8 +448,6 @@ from .oms import Part as PartSchema, Order as OrderSchema
 PokayokeCompletedLogWithResponses.model_rebuild()
 
 
-
-
 # =======================
 # Operation Checklists Schemas
 # =======================
@@ -582,6 +584,3 @@ class Submission(SubmissionBase):
 
 class SubmissionWithDetails(Submission):
     details: List[SubmissionDetail] = []
-
-
-

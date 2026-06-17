@@ -27,6 +27,9 @@ def get_admin_username(db: Session) -> str:
 
 @router.get("/", response_model=List[MachineNotificationWithDetails])
 def list_machine_notifications(
+    mc_id: int | None = None,
+    pc_id: int | None = None,
+    admin_id: int | None = None,
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     db: Session = Depends(get_db),
@@ -73,6 +76,16 @@ def list_machine_notifications(
         bd = breakdown_map.get(n.machine_breakdown_id, {})
         m = machine_map.get(bd.get("machine_id"))
         op = operator_map.get(bd.get("reported_by"))
+        # Filter based on role IDs - for machine breakdowns, filter by reported_by
+        # Skip if breakdown not found and role filtering is requested
+        if (mc_id or pc_id or admin_id) and not bd:
+            continue
+        if mc_id and bd.get("reported_by") != mc_id:
+            continue
+        if pc_id and bd.get("reported_by") != pc_id:
+            continue
+        if admin_id and bd.get("reported_by") != admin_id:
+            continue
         response.append(MachineNotificationWithDetails(
             id=n.id,
             machine_breakdown_id=n.machine_breakdown_id,
@@ -91,8 +104,38 @@ def list_machine_notifications(
 
 
 @router.get("/pending", response_model=List[MachineNotificationSchema])
-def list_pending_machine_notifications(db: Session = Depends(get_db)):
-    return db.query(MachineNotificationModel).filter(MachineNotificationModel.is_ack == False).order_by(MachineNotificationModel.id.desc()).all()  # noqa: E712
+def list_pending_machine_notifications(
+    mc_id: int | None = None,
+    pc_id: int | None = None,
+    admin_id: int | None = None,
+    db: Session = Depends(get_db)
+):
+    q = db.query(MachineNotificationModel).filter(MachineNotificationModel.is_ack == False)  # noqa: E712
+    notifications = q.order_by(MachineNotificationModel.id.desc()).all()
+    breakdown_ids = [n.machine_breakdown_id for n in notifications]
+    if not breakdown_ids:
+        return []
+    stmt = text("""
+        SELECT id, reported_by
+        FROM maintenance.machine_breakdown
+        WHERE id IN :ids
+    """).bindparams(bindparam("ids", expanding=True))
+    rows = db.execute(stmt, {"ids": breakdown_ids}).fetchall()
+    breakdown_map = {int(r[0]): r[1] for r in rows}
+    result = []
+    for n in notifications:
+        reported_by = breakdown_map.get(n.machine_breakdown_id)
+        # Filter based on role IDs - skip if breakdown not found and role filtering is requested
+        if (mc_id or pc_id or admin_id) and reported_by is None:
+            continue
+        if mc_id and reported_by != mc_id:
+            continue
+        if pc_id and reported_by != pc_id:
+            continue
+        if admin_id and reported_by != admin_id:
+            continue
+        result.append(n)
+    return result
 
 
 

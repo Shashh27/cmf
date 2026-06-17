@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from DB.database import get_db
 from DB.models.inventory import InventoryRequest, ToolsList
 from DB.models.access_control import AccessUser
-from DB.models.oms import Order, Part
+from DB.models.oms import Order, Part, Operation, Product
 from DB.schemas.inventory import (
     InventoryRequest as InventoryRequestSchema,
     InventoryRequestCreate as InventoryRequestCreateSchema,
@@ -72,6 +72,14 @@ def create_inventory_request(
             detail=f"Part with id {request_data.part_id} not found"
         )
     
+    # Verify operation exists
+    operation = db.query(Operation).filter(Operation.id == request_data.operation_id).first()
+    if not operation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operation with id {request_data.operation_id} not found"
+        )
+    
     # Force status to be "pending" and inventory_supervisor_id to be None on creation
     create_data = request_data.dict()
     create_data['status'] = 'pending'
@@ -99,6 +107,8 @@ def get_all_inventory_requests(db: Session = Depends(get_db)):
         inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == req.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == req.project_id).first()
         part = db.query(Part).filter(Part.id == req.part_id).first()
+        operation = db.query(Operation).filter(Operation.id == req.operation_id).first() if req.operation_id else None
+        product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
         
         request_dict = {
             "id": req.id,
@@ -106,6 +116,7 @@ def get_all_inventory_requests(db: Session = Depends(get_db)):
             "operator_id": req.operator_id,
             "project_id": req.project_id,
             "part_id": req.part_id,
+            "operation_id": req.operation_id,
             "quantity": req.quantity,
             "purpose_of_use": req.purpose_of_use,
             "inventory_supervisor_id": req.inventory_supervisor_id,
@@ -114,10 +125,16 @@ def get_all_inventory_requests(db: Session = Depends(get_db)):
             "updated_at": req.updated_at,
             "tool_name": tool.item_description if tool else None,
             "tool_type": tool.type if tool else None,
+            "tool_range": tool.range if tool else None,
+            "identification_code": tool.identification_code if tool else None,
             "operator_name": operator.user_name if operator else None,
             "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
-            "part_name": part.part_name if part else None
+            "part_name": part.part_name if part else None,
+            "part_number": part.part_number if part else None,
+            "product_name": product.product_name if product else None,
+            "operation_name": operation.operation_name if operation else None,
+            "operation_number": operation.operation_number if operation else None
         }
         result.append(InventoryRequestWithDetailsSchema(**request_dict))
     
@@ -140,6 +157,8 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
     inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == request.inventory_supervisor_id).first()
     project = db.query(Order).filter(Order.id == request.project_id).first()
     part = db.query(Part).filter(Part.id == request.part_id).first()
+    operation = db.query(Operation).filter(Operation.id == request.operation_id).first() if request.operation_id else None
+    product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
     
     request_dict = {
         "id": request.id,
@@ -147,6 +166,7 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
         "operator_id": request.operator_id,
         "project_id": request.project_id,
         "part_id": request.part_id,
+        "operation_id": request.operation_id,
         "quantity": request.quantity,
         "purpose_of_use": request.purpose_of_use,
         "inventory_supervisor_id": request.inventory_supervisor_id,
@@ -155,10 +175,16 @@ def get_inventory_request(request_id: int, db: Session = Depends(get_db)):
         "updated_at": request.updated_at,
         "tool_name": tool.item_description if tool else None,
         "tool_type": tool.type if tool else None,
+        "tool_range": tool.range if tool else None,
+        "identification_code": tool.identification_code if tool else None,
         "operator_name": operator.user_name if operator else None,
         "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
         "project_name": project.sale_order_number if project else None,
-        "part_name": part.part_name if part else None
+        "part_name": part.part_name if part else None,
+        "part_number": part.part_number if part else None,
+        "product_name": product.product_name if product else None,
+        "operation_name": operation.operation_name if operation else None,
+        "operation_number": operation.operation_number if operation else None
     }
     
     return InventoryRequestWithDetailsSchema(**request_dict)
@@ -219,6 +245,14 @@ def update_inventory_request(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Part with id {update_data['part_id']} not found"
+            )
+    
+    if 'operation_id' in update_data:
+        operation = db.query(Operation).filter(Operation.id == update_data['operation_id']).first()
+        if not operation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Operation with id {update_data['operation_id']} not found"
             )
     
     # Validate quantity if it's being updated
@@ -367,6 +401,8 @@ def get_inventory_requests_by_operator(operator_id: int, db: Session = Depends(g
         inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == req.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == req.project_id).first()
         part = db.query(Part).filter(Part.id == req.part_id).first()
+        operation = db.query(Operation).filter(Operation.id == req.operation_id).first() if req.operation_id else None
+        product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
         
         request_dict = {
             "id": req.id,
@@ -374,6 +410,7 @@ def get_inventory_requests_by_operator(operator_id: int, db: Session = Depends(g
             "operator_id": req.operator_id,
             "project_id": req.project_id,
             "part_id": req.part_id,
+            "operation_id": req.operation_id,
             "quantity": req.quantity,
             "purpose_of_use": req.purpose_of_use,
             "inventory_supervisor_id": req.inventory_supervisor_id,
@@ -382,10 +419,16 @@ def get_inventory_requests_by_operator(operator_id: int, db: Session = Depends(g
             "updated_at": req.updated_at,
             "tool_name": tool.item_description if tool else None,
             "tool_type": tool.type if tool else None,
+            "tool_range": tool.range if tool else None,
+            "identification_code": tool.identification_code if tool else None,
             "operator_name": operator.user_name if operator else None,
             "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
-            "part_name": part.part_name if part else None
+            "part_name": part.part_name if part else None,
+            "part_number": part.part_number if part else None,
+            "product_name": product.product_name if product else None,
+            "operation_name": operation.operation_name if operation else None,
+            "operation_number": operation.operation_number if operation else None
         }
         result.append(InventoryRequestWithDetailsSchema(**request_dict))
     
@@ -405,6 +448,8 @@ def get_inventory_requests_by_status(status: str, db: Session = Depends(get_db))
         inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == req.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == req.project_id).first()
         part = db.query(Part).filter(Part.id == req.part_id).first()
+        operation = db.query(Operation).filter(Operation.id == req.operation_id).first() if req.operation_id else None
+        product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
         
         request_dict = {
             "id": req.id,
@@ -412,6 +457,7 @@ def get_inventory_requests_by_status(status: str, db: Session = Depends(get_db))
             "operator_id": req.operator_id,
             "project_id": req.project_id,
             "part_id": req.part_id,
+            "operation_id": req.operation_id,
             "quantity": req.quantity,
             "purpose_of_use": req.purpose_of_use,
             "inventory_supervisor_id": req.inventory_supervisor_id,
@@ -420,10 +466,16 @@ def get_inventory_requests_by_status(status: str, db: Session = Depends(get_db))
             "updated_at": req.updated_at,
             "tool_name": tool.item_description if tool else None,
             "tool_type": tool.type if tool else None,
+            "tool_range": tool.range if tool else None,
+            "identification_code": tool.identification_code if tool else None,
             "operator_name": operator.user_name if operator else None,
             "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
-            "part_name": part.part_name if part else None
+            "part_name": part.part_name if part else None,
+            "part_number": part.part_number if part else None,
+            "product_name": product.product_name if product else None,
+            "operation_name": operation.operation_name if operation else None,
+            "operation_number": operation.operation_number if operation else None
         }
         result.append(InventoryRequestWithDetailsSchema(**request_dict))
     

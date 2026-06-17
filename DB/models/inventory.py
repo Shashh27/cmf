@@ -124,6 +124,8 @@ class RawMaterialStock(Base):
 
     order_status = Column(String, nullable=True)  # "enquiry", "purchase_request", "purchase_order", "received", etc.
 
+    creation_source = Column(String, nullable=False, default="manual")  # "manual" or "auto_extract"
+
     # New columns for linking parts, vendors, and tracking who created
     part_id = Column(String, nullable=True)  # Can be single ID or comma-separated IDs like "1,2,3"
     
@@ -274,6 +276,8 @@ class InventoryRequest(Base):
     project_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
 
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=True)
 
     quantity = Column(Integer, nullable=False)
 

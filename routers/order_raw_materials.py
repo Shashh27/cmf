@@ -23,6 +23,17 @@ from DB.schemas.inventory import (
 )
 from services.raw_material_calculations import RawMaterialCalculationService
 from services.stock_auto_update import StockAutoUpdateService
+from services.auto_extract_service import AutoExtractService
+
+# Import models for hierarchy fetching
+from DB.models.oms import (
+    Product as ProductModel,
+    Assembly as AssemblyModel,
+    Part as PartModel,
+    PartType as PartTypeModel,
+    Document as DocumentModel,
+    DocumentExtractedData as DocumentExtractedDataModel,
+)
 
 router = APIRouter(
     tags=["Order Raw Materials"]
@@ -589,12 +600,15 @@ def get_order_parts_raw_material_linked(
         
         order_ids = [order[0] for order in order_query.all()]
         
-        # Filter stock items by these order IDs
+        # Filter stock items by these order IDs, BUT include auto-extracted materials regardless
         if order_ids:
-            query = query.filter(RawMaterialStockModel.source_order_id.in_(order_ids))
+            query = query.filter(
+                (RawMaterialStockModel.source_order_id.in_(order_ids)) |
+                (RawMaterialStockModel.creation_source == 'auto_extract')
+            )
         else:
-            # If no orders found, return empty result
-            return []
+            # If no orders found, only return auto-extracted materials
+            query = query.filter(RawMaterialStockModel.creation_source == 'auto_extract')
     
     stock_items = query.order_by(RawMaterialStockModel.id.asc()).all()
     
@@ -1148,3 +1162,353 @@ def delete_order_parts_raw_material_linked(
 
 
 # ==================== Helper Functions ====================
+
+
+# ==================== Order Raw Material Hierarchy (Simplified) ====================
+
+def fetch_simplified_hierarchy(db: Session, product_id: int):
+    """
+    Fetch simplified product hierarchy for raw materials.
+    Returns only: parts, assemblies, documents, extracted_data, and raw material info.
+    Excludes: operations, operation_documents, tools.
+    """
+    # Get product
+    product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with id {product_id} not found"
+        )
+
+    # Get all assemblies for this product
+    all_assemblies = db.query(AssemblyModel).filter(AssemblyModel.product_id == product_id).order_by(AssemblyModel.id.asc()).all()
+    assembly_ids = [asm.id for asm in all_assemblies]
+
+    # Get all parts for this product
+    all_parts = db.query(PartModel).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
+
+    # Get all raw materials for mapping
+    all_raw_materials = db.query(RawMaterialModel).all()
+    raw_material_map = {rm.id: rm.material_name for rm in all_raw_materials}
+    raw_material_status_map = {rm.id: "Available" for rm in all_raw_materials}
+    
+    # Get all raw material units for mapping
+    all_units = db.query(RawMaterialUnitModel).options(
+        joinedload(RawMaterialUnitModel.stock).joinedload(RawMaterialStockModel.material)
+    ).all()
+    unit_map = {unit.id: unit for unit in all_units}
+    
+    # Get all part types for mapping
+    all_part_types = db.query(PartTypeModel).all()
+    part_type_map = {pt.id: pt.type_name for pt in all_part_types}
+
+    # User map for part.user_id -> user_name
+    all_users = db.query(AccessUserModel).all()
+    user_map = {u.id: u.user_name for u in all_users}
+    
+    # Create mappings for easy lookup
+    assembly_map = {asm.id: asm for asm in all_assemblies}
+    part_map = {part.id: part for part in all_parts}
+    
+    # Pre-build lookup maps
+    parts_by_assembly = {}
+    for part in all_parts:
+        parts_by_assembly.setdefault(part.assembly_id, []).append(part)
+    
+    assemblies_by_parent = {}
+    for asm in all_assemblies:
+        assemblies_by_parent.setdefault(asm.parent_id, []).append(asm)
+    
+    # Get documents and extracted data for parts
+    part_ids = list(part_map.keys())
+    documents_by_part = {}
+    extracted_by_part = {}
+    documents_by_assembly = {}
+    
+    if part_ids:
+        # Get documents for parts
+        documents = db.query(DocumentModel).filter(DocumentModel.part_id.in_(part_ids)).all()
+        for doc in documents:
+            if doc.part_id not in documents_by_part:
+                documents_by_part[doc.part_id] = []
+            documents_by_part[doc.part_id].append(doc)
+        
+        # Get extracted data for parts
+        extracted_rows = (
+            db.query(DocumentExtractedDataModel)
+            .filter(DocumentExtractedDataModel.part_id.in_(part_ids))
+            .all()
+        )
+        for row in extracted_rows:
+            if row.part_id not in extracted_by_part:
+                extracted_by_part[row.part_id] = []
+            extracted_by_part[row.part_id].append(row)
+    
+    # Get documents for assemblies
+    if assembly_ids:
+        asm_docs = db.query(DocumentModel).filter(DocumentModel.assembly_id.in_(assembly_ids)).all()
+        for doc in asm_docs:
+            if doc.assembly_id not in documents_by_assembly:
+                documents_by_assembly[doc.assembly_id] = []
+            documents_by_assembly[doc.assembly_id].append(doc)
+
+    def create_simplified_part_details(part: PartModel):
+        """Create simplified part details with only raw material relevant data"""
+        part_type_name = part_type_map.get(part.type_id, "")
+        
+        # Raw material status
+        if part.raw_material_id is None:
+            raw_material_status = "N/A"
+        else:
+            raw_material_status = raw_material_status_map.get(part.raw_material_id, "Not Available")
+
+        # Get unit details if part has a unit assigned
+        unit_details = None
+        raw_material_stock_details = None
+        raw_material_stock_form_type = None
+        raw_material_stock_dimensions = None
+        
+        if part.raw_material_unit_id and part.raw_material_unit_id in unit_map:
+            unit = unit_map[part.raw_material_unit_id]
+            stock = unit.stock
+            # Build stock dimensions string
+            stock_dimensions = None
+            if stock:
+                if stock.form_type == 'Round':
+                    stock_dimensions = f'Ø{stock.diameter} × {stock.length}mm'
+                elif stock.form_type == 'Square':
+                    stock_dimensions = f'{stock.breadth} × {stock.height} × {stock.length}mm'
+                elif stock.form_type == 'Pipe':
+                    stock_dimensions = f'Ø{stock.outer_diameter}/{stock.inner_diameter} × {stock.length}mm'
+            
+            unit_details = {
+                'id': unit.id,
+                'total_length': unit.total_length,
+                'remaining_length': unit.remaining_length,
+                'volume': unit.volume,
+                'mass': unit.mass,
+                'weight': unit.weight,
+                'cost': unit.cost,
+                'status': unit.status,
+                'form_type': stock.form_type if stock else None,
+                'material_name': stock.material.material_name if stock and stock.material else None,
+                'source_type': stock.source_type if stock else None,
+                'stock_dimensions': stock_dimensions,
+            }
+            
+            # Additional stock details for raw material linking
+            if stock:
+                raw_material_stock_details = {
+                    'id': stock.id,
+                    'total_length': stock.length,
+                    'remaining_length': stock.length,
+                    'volume': stock.volume,
+                    'mass': stock.mass,
+                    'weight': stock.weight,
+                    'cost': stock.cost,
+                    'status': stock.status,
+                    'form_type': stock.form_type,
+                    'material_name': stock.material.material_name if stock.material else None,
+                    'source_type': stock.source_type,
+                    'stock_dimensions': stock_dimensions,
+                }
+                raw_material_stock_form_type = stock.form_type
+                raw_material_stock_dimensions = stock_dimensions
+
+        part_dict = {
+            'id': part.id,
+            'part_name': part.part_name,
+            'part_number': part.part_number,
+            'type_id': part.type_id,
+            'raw_material_id': part.raw_material_id,
+            'raw_material_unit_id': part.raw_material_unit_id,
+            'required_length': part.required_length,
+            'part_detail': part.part_detail,
+            'assembly_id': part.assembly_id,
+            'product_id': part.product_id,
+            'user_id': part.user_id,
+            'qty': part.qty,
+            'size': part.size,
+            'vendor_id': part.vendor_id,
+            'type_name': part_type_map.get(part.type_id),
+            'raw_material_name': raw_material_map.get(part.raw_material_id),
+            'raw_material_status': raw_material_status,
+            'raw_material_unit_details': unit_details,
+            'raw_material_stock_details': raw_material_stock_details,
+            'raw_material_stock_form_type': raw_material_stock_form_type,
+            'raw_material_stock_dimensions': raw_material_stock_dimensions,
+            'priority': getattr(part, 'priority', None),
+            'user_name': user_map.get(part.user_id) if part.user_id else None,
+            'vendor_name': getattr(part.vendor, 'company_name', None) if hasattr(part, 'vendor') and part.vendor else None,
+            'recycle_bin': getattr(part, 'recycle_bin', False),
+            'created_at': part.created_at,
+            'updated_at': part.updated_at,
+        }
+        
+        return {
+            'part': part_dict,
+            'documents': documents_by_part.get(part.id, []),
+            'extracted_data': extracted_by_part.get(part.id, []),
+        }
+    
+    def build_simplified_assembly_hierarchy(assembly_id: int):
+        """Recursively build simplified assembly hierarchy"""
+        assembly = assembly_map[assembly_id]
+        
+        direct_parts = [
+            create_simplified_part_details(part) 
+            for part in parts_by_assembly.get(assembly_id, [])
+        ]
+        
+        child_assemblies = [
+            build_simplified_assembly_hierarchy(child.id) 
+            for child in assemblies_by_parent.get(assembly_id, [])
+        ]
+        
+        return {
+            'assembly': {
+                'id': assembly.id,
+                'assembly_name': assembly.assembly_name,
+                'assembly_number': assembly.assembly_number,
+                'product_id': assembly.product_id,
+                'parent_id': assembly.parent_id,
+                'user_id': assembly.user_id,
+                'recycle_bin': assembly.recycle_bin,
+                'user_name': user_map.get(assembly.user_id) if assembly.user_id else None,
+                'created_at': assembly.created_at,
+                'updated_at': assembly.updated_at,
+            },
+            'parts': direct_parts,
+            'subassemblies': child_assemblies,
+            'documents': documents_by_assembly.get(assembly_id, []),
+        }
+    
+    # Build root level assemblies
+    root_assemblies = [
+        build_simplified_assembly_hierarchy(asm.id) 
+        for asm in assemblies_by_parent.get(None, [])
+    ]
+    
+    # Get direct parts (parts not assigned to any assembly)
+    direct_parts = [
+        create_simplified_part_details(part) 
+        for part in parts_by_assembly.get(None, [])
+    ]
+    
+    return {
+        'product': {
+            'id': product.id,
+            'product_name': product.product_name,
+            'product_version': product.product_version,
+            'user_id': product.user_id,
+            'user_name': user_map.get(product.user_id) if product.user_id else None,
+            'created_at': product.created_at,
+            'updated_at': product.updated_at,
+        },
+        'assemblies': root_assemblies,
+        'direct_parts': direct_parts
+    }
+
+
+@router.get("/order-raw-material-hierarchy/{order_id}")
+def get_order_raw_material_hierarchy(order_id: int, db: Session = Depends(get_db)):
+    """
+    Get order with simplified product hierarchy for raw materials.
+    Returns only: extracted text, part information, and assigned raw materials.
+    Excludes: operations, operation documents, tools.
+    """
+    # Get order
+    order = (
+        db.query(OrderModel)
+        .options(
+            joinedload(OrderModel.customer),
+            joinedload(OrderModel.product),
+            joinedload(OrderModel.user),
+            joinedload(OrderModel.project_coordinator),
+            joinedload(OrderModel.admin),
+            joinedload(OrderModel.manufacturing_coordinator),
+        )
+        .filter(OrderModel.id == order_id)
+        .first()
+    )
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Get simplified hierarchy
+    hierarchy = fetch_simplified_hierarchy(db, order.product_id)
+
+    # Build order response
+    order_response = {
+        "id": order.id,
+        "sale_order_number": order.sale_order_number,
+        "project_name": order.project_name,
+        "order_date": order.order_date,
+        "customer_id": order.customer_id,
+        "product_id": order.product_id,
+        "user_id": order.user_id,
+        "user_role": order.user.role if order.user else None,
+        "project_coordinator_id": order.project_coordinator_id,
+        "admin_id": order.admin_id,
+        "manufacturing_coordinator_id": order.manufacturing_coordinator_id,
+        "quantity": order.quantity,
+        "due_date": order.due_date,
+        "status": order.status,
+        "approval_status": order.approval_status,
+        "approval_remarks": order.approval_remarks,
+        "approved_at": order.approved_at,
+        "company_name": order.customer.company_name if order.customer else None,
+        "product_name": order.product.product_name if order.product else None,
+        "user_name": order.user.user_name if order.user else None,
+        "project_coordinator_name": order.project_coordinator.user_name if order.project_coordinator else None,
+        "admin_name": order.admin.user_name if order.admin else None,
+        "manufacturing_coordinator_name": order.manufacturing_coordinator.user_name if order.manufacturing_coordinator else None,
+        "created_at": order.created_at,
+        "updated_at": order.updated_at,
+        "product_hierarchy": hierarchy
+    }
+
+    return order_response
+
+
+# ==================== Auto-Extract Raw Materials ====================
+
+class AutoExtractRequest(BaseModel):
+    part_id: int
+    material_name: Optional[str] = None
+    stock_size: Optional[str] = None
+    quantity: int = 1
+    required_length: Optional[float] = None
+    user_id: int
+    process_type: Optional[str] = 'Barstocks'
+
+
+@router.post("/auto-extract-process")
+def process_auto_extract_material(request: AutoExtractRequest, db: Session = Depends(get_db)):
+    """
+    Process extracted material for a part - creates stock in database.
+    This should only be called when user clicks Procure button.
+    """
+    # Get part
+    part = db.query(PartModel).filter(PartModel.id == request.part_id).first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+
+    # Build extracted data
+    extracted_data = {
+        'material': request.material_name,
+        'stock_size': request.stock_size or '',
+        'quantity': request.quantity,
+        'required_length': request.required_length,
+        'process_type': request.process_type
+    }
+
+    # Process and create stock using auto-extract service
+    result = AutoExtractService.process_and_create_stock(
+        db=db,
+        part=part,
+        extracted_data=extracted_data,
+        user_id=request.user_id
+    )
+
+    return result

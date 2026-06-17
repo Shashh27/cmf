@@ -9,8 +9,9 @@ import io
 import mimetypes
 
 from DB.database import get_db, SessionLocal
-from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel
+from DB.models.oms import Document as DocumentModel, DocumentExtractedData as DocumentExtractedDataModel, Part, Order
 from DB.models.access_control import AccessUser
+from DB.models.notifications import MCNotification
 from DB.schemas.oms import Document, DocumentUpdate, ExtractedDataUpdate
 from DB.minio_client import get_minio_client
 from .step_converter import StepConverter
@@ -382,6 +383,31 @@ async def create_document(
             details={"document_name": db_document.document_name, "document_type": db_document.document_type}
         )
 
+        # Create MC notification if uploaded by PC for a part document
+        if part_id and user_role and 'project_coordinator' in user_role.lower():
+            # Get the part to find the order
+            part = db.query(Part).filter(Part.id == part_id).first()
+            if part and part.product_id:
+                # Get the order for this product
+                order = db.query(Order).filter(Order.product_id == part.product_id).first()
+                if order and order.manufacturing_coordinator_id:
+                    # Create MC notification for all PC uploads (first document and revisions)
+                    mc_notification = MCNotification(
+                        document_id=db_document.id,
+                        mc_user_id=order.manufacturing_coordinator_id,
+                        is_acknowledged=False,
+                        is_rejected=False
+                    )
+                    db.add(mc_notification)
+                    db.commit()
+                    print(f"MC notification created for document {db_document.id} for MC user {order.manufacturing_coordinator_id}")
+                else:
+                    print(f"MC notification NOT created: order={order.id if order else None}, mc_id={order.manufacturing_coordinator_id if order else None}")
+            else:
+                print(f"MC notification NOT created: part={part.id if part else None}, product_id={part.product_id if part else None}")
+        else:
+            print(f"MC notification NOT created: part_id={part_id}, user_role={user_role}")
+
         # Extract data from PDF if applicable (2D files) - currently only for part documents
         if (
             part_id is not None
@@ -591,6 +617,39 @@ async def create_documents_bulk(
         for d in created_docs:
             db.refresh(d)
 
+        # Create MC notifications for PC uploads in bulk
+        user_name = None
+        user_role = None
+        if user_id:
+            user = db.query(AccessUser).filter(AccessUser.id == user_id).first()
+            user_name = user.user_name if user else None
+            user_role = user.role if user else None
+        
+        if part_id and user_role and 'project_coordinator' in user_role.lower():
+            # Get the part to find the order
+            part = db.query(Part).filter(Part.id == part_id).first()
+            if part and part.product_id:
+                # Get the order for this product
+                order = db.query(Order).filter(Order.product_id == part.product_id).first()
+                if order and order.manufacturing_coordinator_id:
+                    # Create MC notification for each document
+                    for doc in created_docs:
+                        mc_notification = MCNotification(
+                            document_id=doc.id,
+                            mc_user_id=order.manufacturing_coordinator_id,
+                            is_acknowledged=False,
+                            is_rejected=False
+                        )
+                        db.add(mc_notification)
+                    db.commit()
+                    print(f"MC notifications created for {len(created_docs)} documents for MC user {order.manufacturing_coordinator_id}")
+                else:
+                    print(f"MC notifications NOT created: order={order.id if order else None}, mc_id={order.manufacturing_coordinator_id if order else None}")
+            else:
+                print(f"MC notifications NOT created: part={part.id if part else None}, product_id={part.product_id if part else None}")
+        else:
+            print(f"MC notifications NOT created: part_id={part_id}, user_role={user_role}")
+
         if extraction_jobs and background_tasks:
             background_tasks.add_task(_extract_pdf_background, extraction_jobs)
 
@@ -776,19 +835,47 @@ async def download_document(document_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/part/{part_id}", response_model=List[Document])
-def get_documents_by_part(part_id: int, user_id: int | None = None, db: Session = Depends(get_db)):
+def get_documents_by_part(part_id: int, user_id: int | None = None, acknowledged_only: bool = False, db: Session = Depends(get_db)):
     """Get all documents for a specific part. Filter by user_id (uploader) for module-specific views."""
     query = db.query(DocumentModel).outerjoin(AccessUser, DocumentModel.user_id == AccessUser.id).filter(DocumentModel.part_id == part_id)
     if user_id is not None:
         query = query.filter(DocumentModel.user_id == user_id)
     
+    # Filter by acknowledgment status if requested (for MC view)
+    if acknowledged_only:
+        query = query.filter(DocumentModel.is_acknowledged == True)
+    
     # Add user_name to each document
     documents = query.all()
+    
+    # Get MC notification data for these documents
+    document_ids = [doc.id for doc in documents]
+    mc_notifications = {}
+    if document_ids:
+        notifications = db.query(MCNotification).filter(MCNotification.document_id.in_(document_ids)).all()
+        mc_notifications = {notif.document_id: notif for notif in notifications}
+    
     for doc in documents:
         if doc.user and hasattr(doc.user, 'user_name'):
             doc.user_name = doc.user.user_name
         else:
             doc.user_name = None
+        
+        if doc.user and hasattr(doc.user, 'role'):
+            doc.user_role = doc.user.role
+        else:
+            doc.user_role = None
+        
+        # Add MC notification remarks if available
+        if doc.id in mc_notifications:
+            notif = mc_notifications[doc.id]
+            doc.mc_ack_remarks = notif.ack_remarks
+            doc.mc_reject_remarks = notif.reject_remarks
+            doc.mc_is_rejected = notif.is_rejected
+        else:
+            doc.mc_ack_remarks = None
+            doc.mc_reject_remarks = None
+            doc.mc_is_rejected = False
     
     return documents
 
@@ -1043,6 +1130,19 @@ def delete_document(document_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Document with id {document_id} not found"
         )
+
+    # Check if document has child documents (revisions) - prevent deletion of parent
+    child_documents = db.query(DocumentModel).filter(DocumentModel.parent_id == document_id).all()
+    if child_documents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sorry, this document cannot be deleted because it has child revisions. Please delete the child revisions first."
+        )
+
+    # Delete associated MC notification if exists
+    mc_notification = db.query(MCNotification).filter(MCNotification.document_id == document_id).first()
+    if mc_notification:
+        db.delete(mc_notification)
 
     # Check if assembly or any parent assembly is in recycle bin - only for assembly documents
     if db_document.assembly_id:
