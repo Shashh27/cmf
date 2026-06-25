@@ -31,8 +31,10 @@ class OperatorLeave(Base):
     reason = Column(String, nullable=True)
     additional_remarks = Column(Text, nullable=True)
     status = Column(String, nullable=False, default='pending')
+    approved_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relationship to AccessUser (will be filtered by role = 'operator' in application logic)
     operator = relationship("AccessUser", foreign_keys=[operator_id])
+    approver = relationship("AccessUser", foreign_keys=[approved_by])

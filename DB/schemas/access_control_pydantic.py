@@ -65,6 +65,7 @@ class OperatorLeaveBase(BaseModel):
     reason: Optional[str] = None
     additional_remarks: Optional[str] = None
     status: str = "pending"
+    approved_by: Optional[int] = None
 
 class OperatorLeaveCreate(OperatorLeaveBase):
     pass
@@ -75,9 +76,11 @@ class OperatorLeaveUpdate(BaseModel):
     reason: Optional[str] = None
     additional_remarks: Optional[str] = None
     status: Optional[str] = None
+    approved_by: Optional[int] = None
 
 class OperatorLeaveStatusUpdate(BaseModel):
     status: str  # 'acknowledged' or 'rejected'
+    approved_by: int  # User ID of the approver (manufacturing_coordinator, supervisor, or admin) - REQUIRED
 
 class OperatorLeaveResponse(OperatorLeaveBase):
     id: int

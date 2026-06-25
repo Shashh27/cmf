@@ -250,11 +250,11 @@ class SchedulerEngine:
                 ends = [st.shift_end for st in assigned_timings]
                 return min(starts), max(ends)
             else:
-                # No assignments: use ONLY GENERAL shift
-                general_timings = [st for st in cfg.shift_timings if st.shift_code == "GENERAL"]
-                if general_timings:
-                    starts = [st.shift_start for st in general_timings]
-                    ends = [st.shift_end for st in general_timings]
+                # No assignments: use GENERAL and NEXT shifts (ignore OT shifts)
+                allowed_shifts = [st for st in cfg.shift_timings if st.shift_code in ["GENERAL", "NEXT"]]
+                if allowed_shifts:
+                    starts = [st.shift_start for st in allowed_shifts]
+                    ends = [st.shift_end for st in allowed_shifts]
                     return min(starts), max(ends)
         
         # Fallback
@@ -952,15 +952,13 @@ class SchedulerEngine:
                 prod_logs = self.db.query(ProductionLog).filter(
                     ProductionLog.operation_id == item.operation_id
                 ).all()
-                all_done = (
-                    len(prod_logs) > 0
-                    and all(log.status == "completed" for log in prod_logs)
-                )
+                # Operation is done when any log has remaining_quantity = 0
+                # (supervisor approved enough to reach zero remaining)
                 remaining_zero = any(
                     log.remaining_quantity_to_be_produced == 0
                     for log in prod_logs
                 )
-                if all_done and remaining_zero:
+                if remaining_zero:
                     completed_op_ids.add(item.operation_id)
 
             # ── Snapshot completed rows (schedule_history_id assigned later) #
@@ -1170,11 +1168,10 @@ class SchedulerEngine:
                         ProductionLog.operation_id == operation.id
                     ).all()
                     
-                    # Check if all production logs are completed and remaining quantity is 0
-                    all_completed = len(production_logs) > 0 and all(log.status == "completed" for log in production_logs)
+                    # Operation is done when any log has remaining_quantity = 0
                     remaining_qty_zero = any(log.remaining_quantity_to_be_produced == 0 for log in production_logs)
-                    
-                    if all_completed and remaining_qty_zero:
+ 
+                    if remaining_qty_zero:
                         # Skip this operation, it's already completed
                         skipped_parts.append(
                             f"Part {part_data['part_number']} (order {order['sale_order_number']}): "
@@ -1202,6 +1199,19 @@ class SchedulerEngine:
             # Track per-part operation completion times
             # part_id -> last operation end time for that part
             part_last_end_time: Dict[int, datetime] = {}
+            
+            # Initialize part_last_end_time with planned end times of completed operations
+            # This ensures cascading works correctly when previous ops are completed
+            for preserved_item in self._preserved_planned_items:
+                part_id = preserved_item['part_id']
+                planned_end = preserved_item['planned_end_time']
+                if part_id in part_last_end_time:
+                    # Keep the latest end time
+                    if planned_end > part_last_end_time[part_id]:
+                        part_last_end_time[part_id] = planned_end
+                else:
+                    part_last_end_time[part_id] = planned_end
+                print(f"[DEBUG] Initialized part_last_end_time for part {part_id}: {planned_end}")
             
             # Track which parts have been scheduled (for reporting)
             scheduled_part_ids: set = set()
@@ -1235,6 +1245,8 @@ class SchedulerEngine:
                     print(f"[DEBUG]   First operation in part, cursor={op_cursor}")
                 else:
                     # Subsequent operation: wait for previous operation of THIS part
+                    # Use PLANNED end time only (not actual end time from logs)
+                    # Actual end time cascading is handled by DynamicSchedulerEngine
                     prev_end_time = part_last_end_time.get(part_id, earliest_part_start)
                     op_cursor = max(prev_end_time, earliest_part_start)
                     print(f"[DEBUG]   Subsequent operation, prev_end={prev_end_time}, cursor={op_cursor}")
@@ -1372,6 +1384,13 @@ class SchedulerEngine:
             # DELETE+INSERT rows with status='rescheduled' as work progresses.
             if all_items:
                 self._seed_rescheduling_items(all_items, schedule_version=1)
+            
+            # ── Phase F: Run dynamic scheduler to update with actual end times ──── #
+            # This ensures rescheduling_items reflects actual completion times
+            # from production logs instead of just planned times
+            print("[SCHEDULE] Running dynamic scheduler to update with actual end times...")
+            dynamic_engine = DynamicSchedulerEngine(self.db)
+            dynamic_engine.dynamic_reschedule(dry_run=False)
 
             return {
                 'success':              True,
@@ -1429,27 +1448,35 @@ class SchedulerEngine:
         """
         try:
             # ── Step 1: Identify completed operation IDs ────────────────── #
-            # An operation is "done" when ALL its production logs are
-            # completed AND at least one has remaining_quantity = 0.
-            existing_rows = self.db.query(Rescheduling).all()
-
+            # Read directly from ProductionLog using planned_items op_ids.
+            # This is reliable — rescheduling_items.completed_qty may be stale
+            # (e.g. 0 even after completion), so we go to the source of truth.
+            op_ids_in_plan = list({item.operation_id for item in planned_items})
             completed_op_ids: set = set()
-            for row in existing_rows:
+            for op_id in op_ids_in_plan:
                 prod_logs = self.db.query(ProductionLog).filter(
-                    ProductionLog.operation_id == row.operation_id
+                    ProductionLog.operation_id == op_id
                 ).all()
-                all_completed = (
-                    len(prod_logs) > 0
-                    and all(log.status == "completed" for log in prod_logs)
-                )
+                # Operation is done when any log has remaining_quantity = 0
                 remaining_zero = any(
                     log.remaining_quantity_to_be_produced == 0
                     for log in prod_logs
                 )
-                if all_completed and remaining_zero:
-                    completed_op_ids.add(row.operation_id)
+                if remaining_zero:
+                    completed_op_ids.add(op_id)
 
             # ── Step 2: Snapshot completed-operation rows ────────────────── #
+            # Use _preserved_planned_items (built in _clear_existing_schedule)
+            # which already has the correct planned times for completed ops.
+            preserved_planned = getattr(self, '_preserved_planned_items', [])
+            preserved_op_ids  = {d['operation_id'] for d in preserved_planned}
+ 
+            # Also pull from rescheduling_items for any completed ops that
+            # may not be in _preserved_planned_items (e.g. outsource ops).
+            existing_rows = self.db.query(Rescheduling).filter(
+                Rescheduling.operation_id.in_(completed_op_ids)
+            ).all() if completed_op_ids else []
+ 
             preserved_data = [
                 {
                     'order_id':         row.order_id,
@@ -1464,11 +1491,10 @@ class SchedulerEngine:
                     'total_qty':        row.total_qty,
                     'completed_qty':    row.completed_qty,
                     'remaining_qty':    row.remaining_qty,
-                    'status':           row.status,
+                    'status':           'completed',
                     'schedule_version': row.schedule_version,
                 }
                 for row in existing_rows
-                if row.operation_id in completed_op_ids
             ]
 
             # ── Step 3: Wipe the table ───────────────────────────────────── #
@@ -1507,6 +1533,7 @@ class SchedulerEngine:
                     schedule_version = schedule_version,
                 )
                 for item in planned_items
+                # if item.operation_id not in completed_op_ids
             ]
             self.db.add_all(seeds)
 
@@ -1608,6 +1635,32 @@ class DynamicSchedulerEngine(SchedulerEngine):
         except Exception as e:
             print(f"[ERROR] _actual_end op={operation_id}: {e}")
             return None
+
+    def _is_operation_completed(self, operation_id: int, total_qty: int) -> bool:
+        """
+        Check if operation is completed by either:
+        1. approved_quantity >= total_qty, OR
+        2. remaining_quantity_to_be_produced == 0 in any log
+        """
+        try:
+            rows = self.db.query(ProductionLog).filter(
+                ProductionLog.operation_id == operation_id
+            ).all()
+            
+            # Check approved quantity
+            approved = sum((r.approved_quantity or 0) for r in rows)
+            if approved >= total_qty:
+                return True
+            
+            # Check remaining quantity
+            remaining_zero = any(
+                r.remaining_quantity_to_be_produced == 0 
+                for r in rows if r.remaining_quantity_to_be_produced is not None
+            )
+            return remaining_zero
+        except Exception as e:
+            print(f"[ERROR] _is_operation_completed op={operation_id}: {e}")
+            return False
  
     def _has_any_log(self, operation_id: int) -> bool:
         """True when at least one production_log row exists."""
@@ -1753,6 +1806,7 @@ class DynamicSchedulerEngine(SchedulerEngine):
         self,
         triggered_by_part_id: Optional[int] = None,
         triggered_by_op_id:   Optional[int] = None,
+         dry_run:              bool = False,
     ) -> Dict:
         """
         Re-plan rescheduling_items after a production log is submitted.
@@ -1834,6 +1888,31 @@ class DynamicSchedulerEngine(SchedulerEngine):
                     'operations_inserted': 0,
                 })
                 return result
+            
+            # ── Sort scope by priority so higher-priority parts get machines first ── #
+            # Look up by part_id (more direct than order_id), and DO NOT filter on
+            # status — every scope part needs its priority for sorting regardless
+            # of whether the priority row is marked 'active' / 'completed' / etc.
+            priority_map: Dict[int, int] = {}
+            scope_part_ids = [pd['part_id'] for _, pd in scope]
+            try:
+                from DB.models.oms import OrderPartPriority as OPP
+                prows = (
+                    self.db.query(OPP)
+                    .filter(OPP.part_id.in_(scope_part_ids))
+                    .all()
+                )
+                # If a part somehow has multiple priority rows, keep the lowest
+                # (highest-priority numerically smallest) value to be safe.
+                for r in prows:
+                    existing = priority_map.get(r.part_id)
+                    if existing is None or r.priority < existing:
+                        priority_map[r.part_id] = r.priority
+                print(f"[DYNAMIC] priority_map loaded: {priority_map}")
+            except Exception as pe:
+                print(f"[DYNAMIC] WARNING: could not load priorities for scope sort: {pe}")
+            scope.sort(key=lambda x: priority_map.get(x[1]['part_id'], 999))
+            print(f"[DYNAMIC] Scope sorted by priority: {[(pd['part_number'], priority_map.get(pd['part_id'], 999)) for _, pd in scope]}")
  
             # ── 3. Load ops + machines ────────────────────────────────── #
             ops_by_part    = self._load_operations(all_part_ids)
@@ -1870,8 +1949,20 @@ class DynamicSchedulerEngine(SchedulerEngine):
                         
                     total_qty = ri.total_qty
                     
-                    # Only pre-block if we have work in progress
-                    if approved <= 0 or approved >= total_qty:
+                    # Only pre-block if we have actual work recorded in logs
+                    # This includes:
+                    #   - partially approved (0 < approved < total_qty)
+                    #   - fully rejected (approved=0, but has logs) — machine
+                    #     was physically occupied; without this the machine slot
+                    #     gets stolen by another part, corrupting cascade_cursor
+                    has_any_log = self.db.query(ProductionLog).filter(
+                        ProductionLog.operation_id == op_id
+                    ).first() is not None
+ 
+                    is_partial = 0 < approved < total_qty
+                    is_rejected = approved == 0 and has_any_log
+ 
+                    if not is_partial and not is_rejected:
                         continue
                         
                     # First check actual end time from production logs
@@ -1994,7 +2085,7 @@ class DynamicSchedulerEngine(SchedulerEngine):
                         continue
 
                     # ── completed: use actual_end, skip insertion ──────── #
-                    if approved >= total_qty:
+                    if self._is_operation_completed(op_id, total_qty):
                         actual = self._actual_end(op_id)
                         if actual:
                             cascade_cursor = self.adjust_to_shift(actual)
@@ -2050,7 +2141,44 @@ class DynamicSchedulerEngine(SchedulerEngine):
                             self.adjust_to_shift(actual) if actual
                             else cascade_cursor
                         )
- 
+
+
+                        # ── FIX: Re-lock the machine to actual_end ──────── #
+                        # Other parts processed earlier in this loop may have
+                        # overwritten machine_end_time[machine_id] to an earlier
+                        # value.  The operator is physically on this machine until
+                        # op_cursor, so we must re-assert that lock BEFORE calling
+                        # _select_machine — otherwise cand_start can be pulled back
+                        # to a time before the last production log's to_time.
+                        # if actual and operation.machine_id:
+                        #     current_lock = self.machine_end_time.get(operation.machine_id)
+                        #     if current_lock is None or op_cursor > current_lock:
+                        #         self.machine_end_time[operation.machine_id] = op_cursor
+                        #         print(
+                        #             f"[DYNAMIC] Op {op_id} — re-locked machine "
+                        #             f"{operation.machine_id} to actual_end {op_cursor}"
+                        #         )
+                         # ────────────────────────────────────────────────── #
+
+                         # ── Re-lock the machine to actual_end ───────────── #
+                        # Other parts processed earlier in this loop may have
+                        # overwritten machine_end_time[machine_id] to an earlier
+                        # value. The operator is physically on this machine until
+                        # op_cursor, so we must re-assert that lock BEFORE calling
+                        # _select_machine — otherwise cand_start can be pulled back
+                        # to a time before the last production log's to_time.
+                        if actual and operation.machine_id:
+                            # Always re-lock to actual_end for inprogress ops —
+                            # regardless of what other parts set machine_end_time to.
+                            # The operator is physically on this machine until op_cursor.
+                            self.machine_end_time[operation.machine_id] = op_cursor
+                            print(
+                                f"[DYNAMIC] Op {op_id} — re-locked machine "
+                                f"{operation.machine_id} to actual_end {op_cursor}"
+                            )
+                            # ────────────────────────────────────────────────── #
+                        
+
                         machine, cand_start = self._select_machine(
                             operation, all_machines, machines_by_wc, op_cursor
                         )
@@ -2159,7 +2287,13 @@ class DynamicSchedulerEngine(SchedulerEngine):
             # ── 7. Bulk INSERT + commit ───────────────────────────────── #
             if all_new_rows:
                 self.db.add_all(all_new_rows)
-            self.db.commit()
+            if dry_run:
+                # Dry run — flush to make rows visible within this transaction
+                # but do NOT commit so caller can rollback cleanly
+                self.db.flush()
+                print("[DYNAMIC] DRY RUN — flushed but not committed")
+            else:
+                self.db.commit()
  
             result.update({
                 'success':             True,

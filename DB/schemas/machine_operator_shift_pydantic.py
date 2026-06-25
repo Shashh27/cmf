@@ -14,6 +14,7 @@ class MachineOperatorShiftAssignmentCreate(MachineOperatorShiftAssignmentBase):
 
 
 class MachineOperatorShiftAssignmentUpdate(BaseModel):
+    machine_id: Optional[int] = None
     operator_id: Optional[int] = None
     shift_config_id: Optional[int] = None
 

@@ -50,14 +50,22 @@ class Assembly(Base):
 
     product_id = Column(Integer, ForeignKey("oms.products.id"))
     parent_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     product = relationship("Product", back_populates="assemblies")
     parts = relationship("Part", back_populates="assembly", cascade="all, delete-orphan")
-
+    documents = relationship("Document", back_populates="assembly", cascade="all, delete-orphan")
+    user = relationship("AccessUser")
     parent = relationship("Assembly", remote_side=[id])
     children = relationship("Assembly", cascade="all, delete-orphan", overlaps="parent")
+
+    @property
+
+    def user_name(self):
+
+        return self.user.user_name if self.user else None
 
 
 # =======================
@@ -229,13 +237,19 @@ class Document(Base):
     document_type = Column(String, nullable=False)
     document_version = Column(String, nullable=False)
 
-    part_id = Column(Integer, ForeignKey("oms.parts.id"))
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable = True)
+    assembly_id = Column(Integer, ForeignKey("oms.assemblies.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    is_acknowledged = Column(Boolean, default=False, nullable=False)
+
     parent_id = Column(Integer, ForeignKey("oms.documents.id"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     part = relationship("Part", back_populates="documents")
+    assembly = relationship("Assembly", back_populates="documents")
     parent = relationship("Document", remote_side=[id])
+    user = relationship("AccessUser")
 
 
 # =======================

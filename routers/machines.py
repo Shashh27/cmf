@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from typing import List
 
 from DB.database import get_db
@@ -128,8 +130,52 @@ def delete_machine(machine_id: int, db: Session = Depends(get_db)):
             detail=f"Machine with id {machine_id} not found"
         )
 
-    db.delete(db_machine)
-    db.commit()
+    # Delete related machine_status records to avoid foreign key violation
+    # Note: machine_status table exists in DB but not in models
+    try:
+        with db.begin_nested():
+            db.execute(text("DELETE FROM scheduling.machine_status WHERE machine_id = :id"), {"id": machine_id})
+    except Exception:
+        # Fallback to unqualified table name for environments where scheduling is in search_path
+        try:
+            with db.begin_nested():
+                db.execute(text("DELETE FROM machine_status WHERE machine_id = :id"), {"id": machine_id})
+        except Exception as e2:
+            print(f"Warning: Could not delete from machine_status: {e2}")
+
+    # Set machine_id to NULL in operations table if referenced
+    try:
+        with db.begin_nested():
+             db.execute(text("UPDATE oms.operations SET machine_id = NULL WHERE machine_id = :id"), {"id": machine_id})
+    except Exception as e3:
+        print(f"Warning: Could not update operations: {e3}")
+
+    # Delete related machine_calibration_notification records to avoid foreign key violation
+    try:
+        with db.begin_nested():
+            db.execute(text("DELETE FROM notifications.machine_calibration_notification WHERE machine_id = :id"), {"id": machine_id})
+    except Exception:
+        # Fallback to unqualified table name
+        try:
+            with db.begin_nested():
+                db.execute(text("DELETE FROM machine_calibration_notification WHERE machine_id = :id"), {"id": machine_id})
+        except Exception as e4:
+            print(f"Warning: Could not delete from machine_calibration_notification: {e4}")
+
+    try:
+        db.delete(db_machine)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # Use available fields from the Machine model (type/model) in the message.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f'Cannot delete machine ID {db_machine.id} (type: {db_machine.type or "-"}, model: {db_machine.model or "-"}). '
+                "It is still referenced by other records (for example planned schedule items). "
+                "Remove or update those references first, then try again."
+            ),
+        )
     return None
 
 

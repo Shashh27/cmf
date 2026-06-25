@@ -1,6 +1,14 @@
 from datetime import date, time
 from typing import List, Literal, Union
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field
+
+# Try to import v2 validators, fall back to v1
+try:
+    from pydantic import field_validator, model_validator
+except ImportError:
+    # Pydantic v1 compatibility
+    from pydantic import validator as field_validator
+    from pydantic import root_validator as model_validator
 
 ShiftCode = Literal["GENERAL", "NEXT", "NON_WORKING", "HALF", "CUSTOM"]
 

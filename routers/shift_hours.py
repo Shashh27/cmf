@@ -374,6 +374,31 @@ def update_operator_shift_for_machine(
         )
     
     # Update assignment
+    if data.machine_id is not None:
+        # Check if new machine exists
+        new_machine = db.query(Machine).filter(Machine.id == data.machine_id).first()
+        if not new_machine:
+            raise HTTPException(status_code=404, detail=f"Machine {data.machine_id} not found")
+        
+        # Check if operator is already assigned to a different machine on the same shift date
+        shift_date = assignment.shift_config.date
+        operator_assignments = db.query(MachineOperatorShiftAssignment).options(
+            joinedload(MachineOperatorShiftAssignment.shift_config)
+        ).filter(
+            MachineOperatorShiftAssignment.operator_id == operator_id,
+            MachineOperatorShiftAssignment.id != assignment_id  # Exclude current assignment
+        ).all()
+        
+        # Check if operator is assigned to any other machine on the same date
+        for existing_assignment in operator_assignments:
+            if existing_assignment.shift_config.date == shift_date and existing_assignment.machine_id != data.machine_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Operator {operator_id} is already assigned to machine {existing_assignment.machine_id} on {shift_date}. An operator can only be assigned to one machine at a time."
+                )
+        
+        assignment.machine_id = data.machine_id
+    
     if data.operator_id is not None:
         assignment.operator_id = data.operator_id
     if data.shift_config_id is not None:

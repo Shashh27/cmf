@@ -190,3 +190,8 @@ class OutSourceOperationWithDetails(BaseModel):
     updated_at:        Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+class SimulatePrioritySwapRequest(BaseModel):
+    id1: int = Field(..., description="OrderPartPriority ID of part to move")
+    id2: int = Field(..., description="OrderPartPriority ID of target position")

@@ -587,6 +587,7 @@ class OrderPartPriority(OrderPartPriorityBase):
     product_name: Optional[str] = None
     product_number: Optional[str] = None
     part_type_name: Optional[str] = None
+    status: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

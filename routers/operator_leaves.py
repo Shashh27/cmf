@@ -131,6 +131,7 @@ def get_all_leaves(
             reason=leave.reason,
             additional_remarks=leave.additional_remarks,
             status=leave.status,
+            approved_by=leave.approved_by,
             created_at=leave.created_at,
             updated_at=leave.updated_at
         )
@@ -292,7 +293,7 @@ def approve_leave(
     status_update: OperatorLeaveStatusUpdate,
     db: Session = Depends(get_db)
 ):
-    """Approve or reject a leave request (Manufacturing Coordinator only)"""
+    """Approve or reject a leave request (Manufacturing Coordinator or Supervisor)"""
     
     # Validate status value
     if status_update.status not in ['acknowledged', 'rejected']:
@@ -301,14 +302,32 @@ def approve_leave(
             detail="Status must be either 'acknowledged' or 'rejected'"
         )
     
+    # Validate approver exists and has appropriate role
+    approver = db.query(AccessUserModel).filter(
+        AccessUserModel.id == status_update.approved_by
+    ).first()
+    
+    if not approver:
+        raise HTTPException(
+            status_code=400,
+            detail="Approver not found"
+        )
+    
+    if approver.role not in ['manufacturing_coordinator', 'supervisor', 'admin']:
+        raise HTTPException(
+            status_code=400,
+            detail="Only manufacturing_coordinator, supervisor, or admin can approve leaves"
+        )
+    
     # Get leave request
     leave = db.query(OperatorLeave).filter(OperatorLeave.id == leave_id).first()
     
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
     
-    # Update status
+    # Update status and approver
     leave.status = status_update.status
+    leave.approved_by = status_update.approved_by
     leave.updated_at = datetime.utcnow()
     
     db.commit()
