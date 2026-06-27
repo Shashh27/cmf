@@ -47,6 +47,7 @@ class ComponentIssue(Base):
     component_status = Column(String, nullable=False)
     production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=True)
     description = Column(Text, nullable=False)
     reported_at = Column(DateTime(timezone=False), default=get_ist_time, nullable=False)
 
@@ -61,6 +62,7 @@ class HelpSupport(Base):
     reported_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
     production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
     part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=False)
+    operation_id = Column(Integer, ForeignKey("oms.operations.id"), nullable=True)
     description = Column(Text, nullable=False)
     mc_reply = Column(Text, nullable=True)
     replied_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)

@@ -742,7 +742,7 @@ def get_machine_completed_logs_simple(machine_id: int, db: Session = Depends(get
             detail=f"Machine with id {machine_id} not found"
         )
 
-    machine_name = f"{machine.make} {machine.model}" if machine and machine.make and machine.model else (machine.type if machine else 'Unknown')
+    machine_name = f"({machine.make}) {machine.model}" if machine and machine.make and machine.model else (machine.type if machine else 'Unknown')
 
     logs = db.query(PokayokeCompletedLog).filter(
         PokayokeCompletedLog.machine_id == machine_id
