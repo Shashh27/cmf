@@ -1,29 +1,148 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
 from pydantic import BaseModel
 import pandas as pd
 import io
+from datetime import datetime, timedelta, date
+from dateutil.relativedelta import relativedelta
 
 from DB.database import get_db
-from DB.models.inventory import ToolsList as ToolsListModel, Category as CategoryModel
+from DB.models.inventory import ToolsList as ToolsListModel, Category as CategoryModel, CustomColumn as CustomColumnModel
 from DB.schemas.inventory import (
     ToolsList,
     ToolsListCreate,
     ToolsListUpdate,
     ToolsListBulkDelete,
+    ToolsListBulkUploadResponse,
     ItemNode,
     SubCategoryNode,
     CategoryTree,
+    CustomColumn,
+    CustomColumnCreate,
+    CustomColumnUpdate,
 )
 
 router = APIRouter(prefix="/tools-list", tags=["tools-list"])
 
 
+def calculate_calibration_due_date(calibration_date: date, frequency: str) -> Optional[date]:
+    """
+    Calculate the calibration due date based on the calibration date and frequency.
+    
+    Args:
+        calibration_date: The date when the tool was last calibrated
+        frequency: The calibration frequency (e.g., '6 months', '1 year')
+    
+    Returns:
+        The calculated due date, or None if inputs are invalid
+    """
+    if not calibration_date or not frequency:
+        return None
+    
+    frequency_lower = frequency.lower().strip()
+    
+    # Try to extract number and unit from frequency string (e.g., "6 months", "1 year")
+    import re
+    match = re.match(r'(\d+)\s*(day|week|month|year)', frequency_lower)
+    if match:
+        num = int(match.group(1))
+        unit = match.group(2)
+        if unit.startswith('day'):
+            return calibration_date + timedelta(days=num)
+        elif unit.startswith('week'):
+            return calibration_date + timedelta(weeks=num)
+        elif unit.startswith('month'):
+            # Use relativedelta for accurate month calculation
+            return calibration_date + relativedelta(months=num)
+        elif unit.startswith('year'):
+            # Use relativedelta for accurate year calculation
+            return calibration_date + relativedelta(years=num)
+    
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
+
+def check_duplicate_tool(db: Session, tool_data: dict, category_id: int = None, sub_category_id: int = None, exclude_id: int = None, check_global: bool = False) -> Optional[ToolsListModel]:
+    """
+    Check if a tool with the same data already exists.
+    
+    Args:
+        db: Database session
+        tool_data: Dictionary containing tool fields to check
+        category_id: Category ID to check within (only used if check_global=False)
+        sub_category_id: Sub-category ID to check within (only used if check_global=False)
+        exclude_id: Tool ID to exclude from check (for updates)
+        check_global: If True, check across all categories/subcategories. If False, check only within the specified category/subcategory.
+    
+    Returns:
+        Existing tool if duplicate found, None otherwise
+    """
+    query = db.query(ToolsListModel)
+    
+    # Filter by category/sub-category only if not checking globally
+    if not check_global:
+        if sub_category_id:
+            query = query.filter(ToolsListModel.sub_category_id == sub_category_id)
+        elif category_id:
+            query = query.filter(ToolsListModel.category_id == category_id)
+    
+    # Exclude current tool ID if provided (for updates)
+    if exclude_id:
+        query = query.filter(ToolsListModel.id != exclude_id)
+    
+    # Build conditions for key fields
+    conditions = []
+    
+    # Check item_description
+    if tool_data.get('item_description'):
+        conditions.append(func.lower(ToolsListModel.item_description) == tool_data['item_description'].lower().strip())
+    
+    # Check range
+    if tool_data.get('range'):
+        conditions.append(func.lower(ToolsListModel.range) == tool_data['range'].lower().strip())
+    else:
+        conditions.append(ToolsListModel.range.is_(None))
+    
+    # Check identification_code
+    if tool_data.get('identification_code'):
+        conditions.append(func.lower(ToolsListModel.identification_code) == tool_data['identification_code'].lower().strip())
+    else:
+        conditions.append(ToolsListModel.identification_code.is_(None))
+    
+    # Check make
+    if tool_data.get('make'):
+        conditions.append(func.lower(ToolsListModel.make) == tool_data['make'].lower().strip())
+    else:
+        conditions.append(ToolsListModel.make.is_(None))
+    
+    # Check location
+    if tool_data.get('location'):
+        conditions.append(func.lower(ToolsListModel.location) == tool_data['location'].lower().strip())
+    else:
+        conditions.append(ToolsListModel.location.is_(None))
+    
+    # Check gauge
+    if tool_data.get('gauge'):
+        conditions.append(func.lower(ToolsListModel.gauge) == tool_data['gauge'].lower().strip())
+    else:
+        conditions.append(ToolsListModel.gauge.is_(None))
+    
+    # Check type
+    if tool_data.get('type'):
+        conditions.append(func.lower(ToolsListModel.type) == tool_data['type'].lower().strip())
+    else:
+        conditions.append(ToolsListModel.type.is_(None))
+    
+    # Apply all conditions
+    if conditions:
+        query = query.filter(*conditions)
+    
+    return query.first()
 
 def safe_str(value, default=None):
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -128,8 +247,29 @@ def create_tool(tool: ToolsListCreate, db: Session = Depends(get_db)):
     tool_data.pop("category", None)
     tool_data.pop("sub_category", None)
     
+    # Check for duplicate tool within the same category/sub-category
+    existing_tool = check_duplicate_tool(
+        db, 
+        tool_data, 
+        category_id=tool_data.get("category_id"), 
+        sub_category_id=tool_data.get("sub_category_id")
+    )
+    if existing_tool:
+        cat_name = category.name if category else "Unknown"
+        sub_cat_name = sub_category.name if sub_category else "Unknown"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tool with the same details already exists in category '{cat_name}' and sub-category '{sub_cat_name}'. Please check existing data before adding."
+        )
+    
     if tool_data.get("total_quantity") is None:
         tool_data["total_quantity"] = tool_data.get("quantity", 0)
+    
+    # Calculate calibration due date if calibration_date and frequency are provided
+    calibration_date = tool_data.get("calibration_date")
+    calibration_frequency = tool_data.get("calibration_frequency")
+    if calibration_date and calibration_frequency:
+        tool_data["calibration_due_date"] = calculate_calibration_due_date(calibration_date, calibration_frequency)
 
     db_tool = ToolsListModel(**tool_data)
     db.add(db_tool)
@@ -142,7 +282,7 @@ def create_tool(tool: ToolsListCreate, db: Session = Depends(get_db)):
 # BULK UPLOAD
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.post("/upload-excel", response_model=List[ToolsList], status_code=status.HTTP_201_CREATED)
+@router.post("/upload-excel", response_model=ToolsListBulkUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_tools_excel(
     file: UploadFile = File(...),
     category: Optional[str] = None,
@@ -187,12 +327,44 @@ async def upload_tools_excel(
             'type':                find_col(df, ['type', 'TYPE', 'category type']),
             'category':            find_col(df, ['category']),
             'sub_category':        find_col(df, ['sub category', 'sub_category']),
+            'calibration_date':    find_col(df, ['calibration date', 'calibration_date', 'last calibrated']),
+            'calibration_frequency': find_col(df, ['calibration frequency', 'calibration_frequency', 'frequency']),
         }
+
+        # Fetch custom columns for the category/sub-category
+        custom_columns_map = {}  # Maps column_name to column_key
+        if category or sub_category:
+            # Resolve category_id and sub_category_id from names
+            cat_id = None
+            sub_cat_id = None
+            if category:
+                cat = db.query(CategoryModel).filter(func.lower(CategoryModel.name) == category.lower()).first()
+                if cat:
+                    cat_id = cat.id
+            if sub_category:
+                sub_cat = db.query(CategoryModel).filter(
+                    func.lower(CategoryModel.name) == sub_category.lower()
+                ).first()
+                if sub_cat:
+                    sub_cat_id = sub_cat.id
+            
+            # Fetch custom columns
+            custom_cols = db.query(CustomColumnModel)
+            if sub_cat_id:
+                custom_cols = custom_cols.filter(CustomColumnModel.sub_category_id == sub_cat_id)
+            elif cat_id:
+                custom_cols = custom_cols.filter(CustomColumnModel.category_id == cat_id)
+            
+            for cc in custom_cols.all():
+                custom_columns_map[cc.column_name.lower()] = cc.column_key
+                # Also add the column to the col dict for easy access
+                col[f'custom_{cc.column_key}'] = find_col(df, [cc.column_name])
 
         if not col['item_description']:
             raise HTTPException(status_code=400, detail="Could not find 'Item Description' column.")
 
         processed = 0
+        skipped_duplicates = 0
         for _, row in df.iterrows():
             item_desc  = safe_str(row.get(col['item_description']))
             ident_code = safe_str(row.get(col['identification_code'])) if col['identification_code'] else None
@@ -238,6 +410,7 @@ async def upload_tools_excel(
 
             tool_data = {
                 'item_description': item_desc,
+                'identification_code': ident_code,
                 'range':            safe_str(row.get(col['range'])) if col['range'] else None,
                 'make':             safe_str(row.get(col['make'])) if col['make'] else None,
                 'quantity':         qty,
@@ -252,14 +425,70 @@ async def upload_tools_excel(
                 'sub_category_id':  sub_cat.id if sub_cat else None,
             }
 
-            db.add(ToolsListModel(identification_code=ident_code, **tool_data))
+            # Add custom field values
+            custom_fields = {}
+            for col_name_lower, col_key in custom_columns_map.items():
+                custom_col_key = f'custom_{col_key}'
+                if custom_col_key in col and col[custom_col_key]:
+                    value = row.get(col[custom_col_key])
+                    if pd.notna(value) and value != '':
+                        custom_fields[col_key] = value
+            if custom_fields:
+                tool_data['custom_fields'] = custom_fields
+            
+            # Add calibration fields if present in Excel
+            if col['calibration_date']:
+                calibration_date = row.get(col['calibration_date'])
+                if pd.notna(calibration_date):
+                    tool_data['calibration_date'] = calibration_date
+            
+            if col['calibration_frequency']:
+                calibration_frequency = safe_str(row.get(col['calibration_frequency']))
+                if calibration_frequency:
+                    tool_data['calibration_frequency'] = calibration_frequency
+            
+            # Calculate due date if both calibration_date and frequency are provided
+            if 'calibration_date' in tool_data and 'calibration_frequency' in tool_data:
+                tool_data['calibration_due_date'] = calculate_calibration_due_date(
+                    tool_data['calibration_date'], 
+                    tool_data['calibration_frequency']
+                )
+
+            # Check for duplicate tool globally (across all categories/subcategories)
+            existing_tool = check_duplicate_tool(
+                db, 
+                tool_data, 
+                category_id=tool_data.get("category_id"), 
+                sub_category_id=tool_data.get("sub_category_id"),
+                check_global=True
+            )
+            if existing_tool:
+                # Skip this row if duplicate found
+                skipped_duplicates += 1
+                continue
+
+            db.add(ToolsListModel(**tool_data))
 
             processed += 1
             if processed % 50 == 0:
                 db.flush()
 
         db.commit()
-        return db.query(ToolsListModel).order_by(ToolsListModel.id.desc()).limit(processed).all()
+        
+        # Return response with information about skipped duplicates
+        result = db.query(ToolsListModel).order_by(ToolsListModel.id.desc()).limit(processed).all()
+        
+        # Build response with duplicate information
+        message = None
+        if skipped_duplicates > 0:
+            message = f"Successfully processed {processed} tools. Skipped {skipped_duplicates} duplicate entries (checked across all categories/subcategories)."
+        
+        return ToolsListBulkUploadResponse(
+            tools=result,
+            processed_count=processed,
+            skipped_duplicates=skipped_duplicates,
+            message=message
+        )
 
     except HTTPException:
         raise
@@ -274,7 +503,11 @@ async def upload_tools_excel(
 
 @router.delete("/bulk-delete", status_code=status.HTTP_200_OK)
 def bulk_delete_tools(request: ToolsListBulkDelete, db: Session = Depends(get_db)):
-    """Bulk delete tools by IDs, filters, or all tools"""
+    """Bulk delete tools by IDs, filters, or all tools
+    
+    If category_id and/or sub_category_id are provided, only delete tools within that category/subcategory.
+    If neither are provided and delete_all is True, delete all tools.
+    """
     query = db.query(ToolsListModel)
     
     # If specific IDs are provided, use those
@@ -283,24 +516,27 @@ def bulk_delete_tools(request: ToolsListBulkDelete, db: Session = Depends(get_db
             raise HTTPException(status_code=400, detail="No tool IDs provided")
         query = query.filter(ToolsListModel.id.in_(request.tool_ids))
     
+    # If category_id or sub_category_id are provided, filter by those
+    elif request.category_id is not None or request.sub_category_id is not None:
+        if request.sub_category_id:
+            query = query.filter(ToolsListModel.sub_category_id == request.sub_category_id)
+        elif request.category_id:
+            query = query.filter(ToolsListModel.category_id == request.category_id)
+        
+        # Also apply type filter if provided
+        if request.type:
+            query = query.filter(ToolsListModel.type == request.type)
+    
     # If delete_all is True, delete all tools
     elif request.delete_all:
         pass  # No filter needed, will delete all
     
-    # Otherwise, apply filters
+    # Otherwise, require at least one filter
     else:
-        if not any([request.category, request.sub_category, request.type]):
-            raise HTTPException(
-                status_code=400, 
-                detail="Either tool_ids, delete_all, or at least one filter (category, sub_category, type) must be provided"
-            )
-        
-        if request.category:
-            query = query.filter(func.lower(ToolsListModel.category) == request.category.lower())
-        if request.sub_category:
-            query = query.filter(func.lower(ToolsListModel.sub_category) == request.sub_category.lower())
-        if request.type:
-            query = query.filter(ToolsListModel.type == request.type)
+        raise HTTPException(
+            status_code=400, 
+            detail="Either tool_ids, delete_all, or at least one filter (category_id, sub_category_id, type) must be provided"
+        )
     
     # Get tools to delete
     tools_to_delete = query.all()
@@ -550,7 +786,12 @@ def delete_sub_category(category_name: str, sub_category_name: str, db: Session 
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/categories/tree", response_model=List[CategoryTree])
-def get_category_tree(db: Session = Depends(get_db)):
+def get_category_tree(response: Response, db: Session = Depends(get_db)):
+    # Add cache control headers to prevent browser caching
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    
     # Get all categories from Category table
     categories = db.query(CategoryModel).filter(CategoryModel.parent_id == None).all()
     
@@ -592,6 +833,7 @@ def get_category_tree(db: Session = Depends(get_db)):
             
             sub_category_list.append({
                 "sub_category": sub.name,
+                "id": sub.id,
                 "count": count,
                 "items": []  # Can be populated if needed
             })
@@ -602,6 +844,7 @@ def get_category_tree(db: Session = Depends(get_db)):
         
         tree.append({
             "category": category.name,
+            "id": category.id,
             "total_count": total_count,
             "sub_categories": sub_category_list
         })
@@ -678,6 +921,9 @@ def get_tools_by_sub_category(category: str, sub_category: str, db: Session = De
             'sub_category_id': tool.sub_category_id,
             'category_name': cat.name if cat else None,
             'sub_category_name': sub.name if sub else None,
+            'calibration_date': tool.calibration_date,
+            'calibration_due_date': tool.calibration_due_date,
+            'calibration_frequency': tool.calibration_frequency,
         }
         tools_list.append(ToolsList(**tool_dict))
     
@@ -783,6 +1029,133 @@ def get_tool_by_identification_code(identification_code: str, db: Session = Depe
     return tool
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CUSTOM COLUMNS ENDPOINTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get("/custom-columns")
+def get_custom_columns(db: Session = Depends(get_db)):
+    """
+    Get all custom columns.
+    Filtering will be done on the frontend.
+    """
+    try:
+        columns = db.query(CustomColumnModel).all()
+        result = []
+        for col in columns:
+            result.append({
+                "id": col.id,
+                "column_name": col.column_name,
+                "column_key": col.column_key,
+                "data_type": col.data_type,
+                "category_id": col.category_id,
+                "sub_category_id": col.sub_category_id,
+                "is_required": col.is_required,
+                "created_at": col.created_at.isoformat() if col.created_at else None,
+                "updated_at": col.updated_at.isoformat() if col.updated_at else None
+            })
+        return {"data": result}
+    except Exception as e:
+        return {"data": [], "error": str(e)}
+
+
+@router.post("/custom-columns", response_model=CustomColumn, status_code=status.HTTP_201_CREATED)
+def create_custom_column(column: CustomColumnCreate, db: Session = Depends(get_db)):
+    """Create a new custom column for a category or sub-category"""
+    # Validate mandatory fields
+    if not column.column_name or not column.column_name.strip():
+        raise HTTPException(status_code=400, detail="column_name is required")
+    if not column.data_type or not column.data_type.strip():
+        raise HTTPException(status_code=400, detail="data_type is required")
+
+    # Check if column name conflicts with existing tools_list table columns
+    reserved_columns = [
+        'id', 'item_description', 'range', 'identification_code', 'make',
+        'quantity', 'total_quantity', 'location', 'gauge', 'remarks',
+        'amount', 'ref_ledger', 'type', 'calibration_date', 'calibration_due_date',
+        'calibration_frequency', 'issues_qty', 'category_id', 'sub_category_id',
+        'custom_fields'
+    ]
+    column_name_lower = column.column_name.lower().strip()
+    if column_name_lower in reserved_columns:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{column.column_name}' is a reserved system column name. Please use a different name."
+        )
+
+    # Check if a column with the same name already exists for the same category/sub-category
+    if column.sub_category_id:
+        # Check for duplicate in the same sub-category
+        existing = db.query(CustomColumnModel).filter(
+            CustomColumnModel.sub_category_id == column.sub_category_id,
+            func.lower(CustomColumnModel.column_name) == column_name_lower
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A custom column with the name '{column.column_name}' already exists for this sub-category"
+            )
+    elif column.category_id:
+        # Check for duplicate in the same category
+        existing = db.query(CustomColumnModel).filter(
+            CustomColumnModel.category_id == column.category_id,
+            CustomColumnModel.sub_category_id == None,
+            func.lower(CustomColumnModel.column_name) == column_name_lower
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A custom column with the name '{column.column_name}' already exists for this category"
+            )
+
+    # Auto-generate column_key from column_name
+    column_key = column.column_name.lower().replace(' ', '_').replace('-', '_')
+    # Ensure uniqueness by appending a number if needed
+    base_key = column_key
+    counter = 1
+    while db.query(CustomColumnModel).filter(CustomColumnModel.column_key == column_key).first():
+        column_key = f"{base_key}_{counter}"
+        counter += 1
+
+    new_column = CustomColumnModel(
+        column_name=column.column_name,
+        column_key=column_key,
+        data_type=column.data_type,
+        category_id=column.category_id,
+        sub_category_id=column.sub_category_id,
+        is_required=column.is_required
+    )
+    db.add(new_column)
+    db.commit()
+    db.refresh(new_column)
+
+    # Initialize the new custom column with empty values for all existing tools
+    # in the affected category/sub-category
+    if column.sub_category_id:
+        # Update tools in this sub-category
+        tools = db.query(ToolsListModel).filter(
+            ToolsListModel.sub_category_id == column.sub_category_id
+        ).all()
+    elif column.category_id:
+        # Update tools in this category (both category-level and sub-category-level tools)
+        tools = db.query(ToolsListModel).filter(
+            ToolsListModel.category_id == column.category_id
+        ).all()
+    else:
+        tools = []
+
+    for tool in tools:
+        if tool.custom_fields is None:
+            tool.custom_fields = {}
+        # Add the new custom column with empty value
+        tool.custom_fields[column_key] = ""
+        db.add(tool)
+
+    db.commit()
+    db.refresh(new_column)
+    return new_column
+
+
 @router.get("/{tool_id}", response_model=ToolsList)
 def get_tool(tool_id: int, db: Session = Depends(get_db)):
     tool = db.query(ToolsListModel).filter(ToolsListModel.id == tool_id).first()
@@ -807,6 +1180,13 @@ def update_tool(tool_id: int, tool_update: ToolsListUpdate, db: Session = Depend
 
     update_data = tool_update.model_dump(exclude_unset=True)
     # Don't auto-resolve category on update - require explicit category if needed
+    
+    # Calculate calibration due date if calibration_date or frequency is being updated
+    if 'calibration_date' in update_data or 'calibration_frequency' in update_data:
+        calibration_date = update_data.get('calibration_date') or db_tool.calibration_date
+        calibration_frequency = update_data.get('calibration_frequency') or db_tool.calibration_frequency
+        if calibration_date and calibration_frequency:
+            update_data['calibration_due_date'] = calculate_calibration_due_date(calibration_date, calibration_frequency)
 
     for field, value in update_data.items():
         setattr(db_tool, field, value)

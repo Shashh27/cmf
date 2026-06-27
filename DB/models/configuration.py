@@ -8,6 +8,7 @@ from sqlalchemy import (
     TIME,
     Boolean,
     Float,
+    Date,
     func,
     text
 )
@@ -93,7 +94,7 @@ class PokayokeChecklist(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String, nullable=False)
-    description = Column(String, nullable=False)
+    description = Column(String, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     # Relationships
@@ -112,6 +113,15 @@ class PokayokeChecklistItem(Base):
     item_type = Column(String, nullable=False)  # 'boolean', 'numerical', 'text'
     is_required = Column(Boolean, default=True)
     expected_value = Column(String)  # Depends on item_type
+    
+    # Scheduling fields for individual check points
+    frequency_type = Column(String, nullable=True)  # 'Time Based', 'Usage Based', 'Condition Based'
+    interval_value = Column(Integer, nullable=True)  # e.g., 3 for "Every 3 Months"
+    interval_unit = Column(String, nullable=True)   # 'Day', 'Week', 'Month', 'Year'
+    trigger_hours = Column(Integer, nullable=True)  # For Usage Based (e.g., 200 hours)
+    inspection_interval = Column(String, nullable=True)  # For Condition Based (e.g., 'Weekly', 'Monthly')
+    remarks = Column(String, nullable=True)  # Optional remarks for this check point
+    
     created_at = Column(TIMESTAMP, server_default=func.now())
 
     # Relationships
@@ -125,9 +135,8 @@ class PokayokeMachineAssignment(Base):
     id = Column(Integer, primary_key=True, index=True)
     checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
-    frequency = Column(String, nullable=True)  # 'Daily', 'Weekly', 'Monthly'
-    shift = Column(String, nullable=True)      # 'Morning', 'Evening', 'Both' (if Daily)
-    scheduled_day = Column(String, nullable=True) # Day of week (Weekly) or Day of month (Monthly)
+    next_due_date = Column(Date, nullable=True)  # Next due date for PM
+    active = Column(Boolean, default=True)  # Whether the assignment is active
     assigned_at = Column(TIMESTAMP, server_default=func.now())
 
     # Relationships
@@ -143,15 +152,11 @@ class PokayokeCompletedLog(Base):
     checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
     machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
     operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
-    production_order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
-    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=True)
     completed_at = Column(TIMESTAMP, nullable=False)
     all_items_passed = Column(Boolean, nullable=True, default=None)
     comments = Column(Text, nullable=True)
     read = Column(Boolean, default=False)
     assignment_id = Column(Integer, ForeignKey("configuration.pokayoke_machine_assignments.id"), nullable=True)
-    frequency = Column(String, nullable=True)  # 'Daily', 'Weekly', 'Monthly'
-    shift = Column(String, nullable=True)      # 'Morning', 'Evening', 'Both'
     
     # Acknowledgment fields for operator
     operator_acknowledged = Column(Boolean, nullable=False, server_default=text("false"))
@@ -165,10 +170,8 @@ class PokayokeCompletedLog(Base):
     # Relationships
     checklist = relationship("PokayokeChecklist")
     machine = relationship("Machine")
-    part = relationship("DB.models.oms.Part")
     operator = relationship("AccessUser", foreign_keys=[operator_id])
     supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
-    order = relationship("Order")
     item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
     machine_assignment = relationship("PokayokeMachineAssignment")
 
@@ -184,6 +187,14 @@ class PokayokeItemResponse(Base):
     is_confirming = Column(Boolean, nullable=True, default=None)
     timestamp = Column(TIMESTAMP, nullable=False)
 
+    # Scheduling fields for this item response
+    frequency_type = Column(String, nullable=True)  # 'Time Based', 'Usage Based', 'Condition Based'
+    interval_value = Column(Integer, nullable=True)  # e.g., 3 for "Every 3 Months"
+    interval_unit = Column(String, nullable=True)   # 'Day', 'Week', 'Month', 'Year'
+    trigger_hours = Column(Integer, nullable=True)  # For Usage Based
+    inspection_interval = Column(String, nullable=True)  # For Condition Based
+    next_due_date = Column(Date, nullable=True)  # Next due date for this specific item
+
     # Approval fields
     approval_status = Column(String, nullable=True)  # 'approved', 'rejected', 'pending'
     approved_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
@@ -194,7 +205,6 @@ class PokayokeItemResponse(Base):
     completed_log = relationship("PokayokeCompletedLog", back_populates="item_responses")
     item = relationship("PokayokeChecklistItem")
     approver = relationship("AccessUser")
-
 
 # =======================
 # Operation Checklists

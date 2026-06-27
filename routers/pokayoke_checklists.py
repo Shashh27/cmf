@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
-from datetime import datetime, timezone, timedelta, time
+from datetime import datetime, timezone, timedelta, time, date
 import re
 from sqlalchemy.orm import Session
 from sqlalchemy import func, TIME, extract
@@ -96,23 +96,29 @@ def validate_expected_value(item_type: str, expected_value: str) -> bool:
 
 @router.post("/", response_model=PokayokeChecklistWithItems, status_code=status.HTTP_201_CREATED)
 def create_checklist(checklist: PokayokeChecklistCreate, db: Session = Depends(get_db)):
-    """Create a new Pokayoke checklist with optional items"""
+    """Create a new Pokayoke checklist with mandatory items"""
+    # Validate that at least one item is provided
+    if not checklist.items or len(checklist.items) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one check point is required to create a checklist"
+        )
+    
     checklist_data = checklist.model_dump(exclude={"items"})
     checklist_data["created_at"] = datetime.now(IST).replace(tzinfo=None)
     db_checklist = PokayokeChecklist(**checklist_data)
     db.add(db_checklist)
     db.flush()  # Get the checklist ID before commit
     
-    # Create items if provided
-    if checklist.items:
-        for idx, item in enumerate(checklist.items):
-            item_data = item.model_dump()
-            item_data['checklist_id'] = db_checklist.id
-            item_data['sequence_number'] = idx + 1
-            item_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
-            db_item = PokayokeChecklistItem(**item_data)
-            db.add(db_item)
-            
+    # Create items
+    for idx, item in enumerate(checklist.items):
+        item_data = item.model_dump()
+        item_data['checklist_id'] = db_checklist.id
+        item_data['sequence_number'] = idx + 1
+        item_data['created_at'] = datetime.now(IST).replace(tzinfo=None)
+        db_item = PokayokeChecklistItem(**item_data)
+        db.add(db_item)
+        
     db.commit()
     db.refresh(db_checklist)
     return db_checklist
@@ -532,19 +538,6 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
     if not log_data.get('completed_at'):
         log_data['completed_at'] = datetime.now(IST).replace(tzinfo=None)
     
-    # If assignment_id is provided, fetch frequency and shift from assignment
-    assignment_id = log_data.get('assignment_id')
-    if assignment_id:
-        assignment = db.query(PokayokeMachineAssignment).filter(
-            PokayokeMachineAssignment.id == assignment_id
-        ).first()
-        if assignment:
-            # Use assignment's frequency and shift if not already provided
-            if not log_data.get('frequency') and assignment.frequency:
-                log_data['frequency'] = assignment.frequency
-            if not log_data.get('shift') and assignment.shift:
-                log_data['shift'] = assignment.shift
-    
     db_log = PokayokeCompletedLog(**log_data)
     db.add(db_log)
     db.commit()
@@ -893,32 +886,36 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
     if not response_data.get('timestamp'):
         response_data['timestamp'] = datetime.now(IST).replace(tzinfo=None)
     
+    # Populate scheduling fields from the checklist item
+    response_data['frequency_type'] = item.frequency_type
+    response_data['interval_value'] = item.interval_value
+    response_data['interval_unit'] = item.interval_unit
+    response_data['trigger_hours'] = item.trigger_hours
+    response_data['inspection_interval'] = item.inspection_interval
+    
+    # Calculate next due date based on frequency
+    from cmf.services.scheduler_service import calculate_next_due_date
+    next_due = calculate_next_due_date(
+        frequency_type=item.frequency_type,
+        interval_value=item.interval_value,
+        interval_unit=item.interval_unit,
+        trigger_hours=item.trigger_hours,
+        inspection_interval=item.inspection_interval,
+        current_date=date.today()
+    )
+    response_data['next_due_date'] = next_due
+    
     if existing_response:
         # Update existing response - reset approval fields for resubmission
         existing_response.response_value = response_data['response_value']
         existing_response.timestamp = response_data['timestamp']
-        # Reset approval status to None (pending) for resubmission
-        existing_response.approval_status = None
-        existing_response.approved_by = None
-        existing_response.approved_at = None
-        existing_response.approval_comments = None
-        # Recalculate is_confirming based on new response
-        existing_response.is_confirming = response_data['response_value'].lower() == item.expected_value.lower()
-        
-        db.commit()
-        db.refresh(existing_response)
-        return existing_response
-    else:
-        # Create new response
-        db_response = PokayokeItemResponse(**response_data)
-        db.add(db_response)
-        db.commit()
-        db.refresh(db_response)
-        return db_response
-    if existing_response:
-        # Update existing response - reset approval fields for resubmission
-        existing_response.response_value = response_data['response_value']
-        existing_response.timestamp = response_data['timestamp']
+        # Update scheduling fields
+        existing_response.frequency_type = response_data['frequency_type']
+        existing_response.interval_value = response_data['interval_value']
+        existing_response.interval_unit = response_data['interval_unit']
+        existing_response.trigger_hours = response_data['trigger_hours']
+        existing_response.inspection_interval = response_data['inspection_interval']
+        existing_response.next_due_date = response_data['next_due_date']
         # Reset approval status to None (pending) for resubmission
         existing_response.approval_status = None
         existing_response.approved_by = None

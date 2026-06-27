@@ -1,6 +1,6 @@
 from pydantic import BaseModel, field_validator
 from typing import Optional, List, Text, TYPE_CHECKING
-from datetime import datetime, time
+from datetime import datetime, time, date
 from typing_extensions import Self
 from .access_control import AccessUserResponse
 
@@ -152,7 +152,7 @@ class Customer(CustomerBase):
 # =======================
 class PokayokeChecklistBase(BaseModel):
     name: str
-    description: str
+    description: Optional[str] = None
 
 
 class PokayokeChecklistItemBase(BaseModel):
@@ -160,13 +160,19 @@ class PokayokeChecklistItemBase(BaseModel):
     item_type: str  # 'boolean', 'numerical', 'text'
     is_required: bool = True
     expected_value: Optional[str] = None
+    # Scheduling fields for individual check points
+    frequency_type: Optional[str] = None  # 'Time Based', 'Usage Based', 'Condition Based'
+    interval_value: Optional[int] = None  # e.g., 3 for "Every 3 Months"
+    interval_unit: Optional[str] = None  # 'Day', 'Week', 'Month', 'Year'
+    trigger_hours: Optional[int] = None  # For Usage Based (e.g., 200 hours)
+    inspection_interval: Optional[str] = None  # For Condition Based (e.g., 'Weekly', 'Monthly')
+    remarks: Optional[str] = None  # Optional remarks for this check point
 
 
 class PokayokeMachineAssignmentBase(BaseModel):
     machine_id: int
-    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
-    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
-    scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
+    next_due_date: Optional[date] = None  # Next due date for PM
+    active: bool = True
 
 
 # Response schemas
@@ -209,9 +215,8 @@ class PokayokeChecklistCreate(PokayokeChecklistBase):
 class PokayokeMachineAssignmentCreate(BaseModel):
     machine_ids: List[int]
     checklist_ids: List[int]
-    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
-    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
-    scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
+    next_due_date: Optional[date] = None  # Next due date for PM
+    active: bool = True
 
 
 # Update schemas
@@ -226,14 +231,20 @@ class PokayokeChecklistItemUpdate(BaseModel):
     item_type: Optional[str] = None
     is_required: Optional[bool] = None
     expected_value: Optional[str] = None
+    # Scheduling fields for individual check points
+    frequency_type: Optional[str] = None
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[int] = None
+    inspection_interval: Optional[str] = None
+    remarks: Optional[str] = None
 
 
 class PokayokeMachineAssignmentUpdate(BaseModel):
     checklist_id: Optional[int] = None
     machine_id: Optional[int] = None
-    frequency: Optional[str] = None
-    shift: Optional[str] = None
-    scheduled_day: Optional[str] = None
+    next_due_date: Optional[date] = None
+    active: Optional[bool] = None
 
 
 # Response with nested data
@@ -253,15 +264,11 @@ class PokayokeCompletedLogBase(BaseModel):
     checklist_id: int
     machine_id: int
     operator_id: int
-    production_order_id: Optional[int] = None
-    part_id: Optional[int] = None
     completed_at: datetime
     all_items_passed: Optional[bool] = None
     comments: Optional[str] = None
     read: bool = False
     assignment_id: Optional[int] = None
-    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
-    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both'
     operator_acknowledged: bool = False
     operator_acknowledged_at: Optional[datetime] = None
     supervisor_acknowledged: bool = False
@@ -285,6 +292,13 @@ class PokayokeItemResponseBase(BaseModel):
     response_value: str
     is_confirming: Optional[bool] = None
     timestamp: datetime
+    # Scheduling fields for this item response
+    frequency_type: Optional[str] = None  # 'Time Based', 'Usage Based', 'Condition Based'
+    interval_value: Optional[int] = None  # e.g., 3 for "Every 3 Months"
+    interval_unit: Optional[str] = None  # 'Day', 'Week', 'Month', 'Year'
+    trigger_hours: Optional[int] = None  # For Usage Based
+    inspection_interval: Optional[str] = None  # For Condition Based
+    next_due_date: Optional[date] = None  # Next due date for this specific item
     approval_status: Optional[str] = None  # 'approved', 'rejected', 'pending'
     approved_by: Optional[int] = None
     approved_at: Optional[datetime] = None
@@ -317,14 +331,17 @@ class PokayokeCompletedLogUpdate(BaseModel):
     checklist_id: Optional[int] = None
     machine_id: Optional[int] = None
     operator_id: Optional[int] = None
-    production_order_id: Optional[int] = None
-    part_id: Optional[int] = None
     all_items_passed: Optional[bool] = None
     comments: Optional[str] = None
     read: Optional[bool] = None
     assignment_id: Optional[int] = None
-    frequency: Optional[str] = None
+    frequency_type: Optional[str] = None
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[int] = None
+    inspection_interval: Optional[str] = None
     shift: Optional[str] = None
+    due_date: Optional[date] = None
     operator_acknowledged: Optional[bool] = None
     operator_acknowledged_at: Optional[datetime] = None
     supervisor_acknowledged: Optional[bool] = None
@@ -445,6 +462,7 @@ class SimpleCompletedLog(BaseModel):
     operator_acknowledged: bool = False
     supervisor_acknowledged: bool = False
     items: List[SimpleItemResponse] = []
+
 
 
 from .oms import Part as PartSchema, Order as OrderSchema
