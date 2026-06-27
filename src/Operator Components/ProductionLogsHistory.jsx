@@ -422,7 +422,7 @@ const ProductionLogsHistory = () => {
       render: (status) => getStatusTag(status),
     },
     {
-      title: 'Supervisor',
+      title: 'Approved By',
       key: 'supervisor',
       width: 100,
       render: (_, record) => (
@@ -448,7 +448,7 @@ const ProductionLogsHistory = () => {
   ];
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column' }}>
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
@@ -461,9 +461,8 @@ const ProductionLogsHistory = () => {
         .search-highlight-row:hover > td { background-color: #bae0ff !important; }
       `}</style>
 
-      <Card
-        title={<Title level={4} style={{ margin: 0 }}>Production Logs History</Title>}
-        className="shadow-sm"
+      <Card style={{ height: '84vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 16 } }}
       >
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <Space wrap>
@@ -505,26 +504,28 @@ const ProductionLogsHistory = () => {
           </Space>
         </div>
 
-        <Table
-          columns={columns}
-          dataSource={filteredLogs}
-          rowKey="id"
-          loading={loading}
-          rowClassName={rowClassName}
-          className="modern-table"
-          pagination={{
-            current: currentPage,
-            pageSize,
-            total: filteredLogs.length,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-            pageSizeOptions: ['10', '20', '50', '100'],
-            onChange: (page, size) => { setCurrentPage(page); setPageSize(size); },
-            onShowSizeChange: (_, size) => { setCurrentPage(1); setPageSize(size); },
-          }}
-          scroll={{ x: 'max-content' }}
-        />
+        <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+          <Table
+            columns={columns}
+            dataSource={filteredLogs}
+            rowKey="id"
+            loading={loading}
+            rowClassName={rowClassName}
+            className="modern-table"
+            pagination={{
+              current: currentPage,
+              pageSize,
+              total: filteredLogs.length,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              pageSizeOptions: ['10', '20', '50', '100'],
+              onChange: (page, size) => { setCurrentPage(page); setPageSize(size); },
+              onShowSizeChange: (_, size) => { setCurrentPage(1); setPageSize(size); },
+            }}
+            scroll={{ x: 'max-content', y: 'calc(83vh - 200px)' }}
+          />
+        </div>
       </Card>
     </div>
   );

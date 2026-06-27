@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {Modal,Button,Typography,message} from 'antd';
-import {CheckCircleOutlined,CloseOutlined,FileTextOutlined,CheckOutlined} from '@ant-design/icons';
+import {Modal,Button,Typography,message,Tabs,Table,Tooltip,Row,Col,Card,Space,Popover} from 'antd';
+import {CheckCircleOutlined,CloseOutlined,FileTextOutlined,CheckOutlined,CheckCircleFilled,CloseCircleFilled,CalendarOutlined} from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
 import config from '../Config/config.js';
-import PokaYokeChecklistSelector from './PokaYokeChecklistSelector.jsx';
-import PokaYokeChecklistForm from './PokaYokeChecklistForm.jsx';
+import PokayokeHistory from './PokayokeHistory.jsx';
 
 const { Title, Text } = Typography;
 
@@ -16,6 +15,7 @@ const PokaYokeChecklist = ({
   initialAssignments = [],
   initialLogs = [],
   initialApprovalStatuses = {},
+  isPage = false,
 }) => {
   const nowIST = () => {
     const parts = Object.fromEntries(
@@ -49,6 +49,13 @@ const PokaYokeChecklist = ({
   const [submitLoading, setSubmitLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successMeta, setSuccessMeta] = useState({});
+  const [activeTab, setActiveTab] = useState('1');
+  const [checklistHistoryData, setChecklistHistoryData] = useState([]);
+  const [hoveredCell, setHoveredCell] = useState(null);
+  const [sendingResponse, setSendingResponse] = useState(false);
+  const [submittedResponses, setSubmittedResponses] = useState({});
+  const [tableData, setTableData] = useState([]);
+  const [loadingResponses, setLoadingResponses] = useState(false);
 
   const isRedo = useMemo(() => {
     if (!selected) return false;
@@ -94,6 +101,144 @@ const PokaYokeChecklist = ({
       return null;
     }
   }, [propMachineId]);
+
+  const machineName = useMemo(() => {
+    try {
+      const stored = localStorage.getItem('selectedMachine');
+      if (!stored) return null;
+      const m = JSON.parse(stored);
+      return m?.name ?? m?.machine_name ?? m?.machineName ?? m?.machine?.name ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const machineMake = useMemo(() => {
+    try {
+      const stored = localStorage.getItem('selectedMachine');
+      if (!stored) return null;
+      const m = JSON.parse(stored);
+      return m?.make ?? m?.machine_make ?? m?.machineMake ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const machineModel = useMemo(() => {
+    try {
+      const stored = localStorage.getItem('selectedMachine');
+      if (!stored) return null;
+      const m = JSON.parse(stored);
+      return m?.model ?? m?.machine_model ?? m?.machineModel ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const fetchExistingResponses = async () => {
+    if (!machineId) return;
+    setLoadingResponses(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/responses`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Fetched responses:', data);
+        // Format the responses to match our state structure
+        const responsesMap = {};
+        if (Array.isArray(data)) {
+          data.forEach((item) => {
+            const checklistId = item.checklist_id;
+            const responseValue = item.response_value;
+            const timestamp = item.timestamp;
+
+            if (checklistId && responseValue && timestamp) {
+              const responseDate = new Date(timestamp);
+              const day = responseDate.getDate();
+              const month = responseDate.getMonth();
+              const year = responseDate.getFullYear();
+
+              // Only include responses from current month
+              const currentDate = new Date();
+              if (month === currentDate.getMonth() && year === currentDate.getFullYear()) {
+                const responseKey = `${checklistId}-${day}`;
+                responsesMap[responseKey] = responseValue;
+                console.log(`Stored response: ${responseKey} = ${responseValue}`);
+              }
+            }
+          });
+        }
+        console.log('Final responses map:', responsesMap);
+        setSubmittedResponses(responsesMap);
+      } else {
+        console.error('Failed to fetch responses:', response.status);
+      }
+    } catch (error) {
+      console.error('Error fetching existing responses:', error);
+    } finally {
+      setLoadingResponses(false);
+    }
+  };
+
+  const handleResponseSubmit = async (checklistId, responseValue, dayNumber, rowIndex) => {
+    const responseKey = `${checklistId}-${dayNumber}`;
+
+    // Check if response already exists
+    if (submittedResponses[responseKey] !== undefined) {
+      message.warning('Response already submitted for this checklist');
+      return;
+    }
+
+    setSendingResponse(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/responses`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          checklist_id: checklistId,
+          machine_id: machineId,
+          operator_id: operatorId,
+          response_value: responseValue,
+          is_confirming: true,
+        }),
+      });
+
+      if (response.ok) {
+        message.success('Response submitted successfully');
+        console.log(`Submitted response: ${responseKey} = ${responseValue}`);
+        // Store the response
+        setSubmittedResponses(prev => ({
+          ...prev,
+          [responseKey]: responseValue
+        }));
+
+        // Update table data
+        setTableData(prev => {
+          const newData = [...prev];
+          if (newData[rowIndex]) {
+            newData[rowIndex][`day_${dayNumber}`] = responseValue;
+          }
+          return newData;
+        });
+      } else {
+        message.error('Failed to submit response');
+        console.error('Submit response error:', response.status);
+      }
+    } catch (error) {
+      message.error('Error submitting response');
+      console.error('Error:', error);
+    } finally {
+      setSendingResponse(false);
+      setHoveredCell(null);
+    }
+  };
 
   const operatorId = useMemo(() => {
     try {
@@ -641,82 +786,249 @@ const PokaYokeChecklist = ({
     setComments('');
   };
 
-  return (
-    <Modal
-      open={open}
-      onCancel={() => onClose(submittedRef.current)}
-      footer={null}
-      width={780}
-      closable={false}
-      styles={{
-        content: { padding: 0, borderRadius: 12, overflow: 'hidden' },
-      }}
-    >
-      {/* Header */}
-      <div
-        style={{
-          background: showSuccess ? '#fff' : '#1677FF',
-          padding: showSuccess ? '14px 20px' : '12px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          borderBottom: showSuccess ? '1px solid #eef2f7' : 'none',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {showSuccess ? (
-            <div
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: 9,
-                border: '2px solid #1677FF',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#1677FF',
-                fontSize: 12,
-                lineHeight: 1,
-                fontWeight: 700,
-              }}
+  if (!open) return null;
+
+  // Generate date columns for the current month
+  const currentDate = new Date();
+  const today = currentDate.getDate();
+  const currentMonth = currentDate.getMonth();
+  const currentYear = currentDate.getFullYear();
+  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+  const dateColumns = Array.from({ length: daysInMonth }, (_, i) => {
+    const dayNumber = i + 1;
+    const isToday = dayNumber === today;
+
+    return {
+      title: String(dayNumber),
+      dataIndex: `day_${i + 1}`,
+      key: `day_${i + 1}`,
+      width: 40,
+      align: 'center',
+      render: (value, record, index) => {
+        const cellKey = `${record.sl_no}-${dayNumber}`;
+        const responseKey = `${record.checklist_id}-${dayNumber}`;
+        const isSubmitted = submittedResponses[responseKey] !== undefined || value === 'yes' || value === 'no';
+        const isHovered = hoveredCell === cellKey;
+
+        const popoverContent = (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button
+              type="primary"
+              size="small"
+              icon={<CheckOutlined />}
+              onClick={() => handleResponseSubmit(record.checklist_id || record.key, 'yes', dayNumber, index)}
+              loading={sendingResponse}
+              style={{ backgroundColor: '#22c55e', borderColor: '#22c55e' }}
             >
-              ✓
+              Mark Yes
+            </Button>
+            <Button
+              danger
+              size="small"
+              icon={<CloseOutlined />}
+              onClick={() => handleResponseSubmit(record.checklist_id || record.key, 'no', dayNumber, index)}
+              loading={sendingResponse}
+            >
+              Mark No
+            </Button>
+          </div>
+        );
+
+        // If already submitted, just show the status without popup
+        if (isSubmitted) {
+          return (
+            <Tooltip title={value === 'yes' ? 'Completed' : 'Not Completed'}>
+              <div style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {value === 'yes' ? (
+                  <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />
+                ) : value === 'no' ? (
+                  <CloseCircleFilled style={{ color: '#ef4444', fontSize: 16 }} />
+                ) : (
+                  <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: '#e5e7eb' }} />
+                )}
+              </div>
+            </Tooltip>
+          );
+        }
+
+        if (isToday) {
+          return (
+            <Popover
+              content={popoverContent}
+              trigger="hover"
+              open={isHovered}
+              onOpenChange={(open) => setHoveredCell(open ? cellKey : null)}
+              placement="top"
+            >
+              <div
+                style={{
+                  cursor: 'pointer',
+                  width: 32,
+                  height: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '4px',
+                  backgroundColor: isHovered ? '#f0f0f0' : 'transparent',
+                  transition: 'background-color 0.2s',
+                }}
+              >
+                {value === 'yes' ? (
+                  <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />
+                ) : value === 'no' ? (
+                  <CloseCircleFilled style={{ color: '#ef4444', fontSize: 16 }} />
+                ) : (
+                  <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: '#e5e7eb' }} />
+                )}
+              </div>
+            </Popover>
+          );
+        }
+
+        // For non-today dates, just show the status with tooltip
+        return (
+          <Tooltip title={value === 'yes' ? 'Completed' : value === 'no' ? 'Not Completed' : 'Pending'}>
+            <div style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {value === 'yes' ? (
+                <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />
+              ) : value === 'no' ? (
+                <CloseCircleFilled style={{ color: '#ef4444', fontSize: 16 }} />
+              ) : (
+                <div style={{ width: 16, height: 16, borderRadius: '50%', backgroundColor: '#e5e7eb' }} />
+              )}
             </div>
-          ) : (
-            <CheckCircleOutlined style={{ color: '#fff', fontSize: 20 }} />
-          )}
-          <span
-            style={{
-              color: showSuccess ? '#0f172a' : '#fff',
-              fontWeight: 600,
-              fontSize: showSuccess ? 14 : 16,
-            }}
-          >
-            Preventive Maintenance Checklist
-          </span>
-        </div>
-        <button
-          onClick={() => onClose(submittedRef.current)}
+          </Tooltip>
+        );
+      },
+    };
+  });
+
+  // Generate table data for checklists
+  const generateTableData = () => {
+    return assignments.map((assignment, index) => {
+      const data = {
+        key: assignment.id || index,
+        sl_no: index + 1,
+        checklist_id: assignment.checklist_id,
+        checklist_name: assignment.checklist?.name || namesByChecklistId[assignment.checklist_id] || `Checklist #${assignment.checklist_id}`,
+        frequency: assignment.frequency || 'Daily',
+      };
+      // Initialize date columns as null (pending) or use existing submitted responses
+      for (let i = 1; i <= daysInMonth; i++) {
+        const responseKey = `${assignment.checklist_id}-${i}`;
+        data[`day_${i}`] = submittedResponses[responseKey] || null;
+      }
+      return data;
+    });
+  };
+
+  // Initialize table data when assignments change
+  useEffect(() => {
+    if (assignments.length > 0) {
+      setTableData(generateTableData());
+    }
+  }, [assignments, submittedResponses]);
+
+  // Fetch existing responses when component loads
+  useEffect(() => {
+    if (isPage && machineId) {
+      fetchExistingResponses();
+    }
+  }, [isPage, machineId]);
+
+  const tableColumns = [
+    {
+      title: 'Sl No',
+      dataIndex: 'sl_no',
+      key: 'sl_no',
+      width: 70,
+      align: 'center',
+    },
+    {
+      title: 'Checklist Name',
+      dataIndex: 'checklist_name',
+      key: 'checklist_name',
+      width: 200,
+    },
+    {
+      title: 'Frequency',
+      dataIndex: 'frequency',
+      key: 'frequency',
+      width: 100,
+    },
+    ...dateColumns,
+  ];
+
+  const content = (
+    <>
+      {/* Header - only show in modal mode */}
+      {!isPage && (
+        <div
           style={{
-            background: 'transparent',
-            border: 'none',
-            color: showSuccess ? '#94a3b8' : '#fff',
-            cursor: 'pointer',
-            padding: 4,
+            background: showSuccess ? '#fff' : '#1677FF',
+            padding: showSuccess ? '14px 20px' : '12px 20px',
             display: 'flex',
             alignItems: 'center',
-            fontSize: showSuccess ? 16 : 18,
+            justifyContent: 'space-between',
+            borderBottom: showSuccess ? '1px solid #eef2f7' : 'none',
           }}
         >
-          <CloseOutlined />
-        </button>
-      </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {showSuccess ? (
+              <div
+                style={{
+                  width: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  border: '2px solid #1677FF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#1677FF',
+                  fontSize: 12,
+                  lineHeight: 1,
+                  fontWeight: 700,
+                }}
+              >
+                ✓
+              </div>
+            ) : (
+              <CheckCircleOutlined style={{ color: '#fff', fontSize: 20 }} />
+            )}
+            <span
+              style={{
+                color: showSuccess ? '#0f172a' : '#fff',
+                fontWeight: 600,
+                fontSize: showSuccess ? 14 : 16,
+              }}
+            >
+              Preventive Maintenance
+            </span>
+          </div>
+          <button
+            onClick={() => onClose(submittedRef.current)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: showSuccess ? '#94a3b8' : '#fff',
+              cursor: 'pointer',
+              padding: 4,
+              display: 'flex',
+              alignItems: 'center',
+              fontSize: showSuccess ? 16 : 18,
+            }}
+          >
+            <CloseOutlined />
+          </button>
+        </div>
+      )}
 
       <div
         style={{
-          padding: showSuccess ? 28 : 24,
-          maxHeight: showSuccess ? undefined : '70vh',
-          overflowY: showSuccess ? undefined : 'auto',
+          padding: showSuccess ? 28 : isPage ? 0 : 24,
+          maxHeight: showSuccess ? undefined : isPage ? undefined : '70vh',
+          overflowY: showSuccess ? undefined : isPage ? undefined : 'auto',
         }}
       >
         {showSuccess ? (
@@ -758,133 +1070,100 @@ const PokaYokeChecklist = ({
             </div>
           </div>
         ) : (
-          <>
-        {/* Title block */}
-        <div
-          style={{
-            background: '#E6F4FF',
-            border: '1px solid #dbeafe',
-            borderRadius: 12,
-            padding: 16,
-            marginBottom: 20,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-            <FileTextOutlined style={{ fontSize: 24, color: '#1677FF' }} />
-            <Title level={4} style={{ margin: 0 }}>
-              Preventive Maintenance Checklist
-            </Title>
-          </div>
-          <Text style={{ color: '#64748b', fontSize: 14 }}>
-            Complete the required checklist items to ensure quality standards are met.
-          </Text>
-        </div>
+          <div>
+            {/* Title Card */}
+            <div style={{ marginBottom: 16 }}>
+              <Card
+                style={{
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                  borderRadius: '12px',
+                  border: '1px solid #e5e7eb',
+                  background: '#ffffff',
+                }}
+                styles={{
+                  body: { padding: '20px' },
+                }}
+              >
+                <div style={{ marginBottom: 8 }}>
+                  <Title level={4} style={{ margin: 0, color: '#1f2937' }}>
+                    Preventive Maintenance Checklist
+                  </Title>
+                </div>
+                <Text style={{ color: '#6b7280', fontSize: '14px' }}>
+                  Machine: {machineMake && `${machineMake} `} {machineModel && `- ${machineModel}`}
+                </Text>
+              </Card>
+            </div>
 
-        {/* Step indicator */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 0,
-            marginBottom: 24,
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <div
+            {/* Tabs Card */}
+            <Card
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: '50%',
-                background: activeStep === 2 ? '#1677FF' : '#E6F4FF',
-                border: '2px solid #1677FF',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: activeStep === 2 ? '#fff' : '#1677FF',
-                fontSize: activeStep === 2 ? 18 : 16,
-                fontWeight: 600,
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                borderRadius: '12px',
+                border: '1px solid #e5e7eb',
+                background: '#ffffff',
+              }}
+              styles={{
+                body: { padding: '20px' },
               }}
             >
-              {activeStep === 2 ? <CheckOutlined /> : '1'}
-            </div>
-            <div style={{ marginTop: 8, textAlign: 'center' }}>
-              <div style={{ fontWeight: 600, color: '#0f172a' }}>Select Checklist</div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
-                Choose from assigned checklists
-              </div>
-            </div>
+              <Tabs
+                activeKey={activeTab}
+                onChange={setActiveTab}
+                items={[
+                  {
+                    key: '1',
+                    label: 'Preventive Maintenance',
+                    children: (
+                      <>
+                        {/* Table with dates */}
+                        <div style={{ overflowX: 'auto' }}>
+                          <Table
+                            columns={tableColumns}
+                            dataSource={tableData}
+                            scroll={{ x: 1500 }}
+                            pagination={false}
+                            size="small"
+                            bordered
+                          />
+                        </div>
+                      </>
+                    ),
+                  },
+                  {
+                    key: '2',
+                    label: 'Checklist History',
+                    children: <PokayokeHistory machineId={machineId} />,
+                  },
+                ]}
+              />
+            </Card>
           </div>
-          <div
-            style={{
-              flex: 1,
-              minWidth: 60,
-              height: 2,
-              background: activeStep === 2 ? '#1677FF' : '#e2e8f0',
-              marginTop: 18,
-              marginLeft: 8,
-              marginRight: 8,
-            }}
-          />
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <div
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: '50%',
-                background: activeStep === 2 ? '#E6F4FF' : '#f1f5f9',
-                border: `2px solid ${activeStep === 2 ? '#1677FF' : '#e2e8f0'}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: activeStep === 2 ? '#1677FF' : '#94a3b8',
-                fontSize: 16,
-                fontWeight: 600,
-              }}
-            >
-              2
-            </div>
-            <div style={{ marginTop: 8, textAlign: 'center' }}>
-              <div style={{ fontWeight: 600, color: activeStep === 2 ? '#0f172a' : '#94a3b8' }}>
-                Complete Items
-              </div>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
-                Fill all required items
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Step 1: Checklist list */}
-        {activeStep === 1 && (
-          <PokaYokeChecklistSelector
-            loading={loading}
-            assignments={assignments}
-            namesByChecklistId={namesByChecklistId}
-            onSelectChecklist={setSelected}
-            completedTodayIds={completedTodayIds}
-            approvalStatuses={approvalStatuses}
-          />
-        )}
-
-        {/* Step 2: Complete items */}
-        {activeStep === 2 && selected && (
-          <PokaYokeChecklistForm
-            items={items}
-            responses={responses}
-            setResponses={setResponses}
-            comments={comments}
-            setComments={setComments}
-            hasNonConforming={hasNonConforming}
-            canSubmit={canSubmit}
-            submitLoading={submitLoading}
-            onSubmit={handleSubmit}
-            onBack={() => setSelected(null)}
-            approvalInfo={approvalStatuses[`${selected?.checklist_id ?? selected?.pokayoke_checklist_id ?? selected?.checklistId ?? selected?.checklist?.id}-${(selected?.frequency || '').toLowerCase()}-${(selected?.shift || '').toLowerCase()}`]}
-          />
-        )}
-          </>
         )}
       </div>
+    </>
+  );
+
+  if (isPage) {
+    return (
+      <div style={{ padding: '24px', width: '100%', background: 'transparent' }}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Modal
+      open={open}
+      onCancel={() => onClose(submittedRef.current)}
+      footer={null}
+      width={780}
+      closable={false}
+      styles={{
+        content: { padding: 0, borderRadius: 12, overflow: 'hidden' },
+      }}
+    >
+      {content}
     </Modal>
   );
 };

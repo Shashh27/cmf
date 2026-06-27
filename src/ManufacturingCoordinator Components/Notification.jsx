@@ -11,6 +11,7 @@ import MachineNotifications from './Notification Components/MachineNotifications
 import ToolIssuesNotifications from './Notification Components/ToolIssuesNotifications';
 import ComponentIssuesNotifications from './Notification Components/ComponentIssuesNotifications';
 import MachineCalibrationNotifications from './Notification Components/MachineCalibrationNotifications';
+import PokayokeOperationNotification from './Notification Components/PokayokeOperationNotification';
 import config from '../Config/config';
 
 const Notification = () => {
@@ -18,17 +19,18 @@ const Notification = () => {
   const navigate = useNavigate();
   const [dateRange, setDateRange] = useState([null, null]);
   const [activeKey, setActiveKey] = useState('1');
-  const [counts, setCounts] = useState({ orders: 0, machines: 0, tools: 0, components: 0, calibrations: 0 });
+  const [counts, setCounts] = useState({ orders: 0, machines: 0, tools: 0, components: 0, calibrations: 0, pokayoke: 0 });
   const setOrdersCount = useCallback((n) => setCounts((c) => ({ ...c, orders: n })), []);
   const setMachinesCount = useCallback((n) => setCounts((c) => ({ ...c, machines: n })), []);
   const setToolsCount = useCallback((n) => setCounts((c) => ({ ...c, tools: n })), []);
   const setComponentsCount = useCallback((n) => setCounts((c) => ({ ...c, components: n })), []);
   const setCalibrationsCount = useCallback((n) => setCounts((c) => ({ ...c, calibrations: n })), []);
+  const setPokayokeCount = useCallback((n) => setCounts((c) => ({ ...c, pokayoke: n })), []);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const t = params.get('tab');
-    if (t && ['1','2','3','4','5'].includes(t)) {
+    if (t && ['1','2','3','4','5','6'].includes(t)) {
       setActiveKey(t);
     }
   }, [location.search]);
@@ -157,6 +159,18 @@ const Notification = () => {
         </span>
       ),
       children: <MachineCalibrationNotifications dateRange={dateRange} onCount={setCalibrationsCount} />
+    },
+    {
+      key: '6',
+      label: (
+        <span>
+          <BellOutlined />
+          <Badge count={counts.pokayoke} offset={[8, -2]} style={{ backgroundColor: '#faad14' }}>
+            <span>PokaYoke Checklist</span>
+          </Badge>
+        </span>
+      ),
+      children: <PokayokeOperationNotification onUnacknowledgedCountChange={setPokayokeCount} />
     }
   ];
 

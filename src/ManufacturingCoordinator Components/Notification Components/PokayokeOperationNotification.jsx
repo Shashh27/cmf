@@ -1,90 +1,82 @@
-import React, { useState, useEffect } from 'react';
-import { Table, Tag, Spin, message, Button } from 'antd';
-import { CheckOutlined } from '@ant-design/icons';
-import config from '../Config/config';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Table, Tag, Spin, message, Button, Badge, Empty, Tooltip, Modal, Input } from 'antd';
+import { CheckOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
+import config from '../../Config/config';
+import dayjs from 'dayjs';
 
-const NotificationPokaYoke = () => {
-  const [pokayokeChecklist, setPokayokeChecklist] = useState([]);
+const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
+  const [pokayokeChecklistNotifications, setPokayokeChecklistNotifications] = useState([]);
   const [pokayokeChecklistLoading, setPokayokeChecklistLoading] = useState(true);
   const [pokayokeChecklistPagination, setPokayokeChecklistPagination] = useState({ current: 1, pageSize: 10 });
-  const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
+  const [acknowledgingChecklistIds, setAcknowledgingChecklistIds] = useState(new Set());
+  const [searchText, setSearchText] = useState('');
+  const [checklistDetailsModalOpen, setChecklistDetailsModalOpen] = useState(false);
+  const [selectedChecklistRecord, setSelectedChecklistRecord] = useState(null);
 
   useEffect(() => {
-    fetchPokayokeChecklist();
+    fetchPokayokeChecklistNotifications();
   }, []);
 
-  const fetchPokayokeChecklist = async () => {
+  // Report unacknowledged count to parent
+  useEffect(() => {
+    const unacknowledgedCount = pokayokeChecklistNotifications.filter(log => !log.mc_ack_by).length;
+    if (onUnacknowledgedCountChange) {
+      onUnacknowledgedCountChange(unacknowledgedCount);
+    }
+  }, [pokayokeChecklistNotifications, onUnacknowledgedCountChange]);
+
+  const fetchPokayokeChecklistNotifications = async () => {
     setPokayokeChecklistLoading(true);
     try {
-      // Get operator ID from localStorage
-      let operatorId = null;
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          const user = JSON.parse(storedUser);
-          operatorId = user.id;
-        } catch (e) {
-          console.error("Error parsing user from local storage", e);
-        }
-      }
-
-      if (!operatorId) {
-        message.error('Operator not found in session. Please log in again.');
-        setPokayokeChecklistLoading(false);
-        return;
-      }
-
-      // Fetch operation-checklists submissions filtered by operator
-      const apiUrl = `${config.API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`;
-
+      const apiUrl = `${config.API_BASE_URL}/operation-checklists/submissions`;
       const response = await fetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
         // Sort by acknowledgment status first (unacknowledged at top), then by submitted_at descending
         const sortedLogs = (data || []).sort((a, b) => {
-          const isAckA = a.operator_ack_by;
-          const isAckB = b.operator_ack_by;
-          // Unacknowledged (null) comes before acknowledged (not null)
+          const isAckA = a.mc_ack_by;
+          const isAckB = b.mc_ack_by;
           if (isAckA !== isAckB) {
             return isAckA ? 1 : -1;
           }
-          // Within same acknowledgment status, sort by submitted_at descending
-          const dateA = new Date(a.submitted_at).getTime();
-          const dateB = new Date(b.submitted_at).getTime();
+          const dateA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+          const dateB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
           return dateB - dateA;
         });
-        setPokayokeChecklist(sortedLogs || []);
+        setPokayokeChecklistNotifications(sortedLogs || []);
       } else {
-        message.error('Failed to fetch PokaYoke Checklist');
-        setPokayokeChecklist([]);
+        message.error('Failed to fetch PokaYoke Checklist notifications');
+        setPokayokeChecklistNotifications([]);
       }
     } catch (error) {
-      console.error('Error fetching PokaYoke Checklist:', error);
-      message.error('Failed to fetch PokaYoke Checklist');
-      setPokayokeChecklist([]);
+      console.error('Error fetching PokaYoke Checklist notifications:', error);
+      message.error('Failed to fetch PokaYoke Checklist notifications');
+      setPokayokeChecklistNotifications([]);
     } finally {
       setPokayokeChecklistLoading(false);
     }
   };
 
-  const handlePokayokeChecklistAcknowledge = async (submissionId) => {
+  const handleChecklistAcknowledge = async (submissionId) => {
     try {
-      // Add to acknowledging set to disable button
-      setAcknowledgingIds(prev => new Set(prev).add(submissionId));
+      setAcknowledgingChecklistIds(prev => new Set(prev).add(submissionId));
 
       // Get role from localStorage
       const storedUser = localStorage.getItem('user');
-      let role = 'operator';
+      let role = 'mc';
       if (storedUser) {
         try {
           const user = JSON.parse(storedUser);
-          role = user.role || 'operator';
+          role = user.role || 'mc';
+          // Map manufacturing_coordinator to mc for backend compatibility
+          if (role === 'manufacturing_coordinator') {
+            role = 'mc';
+          }
         } catch (e) {
           console.error("Error parsing user from local storage", e);
         }
       }
 
-      // Call the PUT endpoint for operation-checklists acknowledgment
       const response = await fetch(`${config.API_BASE_URL}/operation-checklists/submissions/${submissionId}/acknowledge`, {
         method: 'PUT',
         headers: {
@@ -95,41 +87,37 @@ const NotificationPokaYoke = () => {
 
       if (response.ok) {
         message.success('PokaYoke Checklist acknowledged');
-        // Refresh the Pokayoke Checklist list to update the UI
-        await fetchPokayokeChecklist();
-        // Remove from acknowledging set after refresh completes
-        setAcknowledgingIds(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(submissionId);
-          return newSet;
-        });
+        fetchPokayokeChecklistNotifications();
       } else {
         const errorData = await response.json();
-        console.error('PokaYoke Checklist acknowledgment error:', errorData);
+        console.error('Acknowledgment error:', errorData);
         let errorMessage = 'Unknown error';
         if (typeof errorData.detail === 'string') {
           errorMessage = errorData.detail;
         } else if (errorData.message) {
           errorMessage = errorData.message;
         }
-        message.error(`Failed to acknowledge PokaYoke Checklist: ${errorMessage}`);
-        // Remove from acknowledging set on error
-        setAcknowledgingIds(prev => {
+        message.error(`Failed to acknowledge: ${errorMessage}`);
+        setAcknowledgingChecklistIds(prev => {
           const newSet = new Set(prev);
           newSet.delete(submissionId);
           return newSet;
         });
       }
     } catch (error) {
-      console.error('Error acknowledging PokaYoke Checklist:', error);
-      message.error('Failed to acknowledge PokaYoke Checklist');
-      // Remove from acknowledging set on error
-      setAcknowledgingIds(prev => {
+      console.error('Error acknowledging checklist:', error);
+      message.error('Failed to acknowledge checklist');
+      setAcknowledgingChecklistIds(prev => {
         const newSet = new Set(prev);
         newSet.delete(submissionId);
         return newSet;
       });
     }
+  };
+
+  const handleViewChecklistDetails = (record) => {
+    setSelectedChecklistRecord(record);
+    setChecklistDetailsModalOpen(true);
   };
 
   const getStatusColor = (status) => {
@@ -152,6 +140,36 @@ const NotificationPokaYoke = () => {
       <div style={{ fontSize: 12, color: '#8c8c8c' }}>{secondary || '-'}</div>
     </div>
   );
+
+  // Search across all relevant fields: order number, product, part number/name,
+  // operation name/number, machine, operator, status
+  const filteredPokayokeChecklistNotifications = useMemo(() => {
+    const trimmedSearch = searchText.trim().toLowerCase();
+    if (!trimmedSearch) {
+      return pokayokeChecklistNotifications;
+    }
+
+    return pokayokeChecklistNotifications.filter((record) => {
+      const searchableValues = [
+        record.operation?.order?.sale_order_number,
+        record.operation?.order?.customer?.customer_name,
+        record.operation?.product?.product_name,
+        record.operation?.part?.part_name,
+        record.operation?.part?.part_number,
+        record.operation?.operation_name,
+        record.operation?.operation_number,
+        record.machine?.make,
+        record.machine?.model,
+        record.operator?.user_name,
+        record.supervisor?.user_name,
+        record.status,
+      ];
+
+      return searchableValues.some((value) =>
+        value !== undefined && value !== null && String(value).toLowerCase().includes(trimmedSearch)
+      );
+    });
+  }, [pokayokeChecklistNotifications, searchText]);
 
   const pokayokeChecklistColumns = [
     {
@@ -222,13 +240,25 @@ const NotificationPokaYoke = () => {
       },
     },
     {
+      title: 'Operator',
+      key: 'operator',
+      align: 'center',
+      width: 100,
+      sorter: (a, b) => {
+        const aVal = a.operator?.user_name || '';
+        const bVal = b.operator?.user_name || '';
+        return String(aVal).localeCompare(String(bVal));
+      },
+      render: (_, record) => record.operator?.user_name || '-',
+    },
+    {
       title: 'Submitted\nAt',
       key: 'submittedAt',
       align: 'center',
       width: 120,
       sorter: (a, b) => {
-        const dateA = new Date(a.submitted_at);
-        const dateB = new Date(b.submitted_at);
+        const dateA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+        const dateB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
         return dateA - dateB;
       },
       render: (_, record) => {
@@ -268,19 +298,19 @@ const NotificationPokaYoke = () => {
       ),
     },
     {
-      title: 'Acknowledged At',
+      title: 'Acknowledged\nAt',
       key: 'acknowledgedAt',
       align: 'center',
       width: 120,
       sorter: (a, b) => {
-        const dateA = new Date(a.operator_ack_at);
-        const dateB = new Date(b.operator_ack_at);
+        const dateA = a.mc_ack_at ? new Date(a.mc_ack_at).getTime() : 0;
+        const dateB = b.mc_ack_at ? new Date(b.mc_ack_at).getTime() : 0;
         return dateA - dateB;
       },
       render: (_, record) => {
-        if (!record.operator_ack_at) return 'N/A';
+        if (!record.mc_ack_at) return 'N/A';
         try {
-          const date = new Date(record.operator_ack_at);
+          const date = new Date(record.mc_ack_at);
           return date.toLocaleString('en-GB', {
             day: '2-digit',
             month: '2-digit',
@@ -299,27 +329,50 @@ const NotificationPokaYoke = () => {
       title: 'Action',
       key: 'action',
       align: 'center',
-      width: 50,
+      width: 100,
       fixed: 'right',
       render: (_, record) => (
-        <Button
-          type="primary"
-          icon={<CheckOutlined />}
-          size="small"
-          onClick={() => handlePokayokeChecklistAcknowledge(record.id)}
-          disabled={record.operator_ack_by || acknowledgingIds.has(record.id)}
-        >
-          Acknowledge
-        </Button>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          <Tooltip title="View Operator Remarks">
+            <Button
+              type="default"
+              icon={<EyeOutlined />}
+              size="small"
+              onClick={() => handleViewChecklistDetails(record)}
+            />
+          </Tooltip>
+          <Button
+            type="primary"
+            icon={<CheckOutlined />}
+            size="small"
+            onClick={() => handleChecklistAcknowledge(record.id)}
+            disabled={record.mc_ack_by || acknowledgingChecklistIds.has(record.id)}
+          >
+            Acknowledge
+          </Button>
+        </div>
       ),
     },
   ];
 
   return (
     <Spin spinning={pokayokeChecklistLoading}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <Input
+          allowClear
+          placeholder="Search order no, part no, operation, machine, operator..."
+          prefix={<SearchOutlined style={{ color: '#8c8c8c' }} />}
+          value={searchText}
+          onChange={(e) => {
+            setSearchText(e.target.value);
+            setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+          }}
+          style={{ width: 320 }}
+        />
+      </div>
       <Table
         columns={pokayokeChecklistColumns}
-        dataSource={pokayokeChecklist}
+        dataSource={filteredPokayokeChecklistNotifications}
         rowKey="id"
         pagination={{
           current: pokayokeChecklistPagination.current,
@@ -349,8 +402,61 @@ const NotificationPokaYoke = () => {
           },
         }}
       />
+
+      <Modal
+        title="Checklist Details"
+        open={checklistDetailsModalOpen}
+        onCancel={() => {
+          setChecklistDetailsModalOpen(false);
+          setSelectedChecklistRecord(null);
+        }}
+        footer={null}
+        width={650}
+      >
+        <Table
+          dataSource={selectedChecklistRecord?.checklist_names || []}
+          rowKey="checklist_id"
+          pagination={false}
+          locale={{ emptyText: <Empty description="No checklist data" /> }}
+          columns={[
+            {
+              title: 'Checklist Name',
+              dataIndex: 'checklist_name',
+              key: 'checklist_name',
+              align: 'left',
+            },
+            {
+              title: 'Response',
+              dataIndex: 'response',
+              key: 'response',
+              align: 'left',
+              render: (response) => (
+                <span style={{ color: response ? '#52c41a' : '#ff4d4f', fontWeight: 500 }}>
+                  {response ? 'Yes' : 'No'}
+                </span>
+              ),
+            },
+            {
+              title: 'Operator Remarks',
+              dataIndex: 'op_remarks',
+              key: 'op_remarks',
+              align: 'left',
+              render: (remarks) => remarks || '-',
+            },
+          ]}
+          components={{
+            header: {
+              cell: (props) => (
+                <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                  {props.children}
+                </th>
+              ),
+            },
+          }}
+        />
+      </Modal>
     </Spin>
   );
 };
 
-export default NotificationPokaYoke;
+export default PokayokeOperationNotification;

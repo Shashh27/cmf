@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Select, Spin, Typography } from 'antd';
 import { TOOLS_API_BASE_URL } from '../../Config/qualityconfig';
+import { getToolSubCategoryName } from './inspectorConstants';
 
 const { Text } = Typography;
 
@@ -31,7 +32,7 @@ const SetInstrumentModal = ({
         const seen = new Set();
         const unique = [];
         (Array.isArray(data) ? data : []).forEach((item) => {
-          const sub = (item?.sub_category || '').trim();
+          const sub = getToolSubCategoryName(item);
           if (!sub || seen.has(sub)) return;
           seen.add(sub);
           unique.push(sub);
