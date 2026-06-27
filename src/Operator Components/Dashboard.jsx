@@ -343,7 +343,6 @@ const Dashboard = () => {
   const handleSelectJobClick = () => {
     if (checklistPending) {
       message.warning('Please complete the due Checklist before selecting a job.');
-      setShowChecklist(true);
     } else {
       setShowSelectJob(true);
     }

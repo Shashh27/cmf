@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Table, Tag, Spin, message, Button, Badge, Empty } from 'antd';
-import { CheckOutlined } from '@ant-design/icons';
-import config from '../Config/config';
+import { Table, Tag, Spin, message, Button, Badge, Empty, Tooltip, Modal, Input } from 'antd';
+import { CheckOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
+import config from '../../Config/config';
 import dayjs from 'dayjs';
 
 const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
@@ -9,6 +9,9 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
   const [pokayokeChecklistLoading, setPokayokeChecklistLoading] = useState(true);
   const [pokayokeChecklistPagination, setPokayokeChecklistPagination] = useState({ current: 1, pageSize: 10 });
   const [acknowledgingChecklistIds, setAcknowledgingChecklistIds] = useState(new Set());
+  const [searchText, setSearchText] = useState('');
+  const [checklistDetailsModalOpen, setChecklistDetailsModalOpen] = useState(false);
+  const [selectedChecklistRecord, setSelectedChecklistRecord] = useState(null);
 
   useEffect(() => {
     fetchPokayokeChecklistNotifications();
@@ -16,7 +19,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
 
   // Report unacknowledged count to parent
   useEffect(() => {
-    const unacknowledgedCount = pokayokeChecklistNotifications.filter(log => !log.supervisor_ack_by).length;
+    const unacknowledgedCount = pokayokeChecklistNotifications.filter(log => !log.mc_ack_by).length;
     if (onUnacknowledgedCountChange) {
       onUnacknowledgedCountChange(unacknowledgedCount);
     }
@@ -31,8 +34,8 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
         const data = await response.json();
         // Sort by acknowledgment status first (unacknowledged at top), then by submitted_at descending
         const sortedLogs = (data || []).sort((a, b) => {
-          const isAckA = a.supervisor_ack_by;
-          const isAckB = b.supervisor_ack_by;
+          const isAckA = a.mc_ack_by;
+          const isAckB = b.mc_ack_by;
           if (isAckA !== isAckB) {
             return isAckA ? 1 : -1;
           }
@@ -60,11 +63,15 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
 
       // Get role from localStorage
       const storedUser = localStorage.getItem('user');
-      let role = 'supervisor';
+      let role = 'mc';
       if (storedUser) {
         try {
           const user = JSON.parse(storedUser);
-          role = user.role || 'supervisor';
+          role = user.role || 'mc';
+          // Map manufacturing_coordinator to mc for backend compatibility
+          if (role === 'manufacturing_coordinator') {
+            role = 'mc';
+          }
         } catch (e) {
           console.error("Error parsing user from local storage", e);
         }
@@ -108,6 +115,11 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
     }
   };
 
+  const handleViewChecklistDetails = (record) => {
+    setSelectedChecklistRecord(record);
+    setChecklistDetailsModalOpen(true);
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'approved':
@@ -121,14 +133,43 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
     }
   };
 
-  // Helper to render a two-line "stacked" cell: bold primary line on top,
-  // muted secondary line below (matches the Project/Part/Operation Details look).
+  // Helper to render a two-line "stacked" cell
   const renderStackedCell = (primary, secondary) => (
     <div style={{ lineHeight: 1.3 }}>
       <div style={{ fontWeight: 600, color: '#1f1f1f' }}>{primary || '-'}</div>
       <div style={{ fontSize: 12, color: '#8c8c8c' }}>{secondary || '-'}</div>
     </div>
   );
+
+  // Search across all relevant fields: order number, product, part number/name,
+  // operation name/number, machine, operator, status
+  const filteredPokayokeChecklistNotifications = useMemo(() => {
+    const trimmedSearch = searchText.trim().toLowerCase();
+    if (!trimmedSearch) {
+      return pokayokeChecklistNotifications;
+    }
+
+    return pokayokeChecklistNotifications.filter((record) => {
+      const searchableValues = [
+        record.operation?.order?.sale_order_number,
+        record.operation?.order?.customer?.customer_name,
+        record.operation?.product?.product_name,
+        record.operation?.part?.part_name,
+        record.operation?.part?.part_number,
+        record.operation?.operation_name,
+        record.operation?.operation_number,
+        record.machine?.make,
+        record.machine?.model,
+        record.operator?.user_name,
+        record.supervisor?.user_name,
+        record.status,
+      ];
+
+      return searchableValues.some((value) =>
+        value !== undefined && value !== null && String(value).toLowerCase().includes(trimmedSearch)
+      );
+    });
+  }, [pokayokeChecklistNotifications, searchText]);
 
   const pokayokeChecklistColumns = [
     {
@@ -262,14 +303,14 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
       align: 'center',
       width: 120,
       sorter: (a, b) => {
-        const dateA = a.supervisor_ack_at ? new Date(a.supervisor_ack_at).getTime() : 0;
-        const dateB = b.supervisor_ack_at ? new Date(b.supervisor_ack_at).getTime() : 0;
+        const dateA = a.mc_ack_at ? new Date(a.mc_ack_at).getTime() : 0;
+        const dateB = b.mc_ack_at ? new Date(b.mc_ack_at).getTime() : 0;
         return dateA - dateB;
       },
       render: (_, record) => {
-        if (!record.supervisor_ack_at) return 'N/A';
+        if (!record.mc_ack_at) return 'N/A';
         try {
-          const date = new Date(record.supervisor_ack_at);
+          const date = new Date(record.mc_ack_at);
           return date.toLocaleString('en-GB', {
             day: '2-digit',
             month: '2-digit',
@@ -288,27 +329,50 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
       title: 'Action',
       key: 'action',
       align: 'center',
-      width: 50,
+      width: 100,
       fixed: 'right',
       render: (_, record) => (
-        <Button
-          type="primary"
-          icon={<CheckOutlined />}
-          size="small"
-          onClick={() => handleChecklistAcknowledge(record.id)}
-          disabled={record.supervisor_ack_by || acknowledgingChecklistIds.has(record.id)}
-        >
-          Acknowledge
-        </Button>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          <Tooltip title="View Operator Remarks">
+            <Button
+              type="default"
+              icon={<EyeOutlined />}
+              size="small"
+              onClick={() => handleViewChecklistDetails(record)}
+            />
+          </Tooltip>
+          <Button
+            type="primary"
+            icon={<CheckOutlined />}
+            size="small"
+            onClick={() => handleChecklistAcknowledge(record.id)}
+            disabled={record.mc_ack_by || acknowledgingChecklistIds.has(record.id)}
+          >
+            Acknowledge
+          </Button>
+        </div>
       ),
     },
   ];
 
   return (
     <Spin spinning={pokayokeChecklistLoading}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <Input
+          allowClear
+          placeholder="Search order no, part no, operation, machine, operator..."
+          prefix={<SearchOutlined style={{ color: '#8c8c8c' }} />}
+          value={searchText}
+          onChange={(e) => {
+            setSearchText(e.target.value);
+            setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+          }}
+          style={{ width: 320 }}
+        />
+      </div>
       <Table
         columns={pokayokeChecklistColumns}
-        dataSource={pokayokeChecklistNotifications}
+        dataSource={filteredPokayokeChecklistNotifications}
         rowKey="id"
         pagination={{
           current: pokayokeChecklistPagination.current,
@@ -338,6 +402,59 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
           },
         }}
       />
+
+      <Modal
+        title="Checklist Details"
+        open={checklistDetailsModalOpen}
+        onCancel={() => {
+          setChecklistDetailsModalOpen(false);
+          setSelectedChecklistRecord(null);
+        }}
+        footer={null}
+        width={650}
+      >
+        <Table
+          dataSource={selectedChecklistRecord?.checklist_names || []}
+          rowKey="checklist_id"
+          pagination={false}
+          locale={{ emptyText: <Empty description="No checklist data" /> }}
+          columns={[
+            {
+              title: 'Checklist Name',
+              dataIndex: 'checklist_name',
+              key: 'checklist_name',
+              align: 'left',
+            },
+            {
+              title: 'Response',
+              dataIndex: 'response',
+              key: 'response',
+              align: 'left',
+              render: (response) => (
+                <span style={{ color: response ? '#52c41a' : '#ff4d4f', fontWeight: 500 }}>
+                  {response ? 'Yes' : 'No'}
+                </span>
+              ),
+            },
+            {
+              title: 'Operator Remarks',
+              dataIndex: 'op_remarks',
+              key: 'op_remarks',
+              align: 'left',
+              render: (remarks) => remarks || '-',
+            },
+          ]}
+          components={{
+            header: {
+              cell: (props) => (
+                <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                  {props.children}
+                </th>
+              ),
+            },
+          }}
+        />
+      </Modal>
     </Spin>
   );
 };

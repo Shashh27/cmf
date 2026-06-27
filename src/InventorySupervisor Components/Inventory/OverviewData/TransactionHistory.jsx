@@ -90,23 +90,64 @@ const [pagination, setPagination] = useState({current: 1, pageSize: 10,});
       render: (text) => text || '-',
     },
     {
-      title: 'Project Number',
-      dataIndex: 'project_name',
-      key: 'project_number',
+      title: 'Tool Range',
+      dataIndex: 'tool_range',
+      key: 'tool_range',
       width: 150,
-      fixed: 'left',
+      align: 'center',
       ellipsis: true,
       className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
-      title: 'Part Name',
-      dataIndex: 'part_name',
-      key: 'part_name',
-      width: 150,
+      title: 'ID Code',
+      dataIndex: 'identification_code',
+      key: 'identification_code',
+      width: 140,
+      align: 'center',
       ellipsis: true,
       className: 'table-header-styled',
       render: (text) => text || '-',
+    },
+    {
+      title: 'Project',
+      key: 'project',
+      width: 160,
+      fixed: 'left',
+      ellipsis: true,
+      className: 'table-header-styled',
+      render: (_, record) => (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{record.project_name || '-'}</span>
+          <span style={{ fontSize: 11, color: '#8c8c8c' }}>{record.product_name || '-'}</span>
+        </div>
+      ),
+    },
+    {
+      title: 'Part',
+      key: 'part',
+      width: 160,
+      ellipsis: true,
+      className: 'table-header-styled',
+      render: (_, record) => (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{record.part_name || '-'}</span>
+          <span style={{ fontSize: 11, color: '#8c8c8c' }}>{record.part_number || '-'}</span>
+        </div>
+      ),
+    },
+    {
+      title: 'Operation',
+      key: 'operation',
+      width: 160,
+      ellipsis: true,
+      className: 'table-header-styled',
+      render: (_, record) => (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{record.operation_name || '-'}</span>
+          <span style={{ fontSize: 11, color: '#8c8c8c' }}>#{record.operation_number || '-'}</span>
+        </div>
+      ),
     },
     {
       title: 'Requested Qty',
@@ -197,8 +238,14 @@ const [pagination, setPagination] = useState({current: 1, pageSize: 10,});
         const requestRow = {
           key: `request_${inventoryRequest.id}`,
           tool_name: inventoryRequest.tool_name || '-',
+          tool_range: inventoryRequest.tool_range || '-',
+          identification_code: inventoryRequest.identification_code || '-',
           project_name: inventoryRequest.project_name || '-',
+          product_name: inventoryRequest.product_name || '-',
           part_name: inventoryRequest.part_name || '-',
+          part_number: inventoryRequest.part_number || '-',
+          operation_name: inventoryRequest.operation_name || '-',
+          operation_number: inventoryRequest.operation_number || '-',
           requested_qty: inventoryRequest.quantity || '-',
           requested_by: inventoryRequest.operator_name || '-',
           request_created_at: inventoryRequest.created_at,
@@ -221,8 +268,14 @@ const [pagination, setPagination] = useState({current: 1, pageSize: 10,});
           const returnRow = {
             key: `return_${returnRequest.id}`,
             tool_name: inventoryRequest.tool_name || '-',
+            tool_range: inventoryRequest.tool_range || '-',
+            identification_code: inventoryRequest.identification_code || '-',
             project_name: inventoryRequest.project_name || '-',
+            product_name: inventoryRequest.product_name || '-',
             part_name: inventoryRequest.part_name || '-',
+            part_number: inventoryRequest.part_number || '-',
+            operation_name: inventoryRequest.operation_name || '-',
+            operation_number: inventoryRequest.operation_number || '-',
             requested_qty: inventoryRequest.quantity || '-',
             requested_by: inventoryRequest.operator_name || '-',
             request_created_at: inventoryRequest.created_at,

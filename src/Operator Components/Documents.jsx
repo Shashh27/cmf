@@ -29,7 +29,7 @@ const Documents = () => {
       <div style={{ 
         padding: isMobile ? '8px 16px' : '16px 16px 0 16px'
       }}>
-        <Card 
+        {/* <Card 
           bordered={false} 
           style={{ 
             borderRadius: '12px',
@@ -49,7 +49,7 @@ const Documents = () => {
               </Text>
             </div>
           </div>
-        </Card>
+        </Card> */}
       </div>
 
       <div style={{ 

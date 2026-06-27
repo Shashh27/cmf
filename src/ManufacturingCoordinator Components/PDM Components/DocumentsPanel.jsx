@@ -446,6 +446,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     }
   };
 
+
   const openPartActionModal = (type) => {
     if (!selectedItem || selectedItem.itemType !== 'part') { message.warning("Please select a part to add operations/documents"); return; }
     setPartActionType(type); setShowPartActionModal(true);

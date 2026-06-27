@@ -316,7 +316,7 @@ const ReturnRequestsTable = () => {
         return (
           <div>
             <div>{partName}</div>
-            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{partNum}</div>}
+            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>{partNum}</div>}
           </div>
         );
       },

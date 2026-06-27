@@ -1,75 +1,90 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Table, Tag, Spin, message, Button, Badge, Empty } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Table, Tag, Spin, message, Button } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
 import config from '../Config/config';
-import dayjs from 'dayjs';
 
-const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
-  const [pokayokeChecklistNotifications, setPokayokeChecklistNotifications] = useState([]);
+const NotificationPokaYoke = () => {
+  const [pokayokeChecklist, setPokayokeChecklist] = useState([]);
   const [pokayokeChecklistLoading, setPokayokeChecklistLoading] = useState(true);
   const [pokayokeChecklistPagination, setPokayokeChecklistPagination] = useState({ current: 1, pageSize: 10 });
-  const [acknowledgingChecklistIds, setAcknowledgingChecklistIds] = useState(new Set());
+  const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
 
   useEffect(() => {
-    fetchPokayokeChecklistNotifications();
+    fetchPokayokeChecklist();
   }, []);
 
-  // Report unacknowledged count to parent
-  useEffect(() => {
-    const unacknowledgedCount = pokayokeChecklistNotifications.filter(log => !log.supervisor_ack_by).length;
-    if (onUnacknowledgedCountChange) {
-      onUnacknowledgedCountChange(unacknowledgedCount);
-    }
-  }, [pokayokeChecklistNotifications, onUnacknowledgedCountChange]);
-
-  const fetchPokayokeChecklistNotifications = async () => {
+  const fetchPokayokeChecklist = async () => {
     setPokayokeChecklistLoading(true);
     try {
-      const apiUrl = `${config.API_BASE_URL}/operation-checklists/submissions`;
-      const response = await fetch(apiUrl);
-      if (response.ok) {
-        const data = await response.json();
-        // Sort by acknowledgment status first (unacknowledged at top), then by submitted_at descending
-        const sortedLogs = (data || []).sort((a, b) => {
-          const isAckA = a.supervisor_ack_by;
-          const isAckB = b.supervisor_ack_by;
-          if (isAckA !== isAckB) {
-            return isAckA ? 1 : -1;
-          }
-          const dateA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
-          const dateB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
-          return dateB - dateA;
-        });
-        setPokayokeChecklistNotifications(sortedLogs || []);
-      } else {
-        message.error('Failed to fetch PokaYoke Checklist notifications');
-        setPokayokeChecklistNotifications([]);
-      }
-    } catch (error) {
-      console.error('Error fetching PokaYoke Checklist notifications:', error);
-      message.error('Failed to fetch PokaYoke Checklist notifications');
-      setPokayokeChecklistNotifications([]);
-    } finally {
-      setPokayokeChecklistLoading(false);
-    }
-  };
-
-  const handleChecklistAcknowledge = async (submissionId) => {
-    try {
-      setAcknowledgingChecklistIds(prev => new Set(prev).add(submissionId));
-
-      // Get role from localStorage
+      // Get operator ID from localStorage
+      let operatorId = null;
       const storedUser = localStorage.getItem('user');
-      let role = 'supervisor';
       if (storedUser) {
         try {
           const user = JSON.parse(storedUser);
-          role = user.role || 'supervisor';
+          operatorId = user.id;
         } catch (e) {
           console.error("Error parsing user from local storage", e);
         }
       }
 
+      if (!operatorId) {
+        message.error('Operator not found in session. Please log in again.');
+        setPokayokeChecklistLoading(false);
+        return;
+      }
+
+      // Fetch operation-checklists submissions filtered by operator
+      const apiUrl = `${config.API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`;
+
+      const response = await fetch(apiUrl);
+      if (response.ok) {
+        const data = await response.json();
+        // Sort by acknowledgment status first (unacknowledged at top), then by submitted_at descending
+        const sortedLogs = (data || []).sort((a, b) => {
+          const isAckA = a.operator_ack_by;
+          const isAckB = b.operator_ack_by;
+          // Unacknowledged (null) comes before acknowledged (not null)
+          if (isAckA !== isAckB) {
+            return isAckA ? 1 : -1;
+          }
+          // Within same acknowledgment status, sort by submitted_at descending
+          const dateA = new Date(a.submitted_at).getTime();
+          const dateB = new Date(b.submitted_at).getTime();
+          return dateB - dateA;
+        });
+        setPokayokeChecklist(sortedLogs || []);
+      } else {
+        message.error('Failed to fetch PokaYoke Checklist');
+        setPokayokeChecklist([]);
+      }
+    } catch (error) {
+      console.error('Error fetching PokaYoke Checklist:', error);
+      message.error('Failed to fetch PokaYoke Checklist');
+      setPokayokeChecklist([]);
+    } finally {
+      setPokayokeChecklistLoading(false);
+    }
+  };
+
+  const handlePokayokeChecklistAcknowledge = async (submissionId) => {
+    try {
+      // Add to acknowledging set to disable button
+      setAcknowledgingIds(prev => new Set(prev).add(submissionId));
+
+      // Get role from localStorage
+      const storedUser = localStorage.getItem('user');
+      let role = 'operator';
+      if (storedUser) {
+        try {
+          const user = JSON.parse(storedUser);
+          role = user.role || 'operator';
+        } catch (e) {
+          console.error("Error parsing user from local storage", e);
+        }
+      }
+
+      // Call the PUT endpoint for operation-checklists acknowledgment
       const response = await fetch(`${config.API_BASE_URL}/operation-checklists/submissions/${submissionId}/acknowledge`, {
         method: 'PUT',
         headers: {
@@ -80,27 +95,36 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
 
       if (response.ok) {
         message.success('PokaYoke Checklist acknowledged');
-        fetchPokayokeChecklistNotifications();
+        // Refresh the Pokayoke Checklist list to update the UI
+        await fetchPokayokeChecklist();
+        // Remove from acknowledging set after refresh completes
+        setAcknowledgingIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(submissionId);
+          return newSet;
+        });
       } else {
         const errorData = await response.json();
-        console.error('Acknowledgment error:', errorData);
+        console.error('PokaYoke Checklist acknowledgment error:', errorData);
         let errorMessage = 'Unknown error';
         if (typeof errorData.detail === 'string') {
           errorMessage = errorData.detail;
         } else if (errorData.message) {
           errorMessage = errorData.message;
         }
-        message.error(`Failed to acknowledge: ${errorMessage}`);
-        setAcknowledgingChecklistIds(prev => {
+        message.error(`Failed to acknowledge PokaYoke Checklist: ${errorMessage}`);
+        // Remove from acknowledging set on error
+        setAcknowledgingIds(prev => {
           const newSet = new Set(prev);
           newSet.delete(submissionId);
           return newSet;
         });
       }
     } catch (error) {
-      console.error('Error acknowledging checklist:', error);
-      message.error('Failed to acknowledge checklist');
-      setAcknowledgingChecklistIds(prev => {
+      console.error('Error acknowledging PokaYoke Checklist:', error);
+      message.error('Failed to acknowledge PokaYoke Checklist');
+      // Remove from acknowledging set on error
+      setAcknowledgingIds(prev => {
         const newSet = new Set(prev);
         newSet.delete(submissionId);
         return newSet;
@@ -121,8 +145,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
     }
   };
 
-  // Helper to render a two-line "stacked" cell: bold primary line on top,
-  // muted secondary line below (matches the Project/Part/Operation Details look).
+  // Helper to render a two-line "stacked" cell
   const renderStackedCell = (primary, secondary) => (
     <div style={{ lineHeight: 1.3 }}>
       <div style={{ fontWeight: 600, color: '#1f1f1f' }}>{primary || '-'}</div>
@@ -199,25 +222,13 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
       },
     },
     {
-      title: 'Operator',
-      key: 'operator',
-      align: 'center',
-      width: 100,
-      sorter: (a, b) => {
-        const aVal = a.operator?.user_name || '';
-        const bVal = b.operator?.user_name || '';
-        return String(aVal).localeCompare(String(bVal));
-      },
-      render: (_, record) => record.operator?.user_name || '-',
-    },
-    {
       title: 'Submitted\nAt',
       key: 'submittedAt',
       align: 'center',
       width: 120,
       sorter: (a, b) => {
-        const dateA = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
-        const dateB = b.submitted_at ? new Date(b.submitted_at).getTime() : 0;
+        const dateA = new Date(a.submitted_at);
+        const dateB = new Date(b.submitted_at);
         return dateA - dateB;
       },
       render: (_, record) => {
@@ -257,19 +268,19 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
       ),
     },
     {
-      title: 'Acknowledged\nAt',
+      title: 'Acknowledged At',
       key: 'acknowledgedAt',
       align: 'center',
       width: 120,
       sorter: (a, b) => {
-        const dateA = a.supervisor_ack_at ? new Date(a.supervisor_ack_at).getTime() : 0;
-        const dateB = b.supervisor_ack_at ? new Date(b.supervisor_ack_at).getTime() : 0;
+        const dateA = new Date(a.operator_ack_at);
+        const dateB = new Date(b.operator_ack_at);
         return dateA - dateB;
       },
       render: (_, record) => {
-        if (!record.supervisor_ack_at) return 'N/A';
+        if (!record.operator_ack_at) return 'N/A';
         try {
-          const date = new Date(record.supervisor_ack_at);
+          const date = new Date(record.operator_ack_at);
           return date.toLocaleString('en-GB', {
             day: '2-digit',
             month: '2-digit',
@@ -295,8 +306,8 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
           type="primary"
           icon={<CheckOutlined />}
           size="small"
-          onClick={() => handleChecklistAcknowledge(record.id)}
-          disabled={record.supervisor_ack_by || acknowledgingChecklistIds.has(record.id)}
+          onClick={() => handlePokayokeChecklistAcknowledge(record.id)}
+          disabled={record.operator_ack_by || acknowledgingIds.has(record.id)}
         >
           Acknowledge
         </Button>
@@ -308,7 +319,7 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
     <Spin spinning={pokayokeChecklistLoading}>
       <Table
         columns={pokayokeChecklistColumns}
-        dataSource={pokayokeChecklistNotifications}
+        dataSource={pokayokeChecklist}
         rowKey="id"
         pagination={{
           current: pokayokeChecklistPagination.current,
@@ -342,4 +353,4 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
   );
 };
 
-export default PokayokeOperationNotification;
+export default NotificationPokaYoke;

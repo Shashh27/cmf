@@ -132,6 +132,7 @@ const Navbar = ({ collapsed }) => {
     if (path.includes('/configuration')) return 'Configuration';
     if (path.includes('/pokayoke-operation-checklists')) return 'PokaYoke Checklist';
     if (path.includes('/product-monitoring/pokayoke-checklists')) return 'Preventive Maintenance';
+    if (path.includes('/preventive-maintenance')) return 'Preventive Maintenance';
     if (path.includes('/create-inspection-plan')) return 'Inspection Plan';
     if (path.includes('/product-monitoring')) return 'Production Monitoring';
     if (path.includes('/quality-management')) return 'Quality Management';

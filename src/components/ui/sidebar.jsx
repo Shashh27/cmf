@@ -541,7 +541,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <DashboardOutlined />,
 
       },
+      {
 
+        key: `${prefix}/preventive-maintenance`,
+
+        label: <Link to={`${prefix}/preventive-maintenance`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
+
+        icon: <CarryOutOutlined />,
+
+      },
       {
 
         key: `${prefix}/inspection-results`,

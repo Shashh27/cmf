@@ -5,6 +5,9 @@ import InventoryData from '../Operator Components/InventoryData';
 import Documents from '../Operator Components/Documents';
 import Dashboard from '../Operator Components/Dashboard';
 import LeaveLog from '../Operator Components/LeaveLog';
+import PokaYokeChecklist from '../Operator Components/PokaYokeChecklist';
+import OperatorNotifications from '../Operator Components/Notifications';
+import ProductionLogsHistory from '../Operator Components/ProductionLogsHistory';
 
 const OperatorDashboard = () => {
   const location = useLocation();
@@ -24,7 +27,16 @@ const OperatorDashboard = () => {
     if (path.includes('/leave-log')) {
       return <LeaveLog />;
     }
-    
+    if (path.includes('/preventive-maintenance')) {
+      return <PokaYokeChecklist open={true} onClose={() => {}} isPage={true} />;
+    }
+    if (path.includes('/notifications')) {
+      return <OperatorNotifications />;
+    }
+    if (path.includes('/production-logs')) {
+      return <ProductionLogsHistory />;
+    }
+
     // Default Dashboard View
     return <Dashboard />;
   };

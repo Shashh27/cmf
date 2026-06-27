@@ -8,7 +8,7 @@ function cellText(el) {
 
 function parseDataRowRemarks(table) {
   const remarks = [];
-  table.querySelectorAll('tr.ir-data-row').forEach((row, idx) => {
+  table.querySelectorAll('tr.ir-data-row:not(.ir-data-row--filler)').forEach((row, idx) => {
     const cells = row.querySelectorAll('td');
     if (!cells.length) return;
     const last = cells[cells.length - 1];
@@ -84,7 +84,7 @@ function mergeRemarksAcrossPages(payload, pageTables) {
   let globalIdx = 0;
   sorted.forEach(({ table }) => {
     if (!table) return;
-    table.querySelectorAll('tr.ir-data-row').forEach((row) => {
+    table.querySelectorAll('tr.ir-data-row:not(.ir-data-row--filler)').forEach((row) => {
       const cells = row.querySelectorAll('td');
       if (!cells.length) return;
       const last = cells[cells.length - 1];

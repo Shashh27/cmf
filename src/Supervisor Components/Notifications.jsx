@@ -932,24 +932,15 @@ const Notifications = () => {
       render: (text, record, index) => index + 1,
     },
     {
-      title: 'Operation\nNo',
-      key: 'operationNumber',
-      align: 'center',
-      width: 80,
-      render: (text, record) => record.operation?.operation_number || 'N/A',
-    },
-    {
-      title: 'Operation\nName',
-      key: 'operationName',
-      align: 'center',
-      width: 100,
-      render: (text, record) => record.operation?.operation_name || 'N/A',
-    },
-    {
       title: 'Project\nDetails',
       key: 'projectDetails',
       align: 'center',
       width: 100,
+      sorter: (a, b) => {
+        const orderA = a.operation?.order?.sale_order_number || '';
+        const orderB = b.operation?.order?.sale_order_number || '';
+        return orderA.localeCompare(orderB);
+      },
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{record.operation?.order?.sale_order_number || 'N/A'}</div>
@@ -962,10 +953,32 @@ const Notifications = () => {
       key: 'partDetails',
       align: 'center',
       width: 80,
+      sorter: (a, b) => {
+        const partA = a.operation?.part?.part_name || '';
+        const partB = b.operation?.part?.part_name || '';
+        return partA.localeCompare(partB);
+      },
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{record.operation?.part?.part_name || 'N/A'}</div>
           <div style={{ fontSize: '12px', color: '#666' }}>{record.operation?.part?.part_number || 'N/A'}</div>
+        </div>
+      ),
+    },
+    {
+      title: 'Operation\nDetails',
+      key: 'operationDetails',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const opA = a.operation?.operation_name || '';
+        const opB = b.operation?.operation_name || '';
+        return opA.localeCompare(opB);
+      },
+      render: (text, record) => (
+        <div>
+          <div style={{ fontWeight: 'bold' }}>{record.operation?.operation_name || 'N/A'}</div>
+          <div style={{ fontSize: '12px', color: '#666' }}>{record.operation?.operation_number ? `#${record.operation.operation_number}` : 'N/A'}</div>
         </div>
       ),
     },
@@ -989,6 +1002,30 @@ const Notifications = () => {
       ),
     },
     {
+      title: 'From Date\n& Time',
+      key: 'fromDateTime',
+      align: 'center',
+      width: 100,
+      sorter: (a, b) => {
+        const dateA = new Date(`${a.from_date} ${a.from_time}`);
+        const dateB = new Date(`${b.from_date} ${b.from_time}`);
+        return dateA - dateB;
+      },
+      render: (text, record) => formatDateTime(record.from_date, record.from_time),
+    },
+    {
+      title: 'To Date\n& Time',
+      key: 'toDateTime',
+      align: 'center',
+      width: 100,
+      sorter: (a, b) => {
+        const dateA = new Date(`${a.to_date} ${a.to_time}`);
+        const dateB = new Date(`${b.to_date} ${b.to_time}`);
+        return dateA - dateB;
+      },
+      render: (text, record) => formatDateTime(record.to_date, record.to_time),
+    },
+    {
       title: 'Part\nQty',
       key: 'partQuantity',
       align: 'center',
@@ -1006,20 +1043,6 @@ const Notifications = () => {
       render: (text) => (
         <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{text || 0}</span>
       ),
-    },
-    {
-      title: 'From Date\n& Time',
-      key: 'fromDateTime',
-      align: 'center',
-      width: 100,
-      render: (text, record) => formatDateTime(record.from_date, record.from_time),
-    },
-    {
-      title: 'To Date\n& Time',
-      key: 'toDateTime',
-      align: 'center',
-      width: 100,
-      render: (text, record) => formatDateTime(record.to_date, record.to_time),
     },
     {
       title: 'Approved\nQty',
@@ -1058,6 +1081,35 @@ const Notifications = () => {
       align: 'center',
       width: 120,
       render: (text) => text || '-',
+    },
+    {
+      title: 'Acknowledged At',
+      dataIndex: 'supervisor_acknowledged_at',
+      key: 'acknowledgedAt',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const dateA = new Date(a.supervisor_acknowledged_at);
+        const dateB = new Date(b.supervisor_acknowledged_at);
+        return dateA - dateB;
+      },
+      render: (text) => {
+        if (!text) return 'N/A';
+        try {
+          const date = new Date(text);
+          return date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          });
+        } catch (error) {
+          return 'N/A';
+        }
+      },
     },
     {
       title: 'Action',
@@ -1211,6 +1263,7 @@ const Notifications = () => {
       key: 'checklistName',
       align: 'center',
       width: 120,
+      sorter: (a, b) => (a.checklist_name || '').localeCompare(b.checklist_name || ''),
     },
     {
       title: 'Machine\nName',
@@ -1232,6 +1285,11 @@ const Notifications = () => {
       key: 'completedAt',
       align: 'center',
       width: 120,
+      sorter: (a, b) => {
+        const dateA = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const dateB = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+        return dateA - dateB;
+      },
       render: (text) => {
         if (!text) return 'N/A';
         try {
@@ -1242,6 +1300,7 @@ const Notifications = () => {
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
+            second: '2-digit',
             hour12: false
           });
         } catch (error) {
@@ -1266,6 +1325,34 @@ const Notifications = () => {
           {(text || 'N/A').toUpperCase()}
         </Tag>
       ),
+    },
+    {
+      title: 'Acknowledged\nAt',
+      key: 'acknowledgedAt',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const dateA = a.supervisor_acknowledged_at ? new Date(a.supervisor_acknowledged_at).getTime() : 0;
+        const dateB = b.supervisor_acknowledged_at ? new Date(b.supervisor_acknowledged_at).getTime() : 0;
+        return dateA - dateB;
+      },
+      render: (_, record) => {
+        if (!record.supervisor_acknowledged_at) return 'N/A';
+        try {
+          const date = new Date(record.supervisor_acknowledged_at);
+          return date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          });
+        } catch (error) {
+          return 'N/A';
+        }
+      },
     },
     {
       title: 'Action',
@@ -1325,7 +1412,7 @@ const Notifications = () => {
       {/* Tabs Section */}
       <Card
         style={{ borderRadius: 8 }}
-        styles={{ body: { padding: 0 } }}
+        styles={{ body: { padding: '0 16px' } }}
       >
         <Tabs
           activeKey={activeTab}
