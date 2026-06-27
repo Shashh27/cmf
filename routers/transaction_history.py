@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from DB.database import get_db
 from DB.models.inventory import InventoryRequest, InventoryReturnRequest, ToolsList, ToolIssue
 from DB.models.access_control import AccessUser
-from DB.models.oms import Order, Part
+from DB.models.oms import Order, Part, Operation, Product
 from DB.schemas.inventory import (
     TransactionHistoryBase,
     TransactionHistoryResponse,
@@ -100,23 +100,34 @@ def get_transaction_history(
         inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_request.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
-        
+        operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first() if inventory_request.operation_id else None
+        product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
+
         inventory_request_details = {
             "id": inventory_request.id,
             "tool_id": inventory_request.tool_id,
             "operator_id": inventory_request.operator_id,
             "project_id": inventory_request.project_id,
             "part_id": inventory_request.part_id,
+            "operation_id": inventory_request.operation_id,
             "quantity": inventory_request.quantity,
             "purpose_of_use": inventory_request.purpose_of_use,
+            "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
             "status": inventory_request.status,
             "created_at": inventory_request.created_at,
             "updated_at": inventory_request.updated_at,
             "tool_name": tool.item_description if tool else None,
+            "tool_type": tool.type if tool else None,
+            "tool_range": tool.range if tool else None,
+            "identification_code": tool.identification_code if tool else None,
             "operator_name": operator.user_name if operator else None,
             "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
-            "part_name": part.part_name if part else None
+            "part_name": part.part_name if part else None,
+            "part_number": part.part_number if part else None,
+            "product_name": product.product_name if product else None,
+            "operation_name": operation.operation_name if operation else None,
+            "operation_number": operation.operation_number if operation else None
         }
         
         result.inventory_request = InventoryRequestWithDetailsSchema(**inventory_request_details)
@@ -174,23 +185,34 @@ def get_transaction_history(
                 inv_req_supervisor = db.query(AccessUser).filter(AccessUser.id == original_inventory_request.inventory_supervisor_id).first()
                 project = db.query(Order).filter(Order.id == original_inventory_request.project_id).first()
                 part = db.query(Part).filter(Part.id == original_inventory_request.part_id).first()
-                
+                operation = db.query(Operation).filter(Operation.id == original_inventory_request.operation_id).first() if original_inventory_request.operation_id else None
+                product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
+
                 inventory_request_details = {
                     "id": original_inventory_request.id,
                     "tool_id": original_inventory_request.tool_id,
                     "operator_id": original_inventory_request.operator_id,
                     "project_id": original_inventory_request.project_id,
                     "part_id": original_inventory_request.part_id,
+                    "operation_id": original_inventory_request.operation_id,
                     "quantity": original_inventory_request.quantity,
                     "purpose_of_use": original_inventory_request.purpose_of_use,
+                    "inventory_supervisor_id": original_inventory_request.inventory_supervisor_id,
                     "status": original_inventory_request.status,
                     "created_at": original_inventory_request.created_at,
                     "updated_at": original_inventory_request.updated_at,
                     "tool_name": tool.item_description if tool else None,
+                    "tool_type": tool.type if tool else None,
+                    "tool_range": tool.range if tool else None,
+                    "identification_code": tool.identification_code if tool else None,
                     "operator_name": inv_operator.user_name if inv_operator else None,
                     "inventory_supervisor_name": inv_req_supervisor.user_name if inv_req_supervisor else None,
                     "project_name": project.sale_order_number if project else None,
-                    "part_name": part.part_name if part else None
+                    "part_name": part.part_name if part else None,
+                    "part_number": part.part_number if part else None,
+                    "product_name": product.product_name if product else None,
+                    "operation_name": operation.operation_name if operation else None,
+                    "operation_number": operation.operation_number if operation else None
                 }
         
         return_request_details = {
@@ -265,23 +287,34 @@ def get_all_transactions(db: Session = Depends(get_db)):
         inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_request.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
-        
+        operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first() if inventory_request.operation_id else None
+        product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
+
         inventory_request_details = {
             "id": inventory_request.id,
             "tool_id": inventory_request.tool_id,
             "operator_id": inventory_request.operator_id,
             "project_id": inventory_request.project_id,
             "part_id": inventory_request.part_id,
+            "operation_id": inventory_request.operation_id,
             "quantity": inventory_request.quantity,
             "purpose_of_use": inventory_request.purpose_of_use,
+            "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
             "status": inventory_request.status,
             "created_at": inventory_request.created_at,
             "updated_at": inventory_request.updated_at,
             "tool_name": tool.item_description if tool else None,
+            "tool_type": tool.type if tool else None,
+            "tool_range": tool.range if tool else None,
+            "identification_code": tool.identification_code if tool else None,
             "operator_name": operator.user_name if operator else None,
             "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
-            "part_name": part.part_name if part else None
+            "part_name": part.part_name if part else None,
+            "part_number": part.part_number if part else None,
+            "product_name": product.product_name if product else None,
+            "operation_name": operation.operation_name if operation else None,
+            "operation_number": operation.operation_number if operation else None
         }
         
         # Get ALL return requests associated with this inventory request
@@ -451,23 +484,34 @@ def get_transactions_by_tool(tool_id: int, db: Session = Depends(get_db)):
         inventory_supervisor = db.query(AccessUser).filter(AccessUser.id == inventory_request.inventory_supervisor_id).first()
         project = db.query(Order).filter(Order.id == inventory_request.project_id).first()
         part = db.query(Part).filter(Part.id == inventory_request.part_id).first()
-        
+        operation = db.query(Operation).filter(Operation.id == inventory_request.operation_id).first() if inventory_request.operation_id else None
+        product = db.query(Product).filter(Product.id == part.product_id).first() if part and part.product_id else None
+
         inventory_request_details = {
             "id": inventory_request.id,
             "tool_id": inventory_request.tool_id,
             "operator_id": inventory_request.operator_id,
             "project_id": inventory_request.project_id,
             "part_id": inventory_request.part_id,
+            "operation_id": inventory_request.operation_id,
             "quantity": inventory_request.quantity,
             "purpose_of_use": inventory_request.purpose_of_use,
+            "inventory_supervisor_id": inventory_request.inventory_supervisor_id,
             "status": inventory_request.status,
             "created_at": inventory_request.created_at,
             "updated_at": inventory_request.updated_at,
             "tool_name": tool_detail.item_description if tool_detail else None,
+            "tool_type": tool_detail.type if tool_detail else None,
+            "tool_range": tool_detail.range if tool_detail else None,
+            "identification_code": tool_detail.identification_code if tool_detail else None,
             "operator_name": operator.user_name if operator else None,
             "inventory_supervisor_name": inventory_supervisor.user_name if inventory_supervisor else None,
             "project_name": project.sale_order_number if project else None,
-            "part_name": part.part_name if part else None
+            "part_name": part.part_name if part else None,
+            "part_number": part.part_number if part else None,
+            "product_name": product.product_name if product else None,
+            "operation_name": operation.operation_name if operation else None,
+            "operation_number": operation.operation_number if operation else None
         }
         
         return_requests = db.query(InventoryReturnRequest).filter(

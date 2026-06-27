@@ -5,7 +5,7 @@ from DB.database import get_db
 from DB.models.maintenance import OEEIssue as OEEIssueModel, MachineBreakdown as MachineBreakdownModel, ComponentIssue as ComponentIssueModel, HelpSupport as HelpSupportModel
 from DB.models.configuration import Machine as MachineModel
 from DB.models.access_control import AccessUser as AccessUserModel
-from DB.models.oms import Order as OrderModel, Part as PartModel
+from DB.models.oms import Order as OrderModel, Part as PartModel, Operation as OperationModel, Product as ProductModel
 from DB.models.notifications import MachineNotification as MachineNotificationModel, ComponentIssuesNotification as ComponentIssuesNotificationModel
 from DB.schemas.maintenance import (
     OEEIssue as OEEIssueSchema,
@@ -36,7 +36,11 @@ def _maps_for_enrichment(db: Session):
     users    = {u.id: (u.user_name or str(u.id)) for u in db.query(AccessUserModel).all()}
     orders   = {o.id: (o.sale_order_number or o.project_name or str(o.id)) for o in db.query(OrderModel).all()}
     parts    = {p.id: (p.part_name or p.part_number or str(p.id)) for p in db.query(PartModel).all()}
-    return machines, users, orders, parts
+    part_numbers = {p.id: p.part_number for p in db.query(PartModel).all()}
+    operations = {op.id: (op.operation_name or str(op.id)) for op in db.query(OperationModel).all()}
+    operation_numbers = {op.id: op.operation_number for op in db.query(OperationModel).all()}
+    products = {p.id: p.product_name for p in db.query(ProductModel).all()}
+    return machines, users, orders, parts, part_numbers, operations, operation_numbers, products
 
 @router.post("/oee-issues", response_model=OEEIssueSchema)
 def create_oee_issue(payload: OEEIssueCreate, db: Session = Depends(get_db)):
@@ -70,7 +74,7 @@ def create_oee_issue(payload: OEEIssueCreate, db: Session = Depends(get_db)):
 @router.get("/oee-issues", response_model=List[OEEIssueSchema])
 def list_oee_issues(db: Session = Depends(get_db)):
     rows = db.query(OEEIssueModel).order_by(OEEIssueModel.id.asc()).all()
-    m_map, u_map, _, _ = _maps_for_enrichment(db)
+    m_map, u_map, _, _, _, _, _, _ = _maps_for_enrichment(db)
     out = []
     for r in rows:
         out.append({
@@ -183,7 +187,7 @@ def create_machine_breakdown(payload: MachineBreakdownCreate, db: Session = Depe
 @router.get("/machine-breakdown", response_model=List[MachineBreakdownSchema])
 def list_machine_breakdown(db: Session = Depends(get_db)):
     rows = db.query(MachineBreakdownModel).order_by(MachineBreakdownModel.id.asc()).all()
-    m_map, u_map, _, _ = _maps_for_enrichment(db)
+    m_map, u_map, _, _, _, _, _, _ = _maps_for_enrichment(db)
     out = []
     for r in rows:
         out.append({
@@ -263,6 +267,7 @@ def create_component_issue(payload: ComponentIssueCreate, db: Session = Depends(
         component_status=status,
         production_order_id=payload.production_order_id,
         part_id=payload.part_id,
+        operation_id=payload.operation_id,
         description=payload.description,
         reported_at=payload.reported_at if payload.reported_at else None,
     )
@@ -290,6 +295,11 @@ def create_component_issue(payload: ComponentIssueCreate, db: Session = Depends(
         "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "part_number": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_number if obj.part_id else None,
+        "operation_id": obj.operation_id,
+        "operation_name": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_name if obj.operation_id else None,
+        "operation_number": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_number if obj.operation_id else None,
+        "product_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().product.product_name if obj.part_id and db.query(PartModel).filter(PartModel.id == obj.part_id).first().product else None,
         "description": obj.description,
         "reported_at": obj.reported_at,
     }
@@ -297,7 +307,7 @@ def create_component_issue(payload: ComponentIssueCreate, db: Session = Depends(
 @router.get("/component-issues", response_model=List[ComponentIssueSchema])
 def list_component_issues(db: Session = Depends(get_db)):
     rows = db.query(ComponentIssueModel).order_by(ComponentIssueModel.id.asc()).all()
-    m_map, u_map, o_map, p_map = _maps_for_enrichment(db)
+    m_map, u_map, o_map, p_map, pn_map, op_map, opn_map, prod_map = _maps_for_enrichment(db)
     out = []
     for r in rows:
         out.append({
@@ -311,6 +321,11 @@ def list_component_issues(db: Session = Depends(get_db)):
             "order_name": o_map.get(r.production_order_id),
             "part_id": r.part_id,
             "part_name": p_map.get(r.part_id),
+            "part_number": pn_map.get(r.part_id),
+            "operation_id": r.operation_id,
+            "operation_name": op_map.get(r.operation_id),
+            "operation_number": opn_map.get(r.operation_id),
+            "product_name": prod_map.get(db.query(PartModel).filter(PartModel.id == r.part_id).first().product_id) if r.part_id else None,
             "description": r.description,
             "reported_at": r.reported_at,
         })
@@ -332,6 +347,11 @@ def get_component_issue(id: int, db: Session = Depends(get_db)):
         "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "part_number": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_number if obj.part_id else None,
+        "operation_id": obj.operation_id,
+        "operation_name": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_name if obj.operation_id else None,
+        "operation_number": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_number if obj.operation_id else None,
+        "product_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().product.product_name if obj.part_id and db.query(PartModel).filter(PartModel.id == obj.part_id).first().product else None,
         "description": obj.description,
         "reported_at": obj.reported_at,
     }
@@ -359,6 +379,11 @@ def update_component_issue(id: int, payload: ComponentIssueUpdate, db: Session =
         "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "part_number": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_number if obj.part_id else None,
+        "operation_id": obj.operation_id,
+        "operation_name": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_name if obj.operation_id else None,
+        "operation_number": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_number if obj.operation_id else None,
+        "product_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().product.product_name if obj.part_id and db.query(PartModel).filter(PartModel.id == obj.part_id).first().product else None,
         "description": obj.description,
         "reported_at": obj.reported_at,
     }
@@ -382,6 +407,7 @@ def create_help_support(payload: HelpSupportCreate, db: Session = Depends(get_db
         reported_by=payload.reported_by,
         production_order_id=payload.production_order_id,
         part_id=payload.part_id,
+        operation_id=payload.operation_id,
         description=payload.description,
         reported_at=payload.reported_at if payload.reported_at else None,
     )
@@ -408,6 +434,11 @@ def create_help_support(payload: HelpSupportCreate, db: Session = Depends(get_db
         "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "part_number": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_number if obj.part_id else None,
+        "operation_id": obj.operation_id,
+        "operation_name": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_name if obj.operation_id else None,
+        "operation_number": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_number if obj.operation_id else None,
+        "product_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().product.product_name if obj.part_id and db.query(PartModel).filter(PartModel.id == obj.part_id).first().product else None,
         "description": obj.description,
         "mc_reply": obj.mc_reply,
         "replied_by": obj.replied_by,
@@ -419,7 +450,7 @@ def create_help_support(payload: HelpSupportCreate, db: Session = Depends(get_db
 @router.get("/help-support", response_model=List[HelpSupportSchema])
 def list_help_support(db: Session = Depends(get_db)):
     rows = db.query(HelpSupportModel).order_by(HelpSupportModel.id.asc()).all()
-    m_map, u_map, o_map, p_map = _maps_for_enrichment(db)
+    m_map, u_map, o_map, p_map, pn_map, op_map, opn_map, prod_map = _maps_for_enrichment(db)
     out = []
     for r in rows:
         out.append({
@@ -432,6 +463,11 @@ def list_help_support(db: Session = Depends(get_db)):
             "order_name": o_map.get(r.production_order_id),
             "part_id": r.part_id,
             "part_name": p_map.get(r.part_id),
+            "part_number": pn_map.get(r.part_id),
+            "operation_id": r.operation_id,
+            "operation_name": op_map.get(r.operation_id),
+            "operation_number": opn_map.get(r.operation_id),
+            "product_name": prod_map.get(db.query(PartModel).filter(PartModel.id == r.part_id).first().product_id) if r.part_id else None,
             "description": r.description,
             "mc_reply": r.mc_reply,
             "replied_by": r.replied_by,
@@ -456,6 +492,11 @@ def get_help_support(id: int, db: Session = Depends(get_db)):
         "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "part_number": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_number if obj.part_id else None,
+        "operation_id": obj.operation_id,
+        "operation_name": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_name if obj.operation_id else None,
+        "operation_number": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_number if obj.operation_id else None,
+        "product_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().product.product_name if obj.part_id and db.query(PartModel).filter(PartModel.id == obj.part_id).first().product else None,
         "description": obj.description,
         "mc_reply": obj.mc_reply,
         "replied_by": obj.replied_by,
@@ -491,6 +532,11 @@ def update_help_support(id: int, payload: HelpSupportUpdate, db: Session = Depen
         "order_name": db.query(OrderModel).filter(OrderModel.id == obj.production_order_id).first().sale_order_number if obj.production_order_id else None,
         "part_id": obj.part_id,
         "part_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_name if obj.part_id else None,
+        "part_number": db.query(PartModel).filter(PartModel.id == obj.part_id).first().part_number if obj.part_id else None,
+        "operation_id": obj.operation_id,
+        "operation_name": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_name if obj.operation_id else None,
+        "operation_number": db.query(OperationModel).filter(OperationModel.id == obj.operation_id).first().operation_number if obj.operation_id else None,
+        "product_name": db.query(PartModel).filter(PartModel.id == obj.part_id).first().product.product_name if obj.part_id and db.query(PartModel).filter(PartModel.id == obj.part_id).first().product else None,
         "description": obj.description,
         "mc_reply": obj.mc_reply,
         "replied_by": obj.replied_by,

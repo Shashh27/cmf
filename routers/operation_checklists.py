@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from DB.database import get_db
 from DB.models.configuration import (
@@ -238,6 +238,12 @@ def get_submissions(
             "submitted_at": submission.submitted_at.isoformat() if submission.submitted_at else None,
             "sup_action_at": submission.sup_action_at.isoformat() if submission.sup_action_at else None,
             "sup_remarks": submission.sup_remarks,
+            "supervisor_ack_by": submission.supervisor_ack_by,
+            "supervisor_ack_at": submission.supervisor_ack_at.isoformat() if submission.supervisor_ack_at else None,
+            "operator_ack_by": submission.operator_ack_by,
+            "operator_ack_at": submission.operator_ack_at.isoformat() if submission.operator_ack_at else None,
+            "mc_ack_by": submission.mc_ack_by,
+            "mc_ack_at": submission.mc_ack_at.isoformat() if submission.mc_ack_at else None,
             "created_at": submission.created_at.isoformat() if submission.created_at else None,
             "updated_at": submission.updated_at.isoformat() if submission.updated_at else None,
             "operation": None,
@@ -398,7 +404,7 @@ def supervisor_action(
     db_submission.status = action.status
     db_submission.supervisor = action.supervisor_id
     db_submission.sup_remarks = action.sup_remarks
-    db_submission.sup_action_at = datetime.utcnow()
+    db_submission.sup_action_at = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     
     db.commit()
     db.refresh(db_submission)
@@ -418,15 +424,18 @@ def acknowledge_submission(
     
     role = ack_data.get('role')  # 'supervisor', 'operator', or 'mc'
     
+    # Current IST time
+    ist_now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    
     if role == 'supervisor':
         db_submission.supervisor_ack_by = True
-        db_submission.supervisor_ack_at = datetime.utcnow()
+        db_submission.supervisor_ack_at = ist_now
     elif role == 'operator':
         db_submission.operator_ack_by = True
-        db_submission.operator_ack_at = datetime.utcnow()
+        db_submission.operator_ack_at = ist_now
     elif role == 'mc':
         db_submission.mc_ack_by = True
-        db_submission.mc_ack_at = datetime.utcnow()
+        db_submission.mc_ack_at = ist_now
     else:
         raise HTTPException(status_code=400, detail="Invalid role. Must be 'supervisor', 'operator', or 'mc'")
     
@@ -461,7 +470,7 @@ def update_submission_detail(
     for key, value in update_data.items():
         setattr(db_detail, key, value)
     
-    db_detail.updated_at = datetime.utcnow()
+    db_detail.updated_at = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     db.commit()
     db.refresh(db_detail)
     return db_detail
@@ -565,7 +574,7 @@ def resubmit_submission(submission_id: int, resubmission_data: dict, db: Session
     
     # Reset status to pending
     db_submission.status = 'pending'
-    db_submission.submitted_at = datetime.utcnow()
+    db_submission.submitted_at = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     
     # Update details if provided
     if 'details' in resubmission_data:
@@ -579,7 +588,7 @@ def resubmit_submission(submission_id: int, resubmission_data: dict, db: Session
                     db_detail.response = detail_update['response']
                 if 'op_remarks' in detail_update:
                     db_detail.op_remarks = detail_update['op_remarks']
-                db_detail.updated_at = datetime.utcnow()
+                db_detail.updated_at = datetime.now(timezone(timedelta(hours=5, minutes=30)))
     
     db.commit()
     db.refresh(db_submission)
