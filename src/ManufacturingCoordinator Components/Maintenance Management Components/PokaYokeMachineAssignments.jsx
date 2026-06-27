@@ -388,10 +388,8 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         body: JSON.stringify({
           machine_ids: values.machine_ids,
           checklist_ids: values.checklist_ids,
-          frequency: values.frequency,
-          shift: values.frequency === 'Daily' ? values.shift : null,
-          scheduled_day: values.frequency === 'Weekly' ? values.dayOfWeek
-            : values.frequency === 'Monthly' ? (values.dayOfMonth?.format('D') ?? null) : null,
+          next_due_date: values.next_due_date || null,
+          active: true,
         }),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Failed'); }
@@ -840,48 +838,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
             </Select>
           </Form.Item>
 
-          <Form.Item name="frequency" label="Frequency" rules={[{ required: true, message: 'Please select frequency' }]}>
-            <Select placeholder="Select frequency">
-              <Option value="Daily">Daily</Option>
-              <Option value="Weekly">Weekly</Option>
-              <Option value="Monthly">Monthly</Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item noStyle shouldUpdate={(p, c) => p.frequency !== c.frequency}>
-            {({ getFieldValue }) => {
-              const freq = getFieldValue('frequency');
-              if (freq === 'Daily') return (
-                <Form.Item name="shift" label="Shift" rules={[{ required: true }]} initialValue="Both">
-                  <Select>
-                    <Option value="Morning">Morning</Option>
-                    <Option value="Evening">Evening</Option>
-                    <Option value="Both">Both</Option>
-                  </Select>
-                </Form.Item>
-              );
-              if (freq === 'Weekly') return (
-                <Form.Item name="dayOfWeek" label="Day of Week" rules={[{ required: true }]}>
-                  <Select placeholder="Select day">
-                    {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d => (
-                      <Option key={d} value={d}>{d}</Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              );
-              if (freq === 'Monthly') return (
-                <Form.Item name="dayOfMonth" label="Day of Month" rules={[{ required: true }]}>
-                  <DatePicker
-                    style={{ width: '100%' }}
-                    placeholder="Select date"
-                    format="D"
-                    disabledDate={(current) => current && current < dayjs().startOf('day')}
-                  />
-                </Form.Item>
-              );
-              return null;
-            }}
-          </Form.Item>
+          
 
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>

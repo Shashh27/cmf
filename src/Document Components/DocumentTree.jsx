@@ -223,12 +223,8 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
     }
 
     children.push(
-<<<<<<< HEAD
       
       // CNC Programs folder
-=======
-      // Operations folder
->>>>>>> a2fc9a4917429c168a594b142c2f289da10a4d47
       {
         title: (
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

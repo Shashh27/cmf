@@ -39,6 +39,9 @@ const PokaYokeChecklists = () => {
   const [initialItems, setInitialItems] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingChecklist, setEditingChecklist] = useState(null);
+  const [editCheckpoints, setEditCheckpoints] = useState([]);
+  const [editingCheckpointId, setEditingCheckpointId] = useState(null);
+  const [expandedRowKeys, setExpandedRowKeys] = useState([]);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [searchText, setSearchText] = useState('');
   const [form] = Form.useForm();
@@ -71,15 +74,28 @@ const PokaYokeChecklists = () => {
   };
 
   const handleCreateChecklist = async (values) => {
+    // Validate that at least one item is provided
+    const validItems = initialItems
+      .filter((item) => item.item_text && item.item_type && item.expected_value);
+
+    if (validItems.length === 0) {
+      message.error('At least one check point is required to create a checklist');
+      return;
+    }
+
     try {
-      const itemsToCreate = initialItems
-        .filter((item) => item.item_text && item.item_type && item.expected_value)
-        .map((item) => ({
-          item_text: item.item_text,
-          item_type: item.item_type,
-          expected_value: item.expected_value,
-          is_required: !!item.is_required,
-        }));
+      const itemsToCreate = validItems.map((item) => ({
+        item_text: item.item_text,
+        item_type: item.item_type,
+        expected_value: item.expected_value,
+        is_required: !!item.is_required,
+        frequency_type: item.frequency_type || null,
+        interval_value: item.interval_value || null,
+        interval_unit: item.interval_unit || null,
+        trigger_hours: item.trigger_hours || null,
+        inspection_interval: item.inspection_interval || null,
+        remarks: item.remarks || null,
+      }));
 
       const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/`, {
         method: 'POST',
@@ -117,6 +133,21 @@ const PokaYokeChecklists = () => {
       fetchChecklists();
     } catch (error) {
       message.error('Failed to delete checklist: ' + error.message);
+    }
+  };
+
+  const handleDeleteCheckpoint = async (checklistId, itemId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${checklistId}/items/${itemId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('Failed to delete checkpoint');
+      
+      message.success('Checkpoint deleted successfully');
+      fetchChecklists();
+    } catch (error) {
+      message.error('Failed to delete checkpoint: ' + error.message);
     }
   };
 
@@ -166,26 +197,127 @@ const PokaYokeChecklists = () => {
       name: checklist.name,
       description: checklist.description
     });
+    // Load checkpoints with proper IDs and store original data for comparison
+    const checkpointsWithOriginals = checklist.items?.map(item => ({
+      ...item,
+      id: item.id || Date.now() + Math.random(),
+      _original: { ...item } // Store original data for change detection
+    })) || [];
+    setEditCheckpoints(checkpointsWithOriginals);
     setEditModalVisible(true);
   };
 
   const handleUpdateChecklist = async (values) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${editingChecklist.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(values),
-      });
+      let checklistChanged = false;
+      let checkpointsChanged = false;
+      let updatedCount = 0;
 
-      if (!response.ok) throw new Error('Failed to update checklist');
-      
-      message.success('Checklist updated successfully');
+      // Check if checklist details changed
+      if (values.name !== editingChecklist.name || values.description !== editingChecklist.description) {
+        checklistChanged = true;
+        const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${editingChecklist.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(values),
+        });
+
+        if (!response.ok) throw new Error('Failed to update checklist');
+      }
+
+      // Update checkpoints that have changed
+      const validCheckpoints = editCheckpoints
+        .filter((item) => item.item_text && item.item_type && item.expected_value);
+
+      if (validCheckpoints.length === 0) {
+        message.error('At least one checkpoint is required');
+        return;
+      }
+
+      // Update each checkpoint individually, only if changed
+      for (const item of validCheckpoints) {
+        const original = item._original || {};
+        
+        // Check if any field changed
+        const fieldsChanged = 
+          item.item_text !== original.item_text ||
+          item.item_type !== original.item_type ||
+          item.expected_value !== original.expected_value ||
+          item.is_required !== original.is_required ||
+          item.frequency_type !== original.frequency_type ||
+          item.interval_unit !== original.interval_unit ||
+          item.interval_value !== original.interval_value ||
+          item.trigger_hours !== original.trigger_hours ||
+          item.remarks !== original.remarks;
+
+        if (!fieldsChanged) continue; // Skip if nothing changed
+
+        checkpointsChanged = true;
+        updatedCount++;
+
+        // Build checkpoint data with only changed fields
+        const checkpointData = {};
+        if (item.item_text !== original.item_text) checkpointData.item_text = item.item_text;
+        if (item.item_type !== original.item_type) checkpointData.item_type = item.item_type;
+        if (item.expected_value !== original.expected_value) checkpointData.expected_value = item.expected_value;
+        if (item.is_required !== original.is_required) checkpointData.is_required = !!item.is_required;
+        if (item.frequency_type !== original.frequency_type) checkpointData.frequency_type = item.frequency_type || null;
+        if (item.interval_unit !== original.interval_unit) checkpointData.interval_unit = item.interval_unit || null;
+        if (item.interval_value !== original.interval_value) checkpointData.interval_value = item.interval_value || null;
+        if (item.trigger_hours !== original.trigger_hours) checkpointData.trigger_hours = item.trigger_hours || null;
+        if (item.remarks !== original.remarks) checkpointData.remarks = item.remarks || null;
+
+        const itemResponse = await fetch(`${API_BASE_URL}/pokayoke-checklists/items/${item.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(checkpointData),
+        });
+
+        if (!itemResponse.ok) {
+          throw new Error(`Failed to update checkpoint: ${item.item_text}`);
+        }
+      }
+
+      // Show appropriate message based on what changed
+      if (!checklistChanged && !checkpointsChanged) {
+        message.info('No changes detected - nothing to update');
+        return;
+      }
+
+      if (checklistChanged && checkpointsChanged) {
+        message.success(`Checklist and ${updatedCount} checkpoint(s) updated successfully`);
+      } else if (checklistChanged) {
+        message.success('Checklist updated successfully');
+      } else if (checkpointsChanged) {
+        message.success(`${updatedCount} checkpoint(s) updated successfully`);
+      }
+
       setEditModalVisible(false);
       setEditingChecklist(null);
       editForm.resetFields();
-      fetchChecklists();
+      setEditCheckpoints([]);
+      
+      // Update the checklist in place to preserve order
+      setChecklists(prevChecklists => 
+        prevChecklists.map(checklist => 
+          checklist.id === editingChecklist.id 
+            ? { ...checklist, ...values, items: editCheckpoints.map(cp => ({ ...cp, _original: undefined })) }
+            : checklist
+        )
+      );
+      
+      // If the updated checklist is currently in preview, refresh it too
+      if (selectedChecklist && selectedChecklist.id === editingChecklist.id) {
+        setSelectedChecklist(prev => ({
+          ...prev,
+          ...values,
+          items: editCheckpoints.map(cp => ({ ...cp, _original: undefined }))
+        }));
+      }
     } catch (error) {
       message.error('Failed to update checklist: ' + error.message);
     }
@@ -225,13 +357,13 @@ const PokaYokeChecklists = () => {
     {
       title: 'SL NO',
       key: 'sl_no',
-      width: 80,
+      width: 50,
       align: 'center',
       className: 'table-header-styled',
       render: (_, __, index) => index + 1,
     },
     {
-      title: 'Name',
+      title: 'CHECKLIST NAME',
       dataIndex: 'name',
       key: 'name',
       width: 200,
@@ -249,7 +381,7 @@ const PokaYokeChecklists = () => {
       sorter: (a, b) => a.description.localeCompare(b.description),
     },
     {
-      title: 'Items',
+      title: 'Checkpoints',
       dataIndex: 'itemsCount',
       key: 'itemsCount',
       width: 100,
@@ -284,7 +416,10 @@ const PokaYokeChecklists = () => {
               type="text"
               size="small"
               icon={<EyeOutlined />}
-              onClick={() => handlePreview(record)}
+              onClick={() => {
+                setSelectedChecklist(record);
+                setPreviewModalVisible(true);
+              }}
               style={{ color: '#1890ff' }}
             />
           </Tooltip>
@@ -297,7 +432,7 @@ const PokaYokeChecklists = () => {
               style={{ color: '#faad14' }}
             />
           </Tooltip>
-          <Tooltip title="Add Item">
+          <Tooltip title="Add Checkpoint">
             <Button
               type="text"
               size="small"
@@ -367,6 +502,12 @@ const PokaYokeChecklists = () => {
                   item_type: '',
                   expected_value: '',
                   is_required: false,
+                  frequency_type: 'Time Based',
+                  interval_value: null,
+                  interval_unit: '',
+                  trigger_hours: null,
+                  inspection_interval: '',
+                  remarks: ''
                 },
               ]);
               setCreateModalVisible(true);
@@ -404,6 +545,94 @@ const PokaYokeChecklists = () => {
             setPagination({ current: 1, pageSize: size });
           },
         }}
+        onRow={(record) => ({
+          onClick: () => {
+            const key = record.id;
+            setExpandedRowKeys(prev => 
+              prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+            );
+          },
+        })}
+        expandable={{
+          expandedRowKeys,
+          onExpand: (expanded, record) => {
+            const key = record.id;
+            setExpandedRowKeys(expanded ? [...expandedRowKeys, key] : expandedRowKeys.filter(k => k !== key));
+          },
+          expandedRowRender: (record) => (
+            <div style={{ padding: '16px', background: '#fafafa' }}>
+              <div style={{ marginBottom: '12px' }}>
+                <Text strong style={{ fontSize: '13px' }}>Checkpoints ({record.items?.length || 0})</Text>
+              </div>
+              {record.items?.length > 0 ? (
+                <div style={{ 
+                  border: '1px solid #d9d9d9', 
+                  borderRadius: '6px', 
+                  overflow: 'hidden',
+                  background: '#fff'
+                }}>
+                  {/* Table Header */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '50px 350px 80px 60px 100px 100px 80px 80px 1fr',
+                    background: '#fafafa',
+                    padding: '8px 12px',
+                    borderBottom: '1px solid #d9d9d9',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: '#262626',
+                    gap: '12px'
+                  }}>
+                    <div>#</div>
+                    <div>Checkpoint</div>
+                    <div>Type</div>
+                    <div>Required</div>
+                    <div>Expected</div>
+                    <div>Frequency</div>
+                    <div>Unit</div>
+                    <div>Value</div>
+                    <div>Remarks</div>
+                  </div>
+                  {/* Table Rows */}
+                  {record.items.map((item, index) => (
+                    <div key={item.id} style={{
+                      display: 'grid',
+                      gridTemplateColumns: '50px 350px 80px 60px 100px 100px 80px 80px 1fr',
+                      padding: '6px 12px',
+                      borderBottom: index < record.items.length - 1 ? '1px solid #f0f0f0' : 'none',
+                      gap: '12px',
+                      alignItems: 'center',
+                      background: index % 2 === 0 ? '#fff' : '#fafafa'
+                    }}>
+                      <div style={{ fontSize: '12px', fontWeight: 500, color: '#8c8c8c' }}>
+                        {index + 1}
+                      </div>
+                      <div style={{ fontSize: '12px', fontWeight: 600 }}>{item.item_text}</div>
+                      <Tag color="blue" style={{ fontSize: '11px', padding: '2px 8px' }}>
+                        {item.item_type === 'boolean' ? 'Yes/No' : item.item_type === 'numerical' ? 'Num' : item.item_type}
+                      </Tag>
+                      <div style={{ textAlign: 'center' }}>
+                        {item.is_required ? <Tag color="red" style={{ fontSize: '11px' }}>Yes</Tag> : <Tag color="green" style={{ fontSize: '11px' }}>No</Tag>}
+                      </div>
+                      <div style={{ fontSize: '12px' }}>{item.expected_value || '-'}</div>
+                      <Tag color={item.frequency_type === 'Time Based' ? 'blue' : item.frequency_type === 'Usage Based' ? 'orange' : 'purple'} style={{ fontSize: '11px' }}>
+                        {item.frequency_type || '-'}
+                      </Tag>
+                      <div style={{ fontSize: '12px' }}>{item.interval_unit || '-'}</div>
+                      <div style={{ fontSize: '12px' }}>{item.interval_value || item.trigger_hours || '-'}</div>
+                      <div style={{ fontSize: '12px' }}>{item.remarks || '-'}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
+                  No checkpoints added yet
+                </div>
+              )}
+            </div>
+          ),
+          rowExpandable: (record) => true,
+        }}
         style={{
           background: T.surface,
         }}
@@ -425,7 +654,7 @@ const PokaYokeChecklists = () => {
           setInitialItems([]);
         }}
         footer={null}
-        width={700}
+        width={1000}
       >
         <Form
           form={form}
@@ -433,132 +662,262 @@ const PokaYokeChecklists = () => {
           onFinish={handleCreateChecklist}
           style={{ marginTop: '20px' }}
         >
-          <Form.Item
-            name="name"
-            label="Checklist Name"
-            rules={[{ required: true, message: 'Please enter checklist name' }]}
-          >
-            <Input placeholder="Enter checklist name" style={{ borderRadius: '6px' }} />
-          </Form.Item>
-          
-          <Form.Item
-            name="description"
-            label="Description"
-            rules={[{ required: true, message: 'Please enter description' }]}
-          >
-            <TextArea 
-              placeholder="Enter checklist description" 
-              rows={4}
-              style={{ borderRadius: '6px' }}
-            />
-          </Form.Item>
+          {/* Checklist Name and Description in same row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+            <Form.Item
+              name="name"
+              label="Checklist Name"
+              rules={[{ required: true, message: 'Please enter checklist name' }]}
+              style={{ marginBottom: 0 }}
+            >
+              <Input placeholder="Enter checklist name" style={{ borderRadius: '6px' }} />
+            </Form.Item>
+            
+            <Form.Item
+              name="description"
+              label="Description"
+              style={{ marginBottom: 0 }}
+            >
+              <Input 
+                placeholder="Enter checklist description (optional)" 
+                style={{ borderRadius: '6px' }}
+              />
+            </Form.Item>
+          </div>
 
           <Divider />
 
           <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Title level={5} style={{ margin: 0 }}>Initial Items (Optional)</Title>
+            <Title level={5} style={{ margin: 0 }}>Check Points <Text type="danger" style={{ fontSize: '12px' }}>*</Text></Title>
+            <Text type="secondary" style={{ fontSize: '12px' }}>Total: {initialItems.length}</Text>
           </div>
-          <Text type="secondary" style={{ fontSize: '13px', marginBottom: '12px', display: 'block' }}>
-            You can add items later or add some initial items now
-          </Text>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+          {/* Compact Table Layout */}
+          <div style={{ 
+            border: '1px solid #d9d9d9', 
+            borderRadius: '6px', 
+            overflow: 'hidden',
+            marginBottom: '12px'
+          }}>
+            {/* Table Header */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '30px 250px 70px 45px 75px 95px 80px 80px 1fr 30px',
+              background: '#fafafa',
+              padding: '8px 6px',
+              borderBottom: '1px solid #d9d9d9',
+              fontSize: '11px',
+              fontWeight: 600,
+              color: '#262626',
+              gap: '6px'
+            }}>
+              <div>#</div>
+              <div>Checkpoint</div>
+              <div>Type</div>
+              <div>Req</div>
+              <div>Expected</div>
+              <div>Frequency</div>
+              <div>Unit</div>
+              <div>Value</div>
+              <div>Remarks</div>
+              <div></div>
+            </div>
+
+            {/* Table Rows */}
             {initialItems.map((item, index) => (
-              <Card
-                key={item.id}
-                size="small"
-                style={{ borderRadius: '8px', border: '1px solid #f0f0f0' }}
-                bodyStyle={{ padding: '16px' }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <Text strong style={{ fontSize: '13px' }}>Item {index + 1}</Text>
-                  {initialItems.length > 1 && (
-                    <Button
-                      type="text"
-                      icon={<DeleteOutlined style={{ color: '#ff4d4f' }} />}
-                      onClick={() => {
-                        setInitialItems(prev => prev.filter(x => x.id !== item.id));
-                      }}
-                    />
-                  )}
+              <div key={item.id} style={{
+                display: 'grid',
+                gridTemplateColumns: '30px 250px 70px 45px 75px 95px 80px 80px 1fr 30px',
+                padding: '6px',
+                borderBottom: index < initialItems.length - 1 ? '1px solid #f0f0f0' : 'none',
+                gap: '6px',
+                alignItems: 'center',
+                background: index % 2 === 0 ? '#fff' : '#fafafa'
+              }}>
+                {/* Sequence Number */}
+                <div style={{ fontSize: '11px', fontWeight: 500, color: '#8c8c8c' }}>
+                  {index + 1}
                 </div>
 
-                <div style={{ marginBottom: '12px' }}>
-                  <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Item Text</Text>
-                  <Input
-                    placeholder="e.g., Check if safety guards are in place"
-                    value={item.item_text}
+                {/* Checkpoint */}
+                <Input
+                  placeholder="Checkpoint"
+                  value={item.item_text}
+                  onChange={(e) => {
+                    setInitialItems(prev =>
+                      prev.map(x => x.id === item.id ? { ...x, item_text: e.target.value } : x)
+                    );
+                  }}
+                  style={{ fontSize: '11px', height: '28px' }}
+                />
+
+                {/* Type */}
+                <select
+                  value={item.item_type}
+                  onChange={(e) => {
+                    setInitialItems(prev =>
+                      prev.map(x => x.id === item.id ? { ...x, item_type: e.target.value } : x)
+                    );
+                  }}
+                  style={{
+                    width: '100%',
+                    height: '28px',
+                    borderRadius: '4px',
+                    border: '1px solid #d9d9d9',
+                    padding: '0 4px',
+                    fontSize: '10px'
+                  }}
+                >
+                  <option value="">Select</option>
+                  <option value="boolean">Yes/No</option>
+                  <option value="numerical">Num</option>
+                  <option value="text">Text</option>
+                </select>
+
+                {/* Required */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <input
+                    type="checkbox"
+                    checked={item.is_required}
                     onChange={(e) => {
-                      const value = e.target.value;
                       setInitialItems(prev =>
-                        prev.map(x => x.id === item.id ? { ...x, item_text: value } : x)
+                        prev.map(x => x.id === item.id ? { ...x, is_required: e.target.checked } : x)
                       );
                     }}
-                    style={{ borderRadius: '6px' }}
+                    style={{ cursor: 'pointer' }}
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.6fr 1.2fr', gap: '12px' }}>
-                  <div>
-                    <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Item Type</Text>
-                    <select
-                      value={item.item_type}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setInitialItems(prev =>
-                          prev.map(x => x.id === item.id ? { ...x, item_type: value } : x)
-                        );
-                      }}
-                      style={{
-                        width: '100%',
-                        height: '40px',
-                        borderRadius: '6px',
-                        border: '1px solid #d9d9d9',
-                        padding: '0 12px'
-                      }}
-                    >
-                      <option value="">Select item type</option>
-                      <option value="boolean">Yes/No</option>
-                      <option value="numerical">Numerical</option>
-                      <option value="text">Text</option>
-                    </select>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                    <Text strong style={{ fontSize: '13px', marginBottom: '4px' }}>Required</Text>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <input
-                        type="checkbox"
-                        checked={item.is_required}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setInitialItems(prev =>
-                            prev.map(x => x.id === item.id ? { ...x, is_required: checked } : x)
-                          );
-                        }}
-                      />
-                      <span>Required</span>
-                    </label>
-                  </div>
-                  <div>
-                    <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Expected Value</Text>
-                    <Input
-                      placeholder={
-                        item.item_type === 'boolean' ? 'e.g., true, false, yes, no, 1, 0' :
-                        item.item_type === 'numerical' ? 'e.g., 50, 18-25, >=50, <=100, =75' :
-                        'e.g., Enter text value'
-                      }
-                      value={item.expected_value}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setInitialItems(prev =>
-                          prev.map(x => x.id === item.id ? { ...x, expected_value: value } : x)
-                        );
-                      }}
-                      style={{ borderRadius: '6px' }}
-                    />
-                  </div>
-                </div>
-              </Card>
+                {/* Expected Value */}
+                <Input
+                  placeholder="Expected"
+                  value={item.expected_value}
+                  onChange={(e) => {
+                    setInitialItems(prev =>
+                      prev.map(x => x.id === item.id ? { ...x, expected_value: e.target.value } : x)
+                    );
+                  }}
+                  style={{ fontSize: '11px', height: '28px' }}
+                />
+
+                {/* Frequency Type */}
+                <select
+                  value={item.frequency_type || ''}
+                  onChange={(e) => {
+                    setInitialItems(prev =>
+                      prev.map(x => x.id === item.id ? { ...x, frequency_type: e.target.value } : x)
+                    );
+                  }}
+                  style={{
+                    width: '100%',
+                    height: '28px',
+                    borderRadius: '4px',
+                    border: '1px solid #d9d9d9',
+                    padding: '0 4px',
+                    fontSize: '10px'
+                  }}
+                >
+                  <option value="">None</option>
+                  <option value="Time Based">Time</option>
+                  <option value="Usage Based">Usage</option>
+                  <option value="Condition Based">Condition</option>
+                </select>
+
+                {/* Unit Column */}
+                {(item.frequency_type === 'Time Based' || item.frequency_type === 'Condition Based') ? (
+                  <select
+                    value={item.interval_unit || ''}
+                    onChange={(e) => {
+                      setInitialItems(prev =>
+                        prev.map(x => x.id === item.id ? { ...x, interval_unit: e.target.value } : x)
+                      );
+                    }}
+                    style={{
+                      width: '100%',
+                      height: '28px',
+                      borderRadius: '4px',
+                      border: '1px solid #d9d9d9',
+                      padding: '0 2px',
+                      fontSize: '10px'
+                    }}
+                  >
+                    <option value="">Unit</option>
+                    <option value="Day">Day</option>
+                    <option value="Week">Week</option>
+                    <option value="Month">Month</option>
+                    <option value="Year">Year</option>
+                  </select>
+                ) : (
+                  <div></div>
+                )}
+
+                {/* Value Column */}
+                {item.frequency_type === 'Time Based' ? (
+                  <Input
+                    type="number"
+                    placeholder="Value"
+                    value={item.interval_value || ''}
+                    onChange={(e) => {
+                      setInitialItems(prev =>
+                        prev.map(x => x.id === item.id ? { ...x, interval_value: e.target.value ? parseInt(e.target.value) : null } : x)
+                      );
+                    }}
+                    style={{ fontSize: '10px', height: '28px' }}
+                  />
+                ) : item.frequency_type === 'Usage Based' ? (
+                  <Input
+                    type="number"
+                    placeholder="Hours"
+                    value={item.trigger_hours || ''}
+                    onChange={(e) => {
+                      setInitialItems(prev =>
+                        prev.map(x => x.id === item.id ? { ...x, trigger_hours: e.target.value ? parseInt(e.target.value) : null } : x)
+                      );
+                    }}
+                    style={{ fontSize: '10px', height: '28px' }}
+                  />
+                ) : item.frequency_type === 'Condition Based' ? (
+                  <Input
+                    type="number"
+                    placeholder="Value"
+                    value={item.interval_value || ''}
+                    onChange={(e) => {
+                      setInitialItems(prev =>
+                        prev.map(x => x.id === item.id ? { ...x, interval_value: e.target.value ? parseInt(e.target.value) : null } : x)
+                      );
+                    }}
+                    style={{ fontSize: '10px', height: '28px' }}
+                  />
+                ) : (
+                  <div></div>
+                )}
+
+                {/* Remarks Column */}
+                <Input
+                  placeholder="Remarks"
+                  value={item.remarks || ''}
+                  onChange={(e) => {
+                    setInitialItems(prev =>
+                      prev.map(x => x.id === item.id ? { ...x, remarks: e.target.value } : x)
+                    );
+                  }}
+                  style={{ fontSize: '10px', height: '28px' }}
+                />
+
+                {/* Delete Button */}
+                <Button
+                  type="text"
+                  icon={<DeleteOutlined />}
+                  onClick={() => {
+                    if (initialItems.length > 1) {
+                      setInitialItems(prev => prev.filter(x => x.id !== item.id));
+                    } else {
+                      message.warning('At least one check point is required');
+                    }
+                  }}
+                  style={{ color: '#ff4d4f', padding: '2px', fontSize: '12px' }}
+                />
+              </div>
             ))}
           </div>
 
@@ -574,13 +933,24 @@ const PokaYokeChecklists = () => {
                   item_type: '',
                   expected_value: '',
                   is_required: false,
-                },
+                  frequency_type: 'Time Based',
+                  interval_value: null,
+                  interval_unit: '',
+                  trigger_hours: null,
+                  inspection_interval: '',
+                  remarks: ''
+                }
               ]);
             }}
+            icon={<PlusOutlined />}
             style={{ marginBottom: '16px', borderRadius: '6px' }}
           >
-            + Add Item
+            Add Checkpoint
           </Button>
+
+          <Text type="secondary" style={{ fontSize: '11px', display: 'block', marginBottom: '16px' }}>
+            Note: Select frequency type to configure scheduling details inline for each checkpoint.
+          </Text>
           
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
@@ -596,14 +966,9 @@ const PokaYokeChecklists = () => {
               <Button 
                 type="primary" 
                 htmlType="submit"
-                style={{
-                  background: T.primary,
-                  borderColor: T.primary,
-                  borderRadius: '8px',
-                  fontWeight: 600
-                }}
+                style={{ background: T.primary, borderColor: T.primary, borderRadius: '6px', fontWeight: 600 }}
               >
-                Create Checklist
+                Save Checklist
               </Button>
             </Space>
           </Form.Item>
@@ -612,7 +977,12 @@ const PokaYokeChecklists = () => {
 
       {/* Preview Modal */}
       <Modal
-        title={selectedChecklist?.name}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <EyeOutlined style={{ color: '#1890ff' }} />
+            Preview Checklist
+          </div>
+        }
         open={previewModalVisible}
         onCancel={() => setPreviewModalVisible(false)}
         footer={[
@@ -634,92 +1004,117 @@ const PokaYokeChecklists = () => {
               fontWeight: 600
             }}
           >
-            Add New Item
+            Add New Checkpoint
           </Button>
         ]}
-        width={800}
+        width={1200}
       >
         {selectedChecklist && (
-          <div>
-            <Card size="small" style={{ marginBottom: '16px', backgroundColor: '#f8f9fa' }}>
-              <p><Text strong>Description:</Text> {selectedChecklist.description}</p>
-              <p><Text strong>Created:</Text> {formatDate(selectedChecklist.created_at)}</p>
-            </Card>
-            
-            <Title level={5}>Checklist Items</Title>
-            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-              {selectedChecklist.items?.length > 0 ? (
-                <Table
-                  dataSource={selectedChecklist.items}
-                  rowKey="id"
-                  size="small"
-                  pagination={false}
-                  columns={[
-                    {
-                      title: 'SL NO',
-                      key: 'sl_no',
-                      width: 80,
-                      align: 'center',
-                      className: 'table-header-styled',
-                      render: (_, __, index) => index + 1,
-                    },
-                    {
-                      title: 'Item Text',
-                      dataIndex: 'item_text',
-                      key: 'item_text',
-                      className: 'table-header-styled',
-                    },
-                    {
-                      title: 'Type',
-                      dataIndex: 'item_type',
-                      key: 'item_type',
-                      width: 120,
-                      className: 'table-header-styled',
-                      render: (type) => (
-                        <Tag color="blue" style={{ fontSize: '11px' }}>
-                          {type}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: 'Expected Value',
-                      dataIndex: 'expected_value',
-                      key: 'expected_value',
-                      width: 150,
-                      className: 'table-header-styled',
-                      render: (value) => value || '-',
-                    },
-                    {
-                      title: 'Required',
-                      dataIndex: 'is_required',
-                      key: 'is_required',
-                      width: 100,
-                      align: 'center',
-                      className: 'table-header-styled',
-                      render: (required) => (
-                        <Tag color={required ? 'red' : 'green'} style={{ fontSize: '11px' }}>
-                          {required ? 'Yes' : 'No'}
-                        </Tag>
-                      ),
-                    },
-                  ]}
-                />
-              ) : (
-                <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-                  No items added yet
+          <div style={{ display: 'flex', gap: '20px' }}>
+            {/* Left side - Checklist details */}
+            <div style={{ flex: '0 0 300px' }}>
+              <Card size="small" style={{ backgroundColor: '#f8f9fa' }}>
+                <div style={{ marginBottom: '12px' }}>
+                  <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Checklist Name</Text>
+                  <Text style={{ fontSize: '12px' }}>{selectedChecklist.name}</Text>
                 </div>
-              )}
+                <div style={{ marginBottom: '12px' }}>
+                  <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Description</Text>
+                  <Text style={{ fontSize: '12px' }}>{selectedChecklist.description || '-'}</Text>
+                </div>
+                <div>
+                  <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Created</Text>
+                  <Text style={{ fontSize: '12px' }}>{formatDate(selectedChecklist.created_at)}</Text>
+                </div>
+              </Card>
+            </div>
+
+            {/* Right side - Checkpoints */}
+            <div style={{ flex: '1' }}>
+              <div style={{ marginBottom: '12px' }}>
+                <Text strong style={{ fontSize: '13px' }}>Checkpoints ({selectedChecklist.items?.length || 0})</Text>
+              </div>
+              <div style={{ 
+                border: '1px solid #d9d9d9', 
+                borderRadius: '6px', 
+                overflow: 'hidden',
+                background: '#fff',
+                maxHeight: '500px',
+                overflowY: 'auto'
+              }}>
+                {/* Table Header */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '30px 200px 60px 40px 70px 85px 70px 70px 1fr',
+                  background: '#fafafa',
+                  padding: '6px 4px',
+                  borderBottom: '1px solid #d9d9d9',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  color: '#262626',
+                  gap: '4px',
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 1
+                }}>
+                  <div>#</div>
+                  <div>Checkpoint</div>
+                  <div>Type</div>
+                  <div>Req</div>
+                  <div>Expected</div>
+                  <div>Frequency</div>
+                  <div>Unit</div>
+                  <div>Value</div>
+                  <div>Remarks</div>
+                </div>
+                {/* Table Rows */}
+                {selectedChecklist.items?.length > 0 ? (
+                  selectedChecklist.items.map((item, index) => (
+                    <div key={item.id} style={{
+                      display: 'grid',
+                      gridTemplateColumns: '30px 200px 60px 40px 70px 85px 70px 70px 1fr',
+                      padding: '4px',
+                      borderBottom: index < selectedChecklist.items.length - 1 ? '1px solid #f0f0f0' : 'none',
+                      gap: '4px',
+                      alignItems: 'center',
+                      background: index % 2 === 0 ? '#fff' : '#fafafa'
+                    }}>
+                      <div style={{ fontSize: '10px', fontWeight: 500, color: '#8c8c8c' }}>
+                        {index + 1}
+                      </div>
+                      <div style={{ fontSize: '10px', fontWeight: 600 }}>{item.item_text}</div>
+                      <Tag color="blue" style={{ fontSize: '9px', padding: '1px 4px' }}>
+                        {item.item_type === 'boolean' ? 'Yes/No' : item.item_type === 'numerical' ? 'Num' : item.item_type}
+                      </Tag>
+                      <div style={{ textAlign: 'center' }}>
+                        {item.is_required ? <Tag color="red" style={{ fontSize: '9px', padding: '1px 4px' }}>Yes</Tag> : <Tag color="green" style={{ fontSize: '9px', padding: '1px 4px' }}>No</Tag>}
+                      </div>
+                      <div style={{ fontSize: '10px' }}>{item.expected_value || '-'}</div>
+                      <Tag color={item.frequency_type === 'Time Based' ? 'blue' : item.frequency_type === 'Usage Based' ? 'orange' : 'purple'} style={{ fontSize: '9px', padding: '1px 4px' }}>
+                        {item.frequency_type || '-'}
+                      </Tag>
+                      <div style={{ fontSize: '10px' }}>{item.interval_unit || '-'}</div>
+                      <div style={{ fontSize: '10px' }}>{item.interval_value || item.trigger_hours || '-'}</div>
+                      <div style={{ fontSize: '10px' }}>{item.remarks || '-'}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                    No checkpoints added yet
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
       </Modal>
 
-      {/* Add Item Modal */}
+      {/* Add Checkpoint Modal */}
       <Modal
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <PlusOutlined style={{ color: '#1890ff' }} />
-            Add New Item
+            Add New Checkpoint
           </div>
         }
         open={addItemModalVisible}
@@ -728,7 +1123,7 @@ const PokaYokeChecklists = () => {
           itemForm.resetFields();
         }}
         footer={null}
-        width={500}
+        width={600}
       >
         <Form
           form={itemForm}
@@ -738,16 +1133,16 @@ const PokaYokeChecklists = () => {
         >
           <Form.Item
             name="item_text"
-            label="Item Text"
-            rules={[{ required: true, message: 'Please enter item text' }]}
+            label="Checkpoint"
+            rules={[{ required: true, message: 'Please enter checkpoint' }]}
           >
-            <Input placeholder="Enter item text" style={{ borderRadius: '6px' }} />
+            <Input placeholder="Enter checkpoint" style={{ borderRadius: '6px' }} />
           </Form.Item>
           
           <Form.Item
             name="item_type"
-            label="Item Type"
-            rules={[{ required: true, message: 'Please select item type' }]}
+            label="Type"
+            rules={[{ required: true, message: 'Please select type' }]}
           >
             <select 
               style={{ 
@@ -758,7 +1153,7 @@ const PokaYokeChecklists = () => {
                 padding: '0 12px'
               }}
             >
-              <option value="">Select item type</option>
+              <option value="">Select type</option>
               <option value="boolean">Yes/No</option>
               <option value="numerical">Numerical</option>
               <option value="text">Text</option>
@@ -813,6 +1208,83 @@ const PokaYokeChecklists = () => {
               <span>Required</span>
             </label>
           </Form.Item>
+
+          <Form.Item
+            name="frequency_type"
+            label="Frequency Type"
+            initialValue="Time Based"
+          >
+            <select 
+              style={{ 
+                width: '100%', 
+                height: '40px', 
+                borderRadius: '6px',
+                border: '1px solid #d9d9d9',
+                padding: '0 12px'
+              }}
+            >
+              <option value="">None</option>
+              <option value="Time Based">Time Based</option>
+              <option value="Usage Based">Usage Based</option>
+              <option value="Condition Based">Condition Based</option>
+            </select>
+          </Form.Item>
+
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.frequency_type !== curr.frequency_type}>
+            {({ getFieldValue }) => {
+              const frequencyType = getFieldValue('frequency_type');
+              if (frequencyType === 'Time Based' || frequencyType === 'Condition Based') {
+                return (
+                  <>
+                    <Form.Item
+                      name="interval_unit"
+                      label="Unit"
+                    >
+                      <select 
+                        style={{ 
+                          width: '100%', 
+                          height: '40px', 
+                          borderRadius: '6px',
+                          border: '1px solid #d9d9d9',
+                          padding: '0 12px'
+                        }}
+                      >
+                        <option value="">Select unit</option>
+                        <option value="Day">Day</option>
+                        <option value="Week">Week</option>
+                        <option value="Month">Month</option>
+                        <option value="Year">Year</option>
+                      </select>
+                    </Form.Item>
+                    <Form.Item
+                      name="interval_value"
+                      label="Value"
+                    >
+                      <Input type="number" placeholder="Enter value" style={{ borderRadius: '6px' }} />
+                    </Form.Item>
+                  </>
+                );
+              }
+              if (frequencyType === 'Usage Based') {
+                return (
+                  <Form.Item
+                    name="trigger_hours"
+                    label="Trigger Hours"
+                  >
+                    <Input type="number" placeholder="Enter hours" style={{ borderRadius: '6px' }} />
+                  </Form.Item>
+                );
+              }
+              return null;
+            }}
+          </Form.Item>
+
+          <Form.Item
+            name="remarks"
+            label="Remarks"
+          >
+            <Input placeholder="Enter remarks" style={{ borderRadius: '6px' }} />
+          </Form.Item>
           
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
@@ -835,7 +1307,7 @@ const PokaYokeChecklists = () => {
                   fontWeight: 600
                 }}
               >
-                Add Item
+                Add Checkpoint
               </Button>
             </Space>
           </Form.Item>
@@ -855,63 +1327,349 @@ const PokaYokeChecklists = () => {
           setEditModalVisible(false);
           setEditingChecklist(null);
           editForm.resetFields();
+          setEditCheckpoints([]);
         }}
         footer={null}
-        width={600}
+        width={1200}
       >
-        <Form
-          form={editForm}
-          layout="vertical"
-          onFinish={handleUpdateChecklist}
-          style={{ marginTop: '20px' }}
-        >
-          <Form.Item
-            name="name"
-            label="Checklist Name"
-            rules={[{ required: true, message: 'Please enter checklist name' }]}
-          >
-            <Input placeholder="Enter checklist name" style={{ borderRadius: '6px' }} />
-          </Form.Item>
-          
-          <Form.Item
-            name="description"
-            label="Description"
-            rules={[{ required: true, message: 'Please enter description' }]}
-          >
-            <TextArea 
-              placeholder="Enter checklist description" 
-              rows={4}
-              style={{ borderRadius: '6px' }}
-            />
-          </Form.Item>
-          
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Space>
-              <Button 
+        <div style={{ display: 'flex', gap: '20px' }}>
+          {/* Left side - Checklist details */}
+          <div style={{ flex: '0 0 300px' }}>
+            <Form
+              form={editForm}
+              layout="vertical"
+              onFinish={handleUpdateChecklist}
+            >
+              <Form.Item
+                name="name"
+                label="Checklist Name"
+                rules={[{ required: true, message: 'Please enter checklist name' }]}
+              >
+                <Input placeholder="Enter checklist name" style={{ borderRadius: '6px' }} />
+              </Form.Item>
+              
+              <Form.Item
+                name="description"
+                label="Description"
+              >
+                <TextArea 
+                  placeholder="Enter checklist description (optional)" 
+                  rows={4}
+                  style={{ borderRadius: '6px' }}
+                />
+              </Form.Item>
+              
+              <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+                <Space>
+                  <Button 
+                    onClick={() => {
+                      setEditModalVisible(false);
+                      setEditingChecklist(null);
+                      editForm.resetFields();
+                      setEditCheckpoints([]);
+                    }}
+                    style={{ borderRadius: '6px' }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    type="primary" 
+                    htmlType="submit"
+                    style={{
+                      background: '#F59E0B',
+                      borderColor: '#F59E0B',
+                      borderRadius: '8px',
+                      fontWeight: 600
+                    }}
+                  >
+                    Update Checklist
+                  </Button>
+                </Space>
+              </Form.Item>
+            </Form>
+          </div>
+
+          {/* Right side - Checkpoints */}
+          <div style={{ flex: '1' }}>
+            <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text strong style={{ fontSize: '13px' }}>Checkpoints ({editCheckpoints.length})</Text>
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
                 onClick={() => {
-                  setEditModalVisible(false);
-                  setEditingChecklist(null);
-                  editForm.resetFields();
+                  setEditCheckpoints(prev => [
+                    ...prev,
+                    {
+                      id: Date.now(),
+                      item_text: '',
+                      item_type: '',
+                      expected_value: '',
+                      is_required: false,
+                      frequency_type: 'Time Based',
+                      interval_value: null,
+                      interval_unit: '',
+                      trigger_hours: null,
+                      inspection_interval: '',
+                      remarks: ''
+                    }
+                  ]);
                 }}
                 style={{ borderRadius: '6px' }}
               >
-                Cancel
+                Add Checkpoint
               </Button>
-              <Button 
-                type="primary" 
-                htmlType="submit"
-                style={{
-                  background: '#F59E0B',
-                  borderColor: '#F59E0B',
-                  borderRadius: '8px',
-                  fontWeight: 600
-                }}
-              >
-                Update Checklist
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
+            </div>
+
+            <div style={{ 
+              border: '1px solid #d9d9d9', 
+              borderRadius: '6px', 
+              overflow: 'hidden',
+              background: '#fff',
+              maxHeight: '500px',
+              overflowY: 'auto'
+            }}>
+              {/* Table Header */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '30px 200px 60px 40px 70px 85px 70px 70px 1fr 80px',
+                background: '#fafafa',
+                padding: '6px 4px',
+                borderBottom: '1px solid #d9d9d9',
+                fontSize: '10px',
+                fontWeight: 600,
+                color: '#262626',
+                gap: '4px',
+                position: 'sticky',
+                top: 0,
+                zIndex: 1
+              }}>
+                <div>#</div>
+                <div>Checkpoint</div>
+                <div>Type</div>
+                <div>Req</div>
+                <div>Expected</div>
+                <div>Frequency</div>
+                <div>Unit</div>
+                <div>Value</div>
+                <div>Remarks</div>
+                <div>Actions</div>
+              </div>
+              {/* Table Rows */}
+              {editCheckpoints.map((item, index) => (
+                <div key={item.id} style={{
+                  display: 'grid',
+                  gridTemplateColumns: '30px 200px 60px 40px 70px 85px 70px 70px 1fr 100px',
+                  padding: '4px',
+                  borderBottom: index < editCheckpoints.length - 1 ? '1px solid #f0f0f0' : 'none',
+                  gap: '4px',
+                  alignItems: 'center',
+                  background: index % 2 === 0 ? '#fff' : '#fafafa'
+                }}>
+                  <div style={{ fontSize: '10px', fontWeight: 500, color: '#8c8c8c' }}>
+                    {index + 1}
+                  </div>
+                  {editingCheckpointId === item.id ? (
+                    <>
+                      <Input
+                        placeholder="Checkpoint"
+                        value={item.item_text}
+                        onChange={(e) => {
+                          setEditCheckpoints(prev =>
+                            prev.map(x => x.id === item.id ? { ...x, item_text: e.target.value } : x)
+                          );
+                        }}
+                        style={{ fontSize: '10px', height: '24px' }}
+                      />
+                      <select
+                        value={item.item_type}
+                        onChange={(e) => {
+                          setEditCheckpoints(prev =>
+                            prev.map(x => x.id === item.id ? { ...x, item_type: e.target.value } : x)
+                          );
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '24px',
+                          borderRadius: '4px',
+                          border: '1px solid #d9d9d9',
+                          padding: '0 2px',
+                          fontSize: '9px'
+                        }}
+                      >
+                        <option value="">Select</option>
+                        <option value="boolean">Yes/No</option>
+                        <option value="numerical">Num</option>
+                        <option value="text">Text</option>
+                      </select>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={item.is_required}
+                          onChange={(e) => {
+                            setEditCheckpoints(prev =>
+                              prev.map(x => x.id === item.id ? { ...x, is_required: e.target.checked } : x)
+                            );
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        />
+                      </div>
+                      <Input
+                        placeholder="Expected"
+                        value={item.expected_value}
+                        onChange={(e) => {
+                          setEditCheckpoints(prev =>
+                            prev.map(x => x.id === item.id ? { ...x, expected_value: e.target.value } : x)
+                          );
+                        }}
+                        style={{ fontSize: '10px', height: '24px' }}
+                      />
+                      <select
+                        value={item.frequency_type || ''}
+                        onChange={(e) => {
+                          setEditCheckpoints(prev =>
+                            prev.map(x => x.id === item.id ? { ...x, frequency_type: e.target.value } : x)
+                          );
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '24px',
+                          borderRadius: '4px',
+                          border: '1px solid #d9d9d9',
+                          padding: '0 2px',
+                          fontSize: '9px'
+                        }}
+                      >
+                        <option value="">None</option>
+                        <option value="Time Based">Time</option>
+                        <option value="Usage Based">Usage</option>
+                        <option value="Condition Based">Condition</option>
+                      </select>
+                      {(item.frequency_type === 'Time Based' || item.frequency_type === 'Condition Based') ? (
+                        <select
+                          value={item.interval_unit || ''}
+                          onChange={(e) => {
+                            setEditCheckpoints(prev =>
+                              prev.map(x => x.id === item.id ? { ...x, interval_unit: e.target.value } : x)
+                            );
+                          }}
+                          style={{
+                            width: '100%',
+                            height: '24px',
+                            borderRadius: '4px',
+                            border: '1px solid #d9d9d9',
+                            padding: '0 2px',
+                            fontSize: '9px'
+                          }}
+                        >
+                          <option value="">Unit</option>
+                          <option value="Day">Day</option>
+                          <option value="Week">Week</option>
+                          <option value="Month">Month</option>
+                          <option value="Year">Year</option>
+                        </select>
+                      ) : (
+                        <div></div>
+                      )}
+                      {item.frequency_type === 'Time Based' || item.frequency_type === 'Condition Based' ? (
+                        <Input
+                          type="number"
+                          placeholder="Value"
+                          value={item.interval_value || ''}
+                          onChange={(e) => {
+                            setEditCheckpoints(prev =>
+                              prev.map(x => x.id === item.id ? { ...x, interval_value: e.target.value ? parseInt(e.target.value) : null } : x)
+                            );
+                          }}
+                          style={{ fontSize: '10px', height: '24px' }}
+                        />
+                      ) : item.frequency_type === 'Usage Based' ? (
+                        <Input
+                          type="number"
+                          placeholder="Hours"
+                          value={item.trigger_hours || ''}
+                          onChange={(e) => {
+                            setEditCheckpoints(prev =>
+                              prev.map(x => x.id === item.id ? { ...x, trigger_hours: e.target.value ? parseInt(e.target.value) : null } : x)
+                            );
+                          }}
+                          style={{ fontSize: '10px', height: '24px' }}
+                        />
+                      ) : (
+                        <div></div>
+                      )}
+                      <Input
+                        placeholder="Remarks"
+                        value={item.remarks || ''}
+                        onChange={(e) => {
+                          setEditCheckpoints(prev =>
+                            prev.map(x => x.id === item.id ? { ...x, remarks: e.target.value } : x)
+                          );
+                        }}
+                        style={{ fontSize: '10px', height: '24px' }}
+                      />
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <Button
+                          type="text"
+                          icon={<CheckCircleOutlined />}
+                          onClick={() => setEditingCheckpointId(null)}
+                          style={{ color: '#52c41a', padding: '2px', fontSize: '11px' }}
+                        />
+                        <Button
+                          type="text"
+                          icon={<DeleteOutlined />}
+                          onClick={() => {
+                            if (editCheckpoints.length > 1) {
+                              setEditCheckpoints(prev => prev.filter(x => x.id !== item.id));
+                            } else {
+                              message.warning('At least one checkpoint is required');
+                            }
+                          }}
+                          style={{ color: '#ff4d4f', padding: '2px', fontSize: '11px' }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: '10px', fontWeight: 600 }}>{item.item_text}</div>
+                      <Tag color="blue" style={{ fontSize: '9px', padding: '1px 4px' }}>{item.item_type}</Tag>
+                      <div style={{ textAlign: 'center' }}>
+                        {item.is_required ? <Tag color="red" style={{ fontSize: '9px' }}>Yes</Tag> : <Tag color="green" style={{ fontSize: '9px' }}>No</Tag>}
+                      </div>
+                      <div style={{ fontSize: '10px' }}>{item.expected_value || '-'}</div>
+                      <Tag color={item.frequency_type === 'Time Based' ? 'blue' : item.frequency_type === 'Usage Based' ? 'orange' : 'purple'} style={{ fontSize: '9px' }}>
+                        {item.frequency_type || '-'}
+                      </Tag>
+                      <div style={{ fontSize: '10px' }}>{item.interval_unit || '-'}</div>
+                      <div style={{ fontSize: '10px' }}>{item.interval_value || item.trigger_hours || '-'}</div>
+                      <div style={{ fontSize: '10px' }}>{item.remarks || '-'}</div>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <Button
+                          type="text"
+                          icon={<EditOutlined />}
+                          onClick={() => setEditingCheckpointId(item.id)}
+                          style={{ color: '#1890ff', padding: '2px', fontSize: '11px' }}
+                        />
+                        <Button
+                          type="text"
+                          icon={<DeleteOutlined />}
+                          onClick={() => {
+                            if (editCheckpoints.length > 1) {
+                              setEditCheckpoints(prev => prev.filter(x => x.id !== item.id));
+                            } else {
+                              message.warning('At least one checkpoint is required');
+                            }
+                          }}
+                          style={{ color: '#ff4d4f', padding: '2px', fontSize: '11px' }}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </Modal>
     </div>
   );

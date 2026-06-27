@@ -11,6 +11,8 @@ const Inventory = () => {
   const [toolFormVisible, setToolFormVisible] = useState(false);
   const [editingTool, setEditingTool] = useState(null);
   const [toolsListRefresh, setToolsListRefresh] = useState(0);
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedSubCategory, setSelectedSubCategory] = useState(null);
 
   const refreshToolsList = () => {
     setToolsListRefresh(prev => prev + 1);
@@ -26,12 +28,12 @@ const Inventory = () => {
       const response = await fetch(`${API_BASE_URL}/tools-list/${tool.id}`, {
         method: 'DELETE'
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to delete tool');
       }
-      
+
       message.success('Tool deleted successfully');
       refreshToolsList();
     } catch (error) {
@@ -40,14 +42,28 @@ const Inventory = () => {
     }
   };
 
-  const handleCreateTool = () => {
-    setEditingTool(null);
+  const handleCreateTool = (context) => {
+    if (context) {
+      setEditingTool({
+        item_description: context.item_description || '',
+        category: context.category || '',
+        sub_category: context.sub_category || '',
+      });
+      setSelectedCategory(context.category || null);
+      setSelectedSubCategory(context.sub_category || null);
+    } else {
+      setEditingTool(null);
+      setSelectedCategory(null);
+      setSelectedSubCategory(null);
+    }
     setToolFormVisible(true);
   };
 
   const handleToolFormSubmit = (values) => {
     setToolFormVisible(false);
     setEditingTool(null);
+    setSelectedCategory(null);
+    setSelectedSubCategory(null);
     refreshToolsList();
     message.success('Tool operation completed successfully');
   };
@@ -55,6 +71,8 @@ const Inventory = () => {
   const handleToolFormCancel = () => {
     setToolFormVisible(false);
     setEditingTool(null);
+    setSelectedCategory(null);
+    setSelectedSubCategory(null);
   };
 
   const handleEditInstrument = (instrument) => {
@@ -73,7 +91,7 @@ const Inventory = () => {
   };
 
   return (
-    <div style={{ padding: '10px' }}>
+    <>
       <div style={{ background: '#fff', padding: '8px 12px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
         <style>{`
           .ant-tabs-nav { 
@@ -98,7 +116,7 @@ const Inventory = () => {
               key={toolsListRefresh}
               onEdit={handleEditTool}
               onDelete={handleDeleteTool}
-              onCreateNew={handleCreateTool}
+              onCreateNew={(context) => handleCreateTool(context || null)}
             />
           </TabPane>
           
@@ -111,8 +129,10 @@ const Inventory = () => {
         onCancel={handleToolFormCancel}
         onSubmit={handleToolFormSubmit}
         editingTool={editingTool}
+        selectedCategory={selectedCategory}
+        selectedSubCategory={selectedSubCategory}
       />
-    </div>
+    </>
   );
 };
 

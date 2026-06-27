@@ -54,6 +54,14 @@ const STATUS = {
 };
 const getS = (s) => STATUS[s] || STATUS.OFFLINE;
 
+/* ─── Filter key → matching statuses ───────────────────────── */
+const FILTER_MATCH = {
+  ALL:        () => true,
+  PRODUCTION: (s) => s === 'PRODUCTION' || s === 'RUNNING',
+  IDLE:       (s) => s === 'ON' || s === 'IDLE',
+  OFFLINE:    (s) => s === 'OFF' || s === 'OFFLINE',
+};
+
 /* ─── Helpers ───────────────────────────────────────────────── */
 const formatProgram = (path) => {
   if (!path) return null;
@@ -162,24 +170,53 @@ const MachineCard = ({ machine, onClick }) => {
   );
 };
 
-/* ─── KPI Tile — fully solid, no icon box ───────────────────── */
-const KpiTile = ({ label, value, icon: Icon, bg }) => (
-  <div style={{
-    background: bg, borderRadius: 10,
-    padding: '16px 20px', flex: 1, minWidth: 130,
-    display: 'flex', alignItems: 'center', gap: 14,
-  }}>
-    <Icon size={28} color="rgba(255,255,255,0.85)" strokeWidth={1.8} style={{ flexShrink: 0 }} />
-    <div>
-      <div style={{ fontSize: 30, fontWeight: 900, color: '#fff', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-        {value}
+/* ─── KPI Tile ──────────────────────────────────────────────── */
+const KpiTile = ({ label, value, icon: Icon, bg, filterKey, activeFilter, onClick }) => {
+  const isActive = activeFilter === filterKey;
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: bg,
+        borderRadius: 10,
+        padding: '16px 20px',
+        flex: 1,
+        minWidth: 130,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+        cursor: 'pointer',
+        transition: 'transform 0.15s, box-shadow 0.15s',
+        boxShadow: isActive
+          ? '0 0 0 3px rgba(255,255,255,0.9), 0 0 0 5px rgba(255,255,255,0.5), 0 6px 20px rgba(0,0,0,0.25)'
+          : '0 2px 8px rgba(0,0,0,0.12)',
+        transform: isActive ? 'translateY(-2px)' : 'none',
+        outline: isActive ? '2px solid rgba(255,255,255,0.8)' : 'none',
+        position: 'relative',
+      }}
+      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 6px 16px rgba(0,0,0,0.2)'; } }}
+      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'; } }}
+    >
+      <Icon size={28} color="rgba(255,255,255,0.85)" strokeWidth={1.8} style={{ flexShrink: 0 }} />
+      <div>
+        <div style={{ fontSize: 30, fontWeight: 900, color: '#fff', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+          {value}
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.8)', letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: 4 }}>
+          {label}
+        </div>
       </div>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.8)', letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: 4 }}>
-        {label}
-      </div>
+      {isActive && (
+        <div style={{
+          position: 'absolute', top: 8, right: 10,
+          width: 8, height: 8, borderRadius: '50%',
+          background: 'rgba(255,255,255,0.9)',
+          boxShadow: '0 0 0 3px rgba(255,255,255,0.3)',
+        }} />
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 /* ─── Machine Details Modal ─────────────────────────────────── */
 const MachineModal = ({ machine, onClose }) => {
@@ -274,18 +311,24 @@ const MachineDashboard = () => {
 
   const handleRefresh = () => { setRefreshing(true); fetchMachines(); setTimeout(() => setRefreshing(false), 1500); };
 
+  const handleKpiClick = (key) => {
+    // Toggle off if already active
+    setFilterStatus(prev => prev === key ? 'ALL' : key);
+  };
+
   const stats = {
     total:      machines.length,
-    production: machines.filter(m => m.status === 'PRODUCTION' || m.status === 'RUNNING').length,
-    idle:       machines.filter(m => m.status === 'ON' || m.status === 'IDLE').length,
-    offline:    machines.filter(m => m.status === 'OFF' || m.status === 'OFFLINE').length,
+    production: machines.filter(m => FILTER_MATCH.PRODUCTION(m.status)).length,
+    idle:       machines.filter(m => FILTER_MATCH.IDLE(m.status)).length,
+    offline:    machines.filter(m => FILTER_MATCH.OFFLINE(m.status)).length,
   };
 
   const sorted = useMemo(() => {
     const PRI = { PRODUCTION: 0, RUNNING: 0, ON: 1, IDLE: 1, STOPPED: 2, MAINTENANCE: 3, OFF: 4, OFFLINE: 4 };
+    const matchFn = FILTER_MATCH[filterStatus] || FILTER_MATCH.ALL;
     return [...machines]
       .filter(m =>
-        (filterStatus === 'ALL' || m.status === filterStatus) &&
+        matchFn(m.status) &&
         (!searchQuery || (m.machine_name || '').toLowerCase().includes(searchQuery.toLowerCase()))
       )
       .sort((a, b) =>
@@ -301,7 +344,6 @@ const MachineDashboard = () => {
       {/* Top bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div>
-        
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', display: 'inline-block', boxShadow: '0 0 0 3px #22c55e28' }} />
             <span style={{ fontSize: 14, color: '#0f172a' }}>Live · {dayjs().format('HH:mm:ss')}</span>
@@ -317,15 +359,35 @@ const MachineDashboard = () => {
         </div>
       </div>
 
-      {/* KPI row — solid color tiles, no wrapper card */}
+      {/* KPI row — clickable tiles filter the grid */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KpiTile label="Total Machines"  value={stats.total}      icon={Cpu}         bg="#2563eb" />
-        <KpiTile label="In Production"   value={stats.production} icon={Activity}    bg="#16a34a" />
-        <KpiTile label="Idle"            value={stats.idle}       icon={PauseCircle} bg="#d97706" />
-        <KpiTile label="Offline"         value={stats.offline}    icon={WifiOff}     bg="#475569" />
+        <KpiTile
+          label="Total Machines"  value={stats.total}
+          icon={Cpu}         bg="#2563eb"
+          filterKey="ALL"    activeFilter={filterStatus}
+          onClick={() => handleKpiClick('ALL')}
+        />
+        <KpiTile
+          label="In Production"   value={stats.production}
+          icon={Activity}    bg="#16a34a"
+          filterKey="PRODUCTION"  activeFilter={filterStatus}
+          onClick={() => handleKpiClick('PRODUCTION')}
+        />
+        <KpiTile
+          label="Idle"            value={stats.idle}
+          icon={PauseCircle} bg="#d97706"
+          filterKey="IDLE"   activeFilter={filterStatus}
+          onClick={() => handleKpiClick('IDLE')}
+        />
+        <KpiTile
+          label="Offline"         value={stats.offline}
+          icon={WifiOff}     bg="#475569"
+          filterKey="OFFLINE" activeFilter={filterStatus}
+          onClick={() => handleKpiClick('OFFLINE')}
+        />
       </div>
 
-      {/* Filters */}
+      {/* Filters panel */}
       {showFilters && (
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 9, padding: '13px 16px', marginBottom: 14, display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
           <div>
@@ -333,8 +395,8 @@ const MachineDashboard = () => {
             <Select value={filterStatus} onChange={setFilterStatus} size="small" style={{ width: 140 }}>
               <Select.Option value="ALL">All</Select.Option>
               <Select.Option value="PRODUCTION">Production</Select.Option>
-              <Select.Option value="ON">Idle</Select.Option>
-              <Select.Option value="OFF">Offline</Select.Option>
+              <Select.Option value="IDLE">Idle</Select.Option>
+              <Select.Option value="OFFLINE">Offline</Select.Option>
             </Select>
           </div>
           <div>
