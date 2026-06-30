@@ -31,10 +31,13 @@ from DB.schemas.configuration import (
     PokayokeItemResponseCreate,
     PokayokeItemResponseUpdate,
     PokayokeItemResponseWithItem,
+    PokayokeItemResponseWithDetails,
     PokayokeChecklistItemWithApprovals,
     PokayokeChecklistWithItems,
     PokayokeCompletedLogWithResponses,
+    PokayokeCompletedLogWithChecklistName,
     PokayokeMachineAssignmentWithChecklist,
+    PokayokeMachineAssignmentWithChecklistNextDue,
     ChecklistApprovalStatusResponse,
     ChecklistApprovalByLog,
     ChecklistItemApprovalStatus,
@@ -478,9 +481,9 @@ def get_machine_assignments(checklist_id: int, db: Session = Depends(get_db)):
     return assignments
 
 
-@router.get("/machines/{machine_id}/assignments", response_model=List[PokayokeMachineAssignmentWithChecklist])
+@router.get("/machines/{machine_id}/assignments", response_model=List[PokayokeMachineAssignmentWithChecklistNextDue])
 def get_machine_checklists(machine_id: int, db: Session = Depends(get_db)):
-    """Get all Pokayoke checklists assigned to a specific machine"""
+    """Get all Pokayoke checklists assigned to a specific machine with next due dates for items"""
     # Verify machine exists
     machine = db.query(Machine).filter(Machine.id == machine_id).first()
     if not machine:
@@ -492,7 +495,197 @@ def get_machine_checklists(machine_id: int, db: Session = Depends(get_db)):
     assignments = db.query(PokayokeMachineAssignment).filter(
         PokayokeMachineAssignment.machine_id == machine_id
     ).all()
-    return assignments
+    
+    # Calculate next due dates for each item
+    result = []
+    for assignment in assignments:
+        # Get checklist with items
+        checklist = db.query(PokayokeChecklist).filter(
+            PokayokeChecklist.id == assignment.checklist_id
+        ).first()
+        
+        if not checklist:
+            continue
+            
+        # Get items for this checklist
+        items = db.query(PokayokeChecklistItem).filter(
+            PokayokeChecklistItem.checklist_id == checklist.id
+        ).all()
+        
+        # Calculate next due date for each item
+        items_with_next_due = []
+        for item in items:
+            next_due_date = None
+            
+            # First, try to get next_due_date from the most recent item response
+            recent_response = db.query(PokayokeItemResponse).filter(
+                PokayokeItemResponse.item_id == item.id
+            ).order_by(PokayokeItemResponse.timestamp.desc()).first()
+            
+            if recent_response and recent_response.next_due_date:
+                # Use the stored next_due_date from the most recent response
+                next_due_date = recent_response.next_due_date
+            elif item.frequency_type == 'Time Based' and item.interval_value and item.interval_unit:
+                # Fall back to calculation based on assignment date if no response exists
+                base_date = assignment.next_due_date if assignment.next_due_date else assignment.assigned_at
+                if isinstance(base_date, date):
+                    base_date = datetime.combine(base_date, time.min)
+                
+                due_date = base_date
+                
+                # Add interval based on unit
+                if item.interval_unit == 'Day':
+                    due_date = base_date + timedelta(days=item.interval_value)
+                elif item.interval_unit == 'Week':
+                    due_date = base_date + timedelta(weeks=item.interval_value)
+                elif item.interval_unit == 'Month':
+                    due_date = base_date + timedelta(days=item.interval_value * 30)
+                elif item.interval_unit == 'Year':
+                    due_date = base_date + timedelta(days=item.interval_value * 365)
+                
+                next_due_date = due_date
+            
+            # Create item dict with next_due_date
+            item_dict = {
+                'id': item.id,
+                'checklist_id': item.checklist_id,
+                'sequence_number': item.sequence_number,
+                'item_text': item.item_text,
+                'item_type': item.item_type,
+                'is_required': item.is_required,
+                'expected_value': item.expected_value,
+                'frequency_type': item.frequency_type,
+                'interval_value': item.interval_value,
+                'interval_unit': item.interval_unit,
+                'trigger_hours': item.trigger_hours,
+                'inspection_interval': item.inspection_interval,
+                'remarks': item.remarks,
+                'created_at': item.created_at,
+                'next_due_date': next_due_date
+            }
+            items_with_next_due.append(item_dict)
+        
+        # Create assignment result
+        assignment_dict = {
+            'id': assignment.id,
+            'machine_id': assignment.machine_id,
+            'checklist_id': assignment.checklist_id,
+            'assigned_at': assignment.assigned_at,
+            'next_due_date': assignment.next_due_date,
+            'active': assignment.active,
+            'checklist': {
+                'id': checklist.id,
+                'name': checklist.name,
+                'description': checklist.description,
+                'created_at': checklist.created_at,
+                'items': items_with_next_due,
+                'machine_assignments': []
+            }
+        }
+        result.append(assignment_dict)
+    
+    return result
+
+
+@router.get("/machines/{machine_id}/today-assignments", response_model=List[PokayokeMachineAssignmentWithChecklistNextDue])
+def get_machine_today_checklists(machine_id: int, db: Session = Depends(get_db)):
+    """Get Pokayoke checklists assigned to a specific machine that have items due today (next_due_date matches today)"""
+    # Verify machine exists
+    machine = db.query(Machine).filter(Machine.id == machine_id).first()
+    if not machine:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Machine with id {machine_id} not found"
+        )
+    
+    # Get today's date in IST (start of day)
+    today_start = datetime.now(IST).replace(tzinfo=None).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+    
+    assignments = db.query(PokayokeMachineAssignment).filter(
+        PokayokeMachineAssignment.machine_id == machine_id,
+        PokayokeMachineAssignment.active == True
+    ).all()
+    
+    # Filter assignments where at least one item has next_due_date == today
+    result = []
+    for assignment in assignments:
+        # Get checklist with items
+        checklist = db.query(PokayokeChecklist).filter(
+            PokayokeChecklist.id == assignment.checklist_id
+        ).first()
+        
+        if not checklist:
+            continue
+            
+        # Get items for this checklist
+        items = db.query(PokayokeChecklistItem).filter(
+            PokayokeChecklistItem.checklist_id == checklist.id
+        ).all()
+        
+        # Calculate next due date for each item and check if any are due today
+        items_with_next_due = []
+        has_item_due_today = False
+        
+        for item in items:
+            next_due_date = None
+            
+            # Get next_due_date from the most recent item response in pokayoke_item_responses table
+            recent_response = db.query(PokayokeItemResponse).filter(
+                PokayokeItemResponse.item_id == item.id
+            ).order_by(PokayokeItemResponse.timestamp.desc()).first()
+            
+            if recent_response and recent_response.next_due_date:
+                # Use the stored next_due_date from the most recent response
+                next_due_date = recent_response.next_due_date
+            
+            # Check if this item is due today
+            if next_due_date:
+                if isinstance(next_due_date, date):
+                    next_due_date = datetime.combine(next_due_date, time.min)
+                if today_start <= next_due_date < today_end:
+                    has_item_due_today = True
+                    # Only add to items_with_next_due if it's due today
+                    item_dict = {
+                        'id': item.id,
+                        'checklist_id': item.checklist_id,
+                        'sequence_number': item.sequence_number,
+                        'item_text': item.item_text,
+                        'item_type': item.item_type,
+                        'is_required': item.is_required,
+                        'expected_value': item.expected_value,
+                        'frequency_type': item.frequency_type,
+                        'interval_value': item.interval_value,
+                        'interval_unit': item.interval_unit,
+                        'trigger_hours': item.trigger_hours,
+                        'inspection_interval': item.inspection_interval,
+                        'remarks': item.remarks,
+                        'created_at': item.created_at,
+                        'next_due_date': next_due_date
+                    }
+                    items_with_next_due.append(item_dict)
+        
+        # Only include this assignment if at least one item is due today
+        if has_item_due_today:
+            assignment_dict = {
+                'id': assignment.id,
+                'machine_id': assignment.machine_id,
+                'checklist_id': assignment.checklist_id,
+                'assigned_at': assignment.assigned_at,
+                'next_due_date': assignment.next_due_date,
+                'active': assignment.active,
+                'checklist': {
+                    'id': checklist.id,
+                    'name': checklist.name,
+                    'description': checklist.description,
+                    'created_at': checklist.created_at,
+                    'items': items_with_next_due,
+                    'machine_assignments': []
+                }
+            }
+            result.append(assignment_dict)
+    
+    return result
 
 
 @router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -538,10 +731,35 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
     if not log_data.get('completed_at'):
         log_data['completed_at'] = datetime.now(IST).replace(tzinfo=None)
     
+    # Set all_items_passed to True initially since we only submit items that are due today
+    # This will be recalculated during approval based on actual responses
+    log_data['all_items_passed'] = True
+    
     db_log = PokayokeCompletedLog(**log_data)
     db.add(db_log)
     db.commit()
     db.refresh(db_log)
+    
+    # Clean up any empty logs from previous failed submissions (same machine, same checklist, within last hour)
+    one_hour_ago = datetime.now(IST) - timedelta(hours=1)
+    empty_logs = db.query(PokayokeCompletedLog).filter(
+        PokayokeCompletedLog.machine_id == log.machine_id,
+        PokayokeCompletedLog.checklist_id == log.checklist_id,
+        PokayokeCompletedLog.id != db_log.id,
+        PokayokeCompletedLog.completed_at >= one_hour_ago
+    ).all()
+    
+    for empty_log in empty_logs:
+        # Check if this log has no item responses
+        response_count = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == empty_log.id
+        ).count()
+        if response_count == 0:
+            # Delete the empty log
+            db.delete(empty_log)
+    
+    db.commit()
+    
     return db_log
 
 
@@ -687,7 +905,7 @@ def get_completed_log(log_id: int, db: Session = Depends(get_db)):
     return log
 
 
-@completed_logs_router.get("/machines/{machine_id}/logs", response_model=List[PokayokeCompletedLogWithResponses])
+@completed_logs_router.get("/machines/{machine_id}/logs", response_model=List[PokayokeCompletedLogWithChecklistName])
 def get_machine_completed_logs(machine_id: int, db: Session = Depends(get_db)):
     """Get all completed logs for a specific machine.
 
@@ -706,8 +924,14 @@ def get_machine_completed_logs(machine_id: int, db: Session = Depends(get_db)):
         PokayokeCompletedLog.machine_id == machine_id
     ).order_by(PokayokeCompletedLog.completed_at.desc()).all()
 
-    # For each log, filter item responses if there are pending items
+    # Transform logs to use new schema
+    result = []
     for log in logs:
+        # Get checklist name
+        checklist = db.query(PokayokeChecklist).filter(PokayokeChecklist.id == log.checklist_id).first()
+        checklist_name = checklist.name if checklist else None
+
+        # Get item responses
         all_responses = db.query(PokayokeItemResponse).filter(
             PokayokeItemResponse.completed_log_id == log.id
         ).all()
@@ -717,9 +941,71 @@ def get_machine_completed_logs(machine_id: int, db: Session = Depends(get_db)):
 
         # If there are pending items, only show pending + rejected items
         if pending_responses:
-            log.item_responses = [r for r in all_responses if r.approval_status in [None, 'rejected']]
+            filtered_responses = [r for r in all_responses if r.approval_status in [None, 'rejected']]
+        else:
+            filtered_responses = all_responses
 
-    return logs
+        # Transform item responses to include item details directly
+        item_responses_with_details = []
+        for response in filtered_responses:
+            # Get the item details
+            item = db.query(PokayokeChecklistItem).filter(PokayokeChecklistItem.id == response.item_id).first()
+            
+            response_dict = {
+                'id': response.id,
+                'completed_log_id': response.completed_log_id,
+                'item_id': response.item_id,
+                'response_value': response.response_value,
+                'is_confirming': response.is_confirming,
+                'timestamp': response.timestamp,
+                'frequency_type': response.frequency_type,
+                'interval_value': response.interval_value,
+                'interval_unit': response.interval_unit,
+                'trigger_hours': response.trigger_hours,
+                'inspection_interval': response.inspection_interval,
+                'next_due_date': response.next_due_date,
+                'approval_status': response.approval_status,
+                'approved_by': response.approved_by,
+                'approved_at': response.approved_at,
+                'approval_comments': response.approval_comments,
+                # Item details directly included
+                'item_text': item.item_text if item else None,
+                'item_type': item.item_type if item else None,
+                'is_required': item.is_required if item else None,
+                'expected_value': item.expected_value if item else None,
+                'remarks': item.remarks if item else None,
+                'sequence_number': item.sequence_number if item else None,
+            }
+            item_responses_with_details.append(PokayokeItemResponseWithDetails(**response_dict))
+
+        # Build the log response
+        log_dict = {
+            'id': log.id,
+            'checklist_id': log.checklist_id,
+            'checklist_name': checklist_name,
+            'machine_id': log.machine_id,
+            'operator_id': log.operator_id,
+            'completed_at': log.completed_at,
+            'all_items_passed': log.all_items_passed,
+            'comments': log.comments,
+            'read': log.read,
+            'assignment_id': log.assignment_id,
+            'operator_acknowledged': log.operator_acknowledged,
+            'operator_acknowledged_at': log.operator_acknowledged_at,
+            'supervisor_acknowledged': log.supervisor_acknowledged,
+            'supervisor_acknowledged_at': log.supervisor_acknowledged_at,
+            'supervisor_id': log.supervisor_id,
+            'item_responses': item_responses_with_details,
+            'checklist': checklist,
+            'machine': machine,
+            'part': None,
+            'operator': log.operator,
+            'order': None,
+            'machine_assignment': log.machine_assignment,
+        }
+        result.append(PokayokeCompletedLogWithChecklistName(**log_dict))
+
+    return result
 
 
 @completed_logs_router.get("/machines/{machine_id}/logs/simple", response_model=List[SimpleCompletedLog])
@@ -897,15 +1183,16 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
     response_data['trigger_hours'] = item.trigger_hours
     response_data['inspection_interval'] = item.inspection_interval
     
-    # Calculate next due date based on frequency
-    from cmf.services.scheduler_service import calculate_next_due_date
+    # Calculate next due date based on frequency - use completed_at as base date
+    from services.scheduler_service import calculate_next_due_date
+    base_date = completed_log.completed_at.date() if completed_log.completed_at else date.today()
     next_due = calculate_next_due_date(
         frequency_type=item.frequency_type,
         interval_value=item.interval_value,
         interval_unit=item.interval_unit,
         trigger_hours=item.trigger_hours,
         inspection_interval=item.inspection_interval,
-        current_date=date.today()
+        current_date=base_date
     )
     response_data['next_due_date'] = next_due
     
@@ -926,13 +1213,28 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
         existing_response.approved_at = None
         existing_response.approval_comments = None
         # Recalculate is_confirming based on new response
-        existing_response.is_confirming = response_data['response_value'].lower() == item.expected_value.lower()
+        try:
+            response_val = str(response_data['response_value']).lower() if response_data['response_value'] else ''
+            expected_val = str(item.expected_value).lower() if item.expected_value else ''
+            existing_response.is_confirming = response_val == expected_val
+        except Exception as e:
+            print(f"Error calculating is_confirming: {e}")
+            existing_response.is_confirming = True
         
         db.commit()
         db.refresh(existing_response)
         return existing_response
     else:
         # Create new response
+        # Calculate is_confirming based on response value vs expected value
+        try:
+            response_val = str(response_data['response_value']).lower() if response_data['response_value'] else ''
+            expected_val = str(item.expected_value).lower() if item.expected_value else ''
+            response_data['is_confirming'] = response_val == expected_val
+        except Exception as e:
+            # If comparison fails, default to True (assume confirming)
+            print(f"Error calculating is_confirming: {e}")
+            response_data['is_confirming'] = True
         db_response = PokayokeItemResponse(**response_data)
         db.add(db_response)
         db.commit()
@@ -1246,8 +1548,8 @@ def get_approval_status_by_checklist(checklist_id: int, db: Session = Depends(ge
 
         log_data = ChecklistApprovalByLog(
             completed_log_id=log.id,
-            production_order_id=log.production_order_id,
-            part_id=log.part_id,
+            production_order_id=None,
+            part_id=None,
             machine_id=log.machine_id,
             operator_id=log.operator_id,
             operator_name=operator_name,

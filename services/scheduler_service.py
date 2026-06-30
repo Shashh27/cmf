@@ -7,8 +7,8 @@ from datetime import datetime, date, timedelta
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
-from cmf.DB.database import get_db
-from cmf.DB.models.configuration import PokayokeChecklistItem, PokayokeMachineAssignment, PokayokeCompletedLog, PokayokeItemResponse
+from DB.database import get_db
+from DB.models.configuration import PokayokeChecklistItem, PokayokeMachineAssignment, PokayokeCompletedLog, PokayokeItemResponse
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -58,10 +58,22 @@ def calculate_next_due_date(frequency_type, interval_value, interval_unit, trigg
         return None
     
     elif frequency_type == 'Condition Based':
-        # Condition based is triggered by specific conditions - this is a placeholder
-        # In production, this would check condition sensors
-        logger.warning("Condition Based frequency requires condition monitoring - not implemented")
-        return None
+        # Condition based items also use interval_value and interval_unit for next due date calculation
+        if interval_value and interval_unit:
+            if interval_unit == 'Day':
+                return current_date + timedelta(days=interval_value)
+            elif interval_unit == 'Week':
+                return current_date + timedelta(weeks=interval_value)
+            elif interval_unit == 'Month':
+                # Add months manually to handle month boundaries
+                new_month = current_date.month - 1 + interval_value
+                year = current_date.year + new_month // 12
+                month = new_month % 12 + 1
+                # Keep the same day, but handle end-of-month
+                day = min(current_date.day, [31, 29 if year % 4 == 0 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+                return date(year, month, day)
+            elif interval_unit == 'Year':
+                return date(current_date.year + interval_value, current_date.month, current_date.day)
     
     return None
 
@@ -75,7 +87,7 @@ def update_item_response_due_dates():
     db: Session = next(get_db())
     try:
         # Get all item responses without next_due_date
-        from cmf.DB.models.configuration import PokayokeItemResponse
+        from DB.models.configuration import PokayokeItemResponse
         responses = db.query(PokayokeItemResponse).filter(
             PokayokeItemResponse.next_due_date.is_(None)
         ).all()

@@ -194,6 +194,17 @@ class PokayokeChecklistItem(PokayokeChecklistItemBase):
         from_attributes = True
 
 
+class PokayokeChecklistItemWithNextDue(PokayokeChecklistItemBase):
+    id: int
+    checklist_id: int
+    sequence_number: int
+    created_at: datetime
+    next_due_date: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class PokayokeMachineAssignment(PokayokeMachineAssignmentBase):
     id: int
     checklist_id: int
@@ -253,8 +264,17 @@ class PokayokeChecklistWithItems(PokayokeChecklist):
     machine_assignments: List[PokayokeMachineAssignment] = []
 
 
+class PokayokeChecklistWithItemsNextDue(PokayokeChecklist):
+    items: List[PokayokeChecklistItemWithNextDue] = []
+    machine_assignments: List[PokayokeMachineAssignment] = []
+
+
 class PokayokeMachineAssignmentWithChecklist(PokayokeMachineAssignment):
     checklist: PokayokeChecklistWithItems
+
+
+class PokayokeMachineAssignmentWithChecklistNextDue(PokayokeMachineAssignment):
+    checklist: PokayokeChecklistWithItemsNextDue
 
 
 # =======================
@@ -317,6 +337,33 @@ class PokayokeItemResponseWithItem(PokayokeItemResponse):
     approver: Optional[AccessUserResponse] = None
 
 
+# Response schema with item details directly (no nested item object)
+class PokayokeItemResponseWithDetails(BaseModel):
+    id: int
+    completed_log_id: int
+    item_id: int
+    response_value: str
+    is_confirming: Optional[bool] = None
+    timestamp: datetime
+    frequency_type: Optional[str] = None
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[int] = None
+    inspection_interval: Optional[str] = None
+    next_due_date: Optional[date] = None
+    approval_status: Optional[str] = None
+    approved_by: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    approval_comments: Optional[str] = None
+    # Item details directly included
+    item_text: Optional[str] = None
+    item_type: Optional[str] = None
+    is_required: Optional[bool] = None
+    expected_value: Optional[str] = None
+    remarks: Optional[str] = None
+    sequence_number: Optional[int] = None
+
+
 # Create schemas
 class PokayokeCompletedLogCreate(PokayokeCompletedLogBase):
     pass
@@ -363,6 +410,32 @@ class PokayokeItemResponseUpdate(BaseModel):
 # Response with nested data
 class PokayokeCompletedLogWithResponses(PokayokeCompletedLog):
     item_responses: List[PokayokeItemResponseWithItem] = []
+    checklist: Optional[PokayokeChecklist] = None
+    machine: Optional[Machine] = None
+    part: Optional["PartSchema"] = None
+    operator: Optional[AccessUserResponse] = None
+    order: Optional["OrderSchema"] = None
+    machine_assignment: Optional[PokayokeMachineAssignment] = None
+
+
+# Response with item details directly (no nested item) and checklist name
+class PokayokeCompletedLogWithChecklistName(BaseModel):
+    id: int
+    checklist_id: int
+    checklist_name: Optional[str] = None
+    machine_id: int
+    operator_id: int
+    completed_at: datetime
+    all_items_passed: Optional[bool] = None
+    comments: Optional[str] = None
+    read: Optional[bool] = None
+    assignment_id: Optional[int] = None
+    operator_acknowledged: Optional[bool] = None
+    operator_acknowledged_at: Optional[datetime] = None
+    supervisor_acknowledged: Optional[bool] = None
+    supervisor_acknowledged_at: Optional[datetime] = None
+    supervisor_id: Optional[int] = None
+    item_responses: List[PokayokeItemResponseWithDetails] = []
     checklist: Optional[PokayokeChecklist] = None
     machine: Optional[Machine] = None
     part: Optional["PartSchema"] = None
@@ -469,6 +542,7 @@ class SimpleCompletedLog(BaseModel):
 
 from .oms import Part as PartSchema, Order as OrderSchema
 PokayokeCompletedLogWithResponses.model_rebuild()
+PokayokeCompletedLogWithChecklistName.model_rebuild()
 
 
 # =======================
