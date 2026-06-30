@@ -4,7 +4,7 @@ import {
   Select, Empty, Spin, Alert, Tabs, Table, Tag, Tooltip,
   Button, Divider, Modal, Input, Statistic
 } from 'antd';
-import { Line, Pie, Column } from '@ant-design/plots';
+import { Line } from '@ant-design/plots';
 
 import { 
   Activity, BarChart2, 
@@ -623,7 +623,7 @@ const OEEDashboard = () => {
               }}
               onChange={handleTableChange}
               size="middle"
-              bordered
+              variant="outlined"
               className="custom-table"
             />
           ) : (

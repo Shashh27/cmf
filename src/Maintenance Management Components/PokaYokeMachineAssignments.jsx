@@ -38,12 +38,14 @@ const MAT_COLORS = {
   Daily:   '#1E40AF',   // Darker saturated blue
   Weekly:  '#5B21B6',   // Darker saturated purple
   Monthly: '#B45309',   // Darker saturated orange
+  Custom:  '#059669',   // Green for custom/checkpoint-based
 };
 
 const MAT_BGS = {
   Daily:   '#BFDBFE',
   Weekly:  '#DDD6FE',
   Monthly: '#FED7AA',
+  Custom:  '#A7F3D0',
 };
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -69,6 +71,56 @@ function getDaysInMonth(year, month) {
   const remaining = 42 - cells.length;
   for (let d = 1; d <= remaining; d++) cells.push({ day: d, cur: false });
   return cells;
+}
+
+/* ─── Calculate next due date for a checkpoint item ────────────────────────── */
+function calculateNextDueDate(item, baseDate = new Date()) {
+  if (!item.frequency_type || item.frequency_type === 'Condition Based') return null;
+  
+  const { frequency_type, interval_value, interval_unit } = item;
+  const dueDate = new Date(baseDate);
+  
+  if (frequency_type === 'Time Based' && interval_value && interval_unit) {
+    switch (interval_unit) {
+      case 'Day':
+        dueDate.setDate(dueDate.getDate() + interval_value);
+        break;
+      case 'Week':
+        dueDate.setDate(dueDate.getDate() + (interval_value * 7));
+        break;
+      case 'Month':
+        dueDate.setMonth(dueDate.getMonth() + interval_value);
+        break;
+      case 'Year':
+        dueDate.setFullYear(dueDate.getFullYear() + interval_value);
+        break;
+    }
+    return dueDate;
+  }
+  
+  return null;
+}
+
+/* ─── Get all checkpoint due dates for a checklist ────────────────────────── */
+function getCheckpointDueDates(checklist, baseDate = new Date()) {
+  const items = checklist.items || [];
+  const dueDates = [];
+  
+  items.forEach(item => {
+    const nextDue = calculateNextDueDate(item, baseDate);
+    if (nextDue) {
+      dueDates.push({
+        item_id: item.id,
+        item_text: item.item_text,
+        frequency_type: item.frequency_type,
+        interval_value: item.interval_value,
+        interval_unit: item.interval_unit,
+        next_due: nextDue
+      });
+    }
+  });
+  
+  return dueDates;
 }
 
 /* ─── Frequency badge ────────────────────────────────────────────────────── */
@@ -127,19 +179,9 @@ const ItemsPopup = ({ visible, onClose, assignment }) => {
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
               <FreqBadge freq={assignment.frequency} />
-              {assignment.frequency === 'Daily' && assignment.shift && (
+              {assignment.nextDueDate && (
                 <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 8px', fontWeight: 500 }}>
-                  ⏱ {assignment.shift} shift
-                </span>
-              )}
-              {assignment.frequency === 'Weekly' && assignment.scheduled_day && (
-                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 8px', fontWeight: 500 }}>
-                  📅 {assignment.scheduled_day}
-                </span>
-              )}
-              {assignment.frequency === 'Monthly' && assignment.scheduled_day && (
-                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 8px', fontWeight: 500 }}>
-                  📆 Day {assignment.scheduled_day}
+                  📅 Due: {new Date(assignment.nextDueDate).toLocaleDateString()}
                 </span>
               )}
             </div>
@@ -188,24 +230,44 @@ const ItemsPopup = ({ visible, onClose, assignment }) => {
                   <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 4, lineHeight: 1.4 }}>
                     {item.item_text || `Item ${i + 1}`}
                   </div>
-                  {/* Metadata badges */}
-                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                    {item.item_type && (
-                      <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
-                        {item.item_type}
-                      </span>
-                    )}
-                    {item.expected_value && (
-                      <span style={{ fontSize: 10, color: T.primary, background: '#E0E7FF', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
-                        Expected: {item.expected_value}
-                      </span>
-                    )}
-                    {item.is_required && (
-                      <span style={{ fontSize: 10, color: '#EF4444', background: '#FEF2F2', borderRadius: 4, padding: '2px 6px', fontWeight: 600 }}>
-                        Required
-                      </span>
-                    )}
-                  </div>
+               {/* Metadata badges */}
+<div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+  {item.frequency_type && (
+    <span style={{ 
+      fontSize: 10, 
+      color: item.frequency_type === 'Time Based' ? T.primary : T_ORANGE, 
+      background: item.frequency_type === 'Time Based' ? '#E0E7FF' : T_ORANGE_BG, 
+      borderRadius: 4, padding: '2px 6px', fontWeight: 600 
+    }}>
+      {item.frequency_type}
+    </span>
+  )}
+  {item.frequency_type === 'Time Based' && item.interval_value && item.interval_unit && (
+    <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
+      Every {item.interval_value} {item.interval_unit}{item.interval_value > 1 ? 's' : ''}
+    </span>
+  )}
+  {item.frequency_type === 'Condition Based' && item.interval_value && item.interval_unit && (
+    <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
+      Every {item.interval_value} {item.interval_unit}{item.interval_value > 1 ? 's' : ''}
+    </span>
+  )}
+  {item.item_type && (
+    <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
+      {item.item_type}
+    </span>
+  )}
+  {item.expected_value && (
+    <span style={{ fontSize: 10, color: T.primary, background: '#E0E7FF', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
+      Expected: {item.expected_value}
+    </span>
+  )}
+  {item.is_required && (
+    <span style={{ fontSize: 10, color: '#EF4444', background: '#FEF2F2', borderRadius: 4, padding: '2px 6px', fontWeight: 600 }}>
+      Required
+    </span>
+  )}
+</div>
                 </div>
               </div>
             ))}
@@ -260,19 +322,9 @@ const AssignmentCard = ({ assignment, onViewItems, onDelete }) => (
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
               <FreqBadge freq={assignment.frequency} />
-              {assignment.frequency === 'Daily' && assignment.shift && (
+              {assignment.nextDueDate && (
                 <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-                  ⏱ {assignment.shift} shift
-                </span>
-              )}
-              {assignment.frequency === 'Weekly' && assignment.scheduled_day && (
-                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-                  📅 {assignment.scheduled_day}
-                </span>
-              )}
-              {assignment.frequency === 'Monthly' && assignment.scheduled_day && (
-                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-                  📆 Day {assignment.scheduled_day}
+                  📅 Due: {new Date(assignment.nextDueDate).toLocaleDateString()}
                 </span>
               )}
               {/* Items badge */}
@@ -363,11 +415,69 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
       const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`);
       if (!res.ok) throw new Error('Failed to fetch assignments');
       const data = await res.json();
-      setAssignments(data.map(a => ({
-        ...a,
-        checklistName: a.checklist?.name || 'Unknown',
-        itemsCount:    a.checklist?.items?.length || 0,
-      })));
+      setAssignments(data.map(a => {
+        const items = a.checklist?.items || [];
+        let earliestDue = null;
+        let dueFrequency = null;
+
+        // Map interval_unit to display frequency
+        const unitToFreq = {
+          'Day':   'Daily',
+          'Week':  'Weekly',
+          'Month': 'Monthly',
+          'Year':  'Monthly', // closest visual bucket
+        };
+
+        items.forEach(item => {
+          if (
+            item.frequency_type === 'Time Based' &&
+            item.interval_value &&
+            item.interval_unit
+          ) {
+            // Use assigned_at as base if next_due_date is null
+            const baseDate = a.next_due_date
+              ? new Date(a.next_due_date)
+              : new Date(a.assigned_at);
+
+            const dueDate = new Date(baseDate);
+
+            switch (item.interval_unit) {
+              case 'Day':
+                dueDate.setDate(dueDate.getDate() + item.interval_value);
+                break;
+              case 'Week':
+                dueDate.setDate(dueDate.getDate() + item.interval_value * 7);
+                break;
+              case 'Month':
+                dueDate.setMonth(dueDate.getMonth() + item.interval_value);
+                break;
+              case 'Year':
+                dueDate.setFullYear(dueDate.getFullYear() + item.interval_value);
+                break;
+            }
+
+            if (!earliestDue || dueDate < earliestDue) {
+              earliestDue = dueDate;
+              dueFrequency = unitToFreq[item.interval_unit] || 'Monthly';
+            }
+          }
+        });
+
+        // Fallback: if no Time Based items, show on assigned_at date
+        if (!earliestDue) {
+          earliestDue = new Date(a.assigned_at);
+          dueFrequency = 'Custom';
+        }
+
+        return {
+          ...a,
+          checklistName: a.checklist?.name || 'Unknown',
+          itemsCount:    a.checklist?.items?.length || 0,
+          nextDueDate:   earliestDue,
+          assignedDate:  new Date(a.assigned_at), 
+          frequency:     dueFrequency || 'Monthly',
+        };
+      }));
     } catch (e) { message.error('Failed to fetch assignments: ' + e.message); }
     finally { setLoading(false); }
   };
@@ -388,10 +498,8 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
         body: JSON.stringify({
           machine_ids: values.machine_ids,
           checklist_ids: values.checklist_ids,
-          frequency: values.frequency,
-          shift: values.frequency === 'Daily' ? values.shift : null,
-          scheduled_day: values.frequency === 'Weekly' ? values.dayOfWeek
-            : values.frequency === 'Monthly' ? (values.dayOfMonth?.format('D') ?? null) : null,
+          next_due_date: values.next_due_date || null,
+          active: true,
         }),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Failed'); }
@@ -403,17 +511,27 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
     } catch (e) { message.error('Failed to assign checklist: ' + e.message); }
   };
 
-  const getAssignmentsForDate = (year, month, day, isWeekend, dow) => {
-    if (isWeekend || !assignments.length) return [];
-    const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow];
-    const dayOfMonth = String(day);
-    return assignments.filter(a => {
-      if (a.frequency === 'Daily') return true;
-      if (a.frequency === 'Weekly' && a.scheduled_day === dayName) return true;
-      if (a.frequency === 'Monthly' && a.scheduled_day === dayOfMonth) return true;
-      return false;
-    });
-  };
+const getAssignmentsForDate = (year, month, day, isWeekend, dow) => {
+  if (isWeekend || !assignments.length) return [];
+  const targetDate = new Date(year, month, day);
+  return assignments.filter(a => {
+    const nextDue = a.nextDueDate ? new Date(a.nextDueDate) : null;
+    const assigned = a.assignedDate ? new Date(a.assignedDate) : null;
+    
+    // Check if either due date or assigned date matches
+    const matchesDue = nextDue && 
+      nextDue.getDate() === day && 
+      nextDue.getMonth() === month && 
+      nextDue.getFullYear() === year;
+    
+    const matchesAssigned = assigned &&
+      assigned.getDate() === day &&
+      assigned.getMonth() === month &&
+      assigned.getFullYear() === year;
+    
+    return matchesDue || matchesAssigned;
+  });
+};
 
   const handleDateClick = (year, month, day) => {
     const d = dayjs(new Date(year, month, day));
@@ -502,13 +620,14 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
 
     // Group frequencies for mini pills
     const freqs = cur && !isWeekend && count > 0
-      ? [...new Set(cellAssignments.map(a => a.frequency))]
+      ? [...new Set(cellAssignments.map(a => a.frequency || 'Custom'))]
       : [];
 
     // Dominant dot color
     const dominant = freqs.includes('Daily') ? 'Daily'
       : freqs.includes('Weekly') ? 'Weekly'
-      : freqs.includes('Monthly') ? 'Monthly' : null;
+      : freqs.includes('Monthly') ? 'Monthly' 
+      : freqs.includes('Custom') ? 'Custom' : null;
 
     return (
       <div
@@ -840,48 +959,7 @@ const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoad
             </Select>
           </Form.Item>
 
-          <Form.Item name="frequency" label="Frequency" rules={[{ required: true, message: 'Please select frequency' }]}>
-            <Select placeholder="Select frequency">
-              <Option value="Daily">Daily</Option>
-              <Option value="Weekly">Weekly</Option>
-              <Option value="Monthly">Monthly</Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item noStyle shouldUpdate={(p, c) => p.frequency !== c.frequency}>
-            {({ getFieldValue }) => {
-              const freq = getFieldValue('frequency');
-              if (freq === 'Daily') return (
-                <Form.Item name="shift" label="Shift" rules={[{ required: true }]} initialValue="Both">
-                  <Select>
-                    <Option value="Morning">Morning</Option>
-                    <Option value="Evening">Evening</Option>
-                    <Option value="Both">Both</Option>
-                  </Select>
-                </Form.Item>
-              );
-              if (freq === 'Weekly') return (
-                <Form.Item name="dayOfWeek" label="Day of Week" rules={[{ required: true }]}>
-                  <Select placeholder="Select day">
-                    {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(d => (
-                      <Option key={d} value={d}>{d}</Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              );
-              if (freq === 'Monthly') return (
-                <Form.Item name="dayOfMonth" label="Day of Month" rules={[{ required: true }]}>
-                  <DatePicker
-                    style={{ width: '100%' }}
-                    placeholder="Select date"
-                    format="D"
-                    disabledDate={(current) => current && current < dayjs().startOf('day')}
-                  />
-                </Form.Item>
-              );
-              return null;
-            }}
-          </Form.Item>
+          
 
 
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
