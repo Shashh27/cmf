@@ -44,6 +44,7 @@ const Dashboard = () => {
   const [cachedAssignments, setCachedAssignments] = useState([]);
   const [cachedLogs, setCachedLogs] = useState([]);
   const [cachedApprovalStatuses, setCachedApprovalStatuses] = useState({});
+  const [pmItemsDueToday, setPmItemsDueToday] = useState([]);
 
   useEffect(() => {
     try {
@@ -211,27 +212,41 @@ const Dashboard = () => {
 
     const checkChecklistStatus = async () => {
       try {
-        const assignRes = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`);
+        const assignRes = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/today-assignments`);
         const assignData = await assignRes.json();
         const assignments = Array.isArray(assignData) ? assignData : [];
 
-        const today = new Date();
-        const istOptions = { timeZone: 'Asia/Kolkata' };
-        const dayOfWeek = today.toLocaleDateString('en-US', { ...istOptions, weekday: 'long' });
-        const dayOfMonth = today.toLocaleDateString('en-US', { ...istOptions, day: 'numeric' });
-
-        const dueToday = assignments.filter(item => {
-          const frequency = (item?.frequency || '').toLowerCase();
-          const scheduledDay = (item?.scheduled_day || '');
-          if (frequency === 'daily') return true;
-          if (frequency === 'weekly') return scheduledDay.toLowerCase() === dayOfWeek.toLowerCase();
-          if (frequency === 'monthly') return String(scheduledDay) === String(dayOfMonth);
-          return false;
-        });
-
         setCachedAssignments(assignments);
 
-        if (dueToday.length === 0) {
+        // Filter PM items due today based on next_due_date
+        const pmTodayStart = new Date();
+        pmTodayStart.setHours(0, 0, 0, 0);
+        const pmTomorrow = new Date(pmTodayStart);
+        pmTomorrow.setDate(pmTomorrow.getDate() + 1);
+
+        const pmDueToday = [];
+        assignments.forEach(assignment => {
+          const checklist = assignment.checklist;
+          if (checklist && checklist.items) {
+            checklist.items.forEach(item => {
+              if (item.next_due_date) {
+                const dueDate = new Date(item.next_due_date);
+                if (dueDate >= pmTodayStart && dueDate < pmTomorrow) {
+                  pmDueToday.push({
+                    checklist_name: checklist.name,
+                    checkpoint_name: item.item_text,
+                    frequency: item.frequency_type,
+                    interval_value: item.interval_value,
+                    interval_unit: item.interval_unit
+                  });
+                }
+              }
+            });
+          }
+        });
+        setPmItemsDueToday(pmDueToday);
+
+        if (assignments.length === 0) {
           setChecklistPending(false);
           setCachedLogs([]);
           setCachedApprovalStatuses({});
@@ -261,7 +276,7 @@ const Dashboard = () => {
         const approvalStatuses = {};
         let allApproved = true;
 
-        for (const item of dueToday) {
+        for (const item of assignments) {
           const cid = String(item?.checklist_id ?? item?.pokayoke_checklist_id ?? item?.checklistId ?? item?.checklist?.id);
           const freq = (item?.frequency || '').toLowerCase();
           const shift = (item?.shift || '').toLowerCase();
@@ -332,7 +347,171 @@ const Dashboard = () => {
     setShowChecklist(false);
     if (wasSubmitted) {
       checklistStatusFetchedRef.current = false;
+    } else {
+      const restoreAssignments = async () => {
+        try {
+          const assignRes = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/today-assignments`);
+          const assignData = await assignRes.json();
+          setCachedAssignments(Array.isArray(assignData) ? assignData : []);
+        } catch (error) {
+          console.error('Error restoring assignments:', error);
+        }
+      };
+      restoreAssignments();
     }
+  };
+
+  const [inlineSubmission, setInlineSubmission] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [checkpointResponses, setCheckpointResponses] = useState({});
+
+  const handleInlineSubmit = async () => {
+    setSubmitting(true);
+    try {
+      const checklistName = inlineSubmission;
+      const assignment = cachedAssignments.find(a => a.checklist?.name === checklistName);
+      if (!assignment) return;
+
+      const checklistId = assignment.checklist.id;
+      const allItems = assignment.checklist.items || [];
+
+      // Filter items to only submit those with next_due_date matching today
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      
+      const items = allItems.filter(item => {
+        if (item.next_due_date) {
+          const dueDate = new Date(item.next_due_date);
+          return dueDate >= today && dueDate < tomorrow;
+        }
+        return false;
+      });
+
+      if (items.length === 0) {
+        message.warning('No checkpoints due today for this checklist');
+        return;
+      }
+
+      // Get operator ID from localStorage
+      let operatorId = null;
+      try {
+        const raw = localStorage.getItem('selectedOperator')
+                 ?? localStorage.getItem('operator')
+                 ?? localStorage.getItem('selectedUser')
+                 ?? localStorage.getItem('user');
+        if (raw) {
+          let operator;
+          try { operator = JSON.parse(raw); } catch { operator = raw; }
+          operatorId = operator?.id || operator?.operator_id || operator?.operatorId || operator?.user_id || operator?.userId || operator?.user?.id;
+        }
+      } catch (e) {
+        console.error('Error parsing operator ID:', e);
+      }
+
+      // Create completed log
+      const logRes = await fetch(`${API_BASE_URL}/pokayoke-completed-logs/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          checklist_id: checklistId,
+          machine_id: machineId,
+          operator_id: operatorId,
+          overall_status: 'pending',
+          shift: 'Morning',
+          completed_at: new Date().toISOString(),
+        }),
+      });
+
+      if (!logRes.ok) throw new Error('Failed to create log');
+      const log = await logRes.json();
+
+      // Submit each item with user-entered values
+      for (const item of items) {
+        const response = checkpointResponses[item.id] || item.expected_value || 'OK';
+        await fetch(`${API_BASE_URL}/pokayoke-completed-logs/item-responses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            completed_log_id: log.id,
+            item_id: item.id,
+            response_value: response,
+            remarks: '',
+            timestamp: new Date().toISOString(),
+          }),
+        });
+      }
+
+      // Recalculate all_items_passed - since only due items are submitted, check if all are confirming
+      const allConfirming = items.every(item => {
+        const response = checkpointResponses[item.id] || item.expected_value || 'OK';
+        return response.toLowerCase() === (item.expected_value || 'OK').toLowerCase();
+      });
+      
+      await fetch(`${API_BASE_URL}/pokayoke-completed-logs/${log.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          all_items_passed: allConfirming,
+        }),
+      });
+
+      message.success('Checklist submitted successfully');
+      checklistStatusFetchedRef.current = false;
+      setInlineSubmission(null);
+      setCheckpointResponses({});
+      
+      // Refresh data
+      const assignRes = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/today-assignments`);
+      const assignData = await assignRes.json();
+      const assignments = Array.isArray(assignData) ? assignData : [];
+      setCachedAssignments(assignments);
+
+      const pmTodayStart = new Date();
+      pmTodayStart.setHours(0, 0, 0, 0);
+      const pmTomorrow = new Date(pmTodayStart);
+      pmTomorrow.setDate(pmTomorrow.getDate() + 1);
+
+      const pmDueToday = [];
+      assignments.forEach(assignment => {
+        const checklist = assignment.checklist;
+        if (checklist && checklist.items) {
+          checklist.items.forEach(item => {
+            if (item.next_due_date) {
+              const dueDate = new Date(item.next_due_date);
+              if (dueDate >= pmTodayStart && dueDate < pmTomorrow) {
+                pmDueToday.push({
+                  checklist_name: checklist.name,
+                  checkpoint_name: item.item_text,
+                  frequency: item.frequency_type,
+                  interval_value: item.interval_value,
+                  interval_unit: item.interval_unit
+                });
+              }
+            }
+          });
+        }
+      });
+      setPmItemsDueToday(pmDueToday);
+    } catch (error) {
+      console.error('Submission error:', error);
+      message.error('Failed to submit checklist');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleExpandInline = (checklistName) => {
+    setInlineSubmission(inlineSubmission === checklistName ? null : checklistName);
+    setCheckpointResponses({});
+  };
+
+  const handleCheckpointChange = (itemId, value) => {
+    setCheckpointResponses(prev => ({
+      ...prev,
+      [itemId]: value
+    }));
   };
 
   useEffect(() => {
@@ -341,11 +520,7 @@ const Dashboard = () => {
   }, [machineId]);
 
   const handleSelectJobClick = () => {
-    if (checklistPending) {
-      message.warning('Please complete the due Checklist before selecting a job.');
-    } else {
       setShowSelectJob(true);
-    }
   };
 
   const handleProductionSubmit = (submittedQuantity) => {
@@ -515,6 +690,112 @@ const Dashboard = () => {
                 </div>
               </div>
             </div>
+
+            {/* ── Preventive Maintenance Section ── */}
+            {pmItemsDueToday.length > 0 && (
+              <div style={{
+                padding: 12,
+                background: '#FFF7E6',
+                border: '1px solid #FFD591',
+                borderRadius: 8,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <WarningOutlined style={{ color: '#FA8C16', fontSize: 14 }} />
+                  <Text strong style={{ color: '#FA8C16', fontSize: 13 }}>Preventive Maintenance (PM) Due Today</Text>
+                </div>
+                {/* Group by checklist */}
+                {(() => {
+                  const groupedByChecklist = {};
+                  pmItemsDueToday.forEach(pm => {
+                    if (!groupedByChecklist[pm.checklist_name]) {
+                      groupedByChecklist[pm.checklist_name] = [];
+                    }
+                    groupedByChecklist[pm.checklist_name].push(pm);
+                  });
+                  return Object.entries(groupedByChecklist).map(([checklistName, items], idx) => {
+                    const isExpanded = inlineSubmission === checklistName;
+                    const assignment = cachedAssignments.find(a => a.checklist?.name === checklistName);
+                    const allChecklistItems = assignment?.checklist?.items || [];
+                    
+                    // Filter items to only show those with next_due_date matching today
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const tomorrow = new Date(today);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    
+                    const checklistItems = allChecklistItems.filter(item => {
+                      if (item.next_due_date) {
+                        const dueDate = new Date(item.next_due_date);
+                        return dueDate >= today && dueDate < tomorrow;
+                      }
+                      return false;
+                    });
+                    
+                    return (
+                      <div key={idx} style={{
+                        marginBottom: idx < Object.keys(groupedByChecklist).length - 1 ? 12 : 0,
+                        padding: 10,
+                        background: '#fff',
+                        border: '1px solid #FFE7BA',
+                        borderRadius: 6,
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <Text strong style={{ color: '#D48806', fontSize: 13 }}>{checklistName}</Text>
+                          <Space size={4}>
+                            <Button
+                              size="small"
+                              onClick={() => handleExpandInline(checklistName)}
+                              style={{ borderRadius: 4, fontSize: 12 }}
+                            >
+                              {isExpanded ? 'Collapse' : 'Submit'}
+                            </Button>
+                          </Space>
+                        </div>
+                        {items.map((pm, pmIdx) => (
+                          <div key={pmIdx} style={{ fontSize: 12, color: '#8C4A00', marginBottom: pmIdx < items.length - 1 ? 4 : 0, marginLeft: 8 }}>
+                            <strong>•</strong> {pm.checkpoint_name}
+                            <span style={{ marginLeft: 8, color: '#A08000' }}>
+                              ({pm.frequency_type}{pm.interval_value && pm.interval_unit && ` - ${pm.interval_value} ${pm.interval_unit}`})
+                            </span>
+                          </div>
+                        ))}
+                        {isExpanded && (
+                          <div style={{ marginTop: 8, padding: 12, background: '#FAFAFA', borderRadius: 4 }}>
+                            <Text strong style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 8 }}>
+                              Enter values for each checkpoint:
+                            </Text>
+                            {checklistItems.map((item, itemIdx) => (
+                              <div key={item.id} style={{ marginBottom: itemIdx < checklistItems.length - 1 ? 8 : 0 }}>
+                                <div style={{ fontSize: 12, color: '#333', marginBottom: 4 }}>
+                                  {item.sequence_number}. {item.item_text}
+                                  {item.is_required && <span style={{ color: '#ff4d4f', marginLeft: 4 }}>*</span>}
+                                </div>
+                                <Input
+                                  size="small"
+                                  placeholder={item.expected_value || 'Enter value'}
+                                  value={checkpointResponses[item.id] || ''}
+                                  onChange={(e) => handleCheckpointChange(item.id, e.target.value)}
+                                  style={{ fontSize: 12 }}
+                                />
+                              </div>
+                            ))}
+                            <Button
+                              type="primary"
+                              size="small"
+                              onClick={handleInlineSubmit}
+                              loading={submitting}
+                              style={{ marginTop: 12, borderRadius: 4, fontSize: 12 }}
+                            >
+                              Submit All Checkpoints
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            )}
           </Card>
         </Col>
 
