@@ -231,7 +231,8 @@ const Dashboard = () => {
             checklist.items.forEach(item => {
               if (item.next_due_date) {
                 const dueDate = new Date(item.next_due_date);
-                if (dueDate >= pmTodayStart && dueDate < pmTomorrow) {
+                // Include items due today OR overdue (past due)
+                if (dueDate < pmTomorrow) {
                   pmDueToday.push({
                     checklist_name: checklist.name,
                     checkpoint_name: item.item_text,
@@ -480,7 +481,8 @@ const Dashboard = () => {
           checklist.items.forEach(item => {
             if (item.next_due_date) {
               const dueDate = new Date(item.next_due_date);
-              if (dueDate >= pmTodayStart && dueDate < pmTomorrow) {
+              // Include items due today OR overdue (past due)
+              if (dueDate < pmTomorrow) {
                 pmDueToday.push({
                   checklist_name: checklist.name,
                   checkpoint_name: item.item_text,
@@ -726,7 +728,8 @@ const Dashboard = () => {
                     const checklistItems = allChecklistItems.filter(item => {
                       if (item.next_due_date) {
                         const dueDate = new Date(item.next_due_date);
-                        return dueDate >= today && dueDate < tomorrow;
+                        // Include items due today OR overdue (past due)
+                        return dueDate < tomorrow;
                       }
                       return false;
                     });

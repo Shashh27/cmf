@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,Input,Tooltip,} from 'antd';
+import {Table,Select,Typography,Card,Button,Space,Tag,Modal,message,Input,Tooltip,Checkbox,} from 'antd';
 import {ReloadOutlined,FileTextOutlined,CheckCircleOutlined,CloseCircleOutlined,CheckOutlined,CloseOutlined,UserOutlined,} from '@ant-design/icons';
 import { API_BASE_URL } from "../Config/auth";
 
@@ -22,6 +22,9 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
   const [approvalComments, setApprovalComments] = useState('');
   const [submittingApproval, setSubmittingApproval] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [selectedResponses, setSelectedResponses] = useState(new Set());
+  const [bulkApprovalModalVisible, setBulkApprovalModalVisible] = useState(false);
+  const [bulkApprovalAction, setBulkApprovalAction] = useState(null);
 
   useEffect(() => {
     fetchLogs();
@@ -221,6 +224,109 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
     }
   };
 
+  const handleSelectResponse = (responseId) => {
+    setSelectedResponses(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(responseId)) {
+        newSet.delete(responseId);
+      } else {
+        newSet.add(responseId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = (checked) => {
+    if (!selectedLogDetails) return;
+    const pendingResponses = selectedLogDetails.item_responses?.filter(
+      r => r.approval_status !== 'approved' && r.approval_status !== 'rejected'
+    ) || [];
+    
+    if (checked) {
+      setSelectedResponses(new Set(pendingResponses.map(r => r.id)));
+    } else {
+      setSelectedResponses(new Set());
+    }
+  };
+
+  const handleBulkApprove = () => {
+    if (selectedResponses.size === 0) {
+      message.warning('Please select at least one item to approve');
+      return;
+    }
+    setBulkApprovalAction('approve');
+    setBulkApprovalModalVisible(true);
+  };
+
+  const handleBulkReject = () => {
+    if (selectedResponses.size === 0) {
+      message.warning('Please select at least one item to reject');
+      return;
+    }
+    setBulkApprovalAction('reject');
+    setBulkApprovalModalVisible(true);
+  };
+
+  const handleBulkApprovalSubmit = async () => {
+    if (!currentUser || selectedResponses.size === 0 || !bulkApprovalAction) return;
+
+    try {
+      setSubmittingApproval(true);
+      
+      const promises = Array.from(selectedResponses).map(responseId => {
+        const url = `${API_BASE_URL}/pokayoke-completed-logs/item-responses/${responseId}/approve`;
+        return fetch(url, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            approval_status: bulkApprovalAction === 'approve' ? 'approved' : 'rejected',
+            approved_by: currentUser.id,
+            approval_comments: approvalComments,
+          }),
+        });
+      });
+
+      const results = await Promise.all(promises);
+      
+      if (results.some(r => !r.ok)) {
+        throw new Error(`Failed to ${bulkApprovalAction} some items`);
+      }
+
+      // Refresh the log details
+      if (selectedLogDetails) {
+        const updatedResponses = selectedLogDetails.item_responses.map(item => {
+          if (selectedResponses.has(item.id)) {
+            return {
+              ...item,
+              approval_status: bulkApprovalAction === 'approve' ? 'approved' : 'rejected',
+              approved_by: currentUser,
+              approved_at: new Date().toISOString(),
+              approval_comments: approvalComments,
+            };
+          }
+          return item;
+        });
+
+        setSelectedLogDetails(prev => ({
+          ...prev,
+          item_responses: updatedResponses,
+        }));
+      }
+
+      message.success(`${selectedResponses.size} item(s) ${bulkApprovalAction === 'approve' ? 'approved' : 'rejected'} successfully`);
+      setBulkApprovalModalVisible(false);
+      setSelectedResponses(new Set());
+      setBulkApprovalAction(null);
+      setApprovalComments('');
+    } catch (error) {
+      message.error(error.message || `Failed to ${bulkApprovalAction} items`);
+    } finally {
+      setSubmittingApproval(false);
+    }
+  };
+
   const columns = [
     {
       title: 'ID',
@@ -315,6 +421,30 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
   ];
 
   const responseColumns = [
+    {
+      title: (
+        <Checkbox
+          checked={selectedResponses.size > 0 && selectedLogDetails?.item_responses?.filter(
+            r => r.approval_status !== 'approved' && r.approval_status !== 'rejected'
+          )?.length === selectedResponses.size}
+          onChange={(e) => handleSelectAll(e.target.checked)}
+          disabled={!selectedLogDetails?.item_responses?.some(
+            r => r.approval_status !== 'approved' && r.approval_status !== 'rejected'
+          )}
+        />
+      ),
+      key: 'select',
+      width: 50,
+      align: 'center',
+      className: 'table-header-styled',
+      render: (_, record) => (
+        <Checkbox
+          checked={selectedResponses.has(record.id)}
+          onChange={() => handleSelectResponse(record.id)}
+          disabled={record.approval_status === 'approved' || record.approval_status === 'rejected'}
+        />
+      ),
+    },
     {
       title: 'Checklist Item',
       key: 'item_id',
@@ -553,32 +683,10 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
                       {selectedLogDetails.operator?.user_name || '-'}
                     </div>
                   </div>
-                  {/* <div>
-                    <Text type="secondary">Production Order</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.order?.sale_order_number || '-'}
-                    </div>
-                  </div> */}
                   <div>
                     <Text type="secondary">Completed At</Text>
                     <div style={{ fontWeight: 500 }}>
                       {formatDateTime(selectedLogDetails.completed_at)}
-                    </div>
-                  </div>
-                  {/* <div>
-                    <Text type="secondary">Part</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.part?.part_name || '-'}
-                    </div>
-                  </div> */}
-                  <div>
-                    <Text type="secondary">Frequency</Text>
-                    <div style={{ fontWeight: 500 }}>
-                      {selectedLogDetails.frequency ? (
-                        <Tag color="blue" style={{ borderRadius: '12px' }}>
-                          {selectedLogDetails.frequency}{selectedLogDetails.shift ? ` (${selectedLogDetails.shift})` : ''}
-                        </Tag>
-                      ) : '-'}
                     </div>
                   </div>
                 </div>
@@ -609,6 +717,24 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
                   }}
                 >
                   <Text strong>Checklist Responses</Text>
+                  {selectedResponses.size > 0 && (
+                    <Space size="small">
+                      <Button
+                        type="primary"
+                        size="small"
+                        onClick={handleBulkApprove}
+                      >
+                        Approve Selected ({selectedResponses.size})
+                      </Button>
+                      <Button
+                        danger
+                        size="small"
+                        onClick={handleBulkReject}
+                      >
+                        Reject Selected ({selectedResponses.size})
+                      </Button>
+                    </Space>
+                  )}
                 </div>
                 <Table
                   columns={responseColumns}
@@ -671,6 +797,53 @@ const PokaYokeCompletedLogs = ({ machines = [], fetchMachines, machinesLoading }
             value={approvalComments}
             onChange={(e) => setApprovalComments(e.target.value)}
             placeholder={`Add comments for ${approvalAction === 'approve' ? 'approval' : 'rejection'}...`}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        title={
+          bulkApprovalAction === 'approve'
+            ? `Approve ${selectedResponses.size} Item(s)`
+            : `Reject ${selectedResponses.size} Item(s)`
+        }
+        open={bulkApprovalModalVisible}
+        onCancel={() => {
+          setBulkApprovalModalVisible(false);
+          setSelectedResponses(new Set());
+          setBulkApprovalAction(null);
+          setApprovalComments('');
+        }}
+        onOk={handleBulkApprovalSubmit}
+        confirmLoading={submittingApproval}
+        okText={bulkApprovalAction === 'approve' ? 'Approve All' : 'Reject All'}
+        okButtonProps={{
+          type: bulkApprovalAction === 'approve' ? 'primary' : 'default',
+          danger: bulkApprovalAction === 'reject',
+        }}
+      >
+        <div style={{ marginTop: 16 }}>
+          <Text strong style={{ display: 'block', marginBottom: 8 }}>
+            Selected Items
+          </Text>
+          <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4, maxHeight: 200, overflowY: 'auto' }}>
+            {selectedLogDetails?.item_responses
+              ?.filter(r => selectedResponses.has(r.id))
+              .map(r => (
+                <div key={r.id} style={{ marginBottom: 4 }}>
+                  {r.item?.item_text || '-'}
+                </div>
+              ))}
+          </div>
+
+          <Text strong style={{ display: 'block', marginBottom: 8 }}>
+            Comments
+          </Text>
+          <Input.TextArea
+            rows={3}
+            value={approvalComments}
+            onChange={(e) => setApprovalComments(e.target.value)}
+            placeholder={`Add comments for ${bulkApprovalAction === 'approve' ? 'approval' : 'rejection'}...`}
           />
         </div>
       </Modal>

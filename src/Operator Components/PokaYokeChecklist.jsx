@@ -107,35 +107,6 @@ const SubmitDrawer = ({
   useEffect(() => {
     if (open) { setPendingResponses({}); setComments(''); }
   }, [open]);
-  /* ── Due logic ── */
-  const itemIsDue = useCallback((item) => {
-    if (submittedTodayMap[String(item.id)]) return false;
-    const latest = latestResponseMap[String(item.id)];
-    if (!latest) return true;
-    // Use next_due_date from backend if available
-    if (latest.next_due_date) {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const dueDate = new Date(latest.next_due_date); dueDate.setHours(0, 0, 0, 0);
-      return today.getTime() === dueDate.getTime();
-    }
-    // Fallback to manual calculation for condition based or time based without next_due_date
-    if (item.frequency_type === 'Condition Based') return true;
-    if (item.frequency_type === 'Time Based' && item.interval_value && item.interval_unit) {
-      const today2   = new Date(); today2.setHours(0, 0, 0, 0);
-      const lastDate = new Date(latest.completed_at); lastDate.setHours(0, 0, 0, 0);
-      const unit     = (item.interval_unit ?? '').toLowerCase();
-      const val      = item.interval_value;
-      const nextDue  = new Date(lastDate);
-      if (unit.startsWith('day'))        nextDue.setDate(nextDue.getDate() + val);
-      else if (unit.startsWith('week'))  nextDue.setDate(nextDue.getDate() + val * 7);
-      else if (unit.startsWith('month')) nextDue.setMonth(nextDue.getMonth() + val);
-      else if (unit.startsWith('year'))  nextDue.setFullYear(nextDue.getFullYear() + val);
-      return today2 >= nextDue;
-    }
-    return true;
-  }, [submittedTodayMap, latestResponseMap]);
-
-
 
   const setResponse = (itemId, val) =>
     setPendingResponses((prev) => ({ ...prev, [String(itemId)]: val }));
@@ -151,6 +122,7 @@ const SubmitDrawer = ({
         (cp) => (cp.is_required ?? true) && getConformance(cp, pendingResponses[String(cp.id)]) === false
       );
 
+      // Always create a new log
       const logPayload = {
         checklist_id:    Number(checklistId),
         machine_id:      machineId,
@@ -175,7 +147,7 @@ const SubmitDrawer = ({
         throw new Error(err?.detail ? JSON.stringify(err.detail) : 'Log creation failed');
       }
 
-      const createdLog     = await logRes.json();
+      const createdLog = await logRes.json();
       const completedLogId = createdLog?.id ?? createdLog?.log_id;
       if (!completedLogId) throw new Error('No log ID returned from server');
 
@@ -214,17 +186,17 @@ const SubmitDrawer = ({
       onClose={onClose}
       title={
         <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{checklistName}</div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>
+            {checklistName}
+          </div>
           <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 400, marginTop: 2 }}>
-            {dueCheckpoints.length} checkpoint{dueCheckpoints.length !== 1 ? 's' : ''} due today —
-            required items marked <span style={{ color: '#ef4444' }}>*</span>
+            {dueCheckpoints.length} checkpoint{dueCheckpoints.length !== 1 ? 's' : ''} to submit — required items marked <span style={{ color: '#ef4444' }}>*</span>
           </div>
         </div>
       }
       width={480}
       footer={
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <Button onClick={onClose}>Cancel</Button>
           <Button
             type="primary"
             disabled={!allRequiredDone}
@@ -233,6 +205,7 @@ const SubmitDrawer = ({
           >
             Submit
           </Button>
+          <Button onClick={onClose}>Cancel</Button>
         </div>
       }
     >
@@ -463,17 +436,30 @@ const PokaYokeChecklist = ({
           );
           const todayData = await todayRes.json();
           const todayAssignments = Array.isArray(todayData) ? todayData : [];
-          
-          // Create a set of item IDs that are due today
+
+          // The endpoint returns the FULL checklist (all items), not just
+          // the ones due today — so we still have to filter by next_due_date
+          // ourselves. Only keep items whose next_due_date's calendar date
+          // matches today's calendar date.
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
+          const todayEnd = new Date(todayStart);
+          todayEnd.setDate(todayEnd.getDate() + 1);
+
           const todayItemIds = new Set();
           todayAssignments.forEach(assignment => {
             if (assignment.checklist?.items) {
               assignment.checklist.items.forEach(item => {
-                todayItemIds.add(item.id);
+                if (!item.next_due_date) return; // no due date -> not "due today"
+                const due = new Date(item.next_due_date);
+                // Include items due today OR overdue (past due)
+                if (due < todayEnd) {
+                  todayItemIds.add(item.id);
+                }
               });
             }
           });
-          
+
           // Store today's item IDs for filtering submit buttons
           setTodayItemIds(todayItemIds);
         } catch (e) {
@@ -487,7 +473,12 @@ const PokaYokeChecklist = ({
             { headers: { accept: 'application/json' } }
           );
           const rawLogs = await lr.json();
-          const logs    = Array.isArray(rawLogs) ? rawLogs : [];
+
+          // Sort newest-first so that when multiple logs exist for the same
+          // checklist/item, the most recent one wins when we do `if (!map[key])`.
+          const logs = (Array.isArray(rawLogs) ? rawLogs : [])
+            .slice()
+            .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at));
 
           const today = new Date();
           today.setHours(0, 0, 0, 0);
@@ -502,10 +493,18 @@ const PokaYokeChecklist = ({
             logDate.setHours(0, 0, 0, 0);
             const isToday = logDate.getTime() === today.getTime();
 
-            if (!apMap[cid]) apMap[cid] = log.overall_status;
+            // FIX: only treat a checklist as having a "status" (approved /
+            // rejected / pending) if that status came from a log completed
+            // TODAY. Previously this ran unconditionally, so an old log
+            // (e.g. yesterday's "approved") could keep showing as today's
+            // status and would incorrectly disable the Submit button.
+            if (isToday && !apMap[cid]) apMap[cid] = log.overall_status;
 
             for (const item of (log.items ?? [])) {
               const key = String(item.item_id);
+              // latestResponseMap intentionally stays all-time — it's only
+              // used as a fallback to compute next-due-dates for time-based
+              // frequencies, so history is fine here.
               if (!respMap[key]) {
                 respMap[key] = {
                   response_value:  item.response_value,
@@ -540,16 +539,28 @@ const PokaYokeChecklist = ({
   /* ── Due logic ── */
   const itemIsDue = useCallback((item) => {
     if (submittedTodayMap[String(item.id)]) return false;
+
+    // PRIMARY: the item itself carries next_due_date — trust that first.
+    // Only an item whose next_due_date's calendar date equals today counts
+    // as due; a null/future/past next_due_date means it is NOT due today.
+    if (item.next_due_date) {
+      const today   = new Date(); today.setHours(0, 0, 0, 0);
+      const dueDate = new Date(item.next_due_date); dueDate.setHours(0, 0, 0, 0);
+      return today.getTime() >= dueDate.getTime();
+    }
+
     // Use todayItemIds from today-assignments endpoint to check if item is due today
     if (todayItemIds.has(item.id)) return true;
-    
+
     // Fallback to checking next_due_date from latest response
     const latest = latestResponseMap[String(item.id)];
-    if (!latest) return false;
+    // If no previous response exists (newly assigned checklist), consider it due
+    if (!latest) return true;
+
     if (latest.next_due_date) {
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const dueDate = new Date(latest.next_due_date); dueDate.setHours(0, 0, 0, 0);
-      return today.getTime() === dueDate.getTime();
+      return today.getTime() >= dueDate.getTime();
     }
     // Fallback to manual calculation for condition based or time based without next_due_date
     if (item.frequency_type === 'Condition Based') return true;
@@ -598,6 +609,28 @@ const PokaYokeChecklist = ({
     const cid   = String(assignment?.checklist_id ?? assignment?.checklist?.id ?? assignment?.id);
     const name  = assignment?.checklist?.name ?? `Checklist #${cid}`;
     const items = assignment?.checklist?.items ?? [];
+    const status = approvalByChecklist[cid];
+
+    // If rejected, show rejected items for resubmission
+    if (status === 'rejected') {
+      const rejectedItems = items.filter(item => {
+        const response = submittedTodayMap[String(item.id)];
+        return response && response.approval_status === 'rejected';
+      });
+      if (rejectedItems.length === 0) {
+        message.info('No rejected items found for resubmission.');
+        return;
+      }
+      setDrawerData({
+        checklistId: cid,
+        name, assignment,
+        dueCheckpoints: rejectedItems
+      });
+      setDrawerOpen(true);
+      return;
+    }
+
+    // Normal flow: show due items
     const dueToday = items.filter(itemIsDue);
     if (dueToday.length === 0) {
       message.info('All checkpoints for this checklist are either submitted today or not yet due.');
@@ -665,7 +698,7 @@ const PokaYokeChecklist = ({
       <div style={{ display: 'flex', borderTop: '1px solid #d1d5db' }}>
         {[
           { label: 'Machine',    value: [machineMeta.make, machineMeta.model].filter(Boolean).join(' — ') || machineMeta.name || `ID ${machineId}` },
-          { label: 'Machine ID', value: machineMeta.code || machineId || '—' },
+          // { label: 'Machine ID', value: machineMeta.code || machineId || '—' },
           { label: 'Month',      value: monthLabel },
           { label: 'Year',       value: currentYear },
           { label: 'Location',   value: 'Workshop' },
@@ -793,7 +826,17 @@ const PokaYokeChecklist = ({
 
                     {/* Fill & Submit */}
                     <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle' }}>
-                      {canSubmit ? (
+                      {apStatus === 'rejected' ? (
+                        <Button
+                          size="small"
+                          type="primary"
+                          danger
+                          style={{ borderRadius: 16, fontSize: 12, height: 28, paddingInline: 14 }}
+                          onClick={(e) => openSubmitDrawer(assignment, e)}
+                        >
+                          Resubmit
+                        </Button>
+                      ) : canSubmit ? (
                         <Button
                           size="small"
                           type="primary"
