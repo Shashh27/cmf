@@ -212,7 +212,7 @@ const OMS = () => {
     return orders
       .map(o => ({ id: o.product_id, label: o.product_name || `Project ${o.product_id}` }))
       .filter(({ id, label }) => { if (!id || seen.has(id)) return false; seen.add(id); return true; })
-      .sort((a, b) => a.label.localeCompare(b.label))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)))
       .map(({ id, label }) => ({ value: id, label }));
   }, [orders]);
 
@@ -223,8 +223,13 @@ const OMS = () => {
     // Customer multi-select filter
     if (filterCustomers.length > 0 && !filterCustomers.includes(order.customer_id)) return false;
 
-    // Project multi-select filter
-    if (filterProjects.length > 0 && !filterProjects.includes(order.product_id)) return false;
+    // Project multi-select filter (normalize id types — API may return number or string)
+    if (
+      filterProjects.length > 0 &&
+      !filterProjects.some((id) => String(id) === String(order.product_id))
+    ) {
+      return false;
+    }
 
     // 1. Date Range Filter
     if (dateRange && dateRange[0] && dateRange[1]) {
@@ -557,7 +562,7 @@ const OMS = () => {
       {contextHolder}
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 mb-4 lg:mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-2 sm:gap-3 mb-4 lg:mb-6">
           <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between gap-1">
               <div>
@@ -583,15 +588,6 @@ const OMS = () => {
                 <div className="text-lg sm:text-xl font-bold text-blue-600 leading-tight">{inProgressCount}</div>
               </div>
               <SyncOutlined className="text-blue-600 text-lg sm:text-xl" />
-            </div>
-          </div>
-          <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-100 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between gap-1">
-              <div>
-                <div className="text-[10px] sm:text-xs text-gray-600 uppercase tracking-wider font-medium">Scheduled</div>
-                <div className="text-lg sm:text-xl font-bold text-purple-600 leading-tight">{scheduledCount}</div>
-              </div>
-              <ClockCircleOutlined className="text-purple-500 text-lg sm:text-xl" />
             </div>
           </div>
           <div className="rounded-lg p-2 sm:p-3 bg-gradient-to-br from-green-50 to-green-100 border border-green-100 shadow-sm hover:shadow-md transition-shadow">
@@ -648,7 +644,8 @@ const OMS = () => {
                 value={filterProjects}
                 onChange={setFilterProjects}
                 options={uniqueProjectOptions}
-                maxTagCount="responsive"
+                maxTagCount={1}
+                maxTagPlaceholder={(omittedValues) => `+${omittedValues.length} more`}
                 style={{ minWidth: 180 }}
                 size="middle"
               />
@@ -659,7 +656,8 @@ const OMS = () => {
                 value={filterCustomers}
                 onChange={setFilterCustomers}
                 options={uniqueCustomerOptions}
-                maxTagCount="responsive"
+                maxTagCount={1}
+                maxTagPlaceholder={(omittedValues) => `+${omittedValues.length} more`}
                 style={{ minWidth: 180 }}
                 size="middle"
               />
