@@ -8,7 +8,7 @@ from DB.models import Base
 
 from DB.minio_client import init_minio_client
 
-from scheduler_service import start_scheduler, stop_scheduler
+
 
 
 
@@ -72,10 +72,15 @@ from routers import (
     order_tracking_router,
     monitoring_router,
     production_analytics_router,
+    pm_router,
+    operation_checklists_router,
 )
 
 # Import planned raw materials router
 from routers.planned_raw_materials import router as planned_raw_materials_router
+
+# Import raw material summary router
+from routers.raw_material_summary import router as raw_material_summary_router
 
 # Import recycle bin router
 from recyclebin_router.recyclebin import router as recycle_bin_router
@@ -112,13 +117,7 @@ from notification_routers import (
 
 
 
-# Import Pokayoke checklists router
 
-from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
-
-from routers.raw_material_summary import router as raw_material_summary_router
-
-from routers.operation_checklists import router as operation_checklists_router
 
 
 # Import document routers
@@ -128,6 +127,8 @@ from document_routers import (
     general_documents_router,
     machine_documents_router
 )
+
+from scheduler_service import start_scheduler, stop_scheduler
 
 # Initialize FastAPI app
 
@@ -320,11 +321,6 @@ app.include_router(inventory_return_requests_router, prefix="/api/v1")
 
 app.include_router(transaction_history_router, prefix="/api/v1")
 
-app.include_router(pokayoke_checklists_router, prefix="/api/v1")
-
-app.include_router(pokayoke_completed_logs_router, prefix="/api/v1")
-
-app.include_router(operation_checklists_router, prefix="/api/v1")
 
 app.include_router(tool_issues_router, prefix="/api/v1")
 
@@ -337,6 +333,10 @@ app.include_router(order_tracking_router, prefix="/api/v1")
 app.include_router(monitoring_router, prefix="/api/v1")
 
 app.include_router(production_analytics_router, prefix="/api/v1")
+
+app.include_router(pm_router, prefix="/api/v1")
+
+app.include_router(operation_checklists_router, prefix="/api/v1")
 
 app.include_router(raw_material_summary_router, prefix="/api/v1")
 

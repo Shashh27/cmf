@@ -10,7 +10,9 @@ from sqlalchemy import (
     Float,
     Date,
     func,
-    text
+    text,
+    UniqueConstraint,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from ..database import Base
@@ -85,126 +87,7 @@ class Customer(Base):
     user = relationship("AccessUser")
 
 
-# =======================
-# Pokayoke Checklists
-# =======================
-class PokayokeChecklist(Base):
-    __tablename__ = "pokayoke_checklists"
-    __table_args__ = {'schema': 'configuration'}
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    name = Column(String, nullable=False)
-    description = Column(String, nullable=True)
-    created_at = Column(TIMESTAMP, server_default=func.now())
-
-    # Relationships
-    items = relationship("PokayokeChecklistItem", back_populates="checklist", cascade="all, delete-orphan")
-    machine_assignments = relationship("PokayokeMachineAssignment", back_populates="checklist", cascade="all, delete-orphan")
-
-
-class PokayokeChecklistItem(Base):
-    __tablename__ = "pokayoke_checklist_items"
-    __table_args__ = {'schema': 'configuration'}
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
-    item_text = Column(String, nullable=False)
-    sequence_number = Column(Integer, nullable=False)
-    item_type = Column(String, nullable=False)  # 'boolean', 'numerical', 'text'
-    is_required = Column(Boolean, default=True)
-    expected_value = Column(String)  # Depends on item_type
-    
-    # Scheduling fields for individual check points
-    frequency_type = Column(String, nullable=True)  # 'Time Based', 'Usage Based', 'Condition Based'
-    interval_value = Column(Integer, nullable=True)  # e.g., 3 for "Every 3 Months"
-    interval_unit = Column(String, nullable=True)   # 'Day', 'Week', 'Month', 'Year'
-    trigger_hours = Column(Integer, nullable=True)  # For Usage Based (e.g., 200 hours)
-    inspection_interval = Column(String, nullable=True)  # For Condition Based (e.g., 'Weekly', 'Monthly')
-    remarks = Column(String, nullable=True)  # Optional remarks for this check point
-    
-    created_at = Column(TIMESTAMP, server_default=func.now())
-
-    # Relationships
-    checklist = relationship("PokayokeChecklist", back_populates="items")
-
-
-class PokayokeMachineAssignment(Base):
-    __tablename__ = "pokayoke_machine_assignments"
-    __table_args__ = {'schema': 'configuration'}
-
-    id = Column(Integer, primary_key=True, index=True)
-    checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
-    next_due_date = Column(Date, nullable=True)  # Next due date for PM
-    active = Column(Boolean, default=True)  # Whether the assignment is active
-    assigned_at = Column(TIMESTAMP, server_default=func.now())
-
-    # Relationships
-    checklist = relationship("PokayokeChecklist", back_populates="machine_assignments")
-    machine = relationship("Machine")
-
-
-class PokayokeCompletedLog(Base):
-    __tablename__ = "pokayoke_completed_logs"
-    __table_args__ = {'schema': 'configuration'}
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    checklist_id = Column(Integer, ForeignKey("configuration.pokayoke_checklists.id"), nullable=False)
-    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False)
-    operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
-    completed_at = Column(TIMESTAMP, nullable=False)
-    all_items_passed = Column(Boolean, nullable=True, default=None)
-    comments = Column(Text, nullable=True)
-    read = Column(Boolean, default=False)
-    assignment_id = Column(Integer, ForeignKey("configuration.pokayoke_machine_assignments.id"), nullable=True)
-    
-    # Acknowledgment fields for operator
-    operator_acknowledged = Column(Boolean, nullable=False, server_default=text("false"))
-    operator_acknowledged_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    
-    # Acknowledgment fields for supervisor
-    supervisor_acknowledged = Column(Boolean, nullable=False, server_default=text("false"))
-    supervisor_acknowledged_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
-
-    # Relationships
-    checklist = relationship("PokayokeChecklist")
-    machine = relationship("Machine")
-    operator = relationship("AccessUser", foreign_keys=[operator_id])
-    supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])
-    item_responses = relationship("PokayokeItemResponse", back_populates="completed_log", cascade="all, delete-orphan")
-    machine_assignment = relationship("PokayokeMachineAssignment")
-
-
-class PokayokeItemResponse(Base):
-    __tablename__ = "pokayoke_item_responses"
-    __table_args__ = {'schema': 'configuration'}
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    completed_log_id = Column(Integer, ForeignKey("configuration.pokayoke_completed_logs.id"), nullable=False)
-    item_id = Column(Integer, ForeignKey("configuration.pokayoke_checklist_items.id"), nullable=False)
-    response_value = Column(String, nullable=False)
-    is_confirming = Column(Boolean, nullable=True, default=None)
-    timestamp = Column(TIMESTAMP, nullable=False)
-
-    # Scheduling fields for this item response
-    frequency_type = Column(String, nullable=True)  # 'Time Based', 'Usage Based', 'Condition Based'
-    interval_value = Column(Integer, nullable=True)  # e.g., 3 for "Every 3 Months"
-    interval_unit = Column(String, nullable=True)   # 'Day', 'Week', 'Month', 'Year'
-    trigger_hours = Column(Integer, nullable=True)  # For Usage Based
-    inspection_interval = Column(String, nullable=True)  # For Condition Based
-    next_due_date = Column(Date, nullable=True)  # Next due date for this specific item
-
-    # Approval fields
-    approval_status = Column(String, nullable=True)  # 'approved', 'rejected', 'pending'
-    approved_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
-    approved_at = Column(TIMESTAMP, nullable=True)
-    approval_comments = Column(String, nullable=True)
-
-    # Relationships
-    completed_log = relationship("PokayokeCompletedLog", back_populates="item_responses")
-    item = relationship("PokayokeChecklistItem")
-    approver = relationship("AccessUser")
 
 # =======================
 # Operation Checklists
@@ -282,3 +165,128 @@ class SubmissionDetail(Base):
     # Relationships
     submission = relationship("Submission", back_populates="details")
     checklist = relationship("OperationChecklist", back_populates="submission_details")
+
+
+# =======================
+# Preventive Maintenance (PM)
+# =======================
+class PMChecklist(Base):
+    __tablename__ = "pm_checklists"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    items = relationship("PMChecklistItem", back_populates="checklist", cascade="all, delete-orphan")
+    assignments = relationship("PMMachineAssignment", back_populates="checklist", cascade="all, delete-orphan")
+    creator = relationship("AccessUser", foreign_keys=[created_by])
+
+
+class PMChecklistItem(Base):
+    __tablename__ = "pm_checklist_items"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    checklist_id = Column(Integer, ForeignKey("configuration.pm_checklists.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_text = Column(String, nullable=False)
+    sequence_number = Column(Integer, nullable=False)
+    item_type = Column(String, nullable=False)  # Boolean, Numeric, Text
+    expected_value = Column(String, nullable=True)
+    frequency_type = Column(String, nullable=False)  # Time Based, Usage Based, Condition Based
+    interval_value = Column(Integer, nullable=True)
+    interval_unit = Column(String, nullable=True)  # Day, Week, Month, Year
+    trigger_hours = Column(Float, nullable=True)
+    remarks = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    checklist = relationship("PMChecklist", back_populates="items")
+    assignment_items = relationship("PMAssignmentItem", back_populates="checklist_item")
+
+
+class PMMachineAssignment(Base):
+    __tablename__ = "pm_machine_assignments"
+    __table_args__ = (
+        UniqueConstraint('machine_id', 'checklist_id', name='uq_pm_machine_checklist'),
+        {'schema': 'configuration'},
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("configuration.machines.id"), nullable=False, index=True)
+    checklist_id = Column(Integer, ForeignKey("configuration.pm_checklists.id", ondelete="CASCADE"), nullable=False, index=True)
+    assigned_by = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    assigned_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    machine = relationship("Machine")
+    checklist = relationship("PMChecklist", back_populates="assignments")
+    assigner = relationship("AccessUser", foreign_keys=[assigned_by])
+    assignment_items = relationship("PMAssignmentItem", back_populates="assignment", cascade="all, delete-orphan")
+
+
+class PMAssignmentItem(Base):
+    __tablename__ = "pm_assignment_items"
+    __table_args__ = {'schema': 'configuration'}
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    assignment_id = Column(Integer, ForeignKey("configuration.pm_machine_assignments.id", ondelete="CASCADE"), nullable=False, index=True)
+    checklist_item_id = Column(Integer, ForeignKey("configuration.pm_checklist_items.id"), nullable=False, index=True)
+    is_required = Column(Boolean, nullable=False, default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    assignment = relationship("PMMachineAssignment", back_populates="assignment_items")
+    checklist_item = relationship("PMChecklistItem", back_populates="assignment_items")
+    schedule = relationship("PMSchedule", back_populates="assignment_item", uselist=False, cascade="all, delete-orphan")
+    submissions = relationship("PMCheckpointSubmission", back_populates="assignment_item")
+
+
+class PMSchedule(Base):
+    __tablename__ = "pm_schedule"
+    __table_args__ = (
+        UniqueConstraint('assignment_item_id', name='uq_pm_schedule_assignment_item'),
+        Index('ix_pm_schedule_next_due_date', 'next_due_date'),
+        {'schema': 'configuration'},
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    assignment_item_id = Column(Integer, ForeignKey("configuration.pm_assignment_items.id", ondelete="CASCADE"), nullable=False, unique=True)
+    last_completed_date = Column(Date, nullable=True)
+    next_due_date = Column(Date, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    assignment_item = relationship("PMAssignmentItem", back_populates="schedule")
+    submissions = relationship("PMCheckpointSubmission", back_populates="schedule")
+
+
+class PMCheckpointSubmission(Base):
+    __tablename__ = "pm_checkpoint_submissions"
+    __table_args__ = (
+        Index('ix_pm_submissions_status', 'status'),
+        Index('ix_pm_submissions_schedule_id', 'schedule_id'),
+        {'schema': 'configuration'},
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    schedule_id = Column(Integer, ForeignKey("configuration.pm_schedule.id"), nullable=False)
+    assignment_item_id = Column(Integer, ForeignKey("configuration.pm_assignment_items.id"), nullable=False)
+    operator_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+    response_value = Column(String, nullable=False)
+    operator_comments = Column(Text, nullable=True)
+    submitted_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    status = Column(String, nullable=False, default='Submitted')  # Submitted, Approved, Rejected
+    supervisor_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+    reviewed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    supervisor_comments = Column(Text, nullable=True)
+    supervisor_acknowledged = Column(Boolean, nullable=False, default=False)
+    supervisor_acknowledged_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    operator_acknowledged = Column(Boolean, nullable=False, default=False)
+    operator_acknowledged_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    schedule = relationship("PMSchedule", back_populates="submissions")
+    assignment_item = relationship("PMAssignmentItem", back_populates="submissions")
+    operator = relationship("AccessUser", foreign_keys=[operator_id])
+    supervisor = relationship("AccessUser", foreign_keys=[supervisor_id])

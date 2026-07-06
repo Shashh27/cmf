@@ -17,7 +17,7 @@ from DB.models.oms import (
     OrderPartPriority as OrderPartPriorityModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
 )
-from DB.models.configuration import PokayokeCompletedLog
+
 from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
 from services.stock_auto_update import StockAutoUpdateService
 from services.notification_service import NotificationService
@@ -418,17 +418,7 @@ def permanent_delete_part(part_id: int, db: Session = Depends(get_db)):
     )
     
     try:
-        # 1. Delete pokayoke logs for this part
-        result = db.execute(
-            text("SELECT id FROM configuration.pokayoke_completed_logs WHERE part_id = :pid"),
-            {"pid": part_id}
-        )
-        log_ids = [row[0] for row in result]
-        for log_id in log_ids:
-            log_obj = db.query(PokayokeCompletedLog).filter(PokayokeCompletedLog.id == log_id).first()
-            if log_obj:
-                db.delete(log_obj)
-        db.flush()
+        
 
         # 2. Delete from scheduling.part_schedule_status
         db.execute(

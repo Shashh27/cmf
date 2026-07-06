@@ -39,6 +39,7 @@ class MachineLiveHistory(MachineLiveHistoryBase):
 class LiveMonitoringDisplay(BaseModel):
     machine_id: int
     machine_name: str
+    machine_type: Optional[str] = None
     status: str
     last_updated: datetime
     sale_order_number: Optional[str] = None

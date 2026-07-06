@@ -30,7 +30,7 @@ from DB.models.oms import (
 
 )
 
-from DB.models.configuration import Customer, PokayokeCompletedLog, Machine, WorkCenter
+from DB.models.configuration import Customer, Machine, WorkCenter
 
 from DB.models.inventory import InventoryRequest, InventoryReturnRequest, RawMaterialStock
 
@@ -2643,13 +2643,7 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
 
 
 
-        # 11. Delete from configuration.pokayoke_completed_logs (by production_order_id)
-
-        pokayoke_logs = db.query(PokayokeCompletedLog).filter(PokayokeCompletedLog.production_order_id == order_id).all()
-
-        for log in pokayoke_logs:
-
-            db.delete(log)
+       
 
 
 

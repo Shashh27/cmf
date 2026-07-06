@@ -10,6 +10,7 @@ from dateutil.relativedelta import relativedelta
 
 from DB.database import get_db
 from DB.models.inventory import ToolsList as ToolsListModel, Category as CategoryModel, CustomColumn as CustomColumnModel
+from DB.models.access_control import AccessUser
 from DB.schemas.inventory import (
     ToolsList,
     ToolsListCreate,
@@ -178,6 +179,57 @@ def find_col(df, possible_names):
     return None
 
 
+def serialize_tool(tool: ToolsListModel, db: Session) -> ToolsList:
+    """Build ToolsList response with category names, user_id, and creator_name."""
+    tool_dict = {
+        'id': tool.id,
+        'item_description': tool.item_description,
+        'range': tool.range,
+        'identification_code': tool.identification_code,
+        'make': tool.make,
+        'quantity': tool.quantity,
+        'total_quantity': tool.total_quantity,
+        'issues_qty': tool.issues_qty,
+        'location': tool.location,
+        'gauge': tool.gauge,
+        'remarks': tool.remarks,
+        'amount': tool.amount,
+        'ref_ledger': tool.ref_ledger,
+        'type': tool.type,
+        'category_id': tool.category_id,
+        'sub_category_id': tool.sub_category_id,
+        'user_id': tool.user_id,
+        'custom_fields': tool.custom_fields,
+        'calibration_date': tool.calibration_date,
+        'calibration_due_date': tool.calibration_due_date,
+        'calibration_frequency': tool.calibration_frequency,
+        'category_name': None,
+        'sub_category_name': None,
+        'creator_name': None,
+    }
+
+    if tool.category_id:
+        cat = db.query(CategoryModel).filter(CategoryModel.id == tool.category_id).first()
+        if cat:
+            tool_dict['category_name'] = cat.name
+
+    if tool.sub_category_id:
+        sub_cat = db.query(CategoryModel).filter(CategoryModel.id == tool.sub_category_id).first()
+        if sub_cat:
+            tool_dict['sub_category_name'] = sub_cat.name
+            if sub_cat.parent_id:
+                parent_cat = db.query(CategoryModel).filter(CategoryModel.id == sub_cat.parent_id).first()
+                if parent_cat:
+                    tool_dict['category_name'] = parent_cat.name
+
+    if tool.user_id:
+        user = db.query(AccessUser).filter(AccessUser.id == tool.user_id).first()
+        if user:
+            tool_dict['creator_name'] = user.user_name
+
+    return ToolsList(**tool_dict)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CREATE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -192,6 +244,11 @@ def create_tool(tool: ToolsListCreate, db: Session = Depends(get_db)):
             detail=f"Tool with identification code '{tool.identification_code}' already exists")
 
     tool_data = tool.model_dump()
+
+    if tool_data.get("user_id") is not None:
+        user = db.query(AccessUser).filter(AccessUser.id == tool_data["user_id"]).first()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User id {tool_data['user_id']} not found")
     
     # Resolve category and sub-category
     category_name = tool_data.get("category")
@@ -275,7 +332,7 @@ def create_tool(tool: ToolsListCreate, db: Session = Depends(get_db)):
     db.add(db_tool)
     db.commit()
     db.refresh(db_tool)
-    return db_tool
+    return serialize_tool(db_tool, db)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -287,10 +344,16 @@ async def upload_tools_excel(
     file: UploadFile = File(...),
     category: Optional[str] = None,
     sub_category: Optional[str] = None,
+    user_id: Optional[int] = Query(None, description="User who uploaded the tools (stored on each row)"),
     db: Session = Depends(get_db)
 ):
     if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls")):
         raise HTTPException(status_code=400, detail="Only .xlsx / .xls files allowed")
+
+    if user_id is not None:
+        user = db.query(AccessUser).filter(AccessUser.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User id {user_id} not found")
 
     try:
         contents = await file.read()
@@ -424,6 +487,8 @@ async def upload_tools_excel(
                 'category_id':      cat.id if not sub_cat else None,  # Only set category_id if no sub-category
                 'sub_category_id':  sub_cat.id if sub_cat else None,
             }
+            if user_id is not None:
+                tool_data['user_id'] = user_id
 
             # Add custom field values
             custom_fields = {}
@@ -484,7 +549,7 @@ async def upload_tools_excel(
             message = f"Successfully processed {processed} tools. Skipped {skipped_duplicates} duplicate entries (checked across all categories/subcategories)."
         
         return ToolsListBulkUploadResponse(
-            tools=result,
+            tools=[serialize_tool(t, db) for t in result],
             processed_count=processed,
             skipped_duplicates=skipped_duplicates,
             message=message
@@ -863,12 +928,13 @@ def get_tools_by_item_description(item_description: str, db: Session = Depends(g
     Called when user clicks e.g. 'Allen Key' in the sidebar.
     Returns all 36 Allen Key rows.
     """
-    return (
+    tools = (
         db.query(ToolsListModel)
         .filter(func.lower(ToolsListModel.item_description) == item_description.strip().lower())
         .order_by(ToolsListModel.id)
         .all()
     )
+    return [serialize_tool(tool, db) for tool in tools]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -898,36 +964,8 @@ def get_tools_by_sub_category(category: str, sub_category: str, db: Session = De
         .order_by(ToolsListModel.item_description, ToolsListModel.id)
         .all()
     )
-    
-    # Build response with category_name and sub_category_name
-    tools_list = []
-    for tool in results:
-        tool_dict = {
-            'id': tool.id,
-            'item_description': tool.item_description,
-            'range': tool.range,
-            'identification_code': tool.identification_code,
-            'make': tool.make,
-            'quantity': tool.quantity,
-            'total_quantity': tool.total_quantity,
-            'issues_qty': tool.issues_qty,
-            'location': tool.location,
-            'gauge': tool.gauge,
-            'remarks': tool.remarks,
-            'amount': tool.amount,
-            'ref_ledger': tool.ref_ledger,
-            'type': tool.type,
-            'category_id': tool.category_id,
-            'sub_category_id': tool.sub_category_id,
-            'category_name': cat.name if cat else None,
-            'sub_category_name': sub.name if sub else None,
-            'calibration_date': tool.calibration_date,
-            'calibration_due_date': tool.calibration_due_date,
-            'calibration_frequency': tool.calibration_frequency,
-        }
-        tools_list.append(ToolsList(**tool_dict))
-    
-    return tools_list
+
+    return [serialize_tool(tool, db) for tool in results]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -962,61 +1000,19 @@ def get_tools(
             query = query.filter(ToolsListModel.sub_category_id == sub.id)
     
     results = query.all()
-    
-    # Build response with category_name and sub_category_name
-    tools_list = []
-    for tool in results:
-        tool_dict = {
-            'id': tool.id,
-            'item_description': tool.item_description,
-            'range': tool.range,
-            'identification_code': tool.identification_code,
-            'make': tool.make,
-            'quantity': tool.quantity,
-            'total_quantity': tool.total_quantity,
-            'issues_qty': tool.issues_qty,
-            'location': tool.location,
-            'gauge': tool.gauge,
-            'remarks': tool.remarks,
-            'amount': tool.amount,
-            'ref_ledger': tool.ref_ledger,
-            'type': tool.type,
-            'category_id': tool.category_id,
-            'sub_category_id': tool.sub_category_id,
-            'category_name': None,
-            'sub_category_name': None,
-        }
-        
-        # Get category name if category_id is set
-        if tool.category_id:
-            cat = db.query(CategoryModel).filter(CategoryModel.id == tool.category_id).first()
-            if cat:
-                tool_dict['category_name'] = cat.name
-        
-        # Get sub-category name if sub_category_id is set
-        if tool.sub_category_id:
-            sub_cat = db.query(CategoryModel).filter(CategoryModel.id == tool.sub_category_id).first()
-            if sub_cat:
-                tool_dict['sub_category_name'] = sub_cat.name
-                # Get parent category name
-                if sub_cat.parent_id:
-                    parent_cat = db.query(CategoryModel).filter(CategoryModel.id == sub_cat.parent_id).first()
-                    if parent_cat:
-                        tool_dict['category_name'] = parent_cat.name
-        
-        tools_list.append(ToolsList(**tool_dict))
-    
-    return tools_list
+    return [serialize_tool(tool, db) for tool in results]
 
 
 @router.get("/type/{tool_type}", response_model=List[ToolsList])
 def get_tools_by_type(tool_type: str, db: Session = Depends(get_db)):
-    return db.query(ToolsListModel).filter(ToolsListModel.type == tool_type).all()
+    tools = db.query(ToolsListModel).filter(ToolsListModel.type == tool_type).all()
+    return [serialize_tool(tool, db) for tool in tools]
 
 
 @router.get("/location/{location}", response_model=List[ToolsList])
 def get_tools_by_location(location: str, db: Session = Depends(get_db)):
-    return db.query(ToolsListModel).filter(ToolsListModel.location == location).all()
+    tools = db.query(ToolsListModel).filter(ToolsListModel.location == location).all()
+    return [serialize_tool(tool, db) for tool in tools]
 
 
 @router.get("/identification/{identification_code}", response_model=ToolsList)
@@ -1026,7 +1022,7 @@ def get_tool_by_identification_code(identification_code: str, db: Session = Depe
     ).first()
     if not tool:
         raise HTTPException(status_code=404, detail=f"Tool '{identification_code}' not found")
-    return tool
+    return serialize_tool(tool, db)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1074,7 +1070,7 @@ def create_custom_column(column: CustomColumnCreate, db: Session = Depends(get_d
         'quantity', 'total_quantity', 'location', 'gauge', 'remarks',
         'amount', 'ref_ledger', 'type', 'calibration_date', 'calibration_due_date',
         'calibration_frequency', 'issues_qty', 'category_id', 'sub_category_id',
-        'custom_fields'
+        'custom_fields', 'user_id'
     ]
     column_name_lower = column.column_name.lower().strip()
     if column_name_lower in reserved_columns:
@@ -1161,7 +1157,7 @@ def get_tool(tool_id: int, db: Session = Depends(get_db)):
     tool = db.query(ToolsListModel).filter(ToolsListModel.id == tool_id).first()
     if not tool:
         raise HTTPException(status_code=404, detail=f"Tool id {tool_id} not found")
-    return tool
+    return serialize_tool(tool, db)
 
 
 @router.put("/{tool_id}", response_model=ToolsList)
@@ -1193,7 +1189,7 @@ def update_tool(tool_id: int, tool_update: ToolsListUpdate, db: Session = Depend
 
     db.commit()
     db.refresh(db_tool)
-    return db_tool
+    return serialize_tool(db_tool, db)
 
 
 @router.delete("/{tool_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -15,7 +15,17 @@ from .oms import (
 from .configuration import (
     WorkCenter,
     Machine,
-    Customer
+    Customer,
+    OperationChecklist,
+    OperationChecklistAssign,
+    Submission,
+    SubmissionDetail,
+    PMChecklist,
+    PMChecklistItem,
+    PMMachineAssignment,
+    PMAssignmentItem,
+    PMSchedule,
+    PMCheckpointSubmission,
 )
 from .access_control import AccessUser
 from .inventory import (
@@ -54,6 +64,12 @@ __all__ = [
     "WorkCenter",
     "Machine",
     "Customer",
+    "PMChecklist",
+    "PMChecklistItem",
+    "PMMachineAssignment",
+    "PMAssignmentItem",
+    "PMSchedule",
+    "PMCheckpointSubmission",
     "OperationChecklist",
     "OperationChecklistAssign",
     "Submission",

@@ -394,6 +394,8 @@ class ToolsListBase(BaseModel):
 
     custom_fields:       Optional[dict] = None  # JSON field for custom column values
 
+    user_id:             Optional[int]   = None  # User who created this tool (individual or bulk)
+
  
 
  
@@ -466,6 +468,7 @@ class ToolsList(ToolsListBase):
     # Additional fields for display (not in DB, computed from joins)
     category_name: Optional[str] = None
     sub_category_name: Optional[str] = None
+    creator_name: Optional[str] = None
     custom_fields: Optional[Dict] = None  # JSON field for custom column values
 
  

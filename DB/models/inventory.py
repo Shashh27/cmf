@@ -278,8 +278,9 @@ class ToolsList(Base):
 
     custom_fields       = Column(JSON, nullable=True)  # JSON field for custom column values
 
+    user_id             = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
-
+    creator             = relationship("AccessUser", foreign_keys=[user_id])
 # =======================
 
 # Custom Columns (for dynamic columns in tools table)
