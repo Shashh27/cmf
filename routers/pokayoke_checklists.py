@@ -517,33 +517,20 @@ def get_machine_checklists(machine_id: int, db: Session = Depends(get_db)):
         for item in items:
             next_due_date = None
             
-            # First, try to get next_due_date from the most recent item response
-            recent_response = db.query(PokayokeItemResponse).filter(
-                PokayokeItemResponse.item_id == item.id
+            # First, try to get next_due_date from the most recent item response for this machine
+            recent_response = db.query(PokayokeItemResponse).join(
+                PokayokeCompletedLog, PokayokeItemResponse.completed_log_id == PokayokeCompletedLog.id
+            ).filter(
+                PokayokeItemResponse.item_id == item.id,
+                PokayokeCompletedLog.machine_id == machine_id
             ).order_by(PokayokeItemResponse.timestamp.desc()).first()
             
             if recent_response and recent_response.next_due_date:
                 # Use the stored next_due_date from the most recent response
                 next_due_date = recent_response.next_due_date
-            elif item.frequency_type == 'Time Based' and item.interval_value and item.interval_unit:
-                # Fall back to calculation based on assignment date if no response exists
-                base_date = assignment.next_due_date if assignment.next_due_date else assignment.assigned_at
-                if isinstance(base_date, date):
-                    base_date = datetime.combine(base_date, time.min)
-                
-                due_date = base_date
-                
-                # Add interval based on unit
-                if item.interval_unit == 'Day':
-                    due_date = base_date + timedelta(days=item.interval_value)
-                elif item.interval_unit == 'Week':
-                    due_date = base_date + timedelta(weeks=item.interval_value)
-                elif item.interval_unit == 'Month':
-                    due_date = base_date + timedelta(days=item.interval_value * 30)
-                elif item.interval_unit == 'Year':
-                    due_date = base_date + timedelta(days=item.interval_value * 365)
-                
-                next_due_date = due_date
+            else:
+                # Fall back to assignment next due date or assigned date if no response exists
+                next_due_date = assignment.next_due_date if assignment.next_due_date else assignment.assigned_at
             
             # Create item dict with next_due_date
             item_dict = {
@@ -630,20 +617,26 @@ def get_machine_today_checklists(machine_id: int, db: Session = Depends(get_db))
         for item in items:
             next_due_date = None
             
-            # Get next_due_date from the most recent item response in pokayoke_item_responses table
-            recent_response = db.query(PokayokeItemResponse).filter(
-                PokayokeItemResponse.item_id == item.id
+            # Get next_due_date from the most recent item response for this machine in pokayoke_item_responses table
+            recent_response = db.query(PokayokeItemResponse).join(
+                PokayokeCompletedLog, PokayokeItemResponse.completed_log_id == PokayokeCompletedLog.id
+            ).filter(
+                PokayokeItemResponse.item_id == item.id,
+                PokayokeCompletedLog.machine_id == machine_id
             ).order_by(PokayokeItemResponse.timestamp.desc()).first()
             
             if recent_response and recent_response.next_due_date:
                 # Use the stored next_due_date from the most recent response
                 next_due_date = recent_response.next_due_date
+            else:
+                # Fall back to assignment next due date or assigned date if no response exists
+                next_due_date = assignment.next_due_date if assignment.next_due_date else assignment.assigned_at
             
-            # Check if this item is due today
+            # Check if this item is due today (or overdue in the past)
             if next_due_date:
-                if isinstance(next_due_date, date):
+                if isinstance(next_due_date, date) and not isinstance(next_due_date, datetime):
                     next_due_date = datetime.combine(next_due_date, time.min)
-                if today_start <= next_due_date < today_end:
+                if next_due_date < today_end:
                     has_item_due_today = True
                     # Only add to items_with_next_due if it's due today
                     item_dict = {
@@ -731,9 +724,8 @@ def create_completed_log(log: PokayokeCompletedLogCreate, db: Session = Depends(
     if not log_data.get('completed_at'):
         log_data['completed_at'] = datetime.now(IST).replace(tzinfo=None)
     
-    # Set all_items_passed to True initially since we only submit items that are due today
-    # This will be recalculated during approval based on actual responses
-    log_data['all_items_passed'] = True
+    # Set all_items_passed to None initially - will be calculated after item responses are created
+    log_data['all_items_passed'] = None
     
     db_log = PokayokeCompletedLog(**log_data)
     db.add(db_log)
@@ -1223,6 +1215,18 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
         
         db.commit()
         db.refresh(existing_response)
+        
+        # Recalculate all_items_passed for the completed log based on all current responses
+        all_responses = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == completed_log.id
+        ).all()
+        
+        if all_responses:
+            # all_items_passed is True only if all responses are confirming (is_confirming is True)
+            all_confirming = all(r.is_confirming for r in all_responses)
+            completed_log.all_items_passed = all_confirming
+            db.commit()
+        
         return existing_response
     else:
         # Create new response
@@ -1239,6 +1243,18 @@ def create_item_response(response: PokayokeItemResponseCreate, db: Session = Dep
         db.add(db_response)
         db.commit()
         db.refresh(db_response)
+        
+        # Recalculate all_items_passed for the completed log based on all current responses
+        all_responses = db.query(PokayokeItemResponse).filter(
+            PokayokeItemResponse.completed_log_id == completed_log.id
+        ).all()
+        
+        if all_responses:
+            # all_items_passed is True only if all responses are confirming (is_confirming is True)
+            all_confirming = all(r.is_confirming for r in all_responses)
+            completed_log.all_items_passed = all_confirming
+            db.commit()
+        
         return db_response
 
 

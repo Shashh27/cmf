@@ -477,48 +477,7 @@ def update_submission_detail(
 
 
 # =======================
-# Parameterized Routes (must come last)
-# =======================
-
-@router.get("/{checklist_id}", response_model=OperationChecklistSchema)
-def get_operation_checklist(checklist_id: int, db: Session = Depends(get_db)):
-    """Get a specific operation checklist by ID"""
-    checklist = db.query(OperationChecklist).filter(OperationChecklist.id == checklist_id).first()
-    if not checklist:
-        raise HTTPException(status_code=404, detail="Operation checklist not found")
-    return checklist
-
-
-@router.put("/{checklist_id}", response_model=OperationChecklistSchema)
-def update_operation_checklist(
-    checklist_id: int,
-    checklist_update: OperationChecklistUpdate,
-    db: Session = Depends(get_db)
-):
-    """Update an operation checklist"""
-    db_checklist = db.query(OperationChecklist).filter(OperationChecklist.id == checklist_id).first()
-    if not db_checklist:
-        raise HTTPException(status_code=404, detail="Operation checklist not found")
-    
-    update_data = checklist_update.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_checklist, key, value)
-    
-    db.commit()
-    db.refresh(db_checklist)
-    return db_checklist
-
-
-@router.delete("/{checklist_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_operation_checklist(checklist_id: int, db: Session = Depends(get_db)):
-    """Delete an operation checklist"""
-    db_checklist = db.query(OperationChecklist).filter(OperationChecklist.id == checklist_id).first()
-    if not db_checklist:
-        raise HTTPException(status_code=404, detail="Operation checklist not found")
-    
-    db.delete(db_checklist)
-    db.commit()
-    return None
+# Submission Details CRUD
 # =======================
 
 @router.post("/submission-details", response_model=SubmissionDetailSchema, status_code=status.HTTP_201_CREATED)
@@ -561,6 +520,51 @@ def delete_submission_detail(detail_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Submission detail not found")
     
     db.delete(db_detail)
+    db.commit()
+    return None
+
+
+# =======================
+# Parameterized Routes (must come last)
+# =======================
+
+@router.get("/{checklist_id}", response_model=OperationChecklistSchema)
+def get_operation_checklist(checklist_id: int, db: Session = Depends(get_db)):
+    """Get a specific operation checklist by ID"""
+    checklist = db.query(OperationChecklist).filter(OperationChecklist.id == checklist_id).first()
+    if not checklist:
+        raise HTTPException(status_code=404, detail="Operation checklist not found")
+    return checklist
+
+
+@router.put("/{checklist_id}", response_model=OperationChecklistSchema)
+def update_operation_checklist(
+    checklist_id: int,
+    checklist_update: OperationChecklistUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update an operation checklist"""
+    db_checklist = db.query(OperationChecklist).filter(OperationChecklist.id == checklist_id).first()
+    if not db_checklist:
+        raise HTTPException(status_code=404, detail="Operation checklist not found")
+    
+    update_data = checklist_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_checklist, key, value)
+    
+    db.commit()
+    db.refresh(db_checklist)
+    return db_checklist
+
+
+@router.delete("/{checklist_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_operation_checklist(checklist_id: int, db: Session = Depends(get_db)):
+    """Delete an operation checklist"""
+    db_checklist = db.query(OperationChecklist).filter(OperationChecklist.id == checklist_id).first()
+    if not db_checklist:
+        raise HTTPException(status_code=404, detail="Operation checklist not found")
+    
+    db.delete(db_checklist)
     db.commit()
     return None
 
