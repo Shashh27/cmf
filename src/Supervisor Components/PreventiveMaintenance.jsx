@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Tabs, message } from 'antd';
+import { Tabs, message, Card } from 'antd';
 import PokaYokeChecklists from './PokaYokeChecklists';
 import PokaYokeMachineAssignments from './PokaYokeMachineAssignments';
-import PokaYokeCompletedLogs from './PokaYokeCompletedLogs';
-import PokaYokeSupervisorReview from './PokaYokeSupervisorReview';
+import PokaYokeReviewHistory from './PokaYokeReviewHistory';
 import { API_BASE_URL } from '../Config/auth';
 
 const PreventiveMaintenance = () => {
@@ -30,17 +29,6 @@ const PreventiveMaintenance = () => {
   }, []);
 
   const tabItems = [
-    {
-      key: 'pending-review',
-      label: 'Pending Review',
-      children: (
-        <PokaYokeSupervisorReview
-          machines={machines}
-          fetchMachines={fetchMachines}
-          machinesLoading={machinesLoading}
-        />
-      ),
-    },
     { key: 'checklists', label: 'Checklists', children: <PokaYokeChecklists /> },
     {
       key: 'machine-assignments',
@@ -54,10 +42,10 @@ const PreventiveMaintenance = () => {
       ),
     },
     {
-      key: 'submission-history',
-      label: 'Submission History',
+      key: 'review-history',
+      label: 'Review & History',
       children: (
-        <PokaYokeCompletedLogs
+        <PokaYokeReviewHistory
           machines={machines}
           fetchMachines={fetchMachines}
           machinesLoading={machinesLoading}
@@ -67,13 +55,18 @@ const PreventiveMaintenance = () => {
   ];
 
   return (
-    <Tabs
-      activeKey={activeTab}
-      onChange={setActiveTab}
-      items={tabItems}
-      size="middle"
-      style={{ marginBottom: 0, marginTop: 0 }}
-    />
+    <Card
+      className="shadow-sm"
+      styles={{ body: { padding: '16px 20px 20px' } }}
+    >
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={tabItems}
+        size="middle"
+        style={{ marginBottom: 0, marginTop: 0 }}
+      />
+    </Card>
   );
 };
 

@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Card, Table, Typography, Tag, message, Input, DatePicker, Button, Space, Select, Tooltip } from 'antd';
-import { SearchOutlined, ReloadOutlined, CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Card, Table, Typography, Tag, message, DatePicker, Button, Space, Select, Tooltip } from 'antd';
+import { ReloadOutlined, CheckCircleOutlined, ClockCircleOutlined, SyncOutlined, DownloadOutlined } from '@ant-design/icons';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
+import { API_BASE_URL } from '../Config/auth.js';
 import dayjs from 'dayjs';
+import cmtisLogo from '../assets/cmtis.png';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -31,9 +33,13 @@ const highlightText = (text, query) => {
 const ProductionLogsHistory = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [searchText, setSearchText] = useState('');
   const [dateRange, setDateRange] = useState(null);
   const [selectedMachines, setSelectedMachines] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedParts, setSelectedParts] = useState([]);
+  const [selectedOperations, setSelectedOperations] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -80,6 +86,129 @@ const ProductionLogsHistory = () => {
 
   useEffect(() => { fetchProductionLogs(); }, [fetchProductionLogs]);
 
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/orders/`);
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(Array.isArray(data) ? data : []);
+        }
+      } catch (e) {
+        console.error('Error fetching orders:', e);
+      }
+    };
+    fetchOrders();
+  }, []);
+
+  const selectedSaleOrder = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return orders.find((o) => o.id === selectedProjectId)?.sale_order_number ?? null;
+  }, [selectedProjectId, orders]);
+
+  const handleProjectChange = (orderId) => {
+    setSelectedProjectId(orderId);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setCurrentPage(1);
+
+    if (!orderId) return;
+
+    const order = orders.find((o) => o.id === orderId);
+    const saleOrder = order?.sale_order_number;
+    if (!saleOrder) return;
+
+    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        const list = Array.isArray(d) ? d : (d.parts || []);
+        setParts(list);
+      })
+      .catch(() => setParts([]));
+  };
+
+  const applyBaseFilters = useCallback((source) => {
+    let result = source;
+
+    if (selectedMachines.length > 0) {
+      result = result.filter((log) => {
+        const name = log.machine?.make && log.machine?.model
+          ? `(${log.machine.make}) ${log.machine.model}`
+          : log.machine?.make || log.machine?.model || log.machine?.name || '';
+        return selectedMachines.includes(name);
+      });
+    }
+
+    if (selectedSaleOrder) {
+      result = result.filter(
+        (log) => log.operation?.order?.sale_order_number === selectedSaleOrder
+      );
+    }
+
+    if (selectedParts.length > 0) {
+      result = result.filter((log) =>
+        selectedParts.includes(log.operation?.part?.part_number)
+      );
+    }
+
+    if (selectedOperations.length > 0) {
+      result = result.filter((log) =>
+        selectedOperations.includes(String(log.operation?.operation_number ?? ''))
+      );
+    }
+
+    if (dateRange && dateRange.length === 2) {
+      const [start, end] = dateRange;
+      const startDay = start.startOf('day');
+      const endDay = end.endOf('day');
+      result = result.filter((log) => {
+        const d = log.from_date ? dayjs(log.from_date) : null;
+        return d && d.valueOf() >= startDay.valueOf() && d.valueOf() <= endDay.valueOf();
+      });
+    }
+
+    return result;
+  }, [selectedMachines, selectedSaleOrder, selectedParts, selectedOperations, dateRange]);
+
+  const operatorMeta = useMemo(() => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        return {
+          name: user.user_name || user.name || user.username || 'N/A',
+          id: user.id ?? null,
+        };
+      }
+    } catch { /* ignore */ }
+    return { name: 'N/A', id: null };
+  }, []);
+
+  const getFilterPeriodLabel = () => {
+    if (dateRange && dateRange.length === 2) {
+      return `${dateRange[0].format('DD-MM-YYYY')} to ${dateRange[1].format('DD-MM-YYYY')}`;
+    }
+    return 'All Dates';
+  };
+
+  const getPdfExportLogs = () => applyBaseFilters(logs);
+
+  const loadImageAsDataUrl = (src) =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
+
   const machineOptions = useMemo(() => {
     const names = new Set();
     logs.forEach(log => {
@@ -91,71 +220,50 @@ const ProductionLogsHistory = () => {
     return Array.from(names).sort().map(name => ({ label: name, value: name }));
   }, [logs]);
 
-  const filteredLogs = useMemo(() => {
-    let result = logs;
+  const operationOptions = useMemo(() => {
+    const opMap = new Map();
+    logs.forEach((log) => {
+      if (selectedSaleOrder && log.operation?.order?.sale_order_number !== selectedSaleOrder) return;
+      if (selectedParts.length > 0 && !selectedParts.includes(log.operation?.part?.part_number)) return;
 
-    if (selectedMachines.length > 0) {
-      result = result.filter(log => {
-        const name = log.machine?.make && log.machine?.model
-          ? `(${log.machine.make}) ${log.machine.model}`
-          : log.machine?.make || log.machine?.model || log.machine?.name || '';
-        return selectedMachines.includes(name);
-      });
-    }
+      const opNum = log.operation?.operation_number;
+      if (opNum === undefined || opNum === null || opMap.has(String(opNum))) return;
 
-    if (dateRange && dateRange.length === 2) {
-      const [start, end] = dateRange;
-      result = result.filter(log => {
-        const d = log.from_date ? dayjs(log.from_date) : null;
-        return d && d.isAfter(start.startOf('day')) && d.isBefore(end.endOf('day'));
-      });
-    }
+      const opName = log.operation?.operation_name;
+      const label = opName ? `${opName} (#${opNum})` : `#${opNum}`;
+      opMap.set(String(opNum), label);
+    });
+    return Array.from(opMap.entries()).map(([value, label]) => ({ value, label }));
+  }, [logs, selectedSaleOrder, selectedParts]);
 
-    if (searchText) {
-      const q = searchText.toLowerCase();
-      result = result.filter(log => [
-        log.operation?.operation_number,
-        log.operation?.operation_name,
-        log.operation?.order?.sale_order_number,
-        log.operation?.product?.product_name,
-        log.operation?.part?.part_name,
-        log.operation?.part?.part_number,
-        log.operation?.part?.quantity,
-        log.machine?.make,
-        log.machine?.model,
-        log.from_date,
-        log.to_date,
-        log.produced_quantity,
-        log.approved_quantity,
-        log.rework_quantity,
-        log.rejected_quantity,
-        log.status,
-        log.supervisor?.user_name,
-        log.remarks,
-      ].some(f => f && String(f).toLowerCase().includes(q)));
-    }
+  const hasActiveFilters = useMemo(
+    () =>
+      selectedMachines.length > 0 ||
+      !!selectedProjectId ||
+      selectedParts.length > 0 ||
+      selectedOperations.length > 0 ||
+      (dateRange && dateRange.length === 2),
+    [selectedMachines, selectedProjectId, selectedParts, selectedOperations, dateRange]
+  );
 
-    return result;
-  }, [logs, selectedMachines, dateRange, searchText]);
-
-  const rowClassName = (record) => {
-    if (!searchText) return '';
-    const q = searchText.toLowerCase();
-    const matches = [
-      record.operation?.operation_number,
-      record.operation?.operation_name,
-      record.operation?.order?.sale_order_number,
-      record.operation?.product?.product_name,
-      record.operation?.part?.part_name,
-      record.operation?.part?.part_number,
-      record.machine?.make,
-      record.machine?.model,
-      record.status,
-      record.supervisor?.user_name,
-      record.remarks,
-    ].some(f => f && String(f).toLowerCase().includes(q));
-    return matches ? 'search-highlight-row' : '';
+  const handleClearFilters = () => {
+    setSelectedMachines([]);
+    setSelectedProjectId(null);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setDateRange(null);
+    setCurrentPage(1);
   };
+
+  const filteredLogs = useMemo(() => applyBaseFilters(logs), [logs, applyBaseFilters]);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(filteredLogs.length / pageSize) || 1);
+    if (currentPage > maxPage) setCurrentPage(maxPage);
+  }, [filteredLogs.length, pageSize, currentPage]);
+
+  const rowClassName = () => '';
 
   const getStatusTag = (status) => {
     switch (status?.toLowerCase()) {
@@ -182,25 +290,93 @@ const ProductionLogsHistory = () => {
       ? `(${log.machine.make}) ${log.machine.model}`
       : log.machine?.make || log.machine?.model || log.machine?.name || 'N/A';
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     try {
+      const exportLogs = getPdfExportLogs();
       const doc = new jsPDF('l', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
-      
-      doc.setFontSize(18);
-      doc.text('Production Logs History', pageWidth / 2, 15, { align: 'center' });
-      
-      doc.setFontSize(10);
-      doc.text(`Generated on: ${dayjs().format('DD-MM-YYYY HH:mm:ss')}`, pageWidth / 2, 22, { align: 'center' });
-      
-      if (filteredLogs.length === 0) {
-        doc.setFontSize(12);
-        doc.text('No data available', pageWidth / 2, 40, { align: 'center' });
+      const margin = 10;
+      let logoDataUrl = null;
+      try {
+        logoDataUrl = await loadImageAsDataUrl(cmtisLogo);
+      } catch {
+        /* logo optional */
+      }
+
+      const metaLabel = { fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [0, 0, 0] };
+      const metaValue = { fillColor: [255, 255, 255], textColor: [0, 0, 0] };
+      const tableWidth = pageWidth - margin * 2;
+      const headerColRest = (tableWidth - 32) / 2;
+
+      autoTable(doc, {
+        startY: 8,
+        margin: { left: margin, right: margin },
+        tableWidth,
+        theme: 'grid',
+        styles: {
+          fontSize: 8,
+          cellPadding: 2.5,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.2,
+          valign: 'middle',
+        },
+        body: [
+          [
+            { content: '', styles: { minCellHeight: 16 } },
+            {
+              content: 'PRODUCTION LOGS',
+              colSpan: 2,
+              styles: { fontStyle: 'bold', fontSize: 13, halign: 'center', valign: 'middle', minCellHeight: 16 },
+            },
+          ],
+          [
+            { content: 'Operator :', styles: metaLabel },
+            { content: operatorMeta.name, styles: metaValue },
+            { content: `Date : ${dayjs().format('DD/MM/YYYY')}`, styles: metaValue },
+          ],
+          [
+            { content: 'Period :', styles: metaLabel },
+            { content: getFilterPeriodLabel(), styles: metaValue },
+            { content: `Generated At: ${dayjs().format('DD-MM-YYYY, HH:mm:ss')}`, styles: metaValue },
+          ],
+        ],
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: headerColRest },
+          2: { cellWidth: headerColRest },
+        },
+        didDrawCell: (data) => {
+          if (data.section === 'body' && data.row.index === 0 && data.column.index === 0 && logoDataUrl) {
+            const pad = 2;
+            doc.addImage(
+              logoDataUrl,
+              'PNG',
+              data.cell.x + pad,
+              data.cell.y + pad,
+              data.cell.width - pad * 2,
+              data.cell.height - pad * 2
+            );
+          }
+        },
+      });
+
+      const startY = (doc.lastAutoTable?.finalY ?? 40) + 4;
+
+      if (exportLogs.length === 0) {
+        doc.setFontSize(11);
+        doc.text('No production logs found.', pageWidth / 2, startY + 10, { align: 'center' });
         doc.save('production_logs_history.pdf');
+        message.success('PDF downloaded successfully');
         return;
       }
 
-      const tableData = filteredLogs.map((log, index) => [
+      const partQty = (log) => {
+        const qty = log.operation?.part?.quantity ?? 0;
+        const unit = log.operation?.part?.unit || '';
+        return unit ? `${qty} ${unit}` : String(qty);
+      };
+
+      const tableData = exportLogs.map((log, index) => [
         index + 1,
         log.operation?.order?.sale_order_number || '-',
         log.operation?.product?.product_name || '-',
@@ -211,57 +387,59 @@ const ProductionLogsHistory = () => {
         getMachineName(log),
         formatDateTime(log.from_date, log.from_time),
         formatDateTime(log.to_date, log.to_time),
-        log.operation?.part?.quantity || 0,
-        log.produced_quantity || 0,
-        log.approved_quantity || 0,
-        log.rework_quantity || 0,
-        log.rejected_quantity || 0,
-        log.status || '-',
+        log.notes || '-',
+        partQty(log),
+        log.produced_quantity ?? '-',
+        log.approved_quantity ?? '-',
+        log.rework_quantity ?? '-',
+        log.rejected_quantity ?? '-',
         log.supervisor?.user_name || 'N/A',
         log.remarks || '-',
       ]);
 
+      const pdfColWeights = [8, 16, 20, 16, 14, 16, 10, 18, 20, 20, 14, 11, 11, 11, 11, 11, 14, 16];
+      const pdfColWeightTotal = pdfColWeights.reduce((sum, w) => sum + w, 0);
+      const pdfColumnStyles = Object.fromEntries(
+        pdfColWeights.map((weight, index) => [
+          index,
+          {
+            cellWidth: (weight / pdfColWeightTotal) * tableWidth,
+            ...(index === 0 || [6, 11, 12, 13, 14, 15].includes(index) ? { halign: 'center' } : {}),
+          },
+        ])
+      );
+
       autoTable(doc, {
-        startY: 30,
-        head: [
-          ['SL No', 'Sale Order', 'Product', 'Part Name', 'Part No', 'Operation', 'Op No', 
-           'Machine', 'From Time', 'To Time', 'Part Qty', 'Produced', 'Approved', 'Rework', 
-           'Rejected', 'Status', 'Supervisor', 'Remarks']
-        ],
+        startY,
+        margin: { left: margin, right: margin },
+        tableWidth,
+        head: [[
+          'Sl No', 'Sale Order', 'Product', 'Part Name', 'Part No', 'Operation', 'Op No',
+          'Machine', 'Start Time', 'End Time', 'Notes', 'Part Qty', 'Produced',
+          'Approved', 'Rework', 'Rejected', 'Approved By', 'Remarks',
+        ]],
         body: tableData,
+        theme: 'grid',
         styles: {
-          fontSize: 7,
-          cellPadding: 2,
+          fontSize: 6,
+          cellPadding: 1.5,
           overflow: 'linebreak',
+          valign: 'middle',
+          lineColor: [0, 0, 0],
+          lineWidth: 0.15,
+          textColor: [0, 0, 0],
+        },
+        bodyStyles: {
+          textColor: [0, 0, 0],
+          fontStyle: 'normal',
         },
         headStyles: {
-          fillColor: [24, 144, 255],
-          textColor: 255,
+          fillColor: [220, 220, 220],
+          textColor: [0, 0, 0],
           fontStyle: 'bold',
+          halign: 'center',
         },
-        alternateRowStyles: {
-          fillColor: [240, 248, 255],
-        },
-        columnStyles: {
-          0: { cellWidth: 10 },
-          1: { cellWidth: 25 },
-          2: { cellWidth: 30 },
-          3: { cellWidth: 25 },
-          4: { cellWidth: 20 },
-          5: { cellWidth: 25 },
-          6: { cellWidth: 15 },
-          7: { cellWidth: 25 },
-          8: { cellWidth: 25 },
-          9: { cellWidth: 25 },
-          10: { cellWidth: 15 },
-          11: { cellWidth: 15 },
-          12: { cellWidth: 15 },
-          13: { cellWidth: 15 },
-          14: { cellWidth: 15 },
-          15: { cellWidth: 18 },
-          16: { cellWidth: 20 },
-          17: { cellWidth: 30 },
-        },
+        columnStyles: pdfColumnStyles,
       });
 
       doc.save('production_logs_history.pdf');
@@ -287,8 +465,8 @@ const ProductionLogsHistory = () => {
       fixed: 'left',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{highlightText(record.operation?.order?.sale_order_number, searchText)}</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>{highlightText(record.operation?.product?.product_name, searchText)}</Text>
+          <Text strong>{highlightText(record.operation?.order?.sale_order_number, '')}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{highlightText(record.operation?.product?.product_name, '')}</Text>
         </Space>
       ),
     },
@@ -298,8 +476,8 @@ const ProductionLogsHistory = () => {
       width: 120,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{highlightText(record.operation?.part?.part_name, searchText)}</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>{highlightText(record.operation?.part?.part_number, searchText)}</Text>
+          <Text strong>{highlightText(record.operation?.part?.part_name, '')}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{highlightText(record.operation?.part?.part_number, '')}</Text>
         </Space>
       ),
     },
@@ -309,8 +487,8 @@ const ProductionLogsHistory = () => {
       width: 120,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
-          <Text strong>{highlightText(record.operation?.operation_name, searchText)}</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>#{highlightText(record.operation?.operation_number, searchText)}</Text>
+          <Text strong>{highlightText(record.operation?.operation_name, '')}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>#{highlightText(record.operation?.operation_number, '')}</Text>
         </Space>
       ),
     },
@@ -319,11 +497,11 @@ const ProductionLogsHistory = () => {
       key: 'machine',
       width: 120,
       render: (_, record) => (
-        <Text style={{ fontSize: 12 }}>{highlightText(getMachineName(record), searchText)}</Text>
+        <Text style={{ fontSize: 12 }}>{highlightText(getMachineName(record), '')}</Text>
       ),
     },
     {
-      title: 'From Time',
+      title: 'Start Time',
       key: 'from',
       width: 120,
       sorter: (a, b) => {
@@ -337,7 +515,7 @@ const ProductionLogsHistory = () => {
       ),
     },
     {
-      title: 'To Time',
+      title: 'End Time',
       key: 'to',
       width: 120,
       sorter: (a, b) => {
@@ -360,7 +538,7 @@ const ProductionLogsHistory = () => {
         return (
           <Tooltip title={notes || ''}>
             <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {highlightText(display, searchText)}
+              {highlightText(display, '')}
             </Text>
           </Tooltip>
         );
@@ -426,7 +604,7 @@ const ProductionLogsHistory = () => {
       key: 'supervisor',
       width: 100,
       render: (_, record) => (
-        <Text style={{ fontSize: 12 }}>{highlightText(record.supervisor?.user_name, searchText) || 'N/A'}</Text>
+        <Text style={{ fontSize: 12 }}>{highlightText(record.supervisor?.user_name, '') || 'N/A'}</Text>
       ),
     },
     {
@@ -439,7 +617,7 @@ const ProductionLogsHistory = () => {
         return (
           <Tooltip title={remarks || ''}>
             <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {highlightText(display, searchText)}
+              {highlightText(display, '')}
             </Text>
           </Tooltip>
         );
@@ -459,6 +637,11 @@ const ProductionLogsHistory = () => {
         .modern-table .ant-table-tbody > tr > td { border-bottom: 1px solid #f0f0f0; }
         .search-highlight-row > td { background-color: #e6f4ff !important; }
         .search-highlight-row:hover > td { background-color: #bae0ff !important; }
+        .production-logs-table-wrap {
+          flex: 1;
+          min-height: 0;
+          overflow: auto;
+        }
       `}</style>
 
       <Card style={{ height: '84vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
@@ -477,13 +660,57 @@ const ProductionLogsHistory = () => {
               options={machineOptions}
               optionFilterProp="label"
             />
-            <Input
-              placeholder="Search any field..."
+            <Select
+              placeholder="Select Project"
+              showSearch
               allowClear
-              prefix={<SearchOutlined />}
-              value={searchText}
-              onChange={(e) => { setSearchText(e.target.value); setCurrentPage(1); }}
-              style={{ minWidth: 200, maxWidth: 300 }}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              value={selectedProjectId}
+              onChange={handleProjectChange}
+              style={{ minWidth: 180 }}
+              options={orders.map((o) => ({
+                value: o.id,
+                label: o.sale_order_number || `Order ${o.id}`,
+              }))}
+            />
+            <Select
+              mode="multiple"
+              placeholder="Select Parts"
+              showSearch
+              allowClear
+              disabled={!selectedProjectId}
+              maxTagCount={1}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              value={selectedParts}
+              onChange={(val) => {
+                setSelectedParts(val);
+                setSelectedOperations([]);
+                setCurrentPage(1);
+              }}
+              style={{ minWidth: 220, maxWidth: 320 }}
+              options={parts.map((p) => ({
+                value: p.part_number,
+                label: p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number,
+              }))}
+            />
+            <Select
+              mode="multiple"
+              placeholder="Select Operations"
+              showSearch
+              allowClear
+              disabled={!selectedProjectId}
+              maxTagCount={1}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              value={selectedOperations}
+              onChange={(val) => { setSelectedOperations(val); setCurrentPage(1); }}
+              style={{ minWidth: 220, maxWidth: 320 }}
+              options={operationOptions}
             />
             <RangePicker
               allowClear
@@ -493,6 +720,11 @@ const ProductionLogsHistory = () => {
               format="DD-MM-YYYY"
               style={{ minWidth: 250 }}
             />
+            {hasActiveFilters && (
+              <Button onClick={handleClearFilters} style={{ color: '#ff4d4f', borderColor: '#ff4d4f' }}>
+                Clear
+              </Button>
+            )}
           </Space>
           <Space>
             <Button icon={<DownloadOutlined />} onClick={handleDownloadPDF}>
@@ -504,7 +736,7 @@ const ProductionLogsHistory = () => {
           </Space>
         </div>
 
-        <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+        <div className="production-logs-table-wrap">
           <Table
             columns={columns}
             dataSource={filteredLogs}
@@ -520,10 +752,11 @@ const ProductionLogsHistory = () => {
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
               pageSizeOptions: ['10', '20', '50', '100'],
+              position: ['bottomCenter'],
               onChange: (page, size) => { setCurrentPage(page); setPageSize(size); },
               onShowSizeChange: (_, size) => { setCurrentPage(1); setPageSize(size); },
             }}
-            scroll={{ x: 'max-content', y: 'calc(83vh - 200px)' }}
+            scroll={{ x: 'max-content', y: 'calc(84vh - 300px)' }}
           />
         </div>
       </Card>

@@ -397,13 +397,13 @@ const PokaYokeOperationChecklist = () => {
       `}</style>
 
       <Card
-        title={
-          <Space>
-            <SafetyCertificateOutlined style={{ color: '#1890ff' }} />
-            <Title level={4} style={{ margin: 0 }}>PokaYoke Checklist</Title>
-            {refreshing && <ReloadOutlined spin />}
-          </Space>
-        }
+        // title={
+          // <Space>
+          //   <SafetyCertificateOutlined style={{ color: '#1890ff' }} />
+          //   <Title level={4} style={{ margin: 0 }}>PokaYoke Checklist</Title>
+          //   {refreshing && <ReloadOutlined spin />}
+          // </Space>
+        // }
         className="shadow-sm"
       >
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>

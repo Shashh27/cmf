@@ -1,22 +1,75 @@
-import React, { useState, useEffect } from 'react';
-import { Table, Tag, Spin, message, Button } from 'antd';
-import { CheckOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Table, Tag, Spin, message, Button, Select, Space } from 'antd';
+import { CheckOutlined, ReloadOutlined, ClearOutlined } from '@ant-design/icons';
 import config from '../Config/config';
+import { API_BASE_URL } from '../Config/auth.js';
 
-const NotificationPokaYoke = () => {
+const NotificationPokaYoke = ({ onUnacknowledgedCountChange }) => {
   const [pokayokeChecklist, setPokayokeChecklist] = useState([]);
   const [pokayokeChecklistLoading, setPokayokeChecklistLoading] = useState(true);
   const [pokayokeChecklistPagination, setPokayokeChecklistPagination] = useState({ current: 1, pageSize: 10 });
   const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
+  const [machineFilter, setMachineFilter] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedParts, setSelectedParts] = useState([]);
+  const [selectedOperations, setSelectedOperations] = useState([]);
 
   useEffect(() => {
     fetchPokayokeChecklist();
   }, []);
 
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/orders/`);
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(Array.isArray(data) ? data : []);
+        }
+      } catch (e) {
+        console.error('Error fetching orders:', e);
+      }
+    };
+    fetchOrders();
+  }, []);
+
+  useEffect(() => {
+    const unacknowledgedCount = pokayokeChecklist.filter((log) => !log.operator_ack_by).length;
+    onUnacknowledgedCountChange?.(unacknowledgedCount);
+  }, [pokayokeChecklist, onUnacknowledgedCountChange]);
+
+  const selectedSaleOrder = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return orders.find((o) => o.id === selectedProjectId)?.sale_order_number ?? null;
+  }, [selectedProjectId, orders]);
+
+  const handleProjectChange = (orderId) => {
+    setSelectedProjectId(orderId);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+
+    if (!orderId) return;
+
+    const order = orders.find((o) => o.id === orderId);
+    const saleOrder = order?.sale_order_number;
+    if (!saleOrder) return;
+
+    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        const list = Array.isArray(d) ? d : (d.parts || []);
+        setParts(list);
+      })
+      .catch(() => setParts([]));
+  };
+
   const fetchPokayokeChecklist = async () => {
     setPokayokeChecklistLoading(true);
     try {
-      // Get operator ID from localStorage
       let operatorId = null;
       const storedUser = localStorage.getItem('user');
       if (storedUser) {
@@ -24,7 +77,7 @@ const NotificationPokaYoke = () => {
           const user = JSON.parse(storedUser);
           operatorId = user.id;
         } catch (e) {
-          console.error("Error parsing user from local storage", e);
+          console.error('Error parsing user from local storage', e);
         }
       }
 
@@ -34,21 +87,16 @@ const NotificationPokaYoke = () => {
         return;
       }
 
-      // Fetch operation-checklists submissions filtered by operator
       const apiUrl = `${config.API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`;
-
       const response = await fetch(apiUrl);
       if (response.ok) {
         const data = await response.json();
-        // Sort by acknowledgment status first (unacknowledged at top), then by submitted_at descending
         const sortedLogs = (data || []).sort((a, b) => {
           const isAckA = a.operator_ack_by;
           const isAckB = b.operator_ack_by;
-          // Unacknowledged (null) comes before acknowledged (not null)
           if (isAckA !== isAckB) {
             return isAckA ? 1 : -1;
           }
-          // Within same acknowledgment status, sort by submitted_at descending
           const dateA = new Date(a.submitted_at).getTime();
           const dateB = new Date(b.submitted_at).getTime();
           return dateB - dateA;
@@ -67,12 +115,78 @@ const NotificationPokaYoke = () => {
     }
   };
 
+  const machineOptions = useMemo(() => {
+    const machineMap = new Map();
+    pokayokeChecklist.forEach((record) => {
+      const machine = record.machine;
+      if (machine && machine.id !== undefined && machine.id !== null && !machineMap.has(machine.id)) {
+        const label = [machine.make, machine.model].filter(Boolean).join(' - ') || `Machine ${machine.id}`;
+        machineMap.set(machine.id, label);
+      }
+    });
+    return Array.from(machineMap.entries()).map(([id, label]) => ({ value: id, label }));
+  }, [pokayokeChecklist]);
+
+  const operationOptions = useMemo(() => {
+    const opMap = new Map();
+    pokayokeChecklist.forEach((record) => {
+      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) return;
+      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) return;
+
+      const opNum = record.operation?.operation_number;
+      if (opNum === undefined || opNum === null || opMap.has(opNum)) return;
+
+      const opName = record.operation?.operation_name;
+      const label = opName ? `${opName} (#${opNum})` : `#${opNum}`;
+      opMap.set(opNum, label);
+    });
+    return Array.from(opMap.entries()).map(([value, label]) => ({ value, label }));
+  }, [pokayokeChecklist, selectedSaleOrder, selectedParts]);
+
+  const filteredPokayokeChecklist = useMemo(() => {
+    return pokayokeChecklist.filter((record) => {
+      if (machineFilter.length > 0) {
+        if (!record.machine?.id || !machineFilter.includes(record.machine.id)) {
+          return false;
+        }
+      }
+
+      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) {
+        return false;
+      }
+
+      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) {
+        return false;
+      }
+
+      if (selectedOperations.length > 0 && !selectedOperations.includes(record.operation?.operation_number)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [pokayokeChecklist, machineFilter, selectedSaleOrder, selectedParts, selectedOperations]);
+
+  const hasActiveFilters = useMemo(() => (
+    machineFilter.length > 0 ||
+    selectedProjectId != null ||
+    selectedParts.length > 0 ||
+    selectedOperations.length > 0
+  ), [machineFilter, selectedProjectId, selectedParts, selectedOperations]);
+
+  const clearFilters = () => {
+    setMachineFilter([]);
+    setSelectedProjectId(null);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+  };
+
   const handlePokayokeChecklistAcknowledge = async (submissionId) => {
     try {
-      // Add to acknowledging set to disable button
-      setAcknowledgingIds(prev => new Set(prev).add(submissionId));
+      setAcknowledgingIds((prev) => new Set(prev).add(submissionId));
 
-      // Get role from localStorage
       const storedUser = localStorage.getItem('user');
       let role = 'operator';
       if (storedUser) {
@@ -80,11 +194,10 @@ const NotificationPokaYoke = () => {
           const user = JSON.parse(storedUser);
           role = user.role || 'operator';
         } catch (e) {
-          console.error("Error parsing user from local storage", e);
+          console.error('Error parsing user from local storage', e);
         }
       }
 
-      // Call the PUT endpoint for operation-checklists acknowledgment
       const response = await fetch(`${config.API_BASE_URL}/operation-checklists/submissions/${submissionId}/acknowledge`, {
         method: 'PUT',
         headers: {
@@ -95,10 +208,8 @@ const NotificationPokaYoke = () => {
 
       if (response.ok) {
         message.success('PokaYoke Checklist acknowledged');
-        // Refresh the Pokayoke Checklist list to update the UI
         await fetchPokayokeChecklist();
-        // Remove from acknowledging set after refresh completes
-        setAcknowledgingIds(prev => {
+        setAcknowledgingIds((prev) => {
           const newSet = new Set(prev);
           newSet.delete(submissionId);
           return newSet;
@@ -113,8 +224,7 @@ const NotificationPokaYoke = () => {
           errorMessage = errorData.message;
         }
         message.error(`Failed to acknowledge PokaYoke Checklist: ${errorMessage}`);
-        // Remove from acknowledging set on error
-        setAcknowledgingIds(prev => {
+        setAcknowledgingIds((prev) => {
           const newSet = new Set(prev);
           newSet.delete(submissionId);
           return newSet;
@@ -123,8 +233,7 @@ const NotificationPokaYoke = () => {
     } catch (error) {
       console.error('Error acknowledging PokaYoke Checklist:', error);
       message.error('Failed to acknowledge PokaYoke Checklist');
-      // Remove from acknowledging set on error
-      setAcknowledgingIds(prev => {
+      setAcknowledgingIds((prev) => {
         const newSet = new Set(prev);
         newSet.delete(submissionId);
         return newSet;
@@ -145,7 +254,6 @@ const NotificationPokaYoke = () => {
     }
   };
 
-  // Helper to render a two-line "stacked" cell
   const renderStackedCell = (primary, secondary) => (
     <div style={{ lineHeight: 1.3 }}>
       <div style={{ fontWeight: 600, color: '#1f1f1f' }}>{primary || '-'}</div>
@@ -159,7 +267,8 @@ const NotificationPokaYoke = () => {
       key: 'slNo',
       align: 'center',
       width: 50,
-      render: (text, record, index) => index + 1,
+      render: (text, record, index) =>
+        (pokayokeChecklistPagination.current - 1) * pokayokeChecklistPagination.pageSize + index + 1,
     },
     {
       title: 'Project Details',
@@ -242,7 +351,7 @@ const NotificationPokaYoke = () => {
             hour: '2-digit',
             minute: '2-digit',
             second: '2-digit',
-            hour12: false
+            hour12: false,
           });
         } catch (error) {
           return 'N/A';
@@ -288,7 +397,7 @@ const NotificationPokaYoke = () => {
             hour: '2-digit',
             minute: '2-digit',
             second: '2-digit',
-            hour12: false
+            hour12: false,
           });
         } catch (error) {
           return 'N/A';
@@ -317,9 +426,92 @@ const NotificationPokaYoke = () => {
 
   return (
     <Spin spinning={pokayokeChecklistLoading}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, padding: '16px 16px 0' }}>
+        <Space wrap>
+          <Select
+            mode="multiple"
+            showSearch
+            allowClear
+            placeholder="Filter by machine"
+            style={{ minWidth: 220, maxWidth: 320 }}
+            value={machineFilter}
+            onChange={(value) => {
+              setMachineFilter(value || []);
+              setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+            }}
+            options={machineOptions}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+          />
+          <Select
+            placeholder="Select Project"
+            showSearch
+            allowClear
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            value={selectedProjectId}
+            onChange={handleProjectChange}
+            style={{ minWidth: 180 }}
+            options={orders.map((o) => ({
+              value: o.id,
+              label: o.sale_order_number || `Order ${o.id}`,
+            }))}
+          />
+          <Select
+            mode="multiple"
+            placeholder="Select Parts"
+            showSearch
+            allowClear
+            disabled={!selectedProjectId}
+            maxTagCount={1}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            value={selectedParts}
+            onChange={(val) => {
+              setSelectedParts(val);
+              setSelectedOperations([]);
+              setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+            }}
+            style={{ minWidth: 220, maxWidth: 320 }}
+            options={parts.map((p) => ({
+              value: p.part_number,
+              label: p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number,
+            }))}
+          />
+          <Select
+            mode="multiple"
+            placeholder="Select Operations"
+            showSearch
+            allowClear
+            disabled={!selectedProjectId}
+            maxTagCount={1}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            value={selectedOperations}
+            onChange={(val) => {
+              setSelectedOperations(val);
+              setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+            }}
+            style={{ minWidth: 220, maxWidth: 320 }}
+            options={operationOptions}
+          />
+          {hasActiveFilters && (
+            <Button icon={<ClearOutlined />} onClick={clearFilters}>
+              Clear
+            </Button>
+          )}
+        </Space>
+        <Button icon={<ReloadOutlined />} onClick={fetchPokayokeChecklist} loading={pokayokeChecklistLoading}>
+          Refresh
+        </Button>
+      </div>
       <Table
         columns={pokayokeChecklistColumns}
-        dataSource={pokayokeChecklist}
+        dataSource={filteredPokayokeChecklist}
         rowKey="id"
         pagination={{
           current: pokayokeChecklistPagination.current,

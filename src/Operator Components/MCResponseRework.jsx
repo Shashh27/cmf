@@ -104,6 +104,7 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onRepo
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
+            overflow: 'hidden',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{
@@ -130,6 +131,8 @@ const MCResponseRework = ({ productionStats, latestHelpReply, cardHeight, onRepo
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
+              overflow: 'auto',
+              maxHeight: '100%',
             }}>
               {latestHelpReply.description && (
                 <div>

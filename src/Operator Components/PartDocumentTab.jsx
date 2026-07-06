@@ -268,9 +268,34 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const rawMaterialColumns = [
     { title: 'Raw Material Name', dataIndex: 'raw_material_name', key: 'name' },
+    { title: 'Form Type', dataIndex: 'form_type', key: 'form_type' },
+    { title: 'Stock Dimensions', dataIndex: 'stock_dimensions', key: 'stock_dimensions' },
     {
       title: 'Raw Material Status', dataIndex: 'raw_material_status', key: 'status',
       render: (status) => <Tag color={status === 'Available' ? 'green' : 'red'}>{status}</Tag>
+    },
+  ];
+
+  const processPlanColumns = [
+    {
+      title: 'Operation No', key: 'op_num',
+      render: (record) => record.operation_number || record.number || record.op_no || '-'
+    },
+    {
+      title: 'Operation Name', key: 'op_name',
+      render: (record) => record.operation_name || record.name || record.op_name || '-'
+    },
+    {
+      title: 'Setup Time', key: 'setup_time',
+      render: (record) => record.setup_time || record.setupTime || record.preparation_time || '-'
+    },
+    {
+      title: 'Cycle Time', key: 'cycle_time',
+      render: (record) => record.cycle_time || record.cycleTime || record.run_time || '-'
+    },
+    {
+      title: 'Work Center', key: 'wc_name',
+      render: (record) => record.work_center_name || record.work_center?.name || '-'
     },
   ];
 
@@ -500,7 +525,9 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const partDocuments = partData?.documents || partData?.part_documents || [];
   const rawMaterials = partData?.part?.raw_material_name ? [{
     raw_material_name: partData.part.raw_material_name,
-    raw_material_status: partData.part.raw_material_status || 'N/A'
+    raw_material_status: partData.part.raw_material_status || 'N/A',
+    form_type: partData.part.raw_material_unit_details?.form_type || '-',
+    stock_dimensions: partData.part.raw_material_unit_details?.stock_dimensions || '-'
   }] : [];
 
   const tools = selectedOperation?.tools || selectedOperation?.operation_tools || partData?.tools || [];
@@ -508,7 +535,7 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   // Doc tabs for Part Documents — Raw Materials is now a separate top-level tab
   const docTabs = [
     { key: 'all', label: 'All Documents' },
-    { key: 'mpp', label: 'MPP' },
+    { key: 'process_plan', label: 'Process Plan' },
     { key: '2d', label: '2D' },
     { key: '3d', label: '3D' },
   ];
@@ -918,7 +945,22 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
               {docTabs.map(t => <TabPane tab={t.label} key={t.key} />)}
             </Tabs>
             <div style={{ marginTop: 16 }}>
-              {docTabs.some(t => t.key === activeDocTab) && renderDocuments(partDocuments, activeDocTab)}
+              {activeDocTab === 'process_plan' ? (
+                allOperations.length > 0 ? (
+                  <Table
+                    dataSource={allOperations}
+                    columns={processPlanColumns}
+                    rowKey={(record) => record.id || record.operation_id || record.operation_number || record.number}
+                    size="small"
+                    pagination={false}
+                    scroll={{ x: true }}
+                  />
+                ) : (
+                  <Empty description="No operations found for this part." />
+                )
+              ) : (
+                docTabs.some(t => t.key === activeDocTab) && renderDocuments(partDocuments, activeDocTab)
+              )}
             </div>
           </TabPane>
 

@@ -1,30 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
-  Modal, Button, Typography, message, Tabs, Tooltip, Spin, Drawer,
+  Modal, Button, message, Tabs, Spin, Pagination,
 } from 'antd';
 import {
   CheckCircleOutlined, CloseOutlined, CheckCircleFilled,
-  CloseCircleFilled, InfoCircleOutlined, ExclamationCircleOutlined,
+  CloseCircleFilled,
   CalendarOutlined, ClockCircleOutlined, ThunderboltOutlined,
-  PlusOutlined, MinusOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
 import PokayokeHistory from './PokayokeHistory.jsx';
-
-const { Title, Text } = Typography;
-
-/* ─── IST timestamp helper ─────────────────────────────────────────────── */
-const nowIST = () => {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Kolkata',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    }).formatToParts(new Date()).map((p) => [p.type, p.value])
-  );
-  const ms = String(new Date().getMilliseconds()).padStart(3, '0');
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}.${ms}`;
-};
 
 /* ─── Frequency helpers ─────────────────────────────────────────────────── */
 const freqLabel = (item) => {
@@ -60,319 +45,123 @@ const freqColor = (item) => {
   return { color: '#6b7280', bg: '#f3f4f6', border: '#d1d5db' };
 };
 
-/* ─── Conformance checker ────────────────────────────────────────────────── */
-const getConformance = (cp, val) => {
-  if (val === undefined || val === null || val === '') return null;
-  const expected = cp.expected_value ?? null;
-  const typeRaw  = (cp.item_type ?? '').toLowerCase();
-  const truthy   = new Set(['true', 'yes', 'y', '1', 'on']);
-  const falsy    = new Set(['false', 'no', 'n', '0', 'off']);
-
-  if (typeRaw.includes('bool')) {
-    const vBool = truthy.has(String(val).toLowerCase()) ? true
-                : falsy.has(String(val).toLowerCase())  ? false : null;
-    const e     = expected != null ? String(expected).toLowerCase() : 'true';
-    const eBool = truthy.has(e) ? true : falsy.has(e) ? false : true;
-    return vBool !== null && vBool === eBool;
-  }
-  if (typeRaw.includes('num')) {
-    const vNum   = parseFloat(String(val));
-    const expStr = String(expected ?? '').trim();
-    if (Number.isNaN(vNum)) return false;
-    if (expStr.startsWith('<=')) return vNum <= parseFloat(expStr.slice(2));
-    if (expStr.startsWith('>=')) return vNum >= parseFloat(expStr.slice(2));
-    if (expStr.startsWith('<'))  return vNum <  parseFloat(expStr.slice(1));
-    if (expStr.startsWith('>'))  return vNum >  parseFloat(expStr.slice(1));
-    if (expStr.includes('-')) {
-      const [mn, mx] = expStr.split('-').map(Number);
-      return vNum >= mn && vNum <= mx;
-    }
-    return vNum === parseFloat(expStr);
-  }
-  return expected != null &&
-    String(val).toLowerCase().trim() === String(expected).toLowerCase().trim();
+const todayDateStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-/* ─── Submit Drawer ─────────────────────────────────────────────────────── */
-const SubmitDrawer = ({
-  open, onClose,
-  checklistName, dueCheckpoints,
-  machineId, operatorId, checklistId, assignmentId,
-  onSuccess,
-}) => {
-  const [pendingResponses, setPendingResponses] = useState({});
-  const [submitting, setSubmitting]             = useState(false);
-  const [comments, setComments]                 = useState('');
+const isRejectedCheckpoint = (item) =>
+  item?.needs_resubmit === true
+  || String(item?.latest_submission_status ?? '').toLowerCase() === 'rejected';
 
-  useEffect(() => {
-    if (open) { setPendingResponses({}); setComments(''); }
-  }, [open]);
-  /* ── Due logic ── */
-  const itemIsDue = useCallback((item) => {
-    if (submittedTodayMap[String(item.id)]) return false;
-    const latest = latestResponseMap[String(item.id)];
-    if (!latest) return true;
-    // Use next_due_date from backend if available
-    if (latest.next_due_date) {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const dueDate = new Date(latest.next_due_date); dueDate.setHours(0, 0, 0, 0);
-      return today.getTime() === dueDate.getTime();
-    }
-    // Fallback to manual calculation for condition based or time based without next_due_date
-    if (item.frequency_type === 'Condition Based') return true;
-    if (item.frequency_type === 'Time Based' && item.interval_value && item.interval_unit) {
-      const today2   = new Date(); today2.setHours(0, 0, 0, 0);
-      const lastDate = new Date(latest.completed_at); lastDate.setHours(0, 0, 0, 0);
-      const unit     = (item.interval_unit ?? '').toLowerCase();
-      const val      = item.interval_value;
-      const nextDue  = new Date(lastDate);
-      if (unit.startsWith('day'))        nextDue.setDate(nextDue.getDate() + val);
-      else if (unit.startsWith('week'))  nextDue.setDate(nextDue.getDate() + val * 7);
-      else if (unit.startsWith('month')) nextDue.setMonth(nextDue.getMonth() + val);
-      else if (unit.startsWith('year'))  nextDue.setFullYear(nextDue.getFullYear() + val);
-      return today2 >= nextDue;
-    }
-    return true;
-  }, [submittedTodayMap, latestResponseMap]);
+const getCheckpointResponseValue = (item) =>
+  item?.latest_response_value
+  ?? item?.last_response_value
+  ?? item?.response_value
+  ?? item?.latest_submission?.response_value
+  ?? '';
 
+const formatResponseLabel = (val) => {
+  const v = String(val ?? '').toLowerCase().trim();
+  if (['yes', 'y', 'true', '1', 'on'].includes(v)) return 'Yes';
+  if (['no', 'n', 'false', '0', 'off'].includes(v)) return 'No';
+  if (!v) return null;
+  return String(val);
+};
 
+const normalizeCheckpoint = (cp) => ({
+  id: cp.checklist_item_id ?? cp.assignment_item_id ?? cp.id,
+  assignment_item_id: cp.assignment_item_id,
+  schedule_id: cp.schedule_id,
+  checklist_item_id: cp.checklist_item_id,
+  sequence_number: cp.sequence_number,
+  item_text: cp.item_text,
+  name: cp.item_text,
+  item_type: cp.item_type,
+  expected_value: cp.expected_value,
+  frequency_type: cp.frequency_type,
+  interval_value: cp.interval_value,
+  interval_unit: cp.interval_unit,
+  trigger_hours: cp.trigger_hours,
+  inspection_interval: cp.inspection_interval,
+  remarks: cp.remarks,
+  is_required: cp.is_required ?? true,
+  last_completed_date: cp.last_completed_date,
+  next_due_date: cp.next_due_date,
+  is_due: cp.is_due,
+  has_pending_submission: cp.has_pending_submission,
+  latest_submission_status: cp.latest_submission_status,
+  needs_resubmit: cp.needs_resubmit ?? false,
+  rejection_comments: cp.rejection_comments,
+  latest_response_value: getCheckpointResponseValue(cp),
+});
 
-  const setResponse = (itemId, val) =>
-    setPendingResponses((prev) => ({ ...prev, [String(itemId)]: val }));
+const normalizeAssignment = (raw) => {
+  if (raw?.checklist?.items?.length) return raw;
 
-  const requiredItems   = dueCheckpoints.filter((cp) => cp.is_required ?? true);
-  const allRequiredDone = requiredItems.every((cp) => pendingResponses[String(cp.id)] !== undefined);
+  const checkpoints = (raw.checkpoints ?? raw.checklist?.items ?? []).map(normalizeCheckpoint);
 
-  const handleSubmit = async () => {
-    if (!allRequiredDone || submitting) return;
-    setSubmitting(true);
-    try {
-      const hasNonConforming = dueCheckpoints.some(
-        (cp) => (cp.is_required ?? true) && getConformance(cp, pendingResponses[String(cp.id)]) === false
-      );
-
-      const logPayload = {
-        checklist_id:    Number(checklistId),
-        machine_id:      machineId,
-        assignment_id:   assignmentId ?? null,
-        operator_id:     operatorId,
-        comments,
-        completed_at:    nowIST(),
-        all_items_passed: !hasNonConforming,
-        read: false,
-        operator_acknowledged: false,
-        supervisor_acknowledged: false,
-      };
-
-      const logRes = await fetch(`${API_BASE_URL}/pokayoke-completed-logs/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(logPayload),
-      });
-
-      if (!logRes.ok) {
-        const err = await logRes.json().catch(() => ({}));
-        throw new Error(err?.detail ? JSON.stringify(err.detail) : 'Log creation failed');
-      }
-
-      const createdLog     = await logRes.json();
-      const completedLogId = createdLog?.id ?? createdLog?.log_id;
-      if (!completedLogId) throw new Error('No log ID returned from server');
-
-      await Promise.all(
-        dueCheckpoints.map(async (cp) => {
-          const val = pendingResponses[String(cp.id)];
-          if (val === undefined || val === null) return;
-          const isConf = getConformance(cp, val);
-          await fetch(`${API_BASE_URL}/pokayoke-completed-logs/item-responses`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', accept: 'application/json' },
-            body: JSON.stringify({
-              completed_log_id: completedLogId,
-              item_id:          cp.id,
-              response_value:   String(val),
-              is_confirming:    Boolean(isConf),
-              timestamp:        nowIST(),
-            }),
-          });
-        })
-      );
-
-      message.success('Checklist submitted successfully!');
-      onSuccess(pendingResponses, dueCheckpoints);
-      onClose();
-    } catch (e) {
-      message.error(String(e?.message || 'Submit failed'));
-    } finally {
-      setSubmitting(false);
-    }
+  return {
+    id: raw.assignment_id ?? raw.id,
+    assignment_id: raw.assignment_id ?? raw.id,
+    machine_id: raw.machine_id,
+    checklist_id: raw.checklist_id,
+    assigned_at: raw.assigned_at,
+    checklist: {
+      id: raw.checklist_id,
+      name: raw.checklist_name ?? raw.checklist?.name,
+      description: raw.checklist_description ?? raw.checklist?.description,
+      items: checkpoints,
+    },
   };
+};
 
-  return (
-    <Drawer
-      open={open}
-      onClose={onClose}
-      title={
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{checklistName}</div>
-          <div style={{ fontSize: 11, color: '#6b7280', fontWeight: 400, marginTop: 2 }}>
-            {dueCheckpoints.length} checkpoint{dueCheckpoints.length !== 1 ? 's' : ''} due today —
-            required items marked <span style={{ color: '#ef4444' }}>*</span>
-          </div>
-        </div>
+const buildTodayStateFromAssignments = (assignments) => {
+  const today = todayDateStr();
+  const todayItemIds = new Set();
+  const todayMap = {};
+  const approvalMap = {};
+
+  assignments.forEach((assignment) => {
+    const cid = String(assignment.checklist_id ?? assignment.checklist?.id ?? '');
+    let hasPending = false;
+
+    (assignment.checklist?.items ?? []).forEach((item) => {
+      const key = String(item.id);
+      if (item.is_due || isRejectedCheckpoint(item)) todayItemIds.add(item.id);
+      if (item.has_pending_submission) {
+        todayMap[key] = {
+          response_value: getCheckpointResponseValue(item),
+          approval_status: 'pending',
+        };
+        hasPending = true;
+      } else if (isRejectedCheckpoint(item)) {
+        todayMap[key] = {
+          response_value: getCheckpointResponseValue(item),
+          approval_status: 'rejected',
+        };
+        approvalMap[cid] = 'rejected';
+      } else {
+        const status = String(item.latest_submission_status ?? '').toLowerCase();
+        if (status === 'approved' || status === 'pending') {
+          todayMap[key] = {
+            response_value: getCheckpointResponseValue(item),
+            approval_status: status,
+          };
+          if (status === 'pending') hasPending = true;
+        } else if (item.last_completed_date === today) {
+          todayMap[key] = {
+            response_value: getCheckpointResponseValue(item),
+            approval_status: 'approved',
+          };
+        }
       }
-      width={480}
-      footer={
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            type="primary"
-            disabled={!allRequiredDone}
-            loading={submitting}
-            onClick={handleSubmit}
-          >
-            Submit
-          </Button>
-        </div>
-      }
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {dueCheckpoints.map((cp, i) => {
-          const id       = String(cp.id);
-          const val      = pendingResponses[id];
-          const required = cp.is_required ?? true;
-          const type     = (cp.item_type ?? '').toLowerCase();
-          const expected = cp.expected_value ?? null;
-          const conf     = getConformance(cp, val);
+    });
 
-          return (
-            <div key={id} style={{
-              border: '1px solid',
-              borderColor: conf === false ? '#fca5a5' : conf === true ? '#86efac' : '#e5e7eb',
-              borderRadius: 8, padding: '12px 14px',
-              background:   conf === false ? '#fff5f5' : conf === true ? '#f0fdf4' : '#fff',
-              transition: 'all .2s',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, marginRight: 6 }}>#{i + 1}</span>
-                  {required && <span style={{ color: '#ef4444', fontWeight: 700, marginRight: 4 }}>*</span>}
-                  <span style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>{cp.item_text ?? cp.name}</span>
-                </div>
-                {conf === true  && <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16, flexShrink: 0 }} />}
-                {conf === false && <CloseCircleFilled  style={{ color: '#ef4444', fontSize: 16, flexShrink: 0 }} />}
-              </div>
+    if (hasPending) approvalMap[cid] = 'pending';
+  });
 
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  fontSize: 11, color: '#0284c7', background: '#e0f2fe',
-                  border: '1px solid #7dd3fc', borderRadius: 4, padding: '1px 7px',
-                }}>
-                  {freqIcon(cp)} {freqLabel(cp)}
-                </span>
-                {expected && (
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                    fontSize: 11, color: '#374151', background: '#f3f4f6',
-                    border: '1px solid #d1d5db', borderRadius: 4, padding: '1px 7px',
-                  }}>
-                    <InfoCircleOutlined style={{ fontSize: 10 }} />
-                    Expected: <strong>{expected}</strong>
-                  </span>
-                )}
-              </div>
-
-              {cp.remarks && (
-                <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>{cp.remarks}</div>
-              )}
-
-              {type.includes('bool') && (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {['yes', 'no'].map((opt) => (
-                    <button key={opt} onClick={() => setResponse(cp.id, opt)} style={{
-                      flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
-                      fontSize: 13, fontWeight: 600, border: '2px solid',
-                      borderColor: val === opt ? (opt === 'yes' ? '#22c55e' : '#ef4444') : '#e5e7eb',
-                      background:  val === opt ? (opt === 'yes' ? '#f0fdf4' : '#fff5f5') : '#fafafa',
-                      color:       val === opt ? (opt === 'yes' ? '#15803d' : '#dc2626') : '#6b7280',
-                      transition: 'all .15s',
-                    }}>
-                      {opt === 'yes' ? '✓ Yes' : '✗ No'}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {type.includes('num') && (
-                <input type="number" value={val ?? ''} onChange={(e) => setResponse(cp.id, e.target.value)}
-                  placeholder={expected ? `Expected: ${expected}` : 'Enter value'}
-                  style={{
-                    width: '100%', padding: '7px 10px', borderRadius: 6, fontSize: 13,
-                    border: `1.5px solid ${conf === false ? '#fca5a5' : conf === true ? '#86efac' : '#d1d5db'}`,
-                    outline: 'none', boxSizing: 'border-box',
-                  }}
-                />
-              )}
-
-              {type.includes('text') && (
-                <input type="text" value={val ?? ''} onChange={(e) => setResponse(cp.id, e.target.value)}
-                  placeholder={expected ? `Expected: ${expected}` : 'Enter value'}
-                  style={{
-                    width: '100%', padding: '7px 10px', borderRadius: 6, fontSize: 13,
-                    border: `1.5px solid ${conf === false ? '#fca5a5' : conf === true ? '#86efac' : '#d1d5db'}`,
-                    outline: 'none', boxSizing: 'border-box',
-                  }}
-                />
-              )}
-
-              {!type.includes('bool') && !type.includes('num') && !type.includes('text') && (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {['yes', 'no'].map((opt) => (
-                    <button key={opt} onClick={() => setResponse(cp.id, opt)} style={{
-                      flex: 1, padding: '7px 0', borderRadius: 6, cursor: 'pointer',
-                      fontSize: 13, fontWeight: 600, border: '2px solid',
-                      borderColor: val === opt ? (opt === 'yes' ? '#22c55e' : '#ef4444') : '#e5e7eb',
-                      background:  val === opt ? (opt === 'yes' ? '#f0fdf4' : '#fff5f5') : '#fafafa',
-                      color:       val === opt ? (opt === 'yes' ? '#15803d' : '#dc2626') : '#6b7280',
-                      transition: 'all .15s',
-                    }}>
-                      {opt === 'yes' ? '✓ Yes' : '✗ No'}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {conf === false && (
-                <div style={{ marginTop: 8, fontSize: 11, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <ExclamationCircleOutlined /> Non-conforming — supervisor review required
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Comments (optional)</div>
-          <textarea value={comments} onChange={(e) => setComments(e.target.value)} rows={3}
-            placeholder="Add any observations or remarks…"
-            style={{
-              width: '100%', padding: '8px 10px', borderRadius: 6, fontSize: 13,
-              border: '1.5px solid #d1d5db', outline: 'none', resize: 'vertical',
-              boxSizing: 'border-box', fontFamily: 'inherit',
-            }}
-          />
-        </div>
-
-        {!allRequiredDone && (
-          <div style={{ background: '#fefce8', border: '1px solid #fde047', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#854d0e' }}>
-            <ExclamationCircleOutlined style={{ marginRight: 6 }} />
-            Fill all required (<span style={{ color: '#ef4444', fontWeight: 700 }}>*</span>) checkpoints to submit.
-          </div>
-        )}
-      </div>
-    </Drawer>
-  );
+  return { todayItemIds, todayMap, approvalMap };
 };
 
 /* ─── Main Component ─────────────────────────────────────────────────────── */
@@ -385,14 +174,15 @@ const PokaYokeChecklist = ({
 }) => {
   const [loading, setLoading]                     = useState(false);
   const [assignments, setAssignments]             = useState([]);
-  const [latestResponseMap, setLatestResponseMap] = useState({});
   const [submittedTodayMap, setSubmittedTodayMap] = useState({});
   const [approvalByChecklist, setApprovalByChecklist] = useState({});
   const [activeTab, setActiveTab]                 = useState('1');
-  const [drawerOpen, setDrawerOpen]               = useState(false);
-  const [drawerData, setDrawerData]               = useState(null);
-  const [expandedIds, setExpandedIds]             = useState(new Set());
-  const [todayItemIds, setTodayItemIds]         = useState(new Set());
+  const [selectedChecklistId, setSelectedChecklistId] = useState(null);
+  const [pendingResponses, setPendingResponses]   = useState({});
+  const [submitting, setSubmitting]               = useState(false);
+  const [todayItemIds, setTodayItemIds]           = useState(new Set());
+  const [checkpointPage, setCheckpointPage]       = useState(1);
+  const [checkpointPageSize, setCheckpointPageSize] = useState(10);
 
   const prevOpenRef  = useRef(false);
   const submittedRef = useRef(false);
@@ -406,18 +196,6 @@ const PokaYokeChecklist = ({
     } catch { return null; }
   }, [propMachineId]);
 
-  const machineMeta = useMemo(() => {
-    try {
-      const m = JSON.parse(localStorage.getItem('selectedMachine') || 'null');
-      return {
-        make:  m?.make  ?? m?.machine_make  ?? null,
-        model: m?.model ?? m?.machine_model ?? null,
-        name:  m?.name  ?? m?.machine_name  ?? null,
-        code:  m?.code  ?? m?.machine_code  ?? null,
-      };
-    } catch { return {}; }
-  }, []);
-
   const operatorId = useMemo(() => {
     try {
       const raw = localStorage.getItem('selectedOperator')
@@ -430,143 +208,86 @@ const PokaYokeChecklist = ({
     } catch { return null; }
   }, []);
 
-  const currentDate  = new Date();
-  const currentMonth = currentDate.getMonth();
-  const currentYear  = currentDate.getFullYear();
-  const monthLabel   = currentDate.toLocaleString('default', { month: 'long' });
-
   /* ── Data fetch ── */
+  const loadAssignments = useCallback(async () => {
+    if (!machineId) { setAssignments([]); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/pm/operator/assignments?machine_id=${machineId}`,
+        { headers: { accept: 'application/json' } }
+      );
+      if (!res.ok) throw new Error('Failed to fetch assignments');
+      const data = await res.json();
+      const rawList = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.assignments)
+          ? data.assignments
+          : Array.isArray(data?.data)
+            ? data.data
+            : initialAssignments.length
+              ? initialAssignments
+              : [];
+      const normalizedAssignments = rawList.map(normalizeAssignment);
+      setAssignments(normalizedAssignments);
+
+      const { todayItemIds: apiTodayIds, todayMap: apiTodayMap, approvalMap: apiApprovalMap } =
+        buildTodayStateFromAssignments(normalizedAssignments);
+      setTodayItemIds(apiTodayIds);
+      setSubmittedTodayMap(apiTodayMap);
+      setApprovalByChecklist(apiApprovalMap);
+    } catch (e) {
+      console.error('PokaYoke fetch error:', e);
+      setAssignments([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [machineId, initialAssignments]);
+
   useEffect(() => {
-    const run = async () => {
-      if (!open || prevOpenRef.current) return;
-      prevOpenRef.current = true;
-      if (!machineId) { setAssignments([]); return; }
-      setLoading(true);
+    if (!open || prevOpenRef.current) return;
+    prevOpenRef.current = true;
+    loadAssignments();
+  }, [open, loadAssignments]);
 
-      try {
-        let rawAssignments = initialAssignments;
-        if (!rawAssignments.length) {
-          const res  = await fetch(
-            `${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`,
-            { headers: { accept: 'application/json' } }
-          );
-          const data = await res.json();
-          rawAssignments = Array.isArray(data) ? data : [];
-        }
-        setAssignments(rawAssignments);
+  useEffect(() => {
+    if (assignments.length === 0) {
+      setSelectedChecklistId(null);
+      return;
+    }
+    setSelectedChecklistId((prev) => {
+      const ids = assignments.map((a) => String(a.checklist_id ?? a.checklist?.id ?? ''));
+      if (prev && ids.includes(prev)) return prev;
+      return ids[0];
+    });
+  }, [assignments]);
 
-        // Also fetch today's assignments to determine which checkpoints are due today
-        try {
-          const todayRes = await fetch(
-            `${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/today-assignments`,
-            { headers: { accept: 'application/json' } }
-          );
-          const todayData = await todayRes.json();
-          const todayAssignments = Array.isArray(todayData) ? todayData : [];
-          
-          // Create a set of item IDs that are due today
-          const todayItemIds = new Set();
-          todayAssignments.forEach(assignment => {
-            if (assignment.checklist?.items) {
-              assignment.checklist.items.forEach(item => {
-                todayItemIds.add(item.id);
-              });
-            }
-          });
-          
-          // Store today's item IDs for filtering submit buttons
-          setTodayItemIds(todayItemIds);
-        } catch (e) {
-          console.warn('Could not fetch today assignments:', e);
-          setTodayItemIds(new Set());
-        }
+  useEffect(() => {
+    setCheckpointPage(1);
+  }, [selectedChecklistId]);
 
-        try {
-          const lr      = await fetch(
-            `${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs/simple`,
-            { headers: { accept: 'application/json' } }
-          );
-          const rawLogs = await lr.json();
-          const logs    = Array.isArray(rawLogs) ? rawLogs : [];
-
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-
-          const respMap  = {};
-          const todayMap = {};
-          const apMap    = {};
-
-          for (const log of logs) {
-            const cid     = String(log.checklist_id);
-            const logDate = new Date(log.completed_at);
-            logDate.setHours(0, 0, 0, 0);
-            const isToday = logDate.getTime() === today.getTime();
-
-            if (!apMap[cid]) apMap[cid] = log.overall_status;
-
-            for (const item of (log.items ?? [])) {
-              const key = String(item.item_id);
-              if (!respMap[key]) {
-                respMap[key] = {
-                  response_value:  item.response_value,
-                  approval_status: item.approval_status,
-                  completed_at:    log.completed_at,
-                };
-              }
-              if (isToday && !todayMap[key]) {
-                todayMap[key] = {
-                  response_value:  item.response_value,
-                  approval_status: item.approval_status,
-                };
-              }
-            }
-          }
-
-          setLatestResponseMap(respMap);
-          setSubmittedTodayMap(todayMap);
-          setApprovalByChecklist(apMap);
-        } catch (e) {
-          console.warn('Could not fetch completed logs:', e);
-        }
-      } catch (e) {
-        console.error('PokaYoke fetch error:', e);
-        setAssignments([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    run();
-  }, [open, machineId]);
   /* ── Due logic ── */
   const itemIsDue = useCallback((item) => {
-    if (submittedTodayMap[String(item.id)]) return false;
-    // Use todayItemIds from today-assignments endpoint to check if item is due today
+    if (item.has_pending_submission) return false;
+    if (isRejectedCheckpoint(item)) return true;
+
+    const submitted = submittedTodayMap[String(item.id)];
+    if (submitted?.approval_status === 'approved' || submitted?.approval_status === 'pending') return false;
+
+    if (item.is_due === true) return true;
+    if (item.is_due === false) return false;
+
+    if (item.next_due_date) {
+      const today   = new Date(); today.setHours(0, 0, 0, 0);
+      const dueDate = new Date(item.next_due_date); dueDate.setHours(0, 0, 0, 0);
+      return today.getTime() >= dueDate.getTime();
+    }
+
     if (todayItemIds.has(item.id)) return true;
-    
-    // Fallback to checking next_due_date from latest response
-    const latest = latestResponseMap[String(item.id)];
-    if (!latest) return false;
-    if (latest.next_due_date) {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const dueDate = new Date(latest.next_due_date); dueDate.setHours(0, 0, 0, 0);
-      return today.getTime() === dueDate.getTime();
-    }
-    // Fallback to manual calculation for condition based or time based without next_due_date
-    if (item.frequency_type === 'Condition Based') return true;
-    if (item.frequency_type === 'Time Based' && item.interval_value && item.interval_unit) {
-      const today2   = new Date(); today2.setHours(0, 0, 0, 0);
-      const lastDate = new Date(latest.completed_at); lastDate.setHours(0, 0, 0, 0);
-      const unit     = (item.interval_unit ?? '').toLowerCase();
-      const val      = item.interval_value;
-      const nextDue  = new Date(lastDate);
-      if (unit.startsWith('day'))        nextDue.setDate(nextDue.getDate() + val);
-      else if (unit.startsWith('week'))  nextDue.setDate(nextDue.getDate() + val * 7);
-      else if (unit.startsWith('month')) nextDue.setMonth(nextDue.getMonth() + val);
-      else if (unit.startsWith('year'))  nextDue.setFullYear(nextDue.getFullYear() + val);
-      return today2 >= nextDue;
-    }
+
+    if ((item.frequency_type ?? '').toLowerCase() === 'condition based') return true;
     return false;
-  }, [submittedTodayMap, latestResponseMap, todayItemIds]);
+  }, [submittedTodayMap, todayItemIds]);
 
 
 
@@ -575,348 +296,509 @@ const PokaYokeChecklist = ({
       prevOpenRef.current  = false;
       submittedRef.current = false;
       setActiveTab('1');
-      setExpandedIds(new Set());
+      setPendingResponses({});
+      setSelectedChecklistId(null);
     }
   }, [open]);
 
+  const selectedAssignment = useMemo(() => {
+    if (!selectedChecklistId) return null;
+    return assignments.find(
+      (a) => String(a.checklist_id ?? a.checklist?.id ?? '') === selectedChecklistId
+    ) ?? null;
+  }, [assignments, selectedChecklistId]);
+
   if (!open) return null;
 
-  /* ── Toggle expand ── */
-  const toggleExpand = (cid) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      next.has(cid) ? next.delete(cid) : next.add(cid);
-      return next;
-    });
+  const setCheckpointResponse = (checklistId, itemId, val) => {
+    const cid = String(checklistId);
+    const iid = String(itemId);
+    setPendingResponses((prev) => ({
+      ...prev,
+      [cid]: { ...(prev[cid] ?? {}), [iid]: val },
+    }));
   };
 
-  /* ── Due logic ── */
+  const getSubmittableItems = (assignment) =>
+    (assignment?.checklist?.items ?? []).filter(itemIsDue);
 
-  /* ── Open submit drawer ── */
-  const openSubmitDrawer = (assignment, e) => {
-    e?.stopPropagation();
-    const cid   = String(assignment?.checklist_id ?? assignment?.checklist?.id ?? assignment?.id);
-    const name  = assignment?.checklist?.name ?? `Checklist #${cid}`;
-    const items = assignment?.checklist?.items ?? [];
-    const dueToday = items.filter(itemIsDue);
-    if (dueToday.length === 0) {
-      message.info('All checkpoints for this checklist are either submitted today or not yet due.');
+  const handleSubmitChecklist = async () => {
+    if (!selectedAssignment || submitting) return;
+    const cid = String(selectedAssignment.checklist_id ?? selectedAssignment.checklist?.id ?? '');
+    const dueCheckpoints = getSubmittableItems(selectedAssignment);
+    if (dueCheckpoints.length === 0) {
+      message.info('No checkpoints to submit for this checklist.');
       return;
     }
-    setDrawerData({ checklistId: cid, name, assignment, dueCheckpoints: dueToday });
-    setDrawerOpen(true);
-  };
 
-  /* ── After drawer submit ── */
-  const handleDrawerSuccess = (submittedResponses, dueCheckpoints) => {
-    const newTodayMap = { ...submittedTodayMap };
-    for (const cp of dueCheckpoints) {
-      const val = submittedResponses[String(cp.id)];
-      if (val !== undefined) {
-        newTodayMap[String(cp.id)] = { response_value: String(val), approval_status: 'pending' };
+    const responses = pendingResponses[cid] ?? {};
+    const requiredItems = dueCheckpoints.filter((cp) => cp.is_required ?? true);
+    const allRequiredDone = requiredItems.every(
+      (cp) => responses[String(cp.id)] !== undefined && responses[String(cp.id)] !== ''
+    );
+    if (!allRequiredDone) {
+      message.warning('Fill all required checkpoints before submitting.');
+      return;
+    }
+    if (!operatorId) {
+      message.error('Operator not found in session. Please log in again.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const submissions = dueCheckpoints
+        .map((cp) => {
+          const val = responses[String(cp.id)];
+          if (val === undefined || val === null || val === '') return null;
+          if (!cp.schedule_id || !cp.assignment_item_id) {
+            throw new Error(`Missing schedule or assignment info for checkpoint: ${cp.item_text ?? cp.name ?? cp.id}`);
+          }
+          return {
+            schedule_id: cp.schedule_id,
+            assignment_item_id: cp.assignment_item_id,
+            response_value: String(val).toLowerCase(),
+            operator_comments: '',
+          };
+        })
+        .filter(Boolean);
+
+      const res = await fetch(`${API_BASE_URL}/pm/operator/submissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({
+          operator_id: Number(operatorId),
+          submissions,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        const detail = err?.detail;
+        throw new Error(
+          typeof detail === 'string' ? detail : detail ? JSON.stringify(detail) : 'Submission failed'
+        );
       }
+
+      const newTodayMap = { ...submittedTodayMap };
+      for (const cp of dueCheckpoints) {
+        const val = responses[String(cp.id)];
+        if (val !== undefined) {
+          newTodayMap[String(cp.id)] = { response_value: String(val), approval_status: 'pending' };
+        }
+      }
+      setSubmittedTodayMap(newTodayMap);
+      setApprovalByChecklist((prev) => ({ ...prev, [cid]: 'pending' }));
+      setPendingResponses((prev) => ({ ...prev, [cid]: {} }));
+      submittedRef.current = true;
+      message.success('Checklist submitted successfully!');
+    } catch (e) {
+      message.error(String(e?.message || 'Submit failed'));
+    } finally {
+      setSubmitting(false);
     }
-    setSubmittedTodayMap(newTodayMap);
-    if (drawerData?.checklistId) {
-      setApprovalByChecklist((prev) => ({ ...prev, [String(drawerData.checklistId)]: 'pending' }));
-    }
-    submittedRef.current = true;
   };
 
-  /* ── Status badge ── */
-  const getStatusBadge = (assignment) => {
-    const cid    = String(assignment?.checklist_id ?? assignment?.checklist?.id ?? '');
-    const status = approvalByChecklist[cid];
-    const items  = assignment?.checklist?.items ?? [];
-    const doneCount = items.filter((it) => !!submittedTodayMap[String(it.id)]).length;
-    const dueCount  = items.filter((it) => itemIsDue(it)).length;
-
-    if (status === 'approved') return { label: 'Approved',       color: '#15803d', bg: '#dcfce7', border: '#86efac' };
-    if (status === 'rejected') return { label: 'Rejected',       color: '#dc2626', bg: '#fee2e2', border: '#fca5a5' };
-    if (status === 'pending')  return { label: 'Pending Review', color: '#0284c7', bg: '#e0f2fe', border: '#7dd3fc' };
-    if (doneCount > 0)         return { label: `${doneCount}/${items.length} done`, color: '#d97706', bg: '#fef3c7', border: '#fcd34d' };
-    return null;
+  /* ── Shared TH style (matches Inventory) ── */
+  const TH = {
+    background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)',
+    fontWeight: 'bold',
+    fontSize: 12,
+    color: '#374151',
+    padding: '10px 14px',
+    textAlign: 'left',
+    borderBottom: '2px solid #1890ff',
+    whiteSpace: 'nowrap',
   };
 
-  /* ── CMF header ── */
-  const cmfHeader = (
-    <div style={{ border: '2px solid #1e3a5f', marginBottom: 0, background: '#fff' }}>
-      <div style={{ display: 'flex', borderBottom: '1px solid #1e3a5f' }}>
-        <div style={{
-          width: 180, minWidth: 180, padding: '10px 16px',
-          borderRight: '1px solid #1e3a5f',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <img
-            src="/src/assets/cmtis.png" alt="CMTI Logo"
-            style={{ maxWidth: 120, maxHeight: 48, objectFit: 'contain' }}
-            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }}
-          />
-          <span style={{ display: 'none', fontWeight: 900, fontSize: 20, color: '#1e3a5f', fontStyle: 'italic' }}>cmti</span>
+  const renderResponseCell = (cp, checklistId, editable) => {
+    const iid = String(cp.id);
+    const cid = String(checklistId);
+    const submittedToday = submittedTodayMap[iid];
+    const val = (pendingResponses[cid] ?? {})[iid];
+    const type = (cp.item_type ?? '').toLowerCase();
+
+    if (submittedToday && !editable) {
+      const isRejected = submittedToday.approval_status === 'rejected';
+      const isPending = submittedToday.approval_status === 'pending';
+      const responseLabel = formatResponseLabel(
+        submittedToday.response_value ?? cp.latest_response_value ?? cp.response_value
+      );
+      const color = isRejected ? '#dc2626' : isPending ? '#d97706' : '#15803d';
+
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          {isRejected
+            ? <CloseCircleFilled style={{ color: '#ef4444', fontSize: 16 }} />
+            : isPending
+              ? <ClockCircleOutlined style={{ color: '#d97706', fontSize: 16 }} />
+              : <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />}
+          <span style={{ fontSize: 12, color, fontWeight: 600 }}>
+            {responseLabel ?? (isPending ? 'Pending' : '—')}
+          </span>
         </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8px 16px' }}>
-          <div style={{ fontWeight: 800, fontSize: 16, color: '#1e3a5f', letterSpacing: 0.5 }}>CENTRAL MANUFACTURING FACILITY (CMF)</div>
-          <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>ISO 9001-2015</div>
-          <div style={{ fontWeight: 700, fontSize: 13, color: '#111827', marginTop: 4, borderTop: '1px solid #e5e7eb', paddingTop: 4, width: '100%', textAlign: 'center' }}>
-            Preventive Maintenance Checklist
-          </div>
+      );
+    }
+
+    const apiStatus = String(cp.latest_submission_status ?? '').toLowerCase();
+    if (!editable && apiStatus === 'approved') {
+      const responseLabel = formatResponseLabel(cp.latest_response_value ?? cp.response_value);
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />
+          <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
+            {responseLabel ?? '—'}
+          </span>
         </div>
-      </div>
-      <div style={{ display: 'flex', borderTop: '1px solid #d1d5db' }}>
-        {[
-          { label: 'Machine',    value: [machineMeta.make, machineMeta.model].filter(Boolean).join(' — ') || machineMeta.name || `ID ${machineId}` },
-          { label: 'Machine ID', value: machineMeta.code || machineId || '—' },
-          { label: 'Month',      value: monthLabel },
-          { label: 'Year',       value: currentYear },
-          { label: 'Location',   value: 'Workshop' },
-        ].map(({ label, value }, i, arr) => (
-          <div key={label} style={{
-            flex: label === 'Machine' ? 2 : 1,
-            padding: '6px 12px',
-            borderRight: i < arr.length - 1 ? '1px solid #d1d5db' : 'none',
-            fontSize: 12,
-          }}>
-            <span style={{ fontWeight: 700 }}>{label}:</span>
-            <span style={{ marginLeft: 4, color: '#1d4ed8', textDecoration: 'underline' }}>{value}</span>
-          </div>
+      );
+    }
+
+    if (!editable) {
+      return <span style={{ fontSize: 12, color: '#9ca3af' }}>—</span>;
+    }
+
+    if (type.includes('num')) {
+      return (
+        <input
+          type="number"
+          value={val ?? ''}
+          onChange={(e) => setCheckpointResponse(cid, cp.id, e.target.value)}
+          placeholder={cp.expected_value ? `Expected: ${cp.expected_value}` : 'Value'}
+          style={{
+            width: '100%', maxWidth: 120, padding: '6px 8px', borderRadius: 6, fontSize: 12,
+            border: '1.5px solid #d1d5db', outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+      );
+    }
+
+    if (type.includes('text')) {
+      return (
+        <input
+          type="text"
+          value={val ?? ''}
+          onChange={(e) => setCheckpointResponse(cid, cp.id, e.target.value)}
+          placeholder={cp.expected_value ? `Expected: ${cp.expected_value}` : 'Enter value'}
+          style={{
+            width: '100%', maxWidth: 140, padding: '6px 8px', borderRadius: 6, fontSize: 12,
+            border: '1.5px solid #d1d5db', outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+        {['yes', 'no'].map((opt) => (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => setCheckpointResponse(cid, cp.id, opt)}
+            style={{
+              minWidth: 52, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, border: '1.5px solid',
+              borderColor: val === opt ? '#1677ff' : '#d1d5db',
+              background: val === opt ? '#e6f4ff' : '#fff',
+              color: val === opt ? '#1677ff' : '#6b7280',
+              transition: 'all .15s',
+            }}
+          >
+            {opt}
+          </button>
         ))}
       </div>
-    </div>
-  );
-
-  /* ── Shared TH style ── */
-  const TH = {
-    background: '#f3f4f6', fontWeight: 700, fontSize: 12,
-    color: '#374151', padding: '10px 14px', textAlign: 'left',
-    borderBottom: '2px solid #e5e7eb', whiteSpace: 'nowrap',
+    );
   };
 
-  /* ── Main expandable table ── */
-  const mainTable = (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-        <thead>
-          <tr>
-            <th style={{ ...TH, width: 48, textAlign: 'center' }}></th>
-            <th style={{ ...TH, width: 200 }}>Checklist Name</th>
-            <th style={{ ...TH, textAlign: 'center', width: 120 }}>Check Points</th>
-            <th style={{ ...TH, textAlign: 'center', width: 180 }}>Status</th>
-            <th style={{ ...TH, textAlign: 'center', width: 160 }}>Action</th>
-          </tr>
-        </thead>
-        <tbody>
+  const selectedCid = selectedAssignment
+    ? String(selectedAssignment.checklist_id ?? selectedAssignment.checklist?.id ?? '')
+    : '';
+  const selectedItems = selectedAssignment?.checklist?.items ?? [];
+  const selectedName = selectedAssignment?.checklist?.name ?? 'Checklist';
+  const submittableItems = selectedAssignment ? getSubmittableItems(selectedAssignment) : [];
+  const submittableIds = new Set(submittableItems.map((cp) => String(cp.id)));
+  const selectedResponses = pendingResponses[selectedCid] ?? {};
+  const requiredSubmittable = submittableItems.filter((cp) => cp.is_required ?? true);
+  const canSubmitSelected = requiredSubmittable.every(
+    (cp) => selectedResponses[String(cp.id)] !== undefined && selectedResponses[String(cp.id)] !== ''
+  );
+  const showSubmitBtn = submittableItems.length > 0;
+  const needsRedo = submittableItems.some(isRejectedCheckpoint);
+
+  const paginatedItems = selectedItems.slice(
+    (checkpointPage - 1) * checkpointPageSize,
+    checkpointPage * checkpointPageSize
+  );
+
+  const handleCheckpointPageChange = (page, pageSize) => {
+    setCheckpointPage(page);
+    setCheckpointPageSize(pageSize);
+  };
+
+  /* ── Split-pane preventive maintenance panel ── */
+  const pmPanel = (
+    <div style={{
+      display: 'flex',
+      height: '100%',
+      minHeight: 0,
+      minWidth: 0,
+      background: '#f5f6fa',
+      overflow: 'hidden',
+      gap: 12,
+      boxSizing: 'border-box',
+    }}>
+      {/* Left — checklist list */}
+      <div style={{
+        width: 240,
+        minWidth: 240,
+        flexShrink: 0,
+        background: '#fff',
+        borderRadius: 10,
+        border: '1px solid #e8eaed',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        minHeight: 0,
+      }}>
+        <div style={{
+          padding: '12px 16px',
+          borderBottom: '1px solid #f0f0f0',
+          fontSize: 15,
+          fontWeight: 600,
+          color: '#1a1a2e',
+          flexShrink: 0,
+        }}>
+          Checklist
+        </div>
+        <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
           {loading ? (
-            <tr>
-              <td colSpan={5} style={{ padding: 48, textAlign: 'center' }}>
-                <Spin size="large" />
-              </td>
-            </tr>
+            <div style={{ padding: 32, textAlign: 'center' }}><Spin /></div>
           ) : assignments.length === 0 ? (
-            <tr>
-              <td colSpan={5} style={{ padding: 48, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-                No checklists assigned to this machine.
-              </td>
-            </tr>
+            <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+              No checklists assigned.
+            </div>
           ) : (
-            assignments.map((assignment, ai) => {
-              const cid      = String(assignment?.checklist_id ?? assignment?.checklist?.id ?? ai);
-              const cName    = assignment?.checklist?.name ?? `Checklist #${cid}`;
-              const items    = assignment?.checklist?.items ?? [];
-              const badge    = getStatusBadge(assignment);
-              const expanded = expandedIds.has(cid);
-              const dueToday = items.filter(itemIsDue);
-              const allDone  = dueToday.length === 0 && items.length > 0;
-              const apStatus = approvalByChecklist[cid];
-              const canSubmit = !allDone && !['approved', 'pending'].includes(apStatus);
+            assignments.map((assignment, idx) => {
+              const cid = String(assignment.checklist_id ?? assignment.checklist?.id ?? idx);
+              const cName = assignment.checklist?.name ?? `Checklist #${cid}`;
+              const active = cid === selectedChecklistId;
+              const dueCount = (assignment.checklist?.items ?? []).filter(itemIsDue).length;
 
               return (
-                <React.Fragment key={cid}>
-                  {/* ── Checklist row — fully clickable ── */}
-                  <tr
-                    onClick={() => toggleExpand(cid)}
-                    style={{
-                      borderBottom: expanded ? 'none' : '1px solid #e5e7eb',
-                      background: expanded ? '#f0f4ff' : ai % 2 === 0 ? '#fff' : '#fafafa',
-                      transition: 'background .15s',
-                      cursor: 'pointer',
-                      userSelect: 'none',
-                    }}
-                    onMouseEnter={(e) => { if (!expanded) e.currentTarget.style.background = '#f5f7ff'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = expanded ? '#f0f4ff' : ai % 2 === 0 ? '#fff' : '#fafafa'; }}
-                  >
-                    {/* Expand toggle button */}
-                    <td style={{ textAlign: 'center', padding: '12px 0', verticalAlign: 'middle' }}>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); toggleExpand(cid); }}
-                        style={{
-                          width: 26, height: 26, borderRadius: 6, border: '1.5px solid #d1d5db',
-                          background: expanded ? '#1e3a5f' : '#fff',
-                          color: expanded ? '#fff' : '#374151',
-                          cursor: 'pointer', display: 'inline-flex',
-                          alignItems: 'center', justifyContent: 'center',
-                          fontSize: 13, fontWeight: 700, transition: 'all .15s',
-                        }}
-                      >
-                        {expanded ? <MinusOutlined style={{ fontSize: 11 }} /> : <PlusOutlined style={{ fontSize: 11 }} />}
-                      </button>
-                    </td>
-
-                    {/* Name */}
-                    <td style={{ padding: '12px 14px', fontWeight: 600, color: '#111827', verticalAlign: 'middle' }}>
-                      {cName}
-                    </td>
-
-                    {/* Count */}
-                    <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle' }}>
-                      <span style={{
-                        display: 'inline-block', minWidth: 32, padding: '2px 10px',
-                        borderRadius: 20, background: '#e0f2fe', color: '#0369a1',
-                        fontWeight: 700, fontSize: 12, border: '1px solid #bae6fd',
-                      }}>
-                        {items.length}
-                      </span>
-                    </td>
-
-                    {/* Status badge */}
-                    <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle' }}>
-                      {badge ? (
-                        <span style={{
-                          fontSize: 11, fontWeight: 700, padding: '3px 12px', borderRadius: 20,
-                          background: badge.bg, color: badge.color, border: `1px solid ${badge.border}`,
-                        }}>
-                          {badge.label}
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 11, color: '#9ca3af' }}>—</span>
-                      )}
-                    </td>
-
-                    {/* Fill & Submit */}
-                    <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle' }}>
-                      {canSubmit ? (
-                        <Button
-                          size="small"
-                          type="primary"
-                          style={{ borderRadius: 16, fontSize: 12, height: 28, paddingInline: 14 }}
-                          onClick={(e) => openSubmitDrawer(assignment, e)}
-                        >
-                          Fill &amp; Submit
-                          {dueToday.length > 0 && (
-                            <span style={{
-                              marginLeft: 6, background: 'rgba(255,255,255,0.25)',
-                              borderRadius: 10, padding: '0 6px', fontSize: 11,
-                            }}>
-                              {dueToday.length}
-                            </span>
-                          )}
-                        </Button>
-                      ) : (
-                        <span style={{ fontSize: 11, color: '#9ca3af' }}>
-                          {allDone ? 'All done' : '—'}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-
-                  {/* ── Expanded checkpoint rows ── */}
-                  {expanded && (
-                    <tr>
-                      <td colSpan={5} style={{ padding: 0, borderBottom: '1px solid #e5e7eb' }}>
-                        <div style={{ background: '#f8faff', borderTop: '1px solid #e0e7ff' }}>
-                          {items.length === 0 ? (
-                            <div style={{ padding: '16px 56px', color: '#9ca3af', fontSize: 12, fontStyle: 'italic' }}>
-                              No checkpoints in this checklist.
-                            </div>
-                          ) : (
-                            <div style={{ fontSize: 12 }}>
-                              {/* Inner header */}
-                              <div style={{
-                                display: 'flex', alignItems: 'center',
-                                background: '#eef2ff', borderBottom: '1px solid #e5e7eb',
-                                padding: '7px 0',
-                              }}>
-                                <div style={{ width: 48, flexShrink: 0, textAlign: 'center', fontSize: 11, color: '#6b7280', fontWeight: 700 }}>#</div>
-                                <div style={{ flex: 1, minWidth: 0, maxWidth: 300, padding: '0 14px', fontSize: 11, color: '#6b7280', fontWeight: 700 }}>Checkpoint</div>
-                                <div style={{ width: 140, flexShrink: 0, padding: '0 14px', fontSize: 11, color: '#6b7280', fontWeight: 700 }}>Frequency</div>
-                                <div style={{ width: 70, flexShrink: 0, textAlign: 'center', fontSize: 11, color: '#6b7280', fontWeight: 700 }}>Today</div>
-                              </div>
-
-                              {/* Inner rows */}
-                              {items.map((cp, ci) => {
-                                const submittedToday = submittedTodayMap[String(cp.id)];
-                                const required       = cp.is_required ?? true;
-                                const fc             = freqColor(cp);
-
-                                return (
-                                  <div key={cp.id ?? ci} style={{
-                                    display: 'flex', alignItems: 'center',
-                                    borderBottom: ci < items.length - 1 ? '1px solid #e5e7eb' : 'none',
-                                    background: ci % 2 === 0 ? '#fff' : '#f8faff',
-                                    minHeight: 40,
-                                  }}>
-                                    {/* Serial */}
-                                    <div style={{ width: 48, flexShrink: 0, textAlign: 'center', color: '#9ca3af', fontWeight: 600, padding: '8px 0' }}>
-                                      {ci + 1}
-                                    </div>
-
-                                    {/* Checkpoint name */}
-                                    <div style={{ flex: 1, minWidth: 0, padding: '8px 14px', color: '#111827' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                                        {required && <span style={{ color: '#ef4444', fontWeight: 700, fontSize: 13, flexShrink: 0 }}>*</span>}
-                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                          {cp.item_text ?? cp.name}
-                                        </span>
-                                      </div>
-                                      {cp.remarks && (
-                                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                          {cp.remarks}
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {/* Frequency pill */}
-                                    <div style={{ width: 140, flexShrink: 0, padding: '8px 14px' }}>
-                                      <span style={{
-                                        display: 'inline-flex', alignItems: 'center', gap: 4,
-                                        fontSize: 11, color: fc.color, background: fc.bg,
-                                        border: `1px solid ${fc.border}`, borderRadius: 4,
-                                        padding: '2px 8px', whiteSpace: 'nowrap',
-                                      }}>
-                                        {freqIcon(cp)} {freqLabel(cp)}
-                                      </span>
-                                    </div>
-
-                                    {/* Today status icon */}
-                                    <div style={{ width: 70, flexShrink: 0, textAlign: 'center', padding: '8px 0' }}>
-                                      {submittedToday ? (
-                                        submittedToday.approval_status === 'rejected'
-                                          ? <CloseCircleFilled style={{ color: '#ef4444', fontSize: 15 }} />
-                                          : <CheckCircleFilled style={{ color: '#22c55e', fontSize: 15 }} />
-                                      ) : (
-                                        <span style={{ width: 15, height: 15, borderRadius: '50%', border: '1.5px solid #d1d5db', display: 'inline-block', verticalAlign: 'middle' }} />
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                <div
+                  key={cid}
+                  onClick={() => setSelectedChecklistId(cid)}
+                  style={{
+                    padding: '10px 14px',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    borderBottom: '1px solid #f0f0f0',
+                    background: active ? '#e6f4ff' : 'transparent',
+                    borderRadius: active ? 8 : 0,
+                    margin: active ? '2px 6px' : 0,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = '#f5f8ff'; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <div style={{
+                    fontSize: 14,
+                    fontWeight: active ? 600 : 500,
+                    color: '#1a1a2e',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {cName}
+                  </div>
+                  {dueCount > 0 && (
+                    <div style={{ fontSize: 11, color: '#1677ff', marginTop: 2, fontWeight: 600 }}>
+                      {dueCount} due
+                    </div>
                   )}
-                </React.Fragment>
+                </div>
               );
             })
           )}
-        </tbody>
-      </table>
+        </div>
+      </div>
+
+      {/* Right — selected checklist detail */}
+      <div style={{
+        flex: 1,
+        background: '#fff',
+        borderRadius: 10,
+        border: '1px solid #e8eaed',
+        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        minWidth: 0,
+        minHeight: 0,
+      }}>
+        {!selectedAssignment ? (
+          <div style={{
+            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#8c8c8c', fontSize: 14,
+          }}>
+            Select a checklist from the left
+          </div>
+        ) : (
+          <>
+            <div style={{
+              padding: '12px 20px 8px',
+              borderBottom: '1px solid #f0f0f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexShrink: 0,
+              flexWrap: 'wrap',
+            }}>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e', margin: 0, flex: '1 1 auto', minWidth: 160, lineHeight: 1.2 }}>
+                {selectedName}
+              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                <span style={{ fontSize: 13, color: '#595959' }}>Total checkpoints</span>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  minWidth: 28, height: 28, borderRadius: '50%',
+                  background: '#e6f4ff', color: '#1677ff', fontWeight: 700, fontSize: 13,
+                  border: '1px solid #91caff',
+                }}>
+                  {selectedItems.length}
+                </span>
+                <Button
+                  icon={<ReloadOutlined />}
+                  size="small"
+                  loading={loading}
+                  onClick={loadAssignments}
+                  style={{ borderRadius: 7 }}
+                />
+              </div>
+            </div>
+
+            <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                    <tr>
+                      <th style={{ ...TH, width: 56, textAlign: 'center' }}>SL No</th>
+                      <th style={{ ...TH, width: '32%' }}>Checkpoint Name</th>
+                      <th style={{ ...TH, width: '20%' }}>Frequency</th>
+                      <th style={{ ...TH, width: '12%', textAlign: 'center' }}>Expected</th>
+                      <th style={{ ...TH, width: '26%', textAlign: 'center' }}>Response</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ padding: 40, textAlign: 'center', color: '#9ca3af' }}>
+                          No checkpoints in this checklist.
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedItems.map((cp, ci) => {
+                        const fc = freqColor(cp);
+                        const required = cp.is_required ?? true;
+                        const editable = submittableIds.has(String(cp.id));
+                        const slNo = (checkpointPage - 1) * checkpointPageSize + ci + 1;
+
+                        return (
+                          <tr
+                            key={cp.id ?? ci}
+                            style={{ borderBottom: '1px solid #f0f0f0', background: '#fff' }}
+                          >
+                            <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', color: '#6b7280', fontWeight: 600 }}>
+                              {slNo}
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                {required && editable && (
+                                  <span style={{ color: '#ef4444', fontWeight: 700 }}>*</span>
+                                )}
+                                <span style={{ color: '#111827', fontWeight: 500 }}>{cp.item_text ?? cp.name}</span>
+                              </div>
+                              {cp.remarks && (
+                                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{cp.remarks}</div>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                fontSize: 11, color: fc.color, background: fc.bg,
+                                border: `1px solid ${fc.border}`, borderRadius: 4, padding: '2px 8px',
+                              }}>
+                                {freqIcon(cp)} {freqLabel(cp)}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', color: '#374151', fontWeight: 600 }}>
+                              {cp.expected_value ?? '—'}
+                            </td>
+                            <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                              {renderResponseCell(cp, selectedCid, editable)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {showSubmitBtn && (
+                <div style={{
+                  padding: '12px 20px',
+                  borderTop: '1px solid #f0f0f0',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  flexShrink: 0,
+                  background: '#fff',
+                }}>
+                  <Button
+                    type="primary"
+                    danger={needsRedo}
+                    loading={submitting}
+                    disabled={!canSubmitSelected}
+                    onClick={handleSubmitChecklist}
+                    style={{ borderRadius: 7, minWidth: 100 }}
+                  >
+                    {needsRedo ? 'Redo' : 'Submit'}
+                  </Button>
+                </div>
+              )}
+
+              {selectedItems.length > 0 && (
+                <Pagination
+                  current={checkpointPage}
+                  pageSize={checkpointPageSize}
+                  total={selectedItems.length}
+                  showSizeChanger
+                  pageSizeOptions={[5, 10, 15, 20, 50]}
+                  showTotal={(total, range) => `${range[0]}-${range[1]} of ${total} items`}
+                  size="small"
+                  onChange={handleCheckpointPageChange}
+                  style={{
+                    padding: '8px 20px',
+                    margin: 0,
+                    flexShrink: 0,
+                    borderTop: '1px solid #f0f0f0',
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                  }}
+                />
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 
   /* ── Legend ── */
   const legend = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '0 0 12px', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '14px 0 12px', flexWrap: 'wrap', flexShrink: 0 }}>
       {[
         { icon: <CheckCircleFilled style={{ color: '#22c55e', fontSize: 13 }} />,     label: 'Submitted today' },
         { icon: <CloseCircleFilled  style={{ color: '#ef4444', fontSize: 13 }} />,     label: 'Rejected' },
@@ -935,8 +817,15 @@ const PokaYokeChecklist = ({
   /* ── Content ── */
   const content = (
     <>
+      <style>{`
+        .pm-checklist-tabs { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+        .pm-checklist-tabs .ant-tabs-nav { flex-shrink: 0; margin-bottom: 8px; }
+        .pm-checklist-tabs .ant-tabs-content-holder { flex: 1; min-height: 0; overflow: hidden; }
+        .pm-checklist-tabs .ant-tabs-content { height: 100%; }
+        .pm-checklist-tabs .ant-tabs-tabpane { height: 100%; overflow: hidden; }
+      `}</style>
       {!isPage && (
-        <div style={{ background: '#1e3a5f', padding: '11px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ background: '#1e3a5f', padding: '11px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <CheckCircleOutlined style={{ color: '#fff', fontSize: 20 }} />
             <span style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>Preventive Maintenance</span>
@@ -950,55 +839,94 @@ const PokaYokeChecklist = ({
         </div>
       )}
 
-      <div style={{ padding: isPage ? 0 : '16px 20px' }}>
-        <div style={{ marginBottom: 14 }}>{cmfHeader}</div>
-
-        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: '14px 16px', boxShadow: '0 1px 3px rgba(0,0,0,.05)' }}>
+      <div style={{
+        padding: isPage ? '0 0 8px' : '12px 16px',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+        boxSizing: 'border-box',
+      }}>
+        <div style={{
+          background: '#fff',
+          border: '1px solid #e8eaed',
+          borderRadius: 10,
+          padding: '14px 16px',
+          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
           <Tabs
+            className="pm-checklist-tabs"
             activeKey={activeTab}
             onChange={setActiveTab}
             items={[
               {
                 key: '1',
                 label: 'Preventive Maintenance',
-                children: <>{legend}{mainTable}</>,
+                children: (
+                  <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+                    {legend}
+                    <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                      {pmPanel}
+                    </div>
+                  </div>
+                ),
               },
               {
                 key: '2',
                 label: 'Checklist History',
-                children: <PokayokeHistory machineId={machineId} />,
+                children: (
+                  <div style={{ height: '100%', overflow: 'auto', minHeight: 0 }}>
+                    <PokayokeHistory machineId={machineId} />
+                  </div>
+                ),
               },
             ]}
           />
         </div>
       </div>
-
-      {drawerData && (
-        <SubmitDrawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          checklistName={drawerData.name}
-          dueCheckpoints={drawerData.dueCheckpoints}
-          machineId={machineId}
-          operatorId={operatorId}
-          checklistId={drawerData.checklistId}
-          assignmentId={drawerData.assignment?.id ?? null}
-          onSuccess={handleDrawerSuccess}
-        />
-      )}
     </>
   );
 
-  if (isPage) return <div style={{ padding: 24, width: '100%' }}>{content}</div>;
+  if (isPage) {
+    return (
+      <div style={{
+        width: '100%',
+        height: 'calc(100vh - 100px)',
+        overflow: 'hidden',
+        boxSizing: 'border-box',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
+        {content}
+      </div>
+    );
+  }
 
   return (
     <Modal
       open={open}
       onCancel={() => onClose(submittedRef.current)}
       footer={null}
-      width={1000}
+      width={1100}
       closable={false}
-      styles={{ content: { padding: 0, borderRadius: 10, overflow: 'hidden' } }}
+      centered
+      styles={{
+        content: { padding: 0, borderRadius: 10, overflow: 'hidden' },
+        body: {
+          overflow: 'hidden',
+          padding: 0,
+          height: 'calc(100vh - 120px)',
+          maxHeight: 'calc(100vh - 120px)',
+          display: 'flex',
+          flexDirection: 'column',
+        },
+      }}
     >
       {content}
     </Modal>

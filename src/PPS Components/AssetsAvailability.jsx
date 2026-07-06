@@ -534,32 +534,7 @@ const AssetAvailability = () => {
           <TabPane tab="Assets Availability" key="machine-status">
             <div style={{ padding: '24px 0' }}>
               {/* Header Section */}
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'flex-start',
-                marginBottom: '24px',
-                flexWrap: 'wrap',
-                gap: '16px'
-              }}>
-                <div>
-                  <h2 style={{ 
-                    margin: 0, 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '12px',
-                    fontWeight: 'bold',
-                    textTransform: 'uppercase',
-                    fontSize: '24px'
-                  }}>
-                    <SettingOutlined style={{ color: '#1890ff', fontSize: '32px' }} />
-                    ASSETS AVAILABILITY
-                  </h2>
-                  <p style={{ margin: '4px 0 0 44px', color: '#8c8c8c' }}>
-                    Real-time machine status and maintenance overview
-                  </p>
-                </div>
-              </div>
+              
 
               {/* KPI Cards Section */}
               <Row gutter={[24, 24]} style={{ marginBottom: '32px' }}>
@@ -714,11 +689,8 @@ const AssetAvailability = () => {
           <TabPane tab="Breakdown Logs" key="downtime-logs">
             <MaintenanceSection activeTab={activeTab} machineData={machineData} />
           </TabPane>
-          <TabPane tab="Shift Hours Configuration" key="shift-hours">
+          <TabPane tab="Shift Hours & Assignments" key="shift-hours">
             <MaintenanceSection activeTab={activeTab} machineData={machineData} />
-          </TabPane>
-          <TabPane tab="Machine Assignment" key="machine-assignment">
-            <MachineAssignment activeTab={activeTab} machineData={machineData} />
           </TabPane>
           <TabPane tab="Leave Logs" key="leave-logs">
             <MaintenanceSection activeTab={activeTab} machineData={machineData} />

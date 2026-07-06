@@ -23,7 +23,7 @@ const SupervisorDashboard = () => {
   };
 
   return (
-    <div className="supervisor-dashboard" style={{ background: '#f5f5f5', minHeight: '100vh' }}>
+    <div>
       {renderContent()}
     </div>
   );
