@@ -6,7 +6,7 @@ import PokaYokeReviewHistory from './PokaYokeReviewHistory';
 import { API_BASE_URL } from '../Config/auth';
 
 const PreventiveMaintenance = () => {
-  const [activeTab, setActiveTab] = useState('pending-review');
+  const [activeTab, setActiveTab] = useState('review-history');
   const [machines, setMachines] = useState([]);
   const [machinesLoading, setMachinesLoading] = useState(false);
 
