@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Table, Button, Modal, Card, Tag, message, Typography, Space, Input, Select, DatePicker, Tooltip, Empty } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, SafetyCertificateOutlined, SearchOutlined, ReloadOutlined, CheckSquareOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { API_BASE_URL } from '../Config/auth';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -45,8 +46,6 @@ const PokaYokeOperationChecklist = () => {
     action: '',
     remarks: '',
   });
-
-  const API_BASE_URL = 'http://172.18.7.89:8000/api/v1';
 
   const getSupervisorId = () => {
     const storedUser = localStorage.getItem('user');

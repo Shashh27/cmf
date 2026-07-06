@@ -3,7 +3,7 @@ import { Tabs, message } from 'antd';
 import PokaYokeChecklists from './PokaYokeChecklists';
 import PokaYokeCompletedLogs from './PokaYokeCompletedLogs';
 import PokaYokeMachineAssignments from './PokaYokeMachineAssignments';
-import config from '../../Config/config';
+import { API_BASE_URL } from '../../Config/auth';
 
 const PokaYoke = () => {
   const [activeTab, setActiveTab] = useState('checklists');
@@ -13,7 +13,7 @@ const PokaYoke = () => {
   const fetchMachines = async () => {
     setMachinesLoading(true);
     try {
-      const res = await fetch(`${config.API_BASE_URL}/machines/`);
+      const res = await fetch(`${API_BASE_URL}/machines/`);
       if (!res.ok) throw new Error('Failed to fetch machines');
       const data = await res.json();
       setMachines(Array.isArray(data) ? data : []);
@@ -25,33 +25,32 @@ const PokaYoke = () => {
   };
 
   useEffect(() => {
-    // Preload machines so dropdowns have options immediately
     fetchMachines();
   }, []);
 
   const tabItems = [
     { key: 'checklists', label: 'Checklists', children: <PokaYokeChecklists /> },
-    { 
-      key: 'machine-assignments', 
-      label: 'Machine Assignments', 
+    {
+      key: 'machine-assignments',
+      label: 'Machine Assignments',
       children: (
-        <PokaYokeMachineAssignments 
-          machines={machines} 
-          fetchMachines={fetchMachines} 
-          machinesLoading={machinesLoading} 
+        <PokaYokeMachineAssignments
+          machines={machines}
+          fetchMachines={fetchMachines}
+          machinesLoading={machinesLoading}
         />
-      ) 
+      ),
     },
-    { 
-      key: 'completion-logs', 
-      label: 'Completion Logs', 
+    {
+      key: 'submission-history',
+      label: 'Submission History',
       children: (
-        <PokaYokeCompletedLogs 
-          machines={machines} 
-          fetchMachines={fetchMachines} 
-          machinesLoading={machinesLoading} 
+        <PokaYokeCompletedLogs
+          machines={machines}
+          fetchMachines={fetchMachines}
+          machinesLoading={machinesLoading}
         />
-      ) 
+      ),
     },
   ];
 

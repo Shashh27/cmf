@@ -1,66 +1,29 @@
-import React, { useState, useEffect } from 'react';
-import { Button, Modal, Form, Select, message, Typography, Space, DatePicker, Spin, Radio, Popconfirm } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  PlusOutlined, CalendarOutlined, ReloadOutlined,
-  FileTextOutlined, CloseOutlined, CheckSquareOutlined, DeleteOutlined,
-} from '@ant-design/icons';
-import { API_BASE_URL } from '../../Config/auth';
+  Button, Modal, Form, Select, message, Typography, Space, Table, Tag, Switch, Popconfirm, Spin, Badge, Tooltip,
+} from 'antd';
+import { PlusOutlined, ReloadOutlined, DeleteOutlined, CalendarOutlined, RightOutlined } from '@ant-design/icons';
+import { motion } from 'framer-motion';
 import dayjs from 'dayjs';
+import CheckpointDetailModal from './CheckpointDetailModal';
+import {
+  PM_T, btnSharp, pmFetch, fetchChecklistDetails, getCurrentUserId, formatDate, formatDateTime,
+  machineLabel, frequencySummary, itemTypeShort, STATUS_COLORS,
+} from './pmUtils';
 
 const { Text } = Typography;
 const { Option } = Select;
 
-/* ─── Design tokens ─────────────────────────────────────────────────────── */
-const T = {
-  bg:         '#FDFBF7',      // Off-White/Cream main background
-  surface:    '#FFFFFF',
-  sidebar:    '#F5F5F5',      // Pearl White for sidebar
-  border:     '#D1D5DB',      // Bolder border color
-  borderMid:  '#E5E5E5',
-  primary:    '#4A6CF7',      // Blue for buttons (restored)
-  primaryBg:  '#EEF2FF',
-  success:    '#22C55E',
-  successBg:  '#DCFCE7',
-  warning:    '#F59E0B',
-  warningBg:  '#FEF3C7',
-  weekend:    '#F9FAFB',
-  text:       '#111827',
-  textMid:    '#374151',
-  textSub:    '#6B7280',
-  textMuted:  '#9CA3AF',
-  radius:     '12px',
-  radiusSm:   '8px',
-  shadow:     '0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05)',
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DAYS_SHORT = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+const CAL = {
+  weekend: '#F9FAFB',
+  warningBg: '#FEF3C7',
+  warningText: '#92400E',
+  radius: '12px',
 };
 
-// Mat colors for frequency indicators (more saturated/darker)
-const MAT_COLORS = {
-  Daily:   '#1E40AF',   // Darker saturated blue
-  Weekly:  '#5B21B6',   // Darker saturated purple
-  Monthly: '#B45309',   // Darker saturated orange
-  Custom:  '#059669',   // Green for custom/checkpoint-based
-};
-
-const MAT_BGS = {
-  Daily:   '#BFDBFE',
-  Weekly:  '#DDD6FE',
-  Monthly: '#FED7AA',
-  Custom:  '#A7F3D0',
-};
-
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const DAYS_SHORT = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
-
-const FREQ_COLOR = { Daily: MAT_COLORS.Daily, Weekly: MAT_COLORS.Weekly, Monthly: MAT_COLORS.Monthly };
-const FREQ_BG   = { Daily: MAT_BGS.Daily, Weekly: MAT_BGS.Weekly, Monthly: MAT_BGS.Monthly };
-
-// Purple and orange for other uses
-const T_PURPLE = '#8B5CF6';
-const T_ORANGE = '#F97316';
-const T_PURPLE_BG = '#EDE9FE';
-const T_ORANGE_BG = '#FFF0E6';
-
-/* ─── Helpers ────────────────────────────────────────────────────────────── */
 function getDaysInMonth(year, month) {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -73,893 +36,834 @@ function getDaysInMonth(year, month) {
   return cells;
 }
 
-/* ─── Calculate next due date for a checkpoint item ────────────────────────── */
-function calculateNextDueDate(item, baseDate = new Date()) {
-  if (!item.frequency_type || item.frequency_type === 'Condition Based') return null;
-  
-  const { frequency_type, interval_value, interval_unit } = item;
-  const dueDate = new Date(baseDate);
-  
-  if (frequency_type === 'Time Based' && interval_value && interval_unit) {
-    switch (interval_unit) {
-      case 'Day':
-        dueDate.setDate(dueDate.getDate() + interval_value);
-        break;
-      case 'Week':
-        dueDate.setDate(dueDate.getDate() + (interval_value * 7));
-        break;
-      case 'Month':
-        dueDate.setMonth(dueDate.getMonth() + interval_value);
-        break;
-      case 'Year':
-        dueDate.setFullYear(dueDate.getFullYear() + interval_value);
-        break;
-    }
-    return dueDate;
-  }
-  
-  return null;
-}
+const INDICATION_ORDER = ['assigned', 'condition', 'daily', 'weekly', 'monthly', 'yearly', 'usage', 'scheduled'];
 
-/* ─── Get all checkpoint due dates for a checklist ────────────────────────── */
-function getCheckpointDueDates(checklist, baseDate = new Date()) {
-  const items = checklist.items || [];
-  const dueDates = [];
-  
-  items.forEach(item => {
-    const nextDue = calculateNextDueDate(item, baseDate);
-    if (nextDue) {
-      dueDates.push({
-        item_id: item.id,
-        item_text: item.item_text,
-        frequency_type: item.frequency_type,
-        interval_value: item.interval_value,
-        interval_unit: item.interval_unit,
-        next_due: nextDue
-      });
+/** Calendar day summary — Assigned + frequency only (no Completed on dates). */
+function summarizeDayItems(items) {
+  if (!items.length) return null;
+
+  const isAssignDay = items.some((i) => i.indication === 'assigned');
+
+  if (isAssignDay) {
+    return {
+      count: items.length,
+      breakdown: [{ type: 'assigned', count: items.length }],
+    };
+  }
+
+  const byType = {};
+  items.forEach((i) => {
+    if (i.indication && i.indication !== 'completed') {
+      byType[i.indication] = (byType[i.indication] || 0) + 1;
     }
   });
-  
-  return dueDates;
+  const breakdown = INDICATION_ORDER
+    .filter((t) => byType[t])
+    .map((t) => ({ type: t, count: byType[t] }));
+
+  return breakdown.length ? { count: items.length, breakdown } : null;
 }
 
-/* ─── Frequency badge ────────────────────────────────────────────────────── */
-const FreqBadge = ({ freq }) => (
-  <span style={{
-    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
-    background: FREQ_BG[freq] || T.primaryBg,
-    color: FREQ_COLOR[freq] || T.primary,
-    letterSpacing: '0.03em', display: 'inline-block',
-  }}>{freq}</span>
-);
+const INDICATION_META = {
+  assigned: { color: '#16A34A', label: 'Assigned', bg: '#DCFCE7', glow: 'rgba(22,163,74,0.25)' },
+  condition: { color: '#9333EA', label: 'Condition', bg: '#F3E8FF', glow: 'rgba(147,51,234,0.22)' },
+  daily: { color: '#4F46E5', label: 'Daily', bg: '#EEF2FF', glow: 'rgba(79,70,229,0.22)' },
+  weekly: { color: '#D97706', label: 'Weekly', bg: '#FEF3C7', glow: 'rgba(217,119,6,0.22)' },
+  monthly: { color: '#DB2777', label: 'Monthly', bg: '#FCE7F3', glow: 'rgba(219,39,119,0.2)' },
+  yearly: { color: '#0891B2', label: 'Yearly', bg: '#CFFAFE', glow: 'rgba(8,145,178,0.2)' },
+  usage: { color: '#EA580C', label: 'Usage', bg: '#FFEDD5', glow: 'rgba(234,88,12,0.2)' },
+  scheduled: { color: '#64748B', label: 'Scheduled', bg: '#F1F5F9', glow: 'rgba(100,116,139,0.18)' },
+  completed: { color: '#2563EB', label: 'Completed', bg: '#DBEAFE', glow: 'rgba(37,99,235,0.22)' },
+};
 
-/* ─── Items Popup Modal ──────────────────────────────────────────────────── */
-const ItemsPopup = ({ visible, onClose, assignment }) => {
-  if (!assignment) return null;
-  const items = assignment.checklist?.items || [];
-  const freqColor = FREQ_COLOR[assignment.frequency] || T.primary;
-  const freqBg    = FREQ_BG[assignment.frequency]    || T.primaryBg;
+const pillVariants = {
+  hidden: { opacity: 0, scale: 0.88, y: 6 },
+  show: (i) => ({
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    transition: { delay: i * 0.06, duration: 0.22, ease: [0.22, 1, 0.36, 1] },
+  }),
+};
 
+const IndicationPill = ({ type, count, index = 0 }) => {
+  const meta = INDICATION_META[type];
+  if (!meta) return null;
   return (
-    <Modal
-      open={visible}
-      onCancel={onClose}
-      footer={null}
-      width={800}
-      centered
-      closeIcon={
-        <span style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: 28, height: 28, borderRadius: '50%', background: T.bg,
-          color: T.textSub, fontSize: 14,
-        }}>✕</span>
-      }
-      styles={{
-        content: { borderRadius: 16, overflow: 'hidden', padding: 0 },
-        body:    { padding: 0 },
-      }}
+    <motion.div
+      custom={index}
+      variants={pillVariants}
+      initial="hidden"
+      animate="show"
+      whileHover={{ scale: 1.04 }}
+      style={{ display: 'inline-block' }}
     >
-      {/* Header */}
-      <div style={{
-        background: `linear-gradient(135deg, ${freqColor}18 0%, ${freqColor}08 100%)`,
-        borderBottom: `1px solid ${T.border}`,
-        padding: '20px 24px 16px',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-            background: freqBg, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: `0 2px 8px ${freqColor}20`,
-          }}>
-            <FileTextOutlined style={{ color: freqColor, fontSize: 18 }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: T.text, lineHeight: 1.3 }}>
-              {assignment.checklistName}
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-              <FreqBadge freq={assignment.frequency} />
-              {assignment.nextDueDate && (
-                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 8px', fontWeight: 500 }}>
-                  📅 Due: {new Date(assignment.nextDueDate).toLocaleDateString()}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          fontSize: 12, color: T.textSub, fontWeight: 500,
+      <Badge
+        count={count}
+        size="small"
+        overflowCount={99}
+        style={{
+          backgroundColor: meta.color,
+          fontSize: 9,
+          fontWeight: 700,
+          boxShadow: `0 2px 6px ${meta.glow}`,
+        }}
+        offset={[6, -4]}
+      >
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          fontSize: 10,
+          fontWeight: 600,
+          lineHeight: 1.2,
+          padding: '3px 8px',
+          borderRadius: 16,
+          color: meta.color,
+          background: `linear-gradient(135deg, ${meta.bg} 0%, #fff 120%)`,
+          border: `1px solid ${meta.color}28`,
+          boxShadow: `0 2px 8px ${meta.glow}`,
+          whiteSpace: 'nowrap',
         }}>
-          <CheckSquareOutlined style={{ color: freqColor }} />
-          <span>{items.length} checklist item{items.length !== 1 ? 's' : ''}</span>
-        </div>
-      </div>
-
-      {/* Items list - vertical table format */}
-      <div style={{ padding: '16px 20px 20px', maxHeight: 420, overflowY: 'auto' }}>
-        {items.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px 16px', color: T.textMuted }}>
-            <div style={{ fontSize: 32, marginBottom: 10, opacity: 0.4 }}>📋</div>
-            <div style={{ fontSize: 13, fontWeight: 500 }}>No items found</div>
-            <div style={{ fontSize: 12, marginTop: 4 }}>This checklist has no items configured</div>
-          </div>
-        ) : (
-          <div>
-            {items.map((item, i) => (
-              <div key={item.id || i} style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '12px 14px',
-                marginBottom: 6,
-                background: i % 2 === 0 ? T.bg : T.surface,
-                borderRadius: 8,
-                border: `1px solid ${T.border}`,
-                transition: 'box-shadow 0.15s',
-              }}>
-                {/* Index badge */}
-                <span style={{
-                  minWidth: 28, height: 28, borderRadius: '50%',
-                  background: freqBg, color: freqColor,
-                  fontSize: 12, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0,
-                }}>{i + 1}</span>
-
-                {/* Item text */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 4, lineHeight: 1.4 }}>
-                    {item.item_text || `Item ${i + 1}`}
-                  </div>
-                 {/* Metadata badges */}
-<div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-  {item.frequency_type && (
-    <span style={{ 
-      fontSize: 10, 
-      color: item.frequency_type === 'Time Based' ? T.primary : T_ORANGE, 
-      background: item.frequency_type === 'Time Based' ? '#E0E7FF' : T_ORANGE_BG, 
-      borderRadius: 4, padding: '2px 6px', fontWeight: 600 
-    }}>
-      {item.frequency_type}
-    </span>
-  )}
-  {item.frequency_type === 'Time Based' && item.interval_value && item.interval_unit && (
-    <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
-      Every {item.interval_value} {item.interval_unit}{item.interval_value > 1 ? 's' : ''}
-    </span>
-  )}
-  {item.frequency_type === 'Condition Based' && item.interval_value && item.interval_unit && (
-    <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
-      Every {item.interval_value} {item.interval_unit}{item.interval_value > 1 ? 's' : ''}
-    </span>
-  )}
-  {item.item_type && (
-    <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
-      {item.item_type}
-    </span>
-  )}
-  {item.expected_value && (
-    <span style={{ fontSize: 10, color: T.primary, background: '#E0E7FF', borderRadius: 4, padding: '2px 6px', fontWeight: 500 }}>
-      Expected: {item.expected_value}
-    </span>
-  )}
-  {item.is_required && (
-    <span style={{ fontSize: 10, color: '#EF4444', background: '#FEF2F2', borderRadius: 4, padding: '2px 6px', fontWeight: 600 }}>
-      Required
-    </span>
-  )}
-</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div style={{ borderTop: `1px solid ${T.border}`, padding: '12px 20px', textAlign: 'right' }}>
-        <Button onClick={onClose} style={{ borderRadius: 8, fontWeight: 600 }}>Close</Button>
-      </div>
-    </Modal>
+          <motion.span
+            animate={{ scale: [1, 1.15, 1] }}
+            transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: '50%',
+              background: meta.color,
+              flexShrink: 0,
+              boxShadow: `0 0 0 3px ${meta.bg}`,
+            }}
+          />
+          {meta.label}
+        </span>
+      </Badge>
+    </motion.div>
   );
 };
 
-/* ─── Assignment detail card (side panel) ────────────────────────────────── */
-const AssignmentCard = ({ assignment, onViewItems, onDelete }) => (
-  <div
-    style={{
-      background: T.surface, border: `1px solid ${T.border}`,
-      borderRadius: T.radiusSm, padding: '12px 14px', marginBottom: 8,
-      borderLeft: `3px solid ${FREQ_COLOR[assignment.frequency] || T.primary}`,
-      transition: 'box-shadow 0.15s, transform 0.15s',
-    }}
-    onMouseEnter={e => {
-      e.currentTarget.style.boxShadow = T.shadow;
-      e.currentTarget.style.transform = 'translateY(-1px)';
-    }}
-    onMouseLeave={e => {
-      e.currentTarget.style.boxShadow = 'none';
-      e.currentTarget.style.transform = 'translateY(0)';
-    }}
-  >
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-      <div 
-        onClick={() => onViewItems(assignment)}
-        style={{
-          flex: 1, minWidth: 0, cursor: 'pointer',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-            background: FREQ_BG[assignment.frequency] || T.primaryBg,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <FileTextOutlined style={{ color: FREQ_COLOR[assignment.frequency] || T.primary, fontSize: 14 }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 6, lineHeight: 1.3 }}>
-              {assignment.checklistName}
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
-              <FreqBadge freq={assignment.frequency} />
-              {assignment.nextDueDate && (
-                <span style={{ fontSize: 10, color: T.textSub, background: '#F3F4F6', borderRadius: 99, padding: '2px 7px', fontWeight: 500 }}>
-                  📅 Due: {new Date(assignment.nextDueDate).toLocaleDateString()}
-                </span>
-              )}
-              {/* Items badge */}
-              <span style={{
-                fontSize: 10, color: T.success,
-                background: T.successBg,
-                border: `1px solid ${T.success}40`,
-                borderRadius: 99, padding: '2px 9px', fontWeight: 600,
-                display: 'flex', alignItems: 'center', gap: 4,
-              }}>
-                <CheckSquareOutlined style={{ fontSize: 9 }} />
-                {assignment.itemsCount} Items
-              </span>
-            </div>
-          </div>
+const DayCellIndicators = ({ summary }) => {
+  if (!summary?.breakdown?.length) return null;
+  const { breakdown, count } = summary;
+  const visible = breakdown.slice(0, 2);
+  const extra = breakdown.length - visible.length;
+
+  const tooltipLines = breakdown.map(
+    ({ type, count: c }) => `${INDICATION_META[type].label}: ${c}`
+  );
+
+  return (
+    <Tooltip
+      title={(
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{count} checkpoint(s)</div>
+          {tooltipLines.map((line) => <div key={line}>{line}</div>)}
+          <div style={{ marginTop: 4, opacity: 0.85 }}>Click for details</div>
         </div>
-      </div>
-      
-      {/* Delete button */}
-      <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-        <Popconfirm
-          title="Delete Assignment"
-          description={`Are you sure you want to delete the assignment "${assignment.checklistName}"? This action cannot be undone.`}
-          onConfirm={() => onDelete(assignment)}
-          okText="Delete"
-          cancelText="Cancel"
-          okButtonProps={{ danger: true }}
-        >
-          <Button
-            type="text"
-            size="small"
-            icon={<DeleteOutlined />}
-            style={{
-              color: '#EF4444',
-              borderColor: '#EF4444',
-              borderRadius: 6,
-              padding: '4px 8px',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background = '#FEF2F2';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = 'transparent';
-            }}
-          />
-        </Popconfirm>
-      </div>
-    </div>
-  </div>
-);
-
-/* ─── Main Component ──────────────────────────────────────────────────────── */
-const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoading }) => {
-  const [checklists, setChecklists]               = useState([]);
-  const [assignments, setAssignments]             = useState([]);
-  const [loading, setLoading]                     = useState(false);
-  const [checklistsLoading, setChecklistsLoading] = useState(false);
-  const [selectedMachine, setSelectedMachine]     = useState(null);
-  const [assignModalVisible, setAssignModalVisible] = useState(false);
-  const [selectedDate, setSelectedDate]           = useState(null);
-  const [selectedDateAssignments, setSelectedDateAssignments] = useState([]);
-  const [itemsPopupVisible, setItemsPopupVisible] = useState(false);
-  const [activeAssignment, setActiveAssignment]   = useState(null);
-  const [calendarMode, setCalendarMode]           = useState('month');
-
-  const today = dayjs();
-  const [viewYear, setViewYear]   = useState(today.year());
-  const [viewMonth, setViewMonth] = useState(today.month());
-  const [form] = Form.useForm();
-
-  useEffect(() => {
-    if (selectedMachine) fetchMachineAssignments(selectedMachine);
-  }, [selectedMachine]);
-
-  const fetchChecklists = async () => {
-    setChecklistsLoading(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/`);
-      if (!res.ok) throw new Error('Failed to fetch checklists');
-      setChecklists(await res.json());
-    } catch (e) { message.error('Failed to fetch checklists: ' + e.message); }
-    finally { setChecklistsLoading(false); }
-  };
-
-  const fetchMachineAssignments = async (machineId) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/machines/${machineId}/assignments`);
-      if (!res.ok) throw new Error('Failed to fetch assignments');
-      const data = await res.json();
-      setAssignments(data.map(a => {
-        // Calculate earliest due date from checkpoint items
-        const items = a.checklist?.items || [];
-        let earliestDue = null;
-        let dueFrequency = null;
-        
-        items.forEach(item => {
-          if (item.frequency_type && item.frequency_type !== 'Condition Based' && item.interval_value && item.interval_unit) {
-            const baseDate = a.next_due_date ? new Date(a.next_due_date) : new Date();
-            const dueDate = new Date(baseDate);
-            
-            if (item.frequency_type === 'Time Based') {
-              switch (item.interval_unit) {
-                case 'Day':
-                  dueDate.setDate(dueDate.getDate() + item.interval_value);
-                  break;
-                case 'Week':
-                  dueDate.setDate(dueDate.getDate() + (item.interval_value * 7));
-                  break;
-                case 'Month':
-                  dueDate.setMonth(dueDate.getMonth() + item.interval_value);
-                  break;
-                case 'Year':
-                  dueDate.setFullYear(dueDate.getFullYear() + item.interval_value);
-                  break;
-              }
-              
-              if (!earliestDue || dueDate < earliestDue) {
-                earliestDue = dueDate;
-                dueFrequency = item.interval_unit;
-              }
-            }
-          }
-        });
-        
-        return {
-          ...a,
-          checklistName: a.checklist?.name || 'Unknown',
-          itemsCount:    a.checklist?.items?.length || 0,
-          assignedDate:  new Date(a.assigned_at),
-          nextDueDate: earliestDue,
-          frequency: dueFrequency || 'Custom',
-        };
-      }));
-    } catch (e) { message.error('Failed to fetch assignments: ' + e.message); }
-    finally { setLoading(false); }
-  };
-
-  const handleAssignChecklist = async (values) => {
-    if (!values.machine_ids || values.machine_ids.length === 0) {
-      message.error('Please select at least one machine');
-      return;
-    }
-    if (!values.checklist_ids || values.checklist_ids.length === 0) {
-      message.error('Please select at least one checklist');
-      return;
-    }
-    try {
-      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/assignments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          machine_ids: values.machine_ids,
-          checklist_ids: values.checklist_ids,
-          next_due_date: values.next_due_date || null,
-          active: true,
-        }),
-      });
-      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Failed'); }
-      message.success('Checklist assigned successfully');
-      setAssignModalVisible(false);
-      form.resetFields();
-      // Refresh assignments for all selected machines
-      values.machine_ids.forEach(machineId => fetchMachineAssignments(machineId));
-    } catch (e) { message.error('Failed to assign checklist: ' + e.message); }
-  };
-
- const getAssignmentsForDate = (year, month, day, isWeekend, dow) => {
-  if (isWeekend || !assignments.length) return [];
-  const targetDate = new Date(year, month, day);
-  return assignments.filter(a => {
-    const nextDue = a.nextDueDate ? new Date(a.nextDueDate) : null;
-    const assigned = a.assignedDate ? new Date(a.assignedDate) : null;
-    
-    // Check if either due date or assigned date matches
-    const matchesDue = nextDue && 
-      nextDue.getDate() === day && 
-      nextDue.getMonth() === month && 
-      nextDue.getFullYear() === year;
-    
-    const matchesAssigned = assigned &&
-      assigned.getDate() === day &&
-      assigned.getMonth() === month &&
-      assigned.getFullYear() === year;
-    
-    return matchesDue || matchesAssigned;
-  });
+      )}
+      placement="top"
+    >
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2 }}
+        style={{ display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-start', width: '100%' }}
+      >
+        {visible.map(({ type, count: c }, i) => (
+          <IndicationPill key={type} type={type} count={c} index={i} />
+        ))}
+        {extra > 0 && (
+          <span style={{ fontSize: 9, color: '#94A3B8', fontWeight: 600, paddingLeft: 2 }}>
+            +{extra} more
+          </span>
+        )}
+      </motion.div>
+    </Tooltip>
+  );
 };
 
-  const handleDateClick = (year, month, day) => {
-    const d = dayjs(new Date(year, month, day));
-    setSelectedDate(d);
-    const dow = d.day();
-    const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
-    setSelectedDateAssignments(isWeekend ? [] : getAssignmentsForDate(year, month, day, false, dow));
-  };
+function isConditionBased(ci) {
+  return ci?.frequency_type === 'Condition Based';
+}
 
-  const handleViewItems = async (assignment) => {
-    try {
-      // Fetch items using the specific items endpoint
-      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/${assignment.checklist_id}/items`);
-      if (!res.ok) throw new Error('Failed to fetch checklist items');
-      const itemsData = await res.json();
-      
-      // Update assignment with items
-      const updatedAssignment = {
-        ...assignment,
-        checklist: {
-          ...assignment.checklist,
-          items: itemsData || [],
-        },
-      };
-      
-      setActiveAssignment(updatedAssignment);
-      setItemsPopupVisible(true);
-    } catch (e) {
-      message.error('Failed to load checklist items: ' + e.message);
-    }
-  };
+/** Time Based every 1 Day */
+function isTimeDaily(ci) {
+  return ci?.frequency_type === 'Time Based' && ci.interval_value === 1 && ci.interval_unit === 'Day';
+}
 
-  const handleDeleteAssignment = async (assignment) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/pokayoke-checklists/assignments/${assignment.id}`, {
-        method: 'DELETE',
+/** Shown every day from assignment (condition or time-daily) */
+function isEveryDayCheckpoint(ci) {
+  return isConditionBased(ci) || isTimeDaily(ci);
+}
+
+/** Map checkpoint frequency to calendar indication key */
+function getFrequencyIndication(ci) {
+  if (!ci) return 'scheduled';
+  if (isConditionBased(ci)) return 'condition';
+  if (isTimeDaily(ci)) return 'daily';
+  if (ci.frequency_type === 'Usage Based') return 'usage';
+  const iu = ci.interval_unit;
+  if (iu === 'Week') return 'weekly';
+  if (iu === 'Month') return 'monthly';
+  if (iu === 'Year') return 'yearly';
+  if (iu === 'Day') return 'daily';
+  return 'scheduled';
+}
+
+function isScheduledDueOnDate(ci, schedule, dateKey) {
+  if (!ci || !schedule?.next_due_date || isEveryDayCheckpoint(ci)) return false;
+  const due = dayjs(schedule.next_due_date);
+  const target = dayjs(dateKey);
+  if (target.isBefore(due, 'day')) return false;
+
+  if (ci.frequency_type === 'Usage Based') {
+    return target.isSame(due, 'day');
+  }
+
+  const iv = ci.interval_value || 1;
+  const iu = ci.interval_unit || 'Day';
+
+  if (iu === 'Day') {
+    const days = target.diff(due, 'day');
+    return days >= 0 && days % iv === 0;
+  }
+  if (iu === 'Week') {
+    if (target.day() !== due.day()) return false;
+    const weeks = target.diff(due.startOf('week'), 'week');
+    const dueWeeks = due.diff(due.startOf('week'), 'week');
+    return weeks >= dueWeeks && (weeks - dueWeeks) % iv === 0;
+  }
+  if (iu === 'Month') {
+    if (target.date() !== due.date()) return false;
+    const months = target.diff(due, 'month');
+    return months >= 0 && months % iv === 0;
+  }
+  if (iu === 'Year') {
+    if (target.month() !== due.month() || target.date() !== due.date()) return false;
+    const years = target.diff(due, 'year');
+    return years >= 0 && years % iv === 0;
+  }
+  return target.isSame(due, 'day');
+}
+
+/** Checkpoints visible on a calendar day with indication type */
+export function getCheckpointsForDate(assignments, submissions, date) {
+  const dateKey = dayjs(date).format('YYYY-MM-DD');
+  const items = [];
+
+  assignments.forEach((assignment) => {
+    const assignedDay = dayjs(assignment.assigned_at).format('YYYY-MM-DD');
+    if (dateKey < assignedDay) return;
+
+    const checklistName = assignment.checklist?.name || assignment.checklistName || '';
+    const isAssignDay = dateKey === assignedDay;
+
+    (assignment.assignment_items || []).forEach((ai) => {
+      const ci = ai.checklist_item;
+      if (!ci) return;
+
+      const isCondition = isConditionBased(ci);
+      const isDaily = isTimeDaily(ci);
+      let indication = null;
+
+      if (isAssignDay) {
+        indication = 'assigned';
+      } else if (isCondition) {
+        indication = 'condition';
+      } else if (isDaily) {
+        indication = 'daily';
+      } else if (isScheduledDueOnDate(ci, ai.schedule, dateKey)) {
+        indication = getFrequencyIndication(ci);
+      }
+
+      if (!indication) return;
+
+      const daySubs = (submissions || []).filter(
+        (s) => s.assignment_item_id === ai.id && dayjs(s.submitted_at).format('YYYY-MM-DD') === dateKey
+      );
+      const allItemSubs = (submissions || []).filter((s) => s.assignment_item_id === ai.id);
+      const latestSub = daySubs[daySubs.length - 1];
+      let submissionStatus = null;
+      if (latestSub) {
+        if (latestSub.status === 'Approved') submissionStatus = 'completed';
+        else if (latestSub.status === 'Submitted') submissionStatus = 'submitted';
+        else if (latestSub.status === 'Rejected') submissionStatus = 'rejected';
+      }
+
+      items.push({
+        key: `${indication}-${assignment.id}-${ai.id}-${dateKey}`,
+        indication,
+        submissionStatus,
+        assignment,
+        assignmentItem: ai,
+        checkpointName: ci.item_text || 'Checkpoint',
+        checklistName,
+        submissions: daySubs,
+        hasSubmissions: allItemSubs.length > 0,
+        dueDay: ai.schedule?.next_due_date,
+        dateKey,
       });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Failed to delete assignment');
-      }
-      message.success('Assignment deleted successfully');
-      
-      // Refresh assignments for the selected machine
-      if (selectedMachine) {
-        fetchMachineAssignments(selectedMachine);
-      }
-      
-      // Update selected date assignments if needed
-      if (selectedDate) {
-        const dow = selectedDate.day();
-        const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
-        if (!isWeekend) {
-          const updatedAssignments = getAssignmentsForDate(
-            selectedDate.year(),
-            selectedDate.month(),
-            selectedDate.date(),
-            false,
-            dow
-          );
-          setSelectedDateAssignments(updatedAssignments);
-        }
-      }
+    });
+  });
+
+  const order = { assigned: 0, condition: 1, daily: 2, weekly: 3, monthly: 4, yearly: 5, usage: 6, scheduled: 7 };
+  items.sort((a, b) => {
+    const oa = order[a.indication] ?? 9;
+    const ob = order[b.indication] ?? 9;
+    if (oa !== ob) return oa - ob;
+    return a.checkpointName.localeCompare(b.checkpointName);
+  });
+
+  return items;
+}
+
+const CheckpointListCard = ({ item, onClick, onDelete, active }) => {
+  const meta = INDICATION_META[item.indication] || INDICATION_META.scheduled;
+  const latestSub = item.submissions[item.submissions.length - 1];
+
+  const statusTag = (() => {
+    if (!latestSub) return null;
+    if (latestSub.status === 'Approved') {
+      return <Tag color="success" style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 0 }}>Completed</Tag>;
+    }
+    return (
+      <Tag color={STATUS_COLORS[latestSub.status] || 'default'} style={{ margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 0 }}>
+        {latestSub.status}
+      </Tag>
+    );
+  })();
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onClick(); }}
+      style={{
+        background: active ? PM_T.primaryBg : '#fff',
+        border: `1px solid ${active ? PM_T.primary : PM_T.border}`,
+        borderLeft: `3px solid ${meta.color}`,
+        padding: '6px 8px',
+        marginBottom: 4,
+        cursor: 'pointer',
+        transition: 'background 0.12s',
+      }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = '#F8FAFF'; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = '#fff'; }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+          <Text strong style={{ fontSize: 12, lineHeight: 1.2 }} ellipsis>{item.checkpointName}</Text>
+          <Tag style={{
+            margin: 0, fontSize: 9, lineHeight: '14px', padding: '0 5px', borderRadius: 8,
+            border: `1px solid ${meta.color}40`, background: meta.bg, color: meta.color,
+          }}>
+            {meta.label}
+          </Tag>
+          {statusTag}
+        </div>
+        <Space size={2} onClick={(e) => e.stopPropagation()}>
+          {onDelete && !item.hasSubmissions && (
+            <Popconfirm title="Remove from machine?" onConfirm={() => onDelete(item)}>
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} style={{ ...btnSharp, padding: 0, width: 22, height: 22 }} />
+            </Popconfirm>
+          )}
+          <RightOutlined style={{ color: PM_T.textMuted, fontSize: 10 }} />
+        </Space>
+      </div>
+      <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 2, lineHeight: 1.2 }} ellipsis>
+        {item.checklistName}
+      </Text>
+    </div>
+  );
+};
+
+const PokaYokeMachineAssignments = ({ machines = [], fetchMachines, machinesLoading }) => {
+  const [assignments, setAssignments] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
+  const [checklists, setChecklists] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedMachine, setSelectedMachine] = useState(null);
+  const [selectedChecklistFilter, setSelectedChecklistFilter] = useState(null);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(dayjs());
+  const [viewYear, setViewYear] = useState(dayjs().year());
+  const [viewMonth, setViewMonth] = useState(dayjs().month());
+  const [checkpointConfig, setCheckpointConfig] = useState([]);
+  const [detailItem, setDetailItem] = useState(null);
+  const [form] = Form.useForm();
+
+  const assignedChecklists = useMemo(() => {
+    const map = new Map();
+    assignments.forEach((a) => {
+      const id = a.checklist_id || a.checklist?.id;
+      const name = a.checklist?.name || a.checklistName;
+      if (id) map.set(id, name);
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [assignments]);
+
+  const filteredAssignments = useMemo(() => {
+    if (!selectedChecklistFilter) return assignments;
+    return assignments.filter(
+      (a) => (a.checklist_id || a.checklist?.id) === selectedChecklistFilter
+    );
+  }, [assignments, selectedChecklistFilter]);
+
+  const filteredSubmissions = useMemo(() => {
+    if (!selectedChecklistFilter) return submissions;
+    const itemIds = new Set();
+    filteredAssignments.forEach((a) => {
+      (a.assignment_items || []).forEach((ai) => itemIds.add(ai.id));
+    });
+    return submissions.filter((s) => itemIds.has(s.assignment_item_id));
+  }, [submissions, selectedChecklistFilter, filteredAssignments]);
+
+  const selectedDayItems = useMemo(
+    () => getCheckpointsForDate(filteredAssignments, filteredSubmissions, selectedDate),
+    [filteredAssignments, filteredSubmissions, selectedDate]
+  );
+
+  const dateLabel = useMemo(() => {
+    if (selectedDate.isSame(dayjs(), 'day')) return 'Today';
+    if (selectedDate.isSame(dayjs().add(1, 'day'), 'day')) return 'Tomorrow';
+    return selectedDate.format('DD MMM YYYY');
+  }, [selectedDate]);
+
+  const calendarCells = useMemo(() => getDaysInMonth(viewYear, viewMonth), [viewYear, viewMonth]);
+
+  const getDaySummary = (year, month, day, cur) => {
+    if (!cur) return null;
+    const items = getCheckpointsForDate(
+      filteredAssignments,
+      filteredSubmissions,
+      dayjs(new Date(year, month, day))
+    );
+    return summarizeDayItems(items);
+  };
+
+  const handleDateClick = (year, month, day, cur) => {
+    if (!cur) return;
+    setSelectedDate(dayjs(new Date(year, month, day)));
+    setDetailItem(null);
+  };
+
+  useEffect(() => {
+    if (selectedMachine) loadAssignments(selectedMachine);
+    else {
+      setAssignments([]);
+      setSubmissions([]);
+    }
+    setSelectedChecklistFilter(null);
+  }, [selectedMachine]);
+
+  const loadChecklists = async () => {
+    try {
+      setChecklists(await pmFetch('/checklists'));
     } catch (e) {
-      message.error('Failed to delete assignment: ' + e.message);
+      message.error(e.message);
     }
   };
 
-  const cells = getDaysInMonth(viewYear, viewMonth);
-  const machineName = machines.find(m => m.id === selectedMachine);
-  const machineLabel = machineName ? `${machineName.make} - ${machineName.model || 'N/A'}` : '';
+  const loadAssignments = async (machineId) => {
+    if (!machineId) return;
+    setLoading(true);
+    try {
+      const [data, submissionData] = await Promise.all([
+        pmFetch(`/assignments?machine_id=${machineId}`),
+        pmFetch(`/machines/${machineId}/submissions`),
+      ]);
+      const enriched = await Promise.all(
+        data.map(async (a) => {
+          const detail = await pmFetch(`/assignments/${a.id}`);
+          return {
+            ...detail,
+            checklistName: detail.checklist?.name || 'Unknown',
+            itemsCount: detail.assignment_items?.length || 0,
+          };
+        })
+      );
+      setAssignments(enriched);
+      setSubmissions(submissionData || []);
+    } catch (e) {
+      message.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  /* ─── Calendar cell ─────────────────────────────────────────────────────── */
-  const renderCell = ({ day, cur }, idx) => {
+  const handleDeleteCheckpoint = async (item) => {
+    const assignmentId = item.assignment?.id;
+    const assignmentItemId = item.assignmentItem?.id;
+    if (!assignmentId || !assignmentItemId) return;
+    if (item.hasSubmissions) {
+      message.warning('Cannot remove checkpoint after operator has submitted a response');
+      return;
+    }
+
+    try {
+      await pmFetch(`/assignments/${assignmentId}/items/${assignmentItemId}`, { method: 'DELETE' });
+      message.success('Checkpoint removed from machine');
+      if (selectedMachine) loadAssignments(selectedMachine);
+    } catch (e) {
+      message.error(e.message);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (!selectedMachine) return;
+    await loadAssignments(selectedMachine);
+    message.success('Refreshed');
+  };
+
+  const onChecklistChange = async (checklistId) => {
+    if (!checklistId) return setCheckpointConfig([]);
+    try {
+      const detail = await fetchChecklistDetails(checklistId);
+      setCheckpointConfig(
+        (detail.items || []).map((item) => ({
+          ...item,
+          checklist_item_id: item.id,
+          is_required: true,
+        }))
+      );
+    } catch (e) {
+      message.error(e.message);
+    }
+  };
+
+  const handleAssign = async (values) => {
+    if (!checkpointConfig.length) return message.error('Checklist has no checkpoints');
+    const toAssign = checkpointConfig.filter((c) => c.is_required);
+    if (!toAssign.length) return message.error('Select at least one checkpoint to assign');
+    const machineIds = values.machine_ids || [];
+    if (!machineIds.length) return message.error('Select at least one machine');
+
+    let ok = 0;
+    for (const machineId of machineIds) {
+      try {
+        await pmFetch('/assignments', {
+          method: 'POST',
+          body: JSON.stringify({
+            machine_id: machineId,
+            checklist_id: values.checklist_id,
+            assigned_by: getCurrentUserId(),
+            items: checkpointConfig.map((c) => ({
+              checklist_item_id: c.checklist_item_id,
+              is_required: c.is_required,
+            })),
+          }),
+        });
+        ok++;
+      } catch (e) {
+        message.error(`Machine ${machineLabel(machines.find((m) => m.id === machineId))}: ${e.message}`);
+      }
+    }
+    if (ok) message.success(`Assigned to ${ok} machine(s)`);
+    setAssignOpen(false);
+    form.resetFields();
+    setCheckpointConfig([]);
+    if (selectedMachine) loadAssignments(selectedMachine);
+    else if (machineIds.length === 1) setSelectedMachine(machineIds[0]);
+  };
+
+  const legendItems = ['assigned', 'condition', 'daily', 'weekly', 'monthly', 'yearly', 'usage'];
+
+  const renderCalendarCell = ({ day, cur }, idx) => {
     const date = new Date(viewYear, cur ? viewMonth : (idx < 7 ? viewMonth - 1 : viewMonth + 1), day);
     const dow = date.getDay();
-    const isWeekend = dow === 0; // Only Sunday is weekend, Saturday is included in weekly
+    const isSunday = dow === 0;
+    const today = dayjs();
     const isToday = cur && day === today.date() && viewMonth === today.month() && viewYear === today.year();
-    const isSelected = selectedDate && cur
+    const isSelected = cur && selectedDate
       && selectedDate.date() === day
       && selectedDate.month() === viewMonth
       && selectedDate.year() === viewYear;
 
-    const cellAssignments = cur ? getAssignmentsForDate(viewYear, viewMonth, day, isWeekend, dow) : [];
-    const count = cellAssignments.length;
-
-    // Group frequencies for mini pills
-    const freqs = cur && !isWeekend && count > 0
-      ? [...new Set(cellAssignments.map(a => a.frequency || 'Custom'))]
-      : [];
-
-    // Dominant dot color
-    const dominant = freqs.includes('Daily') ? 'Daily'
-      : freqs.includes('Weekly') ? 'Weekly'
-      : freqs.includes('Monthly') ? 'Monthly' 
-      : freqs.includes('Custom') ? 'Custom' : null;
+    const summary = cur ? getDaySummary(viewYear, viewMonth, day, cur) : null;
 
     return (
       <div
         key={idx}
-        onClick={() => cur && handleDateClick(viewYear, viewMonth, day)}
+        onClick={() => handleDateClick(viewYear, viewMonth, day, cur)}
         style={{
           position: 'relative',
-          minHeight: 85,
-          padding: '8px 10px',
-          borderRadius: 0,
-          background: isSelected ? '#EEF2FF'
-            : isWeekend && cur ? T.weekend
-            : cur ? T.surface : 'transparent',
-          border: 'none',
-          borderRight: `1px solid ${T.border}`,
-          borderBottom: `1px solid ${T.border}`,
-          cursor: cur && !isWeekend ? 'pointer' : 'default',
-          opacity: cur ? 1 : 0.3,
-          outline: isSelected ? `2px solid ${T.primary}` : isToday ? `2px solid ${T.primary}` : 'none',
-          outlineOffset: isSelected ? '-2px' : '-2px',
+          height: '100%',
+          minHeight: 88,
+          padding: '5px 6px 6px',
+          background: isSelected ? PM_T.primaryBg
+            : isSunday && cur ? CAL.weekend
+            : cur ? '#fff' : 'transparent',
+          borderRight: `1px solid ${PM_T.border}`,
+          borderBottom: `1px solid ${PM_T.border}`,
+          cursor: cur ? 'pointer' : 'default',
+          opacity: cur ? 1 : 0.35,
+          outline: isSelected ? `2px solid ${PM_T.primary}` : isToday ? `2px solid ${PM_T.primary}` : 'none',
+          outlineOffset: -2,
           transition: 'background 0.12s',
         }}
-        onMouseEnter={e => {
-          if (cur && !isSelected && !isWeekend) e.currentTarget.style.background = '#F5F7FF';
+        onMouseEnter={(e) => {
+          if (cur && !isSelected) e.currentTarget.style.background = '#F5F7FF';
         }}
-        onMouseLeave={e => {
-          if (cur && !isSelected) e.currentTarget.style.background =
-            isWeekend ? T.weekend : T.surface;
+        onMouseLeave={(e) => {
+          if (cur && !isSelected) {
+            e.currentTarget.style.background = isSunday ? CAL.weekend : '#fff';
+          }
         }}
       >
-        {/* Day number */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <span style={{
-            fontSize: 13, fontWeight: isToday ? 700 : 500,
-            color: isToday ? T.surface : isWeekend ? T.textMuted : T.textMid,
-            width: 26, height: 26, borderRadius: '50%',
-            background: isToday ? T.primary : 'transparent',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>{day}</span>
-          {isWeekend && cur && (
+            fontSize: 13,
+            fontWeight: isToday ? 700 : 500,
+            color: isToday ? '#fff' : isSunday ? PM_T.textMuted : PM_T.textMid,
+            width: 26,
+            height: 26,
+            borderRadius: '50%',
+            background: isToday ? PM_T.primary : 'transparent',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            {day}
+          </span>
+          {isSunday && cur && (
             <span style={{
-              fontSize: 9, fontWeight: 700, color: '#92400E',
-              background: T.warningBg, borderRadius: 4, padding: '1px 5px',
-            }}>OFF</span>
+              fontSize: 9, fontWeight: 700, color: CAL.warningText,
+              background: CAL.warningBg, borderRadius: 4, padding: '1px 5px',
+            }}>
+              OFF
+            </span>
           )}
         </div>
 
-        {/* Assignments block – matches the image layout */}
-        {cur && !isWeekend && count > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {/* Dot + "Assignments" label */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{
-                width: 8, height: 8, borderRadius: '50%',
-                background: FREQ_COLOR[dominant] || T.primary,
-                flexShrink: 0,
-                boxShadow: `0 0 0 2px ${FREQ_BG[dominant] || T.primaryBg}`,
-              }} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: T.textMid }}>Assignments</span>
-            </div>
-            {/* Frequency pills */}
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-              {freqs.map(f => (
-                <span key={f} style={{
-                  fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 3,
-                  background: FREQ_BG[f], color: FREQ_COLOR[f],
-                  letterSpacing: '0.02em',
-                }}>{f}</span>
-              ))}
-            </div>
-          </div>
+        {cur && summary && (
+          <DayCellIndicators summary={summary} />
         )}
       </div>
     );
   };
 
-  /* ─── Render ─────────────────────────────────────────────────────────────── */
   return (
-    <div style={{ padding: 0, fontFamily: "'DM Sans', 'Inter', system-ui, sans-serif", background: T.bg }}>
-
-      {/* ── Top bar ── */}
-      <div style={{
-        background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
-        padding: '10px 14px', marginBottom: 10, boxShadow: T.shadow,
-        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-      }}>
-        <Text strong style={{ fontSize: 13, color: T.textMid, whiteSpace: 'nowrap' }}>Select Machine:</Text>
-        <div style={{ flex: '1 1 280px', minWidth: 220 }}>
-          <Select
-            showSearch
-            placeholder="Choose a machine to view assignments"
-            loading={machinesLoading}
-            onFocus={fetchMachines}
-            style={{ width: '100%' }}
-            value={selectedMachine}
-            onChange={setSelectedMachine}
-            filterOption={(input, opt) =>
-              (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
-                .toString().toLowerCase().includes(input.toLowerCase())
-            }
-          >
-            {machines.map(m => (
-              <Option key={m.id} value={m.id}>{m.make} - {m.model || 'N/A'}</Option>
-            ))}
+    <div>
+      <Space wrap style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
+        <Space wrap>
+          <Text strong>Machine:</Text>
+          <Select showSearch placeholder="Select machine" style={{ width: 240 }} loading={machinesLoading}
+            value={selectedMachine} onFocus={fetchMachines} onChange={setSelectedMachine} optionFilterProp="children">
+            {machines.map((m) => <Option key={m.id} value={m.id}>{machineLabel(m)}</Option>)}
           </Select>
-        </div>
-        {selectedMachine && (
-          <span style={{
-            fontSize: 12, fontWeight: 600, color: T.primary,
-            background: T.primaryBg, borderRadius: 99, padding: '4px 12px',
-          }}>{machineLabel}</span>
-        )}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => selectedMachine ? fetchMachineAssignments(selectedMachine) : fetchMachines()}
-            loading={loading}
-            style={{ borderRadius: 8 }}
-          >Refresh</Button>
-          <Button
-            type="primary" icon={<PlusOutlined />}
-            onClick={() => {
-              fetchChecklists();
-              fetchMachines();
-              // Pre-select the currently selected machine if any
-              if (selectedMachine) {
-                form.setFieldsValue({ machine_ids: [selectedMachine] });
-              } else {
-                form.setFieldsValue({ machine_ids: [] });
-              }
-              setAssignModalVisible(true);
-            }}
-            style={{ background: T.primary, borderColor: T.primary, borderRadius: 8, fontWeight: 600 }}
-          >New Assignment</Button>
-        </div>
-      </div>
+          <Select allowClear showSearch placeholder="Filter by checklist" style={{ width: 220 }}
+            value={selectedChecklistFilter} onChange={setSelectedChecklistFilter} optionFilterProp="children"
+            disabled={!selectedMachine || assignedChecklists.length === 0}>
+            {assignedChecklists.map((c) => <Option key={c.id} value={c.id}>{c.name}</Option>)}
+          </Select>
+        </Space>
+        <Space>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={handleRefresh} style={btnSharp}>Refresh</Button>
+          <Button type="primary" icon={<PlusOutlined />} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}
+            onClick={() => { loadChecklists(); fetchMachines(); form.setFieldsValue({ machine_ids: selectedMachine ? [selectedMachine] : [] }); setAssignOpen(true); }}>
+            New Assignment
+          </Button>
+        </Space>
+      </Space>
 
-      {selectedMachine ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 12, alignItems: 'stretch' }}>
-
-          {/* ── Calendar card ── */}
-          <div style={{
-            background: T.bg, border: `1px solid ${T.border}`,
-            borderRadius: T.radius, boxShadow: T.shadow, overflow: 'hidden',
-            display: 'flex', flexDirection: 'column',
-          }}>
-            {/* Calendar header */}
+      <div className="pm-assignments-layout" style={{ display: 'grid', gap: 10, alignItems: 'stretch', minHeight: 540 }}>
+        <div style={{
+          background: PM_T.bg,
+          border: `1px solid ${PM_T.border}`,
+          borderRadius: CAL.radius,
+          boxShadow: PM_T.shadow,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 420,
+        }}>
+            {/* Calendar header — MC style */}
             <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '10px 14px', borderBottom: `1px solid ${T.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 14px',
+              borderBottom: `1px solid ${PM_T.border}`,
+              background: '#fff',
+              flexWrap: 'wrap',
+              gap: 8,
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <CalendarOutlined style={{ color: T.primary, fontSize: 16 }} />
-                <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>Assignment Calendar</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                {/* Year selector */}
-                <Select size="small" value={viewYear} onChange={setViewYear} style={{ width: 80 }}>
-                  {Array.from({ length: 21 }, (_, i) => today.year() - 10 + i).map(y => (
+              <Space size={8}>
+                <CalendarOutlined style={{ color: PM_T.primary, fontSize: 16 }} />
+                <Text strong style={{ fontSize: 14 }}>Assignment Calendar</Text>
+              </Space>
+              <Space wrap size={8}>
+                <Select size="small" value={viewYear} onChange={setViewYear} style={{ width: 88 }}>
+                  {Array.from({ length: 11 }, (_, i) => dayjs().year() - 5 + i).map((y) => (
                     <Option key={y} value={y}>{y}</Option>
                   ))}
                 </Select>
-                {/* Month selector */}
-                <Select size="small" value={viewMonth} onChange={setViewMonth} style={{ width: 108 }}>
-                  {MONTHS.map((m, i) => <Option key={i} value={i}>{m}</Option>)}
+                <Select size="small" value={viewMonth} onChange={setViewMonth} style={{ width: 110 }}>
+                  {MONTHS.map((m, i) => <Option key={m} value={i}>{m}</Option>)}
                 </Select>
-                {/* Month / Year toggle */}
-                <Radio.Group value={calendarMode} onChange={e => setCalendarMode(e.target.value)} size="small">
-                  <Radio.Button value="month">Month</Radio.Button>
-                  <Radio.Button value="year">Year</Radio.Button>
-                </Radio.Group>
-                {/* Today */}
-                <button
-                  onClick={() => { setViewMonth(today.month()); setViewYear(today.year()); }}
-                  style={{
-                    fontSize: 12, fontWeight: 600, color: T.primary, background: T.primaryBg,
-                    border: 'none', borderRadius: 8, padding: '4px 12px', cursor: 'pointer',
+                <Button
+                  size="small"
+                  style={btnSharp}
+                  onClick={() => {
+                    const t = dayjs();
+                    setViewYear(t.year());
+                    setViewMonth(t.month());
+                    setSelectedDate(t);
                   }}
-                >Today</button>
-              </div>
+                >
+                  Today
+                </Button>
+              </Space>
             </div>
 
-            {loading ? (
-              <div style={{ textAlign: 'center', padding: 48, flex: 1 }}>
-                <Spin size="large" />
-                <p style={{ marginTop: 12, color: T.textSub }}>Loading assignments…</p>
-              </div>
-            ) : (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                {/* Day-of-week headers */}
-                <div style={{
-                  display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
-                  borderBottom: `1px solid ${T.border}`,
-                }}>
+          {selectedMachine && loading ? (
+            <div style={{ padding: 48, textAlign: 'center', flex: 1 }}><Spin /></div>
+          ) : (
+              <>
+                <style>{`
+                  .pm-assignments-layout { grid-template-columns: 1fr; }
+                  @media (min-width: 992px) {
+                    .pm-assignments-layout { grid-template-columns: minmax(0, 1fr) minmax(280px, 420px); }
+                  }
+                `}</style>
+                {/* Day headers */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: `1px solid ${PM_T.border}`, background: '#fafafa' }}>
                   {DAYS_SHORT.map((d, i) => (
-                    <div key={d} style={{
-                      textAlign: 'center',
-                      fontSize: 10, fontWeight: 700, letterSpacing: '0.07em',
-                      color: (i === 0 || i === 6) ? T.textMuted : T.textSub,
-                      padding: '6px 0',
-                      borderRight: i < 6 ? `1px solid ${T.border}` : 'none',
-                    }}>{d}</div>
-                  ))}
-                </div>
-
-                {/* Calendar grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', flex: 1 }}>
-                  {cells.map((cell, idx) => renderCell(cell, idx))}
-                </div>
-
-                {/* Legend */}
-                <div style={{
-                  display: 'flex', gap: 14, padding: '8px 12px',
-                  borderTop: `1px solid ${T.border}`, flexWrap: 'wrap',
-                }}>
-                  {['Daily','Weekly','Monthly'].map(f => (
-                    <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 2, background: FREQ_COLOR[f], display: 'inline-block' }} />
-                      <span style={{ fontSize: 11, color: T.textSub, fontWeight: 500 }}>{f}</span>
+                    <div
+                      key={d}
+                      style={{
+                        textAlign: 'center',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        color: i === 0 ? PM_T.textMuted : PM_T.textSub,
+                        padding: '6px 0',
+                        borderRight: i < 6 ? `1px solid ${PM_T.border}` : 'none',
+                      }}
+                    >
+                      {d}
                     </div>
                   ))}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, color: '#92400E', background: T.warningBg, borderRadius: 2, padding: '1px 5px' }}>OFF</span>
-                    <span style={{ fontSize: 11, color: T.textSub, fontWeight: 500 }}>Weekend</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: T.primary, display: 'inline-block' }} />
-                    <span style={{ fontSize: 11, color: T.textSub, fontWeight: 500 }}>Today</span>
-                  </div>
                 </div>
-              </div>
+                {/* Grid */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(7, 1fr)',
+                  gridTemplateRows: 'repeat(6, 1fr)',
+                  flex: 1,
+                  minHeight: 480,
+                }}>
+                  {calendarCells.map((cell, idx) => renderCalendarCell(cell, idx))}
+                </div>
+                {/* Legend */}
+                <div style={{
+                  display: 'flex',
+                  gap: 12,
+                  padding: '8px 12px',
+                  borderTop: `1px solid ${PM_T.border}`,
+                  flexWrap: 'wrap',
+                  background: '#fff',
+                }}>
+                  {legendItems.map((k) => (
+                    <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{
+                        width: 10, height: 10, borderRadius: 3,
+                        background: INDICATION_META[k].color, display: 'inline-block',
+                      }} />
+                      <span style={{ fontSize: 11, color: PM_T.textSub }}>{INDICATION_META[k].label}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 
-          {/* ── Details panel ── */}
-          <div style={{
-            background: T.sidebar, border: `1px solid ${T.border}`, borderRadius: T.radius,
-            boxShadow: T.shadow, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          }}>
-            <div style={{ padding: '12px 14px', borderBottom: `1px solid ${T.border}` }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>
-                {selectedDate
-                  ? `Assignments — ${selectedDate.format('ddd, DD MMM YYYY')}`
-                  : 'Assignment Details'}
-              </div>
-              {selectedDate && selectedDateAssignments.length > 0 && (
-                <div style={{ fontSize: 11, color: T.textSub, marginTop: 2 }}>
-                  {selectedDateAssignments.length} assignment{selectedDateAssignments.length > 1 ? 's' : ''} scheduled
-                </div>
-              )}
-            </div>
-
-            <div style={{ padding: 10, maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' }}>
-              {!selectedDate ? (
-                <div style={{ textAlign: 'center', padding: '36px 16px', color: T.textMuted }}>
-                  <div style={{ fontSize: 36, marginBottom: 10, opacity: 0.4 }}>📅</div>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>Select a date</div>
-                  <div style={{ fontSize: 12, marginTop: 4 }}>Click any weekday to see its assignments</div>
-                </div>
-              ) : selectedDate.day() === 0 ? (
-                <div style={{ textAlign: 'center', padding: '36px 16px' }}>
-                  <div style={{ fontSize: 36, marginBottom: 10 }}>🏖️</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: T.warning }}>Weekend</div>
-                  <div style={{ fontSize: 12, color: T.textSub, marginTop: 4 }}>No assignments scheduled</div>
-                </div>
-              ) : selectedDateAssignments.length > 0 ? (
-                selectedDateAssignments.map((a, i) => (
-                  <AssignmentCard key={i} assignment={a} onViewItems={handleViewItems} onDelete={handleDeleteAssignment} />
+        <div style={{ border: `1px solid ${PM_T.border}`, background: '#fafafa', minHeight: 300, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '6px 10px', borderBottom: `1px solid ${PM_T.border}`, background: '#fff', flexShrink: 0 }}>
+            <Text strong style={{ fontSize: 12 }}>Assigned Checkpoints — {dateLabel}</Text>
+            <Text type="secondary" style={{ fontSize: 10, display: 'block' }}>
+              {!selectedMachine
+                ? 'Select a machine to view checkpoints'
+                : selectedDayItems.length > 0
+                  ? `${selectedDayItems.length} checkpoint(s) — click to view details`
+                  : 'No checkpoints on this date'}
+            </Text>
+          </div>
+          <div style={{ padding: 6, flex: 1, overflowY: 'auto', maxHeight: '58vh' }}>
+            {!selectedMachine ? (
+              <Text type="secondary" style={{ fontSize: 10, padding: 4 }}>Choose a machine from the toolbar above.</Text>
+            ) : selectedDayItems.length === 0 ? (
+              <Text type="secondary" style={{ fontSize: 10, padding: 4 }}>
+                Nothing on this date.
+              </Text>
+            ) : (
+                selectedDayItems.map((item) => (
+                  <CheckpointListCard
+                    key={item.key}
+                    item={item}
+                    active={detailItem?.key === item.key}
+                    onClick={() => setDetailItem(item)}
+                    onDelete={handleDeleteCheckpoint}
+                  />
                 ))
-              ) : (
-                <div style={{ textAlign: 'center', padding: '36px 16px', color: T.textMuted }}>
-                  <div style={{ fontSize: 36, marginBottom: 10, opacity: 0.4 }}>✅</div>
-                  <div style={{ fontSize: 13, fontWeight: 500 }}>No assignments</div>
-                  <div style={{ fontSize: 12, marginTop: 4 }}>Nothing scheduled for this date</div>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
-      ) : (
-        <div style={{
-          background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
-          boxShadow: T.shadow, textAlign: 'center', padding: '56px 24px',
-        }}>
-          <CalendarOutlined style={{ fontSize: 48, color: T.primary, opacity: 0.3, marginBottom: 12, display: 'block' }} />
-          <div style={{ fontSize: 16, fontWeight: 600, color: T.textMid, marginBottom: 6 }}>Select a machine to get started</div>
-          <div style={{ fontSize: 13, color: T.textSub }}>Choose a machine from the dropdown above to view its assignment calendar</div>
-        </div>
-      )}
+      </div>
 
-      {/* ── New Assignment Modal ── */}
-      <Modal
-        title={<div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15 }}><PlusOutlined style={{ color: T.primary }} /> New Assignment</div>}
-        open={assignModalVisible}
-        onCancel={() => { setAssignModalVisible(false); form.resetFields(); }}
-        footer={null}
-        width={480}
-        centered
-        maskClosable={false}
-      >
-        <Form form={form} layout="vertical" onFinish={handleAssignChecklist} style={{ marginTop: 20 }}>
-          <Form.Item name="machine_ids" label="Select Machines" rules={[{ required: true, message: 'Please select at least one machine' }]}>
-            <Select 
-              mode="multiple"
-              placeholder="Select machines" 
-              loading={machinesLoading}
-              onFocus={fetchMachines}
-              showSearch
-              filterOption={(input, opt) =>
-                (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
-                  .toString().toLowerCase().includes(input.toLowerCase())}
-            >
-              {machines.map(m => <Option key={m.id} value={m.id}>{m.make} - {m.model || 'N/A'}</Option>)}
+      <CheckpointDetailModal
+        item={detailItem}
+        allSubmissions={filteredSubmissions}
+        open={!!detailItem}
+        onClose={() => setDetailItem(null)}
+        onDelete={handleDeleteCheckpoint}
+      />
+
+      <Modal title="New Assignment" open={assignOpen} onCancel={() => { setAssignOpen(false); form.resetFields(); setCheckpointConfig([]); }}
+        footer={null} width={960} destroyOnClose>
+        <Form form={form} layout="vertical" onFinish={handleAssign}>
+          <Form.Item name="machine_ids" label="Machines (one or more)" rules={[{ required: true }]}>
+            <Select mode="multiple" showSearch placeholder="Select machines" optionFilterProp="children">
+              {machines.map((m) => <Option key={m.id} value={m.id}>{machineLabel(m)}</Option>)}
             </Select>
           </Form.Item>
-
-          <Form.Item name="checklist_ids" label="Select Checklists" rules={[{ required: true, message: 'Please select at least one checklist' }]}>
-            <Select 
-              mode="multiple"
-              placeholder="Select checklists" 
-              loading={checklistsLoading} 
-              showSearch
-              filterOption={(input, opt) =>
-                (Array.isArray(opt?.children) ? opt.children.join('') : opt?.children || '')
-                  .toString().toLowerCase().includes(input.toLowerCase())}
-            >
-              {checklists.map(c => <Option key={c.id} value={c.id}>{c.name}</Option>)}
+          <Form.Item name="checklist_id" label="Checklist" rules={[{ required: true }]}>
+            <Select showSearch placeholder="Select checklist" onChange={onChecklistChange} optionFilterProp="children">
+              {checklists.map((c) => <Option key={c.id} value={c.id}>{c.name}</Option>)}
             </Select>
           </Form.Item>
-
-          
-
-
+          {checkpointConfig.length > 0 && (
+            <Table size="small" bordered pagination={false} rowKey="checklist_item_id" dataSource={checkpointConfig}
+              scroll={{ x: 860 }}
+              columns={[
+                { title: '#', width: 40, align: 'center', render: (_, r) => r.sequence_number },
+                { title: 'Checkpoint', dataIndex: 'item_text', width: 160, ellipsis: true },
+                { title: 'Type', width: 72, render: (_, r) => <Tag style={{ borderRadius: 0, fontSize: 10, margin: 0 }}>{itemTypeShort(r.item_type)}</Tag> },
+                { title: 'Expected', dataIndex: 'expected_value', width: 90, ellipsis: true, render: (v) => v || '—' },
+                { title: 'Frequency', width: 110, render: (_, r) => <Tag style={{ borderRadius: 0, fontSize: 10, margin: 0 }}>{r.frequency_type}</Tag> },
+                { title: 'Unit', width: 72, render: (_, r) => r.interval_unit || '—' },
+                { title: 'Interval / Hrs', width: 90, render: (_, r) => r.interval_value ?? r.trigger_hours ?? '—' },
+                { title: 'Remarks', dataIndex: 'remarks', width: 120, ellipsis: true, render: (v) => v || '—' },
+                { title: 'Assign', width: 72, align: 'center', fixed: 'right', render: (_, r) => (
+                  <Switch size="small" checked={r.is_required} onChange={(c) =>
+                    setCheckpointConfig((p) => p.map((x) => x.checklist_item_id === r.checklist_item_id ? { ...x, is_required: c } : x))
+                  } />
+                )},
+              ]}
+              style={{ marginBottom: 12 }}
+            />
+          )}
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button onClick={() => { setAssignModalVisible(false); form.resetFields(); }} style={{ borderRadius: 8 }}>Cancel</Button>
-              <Button type="primary" htmlType="submit"
-                style={{ background: T.primary, borderColor: T.primary, borderRadius: 8, fontWeight: 600 }}
-              >Assign Checklist</Button>
+              <Button onClick={() => setAssignOpen(false)} style={btnSharp}>Cancel</Button>
+              <Button type="primary" htmlType="submit" disabled={!checkpointConfig.some((c) => c.is_required)} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}>Assign</Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
-
-      {/* ── Items Popup Modal ── */}
-      <ItemsPopup
-        visible={itemsPopupVisible}
-        onClose={() => { setItemsPopupVisible(false); setActiveAssignment(null); }}
-        assignment={activeAssignment}
-      />
     </div>
   );
 };

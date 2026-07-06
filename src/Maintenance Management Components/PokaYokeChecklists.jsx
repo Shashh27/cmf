@@ -1,298 +1,301 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Card, Typography, Divider, Tooltip, Select, DatePicker, Row, Col } from 'antd';
-import { PlusOutlined, EyeOutlined, DeleteOutlined,EditOutlined,CheckCircleOutlined,ClockCircleOutlined, FilterOutlined, CalendarOutlined, ReloadOutlined } from '@ant-design/icons';
-import { API_BASE_URL } from '../Config/auth';
+import {
+  Table, Button, Modal, Form, Input, message, Space, Popconfirm, Tag, Typography, Divider, Tooltip, Card, Select, InputNumber,
+} from 'antd';
+import {
+  PlusOutlined, EyeOutlined, DeleteOutlined, EditOutlined, ReloadOutlined, CheckCircleOutlined,
+} from '@ant-design/icons';
+import {
+  PM_T, btnSharp, nativeSelectStyle, pmFetch, fetchAllChecklistsWithItems, fetchChecklistDetails,
+  getCurrentUserId, formatDateTime, emptyCheckpoint, buildCheckpointPayload, validateCheckpoint,
+  itemTypeShort, FREQ_TAG_COLORS,
+} from './pmUtils';
 
 const { Title, Text } = Typography;
-const { TextArea } = Input;
 
-/* ─── Design tokens (matching Machine Assignments) ────────────────────────── */
-const T = {
-  bg:         '#FDFBF7',
-  surface:    '#FFFFFF',
-  sidebar:    '#F5F5F5',
-  border:     '#D1D5DB',
-  borderMid:  '#E5E5E5',
-  primary:    '#4A6CF7',
-  primaryBg:  '#EEF2FF',
-  success:    '#22C55E',
-  successBg:  '#DCFCE7',
-  warning:    '#F59E0B',
-  warningBg:  '#FEF3C7',
-  weekend:    '#F9FAFB',
-  text:       '#111827',
-  textMid:    '#374151',
-  textSub:    '#6B7280',
-  textMuted:  '#9CA3AF',
-  radius:     '12px',
-  radiusSm:   '8px',
-  shadow:     '0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05)',
+/* ── Inline checkpoint row for create modal ── */
+const CreateCheckpointRows = ({ items, onChange, onRemove }) => (
+  <>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: '30px 250px 70px 75px 95px 80px 80px 1fr 30px',
+      background: '#fafafa', padding: '8px 6px', borderBottom: '1px solid #d9d9d9',
+      fontSize: 11, fontWeight: 600, gap: 6,
+    }}>
+      <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div>
+      <div>Frequency</div><div>Unit</div><div>Value</div><div>Remarks</div><div />
+    </div>
+    {items.map((item, index) => (
+      <div key={item.id} style={{
+        display: 'grid',
+        gridTemplateColumns: '30px 250px 70px 75px 95px 80px 80px 1fr 30px',
+        padding: 6, gap: 6, alignItems: 'center',
+        borderBottom: index < items.length - 1 ? '1px solid #f0f0f0' : 'none',
+        background: index % 2 === 0 ? '#fff' : '#fafafa',
+      }}>
+        <div style={{ fontSize: 11, color: '#8c8c8c' }}>{index + 1}</div>
+        <Input size="small" value={item.item_text} placeholder="Checkpoint"
+          onChange={(e) => onChange(item.id, { item_text: e.target.value })} style={{ fontSize: 11, borderRadius: 0 }} />
+        <select value={item.item_type} onChange={(e) => onChange(item.id, { item_type: e.target.value })} style={nativeSelectStyle}>
+          <option value="Boolean">Yes/No</option>
+          <option value="Numeric">Num</option>
+          <option value="Text">Text</option>
+        </select>
+        <Input size="small" value={item.expected_value} placeholder="Expected"
+          onChange={(e) => onChange(item.id, { expected_value: e.target.value })} style={{ fontSize: 11, borderRadius: 0 }} />
+        <select value={item.frequency_type} onChange={(e) => onChange(item.id, { frequency_type: e.target.value })} style={nativeSelectStyle}>
+          <option value="Time Based">Time</option>
+          <option value="Usage Based">Usage</option>
+          <option value="Condition Based">Condition</option>
+        </select>
+        {['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
+          <select value={item.interval_unit || ''} onChange={(e) => onChange(item.id, { interval_unit: e.target.value })} style={nativeSelectStyle}>
+            <option value="">Unit</option>
+            {['Day', 'Week', 'Month', 'Year'].map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        ) : <div />}
+        {item.frequency_type === 'Usage Based' ? (
+          <Input size="small" type="number" placeholder="Hours" value={item.trigger_hours || ''}
+            onChange={(e) => onChange(item.id, { trigger_hours: e.target.value ? parseInt(e.target.value, 10) : null })}
+            style={{ fontSize: 10, borderRadius: 0 }} />
+        ) : ['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
+          <Input size="small" type="number" placeholder="Value" value={item.interval_value || ''}
+            onChange={(e) => onChange(item.id, { interval_value: e.target.value ? parseInt(e.target.value, 10) : null })}
+            style={{ fontSize: 10, borderRadius: 0 }} />
+        ) : <div />}
+        <Input size="small" value={item.remarks || ''} placeholder="Remarks"
+          onChange={(e) => onChange(item.id, { remarks: e.target.value })} style={{ fontSize: 10, borderRadius: 0 }} />
+        <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }}
+          disabled={items.length <= 1}
+          onClick={() => onRemove(item.id)} />
+      </div>
+    ))}
+  </>
+);
+
+/* ── Expanded row grid (read-only) ── */
+const ExpandedCheckpoints = ({ items, compact = false }) => {
+  if (!items?.length) {
+    return (
+      <div style={{ textAlign: 'center', padding: compact ? 12 : 20, color: '#999', fontSize: compact ? 11 : 12 }}>
+        No checkpoints added yet
+      </div>
+    );
+  }
+
+  const gridCols = compact
+    ? '28px 1fr 58px 68px 88px 58px 58px 1fr'
+    : '50px 1fr 80px 100px 100px 80px 80px 1fr';
+  const cellFont = compact ? 11 : 12;
+  const tagStyle = compact
+    ? { fontSize: 10, margin: 0, lineHeight: '16px', padding: '0 4px' }
+    : { fontSize: 11 };
+
+  return (
+    <div style={{ padding: compact ? 0 : 16, background: compact ? 'transparent' : '#fafafa' }}>
+      <div style={{
+        border: '1px solid #d9d9d9', borderRadius: 0, overflow: 'hidden', background: '#fff',
+        marginTop: compact ? 0 : 8,
+      }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: gridCols,
+          background: '#fafafa',
+          padding: compact ? '4px 8px' : '8px 12px',
+          borderBottom: '1px solid #d9d9d9',
+          fontSize: cellFont,
+          fontWeight: 600,
+          gap: compact ? 6 : 12,
+        }}>
+          <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div>
+          <div>Frequency</div><div>Unit</div><div>Value</div><div>Remarks</div>
+        </div>
+        {items.map((item, index) => (
+          <div key={item.id} style={{
+            display: 'grid',
+            gridTemplateColumns: gridCols,
+            padding: compact ? '3px 8px' : '6px 12px',
+            gap: compact ? 6 : 12,
+            alignItems: 'center',
+            minHeight: compact ? 28 : undefined,
+            borderBottom: index < items.length - 1 ? '1px solid #f0f0f0' : 'none',
+            background: index % 2 === 0 ? '#fff' : '#fafafa',
+          }}>
+            <div style={{ fontSize: cellFont, color: '#8c8c8c' }}>{index + 1}</div>
+            <div style={{
+              fontSize: cellFont,
+              fontWeight: 600,
+              lineHeight: compact ? '16px' : undefined,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {item.item_text}
+            </div>
+            <Tag color="blue" style={tagStyle}>{itemTypeShort(item.item_type)}</Tag>
+            <div style={{ fontSize: cellFont }}>{item.expected_value || '-'}</div>
+            <Tag color={FREQ_TAG_COLORS[item.frequency_type] || 'default'} style={tagStyle}>{item.frequency_type || '-'}</Tag>
+            <div style={{ fontSize: cellFont }}>{item.interval_unit || '-'}</div>
+            <div style={{ fontSize: cellFont }}>{item.interval_value || item.trigger_hours || '-'}</div>
+            <div style={{
+              fontSize: cellFont,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {item.remarks || '-'}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 };
 
 const PokaYokeChecklists = () => {
   const [checklists, setChecklists] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [createModalVisible, setCreateModalVisible] = useState(false);
-  const [previewModalVisible, setPreviewModalVisible] = useState(false);
-  const [selectedChecklist, setSelectedChecklist] = useState(null);
-  const [addItemModalVisible, setAddItemModalVisible] = useState(false);
-  const [initialItems, setInitialItems] = useState([]);
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editingChecklist, setEditingChecklist] = useState(null);
-  const [editCheckpoints, setEditCheckpoints] = useState([]);
-  const [editingCheckpointId, setEditingCheckpointId] = useState(null);
+  const [searchText, setSearchText] = useState('');
   const [expandedRowKeys, setExpandedRowKeys] = useState([]);
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
-  const [searchText, setSearchText] = useState('');
-  const [form] = Form.useForm();
-  const [itemForm] = Form.useForm();
-  const [editForm] = Form.useForm();
 
-  useEffect(() => {
-    fetchChecklists();
-  }, []);
+  const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [previewModalVisible, setPreviewModalVisible] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [addItemModalVisible, setAddItemModalVisible] = useState(false);
+
+  const [selectedChecklist, setSelectedChecklist] = useState(null);
+  const [editingChecklist, setEditingChecklist] = useState(null);
+  const [initialItems, setInitialItems] = useState([emptyCheckpoint()]);
+  const [editCheckpoints, setEditCheckpoints] = useState([]);
+  const [editingCheckpointId, setEditingCheckpointId] = useState(null);
+
+  const [form] = Form.useForm();
+  const [editForm] = Form.useForm();
+  const [itemForm] = Form.useForm();
+
+  useEffect(() => { fetchChecklists(); }, []);
 
   const fetchChecklists = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/all`);
-      if (!response.ok) throw new Error('Failed to fetch checklists');
-      const data = await response.json();
-      
-      // Data now includes nested items info
-      const checklistsWithCounts = data.map((checklist) => ({
-        ...checklist,
-        itemsCount: checklist.items?.length || 0
-      }));
-      
-      setChecklists(checklistsWithCounts);
-    } catch (error) {
-      message.error('Failed to fetch checklists: ' + error.message);
+      const data = await fetchAllChecklistsWithItems();
+      setChecklists(data.map((c) => ({ ...c, itemsCount: c.items?.length || 0 })));
+    } catch (e) {
+      message.error('Failed to fetch checklists: ' + e.message);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleRefresh = async () => {
+    setExpandedRowKeys([]);
+    setPagination((p) => ({ ...p, current: 1 }));
+    await fetchChecklists();
+    message.success('Checklists refreshed');
+  };
+
+  const patchCreateItem = (id, patch) => {
+    setInitialItems((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  };
+
+  const patchEditItem = (id, patch) => {
+    setEditCheckpoints((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  };
+
   const handleCreateChecklist = async (values) => {
-    // Validate that at least one item is provided
-    const validItems = initialItems
-      .filter((item) => item.item_text && item.item_type && item.expected_value);
-
-    if (validItems.length === 0) {
-      message.error('At least one check point is required to create a checklist');
-      return;
+    const validItems = initialItems.filter((i) => i.item_text && i.item_type && i.frequency_type);
+    if (!validItems.length) return message.error('At least one checkpoint is required');
+    for (const cp of validItems) {
+      const err = validateCheckpoint(cp);
+      if (err) return message.error(err);
     }
-
     try {
-      const itemsToCreate = validItems.map((item) => ({
-        item_text: item.item_text,
-        item_type: item.item_type,
-        expected_value: item.expected_value,
-        is_required: !!item.is_required,
-        frequency_type: item.frequency_type || null,
-        interval_value: item.interval_value || null,
-        interval_unit: item.interval_unit || null,
-        trigger_hours: item.trigger_hours || null,
-        inspection_interval: item.inspection_interval || null,
-        remarks: item.remarks || null,
-      }));
-
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/`, {
+      await pmFetch('/checklists', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           name: values.name,
-          description: values.description,
-          items: itemsToCreate
+          description: values.description || null,
+          created_by: getCurrentUserId(),
+          items: validItems.map(buildCheckpointPayload),
         }),
       });
-
-      if (!response.ok) throw new Error('Failed to create checklist');
-      
       message.success('Checklist created successfully');
       setCreateModalVisible(false);
       form.resetFields();
-      setInitialItems([]);
+      setInitialItems([emptyCheckpoint()]);
       fetchChecklists();
-    } catch (error) {
-      message.error('Failed to create checklist: ' + error.message);
+    } catch (e) {
+      message.error('Failed to create checklist: ' + e.message);
     }
-  };
-
-  const handleDeleteChecklist = async (id) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${id}/`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('Failed to delete checklist');
-      
-      message.success('Checklist deleted successfully');
-      fetchChecklists();
-    } catch (error) {
-      message.error('Failed to delete checklist: ' + error.message);
-    }
-  };
-
-  const handleDeleteCheckpoint = async (checklistId, itemId) => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${checklistId}/items/${itemId}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('Failed to delete checkpoint');
-      
-      message.success('Checkpoint deleted successfully');
-      fetchChecklists();
-    } catch (error) {
-      message.error('Failed to delete checkpoint: ' + error.message);
-    }
-  };
-
-  const handlePreview = (checklist) => {
-    setSelectedChecklist(checklist);
-    setPreviewModalVisible(true);
-  };
-
-  const handleAddItem = async (values) => {
-    if (!selectedChecklist) return;
-    
-    try {
-      const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${selectedChecklist.id}/items`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(values),
-      });
-
-      if (!response.ok) throw new Error('Failed to add item');
-      
-      message.success('Item added successfully');
-      setAddItemModalVisible(false);
-      itemForm.resetFields();
-      
-      // Fetch updated checklist to refresh preview
-      try {
-        const checklistResponse = await fetch(`${API_BASE_URL}/pokayoke-checklists/${selectedChecklist.id}`);
-        if (checklistResponse.ok) {
-          const updatedChecklist = await checklistResponse.json();
-          setSelectedChecklist(updatedChecklist);
-        }
-      } catch (e) {
-        console.error('Failed to refresh preview:', e);
-      }
-      
-      fetchChecklists();
-    } catch (error) {
-      message.error('Failed to add item: ' + error.message);
-    }
-  };
-
-  const handleEditChecklist = (checklist) => {
-    setEditingChecklist(checklist);
-    editForm.setFieldsValue({
-      name: checklist.name,
-      description: checklist.description
-    });
-    // Load checkpoints with proper IDs and store original data for comparison
-    const checkpointsWithOriginals = checklist.items?.map(item => ({
-      ...item,
-      id: item.id || Date.now() + Math.random(),
-      _original: { ...item } // Store original data for change detection
-    })) || [];
-    setEditCheckpoints(checkpointsWithOriginals);
-    setEditModalVisible(true);
   };
 
   const handleUpdateChecklist = async (values) => {
+    if (!editingChecklist) return;
     try {
       let checklistChanged = false;
-      let checkpointsChanged = false;
       let updatedCount = 0;
 
-      // Check if checklist details changed
       if (values.name !== editingChecklist.name || values.description !== editingChecklist.description) {
         checklistChanged = true;
-        const response = await fetch(`${API_BASE_URL}/pokayoke-checklists/${editingChecklist.id}`, {
+        await pmFetch(`/checklists/${editingChecklist.id}`, {
           method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(values),
+          body: JSON.stringify({ name: values.name, description: values.description }),
         });
-
-        if (!response.ok) throw new Error('Failed to update checklist');
       }
 
-      // Update checkpoints that have changed
-      const validCheckpoints = editCheckpoints
-        .filter((item) => item.item_text && item.item_type && item.expected_value);
+      const validCheckpoints = editCheckpoints.filter((i) => i.item_text && i.item_type && i.frequency_type);
+      if (!validCheckpoints.length) return message.error('At least one checkpoint is required');
 
-      if (validCheckpoints.length === 0) {
-        message.error('At least one checkpoint is required');
-        return;
-      }
-
-      // Update each checkpoint individually, only if changed
       for (const item of validCheckpoints) {
+        if (String(item.id).startsWith('tmp-')) {
+          const err = validateCheckpoint(item);
+          if (err) return message.error(err);
+          await pmFetch(`/checklists/${editingChecklist.id}/items`, {
+            method: 'POST',
+            body: JSON.stringify(buildCheckpointPayload(item, validCheckpoints.indexOf(item))),
+          });
+          updatedCount++;
+          continue;
+        }
         const original = item._original || {};
-        
-        // Check if any field changed
-        const fieldsChanged = 
+        const fieldsChanged =
           item.item_text !== original.item_text ||
           item.item_type !== original.item_type ||
           item.expected_value !== original.expected_value ||
-          item.is_required !== original.is_required ||
           item.frequency_type !== original.frequency_type ||
           item.interval_unit !== original.interval_unit ||
           item.interval_value !== original.interval_value ||
           item.trigger_hours !== original.trigger_hours ||
           item.remarks !== original.remarks;
 
-        if (!fieldsChanged) continue; // Skip if nothing changed
+        if (!fieldsChanged) continue;
+        const err = validateCheckpoint(item);
+        if (err) return message.error(err);
 
-        checkpointsChanged = true;
         updatedCount++;
+        const payload = {};
+        if (item.item_text !== original.item_text) payload.item_text = item.item_text;
+        if (item.item_type !== original.item_type) payload.item_type = item.item_type;
+        if (item.expected_value !== original.expected_value) payload.expected_value = item.expected_value || null;
+        if (item.frequency_type !== original.frequency_type) payload.frequency_type = item.frequency_type;
+        if (item.interval_unit !== original.interval_unit) payload.interval_unit = item.interval_unit || null;
+        if (item.interval_value !== original.interval_value) payload.interval_value = item.interval_value || null;
+        if (item.trigger_hours !== original.trigger_hours) payload.trigger_hours = item.trigger_hours || null;
+        if (item.remarks !== original.remarks) payload.remarks = item.remarks || null;
 
-        // Build checkpoint data with only changed fields
-        const checkpointData = {};
-        if (item.item_text !== original.item_text) checkpointData.item_text = item.item_text;
-        if (item.item_type !== original.item_type) checkpointData.item_type = item.item_type;
-        if (item.expected_value !== original.expected_value) checkpointData.expected_value = item.expected_value;
-        if (item.is_required !== original.is_required) checkpointData.is_required = !!item.is_required;
-        if (item.frequency_type !== original.frequency_type) checkpointData.frequency_type = item.frequency_type || null;
-        if (item.interval_unit !== original.interval_unit) checkpointData.interval_unit = item.interval_unit || null;
-        if (item.interval_value !== original.interval_value) checkpointData.interval_value = item.interval_value || null;
-        if (item.trigger_hours !== original.trigger_hours) checkpointData.trigger_hours = item.trigger_hours || null;
-        if (item.remarks !== original.remarks) checkpointData.remarks = item.remarks || null;
-
-        const itemResponse = await fetch(`${API_BASE_URL}/pokayoke-checklists/items/${item.id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(checkpointData),
-        });
-
-        if (!itemResponse.ok) {
-          throw new Error(`Failed to update checkpoint: ${item.item_text}`);
-        }
+        await pmFetch(`/checklist-items/${item.id}`, { method: 'PUT', body: JSON.stringify(payload) });
       }
 
-      // Show appropriate message based on what changed
-      if (!checklistChanged && !checkpointsChanged) {
-        message.info('No changes detected - nothing to update');
+      if (!checklistChanged && updatedCount === 0) {
+        message.info('No changes detected');
         return;
       }
-
-      if (checklistChanged && checkpointsChanged) {
-        message.success(`Checklist and ${updatedCount} checkpoint(s) updated successfully`);
+      if (checklistChanged && updatedCount > 0) {
+        message.success(`Checklist and ${updatedCount} checkpoint(s) updated`);
       } else if (checklistChanged) {
         message.success('Checklist updated successfully');
-      } else if (checkpointsChanged) {
+      } else {
         message.success(`${updatedCount} checkpoint(s) updated successfully`);
       }
 
@@ -300,1376 +303,378 @@ const PokaYokeChecklists = () => {
       setEditingChecklist(null);
       editForm.resetFields();
       setEditCheckpoints([]);
-      
-      // Update the checklist in place to preserve order
-      setChecklists(prevChecklists => 
-        prevChecklists.map(checklist => 
-          checklist.id === editingChecklist.id 
-            ? { ...checklist, ...values, items: editCheckpoints.map(cp => ({ ...cp, _original: undefined })) }
-            : checklist
-        )
+      fetchChecklists();
+    } catch (e) {
+      message.error('Failed to update checklist: ' + e.message);
+    }
+  };
+
+  const handleEditChecklist = async (record) => {
+    try {
+      const detail = await fetchChecklistDetails(record.id);
+      setEditingChecklist(detail);
+      editForm.setFieldsValue({ name: detail.name, description: detail.description });
+      setEditCheckpoints(
+        (detail.items || []).map((item) => ({ ...item, _original: { ...item } }))
       );
-      
-      // If the updated checklist is currently in preview, refresh it too
-      if (selectedChecklist && selectedChecklist.id === editingChecklist.id) {
-        setSelectedChecklist(prev => ({
-          ...prev,
-          ...values,
-          items: editCheckpoints.map(cp => ({ ...cp, _original: undefined }))
-        }));
+      setEditingCheckpointId(null);
+      setEditModalVisible(true);
+    } catch (e) {
+      message.error(e.message);
+    }
+  };
+
+  const handlePreview = async (record) => {
+    try {
+      const detail = await fetchChecklistDetails(record.id);
+      setSelectedChecklist(detail);
+      setPreviewModalVisible(true);
+    } catch (e) {
+      message.error(e.message);
+    }
+  };
+
+  const handleDeleteChecklist = async (id) => {
+    try {
+      await pmFetch(`/checklists/${id}`, { method: 'DELETE' });
+      message.success('Checklist deleted successfully');
+      fetchChecklists();
+    } catch (e) {
+      message.error('Failed to delete checklist: ' + e.message);
+    }
+  };
+
+  const handleDeleteCheckpoint = async (checklistId, itemId) => {
+    try {
+      await pmFetch(`/checklist-items/${itemId}`, { method: 'DELETE' });
+      message.success('Checkpoint deleted successfully');
+      const detail = await fetchChecklistDetails(checklistId);
+      if (editingChecklist?.id === checklistId) {
+        setEditCheckpoints((detail.items || []).map((item) => ({ ...item, _original: { ...item } })));
+        setEditingChecklist(detail);
       }
-    } catch (error) {
-      message.error('Failed to update checklist: ' + error.message);
+      if (selectedChecklist?.id === checklistId) setSelectedChecklist(detail);
+      fetchChecklists();
+    } catch (e) {
+      message.error('Failed to delete checkpoint: ' + e.message);
     }
   };
 
-  const validateExpectedValue = (itemType, expectedValue) => {
-    if (!expectedValue) return false;
-    
-    if (itemType === 'boolean') {
-      const validValues = ['true', 'false', 'yes', 'no', '1', '0'];
-      return validValues.includes(expectedValue.toLowerCase());
-    } else if (itemType === 'numerical') {
-      // Check if it's a single number
-      if (/^\d+(\.\d+)?$/.test(expectedValue)) return true;
-      // Check if it's a range (e.g., 18-25)
-      if (/^\d+(\.\d+)?-\d+(\.\d+)?$/.test(expectedValue)) return true;
-      // Check if it's a comparison (e.g., >=50, <=100, =75)
-      if (/^[><=]+\d+(\.\d+)?$/.test(expectedValue)) return true;
-      return false;
-    } else if (itemType === 'text') {
-      return expectedValue.trim().length > 0;
+  const handleAddItem = async (values) => {
+    if (!selectedChecklist) return;
+    const cp = { ...emptyCheckpoint(), ...values };
+    const err = validateCheckpoint(cp);
+    if (err) return message.error(err);
+    try {
+      await pmFetch(`/checklists/${selectedChecklist.id}/items`, {
+        method: 'POST',
+        body: JSON.stringify(buildCheckpointPayload(cp, selectedChecklist.items?.length || 0)),
+      });
+      message.success('Checkpoint added successfully');
+      setAddItemModalVisible(false);
+      itemForm.resetFields();
+      const detail = await fetchChecklistDetails(selectedChecklist.id);
+      setSelectedChecklist(detail);
+      fetchChecklists();
+    } catch (e) {
+      message.error('Failed to add checkpoint: ' + e.message);
     }
-    return false;
   };
 
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const columns = [
-    {
-      title: 'SL NO',
-      key: 'sl_no',
-      width: 50,
-      align: 'center',
-      className: 'table-header-styled',
-      render: (_, __, index) => index + 1,
-    },
-    {
-      title: 'CHECKLIST NAME',
-      dataIndex: 'name',
-      key: 'name',
-      width: 200,
-      className: 'table-header-styled',
-      sorter: (a, b) => a.name.localeCompare(b.name),
-      render: (text) => <Text strong>{text}</Text>,
-    },
-    {
-      title: 'Description',
-      dataIndex: 'description',
-      key: 'description',
-      width: 300,
-      ellipsis: true,
-      className: 'table-header-styled',
-      sorter: (a, b) => a.description.localeCompare(b.description),
-    },
-    {
-      title: 'Checkpoints',
-      dataIndex: 'itemsCount',
-      key: 'itemsCount',
-      width: 100,
-      align: 'center',
-      className: 'table-header-styled',
-      sorter: (a, b) => a.itemsCount - b.itemsCount,
-      render: (count) => (
-        <Tag color="blue" style={{ fontSize: '12px', padding: '2px 8px' }}>
-          {count}
-        </Tag>
-      ),
-    },
-    {
-      title: 'Created At',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 180,
-      className: 'table-header-styled',
-      sorter: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-      render: (date) => <Text type="secondary">{formatDate(date)}</Text>,
-    },
-    {
-      title: 'Actions',
-      key: 'actions',
-      width: 200,
-      align: 'center',
-      className: 'table-header-styled',
-      render: (_, record) => (
-        <Space size="small">
-          <Tooltip title="Preview">
-            <Button
-              type="text"
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => {
-                setSelectedChecklist(record);
-                setPreviewModalVisible(true);
-              }}
-              style={{ color: '#1890ff' }}
-            />
-          </Tooltip>
-          <Tooltip title="Edit">
-            <Button
-              type="text"
-              size="small"
-              icon={<EditOutlined />}
-              onClick={() => handleEditChecklist(record)}
-              style={{ color: '#faad14' }}
-            />
-          </Tooltip>
-          <Tooltip title="Add Checkpoint">
-            <Button
-              type="text"
-              size="small"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                setSelectedChecklist(record);
-                setAddItemModalVisible(true);
-              }}
-              style={{ color: '#52c41a' }}
-            />
-          </Tooltip>
-          <Tooltip title="Delete">
-            <Popconfirm
-              title="Are you sure you want to delete this checklist?"
-              onConfirm={() => handleDeleteChecklist(record.id)}
-              okText="Yes"
-              cancelText="No"
-            >
-              <Button
-                type="text"
-                size="small"
-                icon={<DeleteOutlined />}
-                danger
-              />
-            </Popconfirm>
-          </Tooltip>
-        </Space>
-      ),
-    },
-  ];
-
-  const filteredChecklists = checklists.filter(item => 
-    item.name.toLowerCase().includes(searchText.toLowerCase())
+  const filteredChecklists = checklists.filter((item) =>
+    item.name.toLowerCase().includes(searchText.toLowerCase()) ||
+    (item.description || '').toLowerCase().includes(searchText.toLowerCase())
   );
 
-  return (
-    <div style={{ padding: 0, fontFamily: "'DM Sans', 'Inter', system-ui, sans-serif", background: T.bg }}>
-      {/* ── Top bar ── */}
-      <div style={{
-        background: T.surface, border: `1px solid ${T.border}`, borderRadius: T.radius,
-        padding: '10px 14px', marginBottom: 10, boxShadow: T.shadow,
-        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-      }}>
-        <Text strong style={{ fontSize: 13, color: T.textMid, whiteSpace: 'nowrap' }}>Checklists:</Text>
-        <div style={{ flex: '1 1 280px', minWidth: 220 }}>
-          <Input.Search
-            placeholder="Search by name..."
-            allowClear
-            onChange={(e) => setSearchText(e.target.value)}
-            style={{ width: '100%' }}
-          />
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={fetchChecklists}
-            loading={loading}
-            style={{ borderRadius: 8 }}
-          >Refresh</Button>
-          <Button
-            type="primary" icon={<PlusOutlined />}
-            onClick={() => {
-              setInitialItems([
-                {
-                  id: Date.now(),
-                  item_text: '',
-                  item_type: '',
-                  expected_value: '',
-                  is_required: false,
-                  frequency_type: 'Time Based',
-                  interval_value: null,
-                  interval_unit: '',
-                  trigger_hours: null,
-                  inspection_interval: '',
-                  remarks: ''
-                },
-              ]);
-              setCreateModalVisible(true);
-            }}
-            style={{ background: T.primary, borderColor: T.primary, borderRadius: 8, fontWeight: 600 }}
-          >New Checklist</Button>
-        </div>
-      </div>
+  const columns = [
+    { title: 'SL NO', key: 'sl', width: 55, align: 'center', className: 'table-header-styled',
+      render: (_, __, i) => (pagination.current - 1) * pagination.pageSize + i + 1 },
+    { title: 'CHECKLIST NAME', dataIndex: 'name', key: 'name', width: 220, className: 'table-header-styled',
+      sorter: (a, b) => a.name.localeCompare(b.name),
+      ellipsis: true,
+      render: (t) => <Text strong style={{ fontSize: 12 }}>{t}</Text> },
+    { title: 'Description', dataIndex: 'description', key: 'description', width: 160, className: 'table-header-styled',
+      ellipsis: true,
+      sorter: (a, b) => (a.description || '').localeCompare(b.description || ''),
+      render: (t) => <Text type="secondary" style={{ fontSize: 12 }}>{t?.trim() ? t : '—'}</Text> },
+    { title: 'Checkpoints', dataIndex: 'itemsCount', key: 'itemsCount', width: 90, align: 'center', className: 'table-header-styled',
+      sorter: (a, b) => a.itemsCount - b.itemsCount,
+      render: (c) => <Tag color="blue" style={{ fontSize: 11, borderRadius: 0, margin: 0 }}>{c}</Tag> },
+    { title: 'Created At', dataIndex: 'created_at', key: 'created_at', width: 150, className: 'table-header-styled',
+      sorter: (a, b) => new Date(a.created_at) - new Date(b.created_at),
+      render: (d) => <Text type="secondary" style={{ fontSize: 11 }}>{formatDateTime(d)}</Text> },
+    { title: 'Actions', key: 'actions', width: 140, align: 'center', className: 'table-header-styled',
+      render: (_, record) => (
+        <Space size="small" onClick={(e) => e.stopPropagation()}>
+          <Tooltip title="Preview"><Button type="text" size="small" icon={<EyeOutlined />} onClick={() => handlePreview(record)} style={{ color: '#1890ff' }} /></Tooltip>
+          <Tooltip title="Edit"><Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEditChecklist(record)} style={{ color: '#faad14' }} /></Tooltip>
+          <Tooltip title="Add Checkpoint"><Button type="text" size="small" icon={<PlusOutlined />} onClick={() => { setSelectedChecklist(record); setAddItemModalVisible(true); }} style={{ color: '#52c41a' }} /></Tooltip>
+          <Popconfirm title="Delete this checklist?" onConfirm={() => handleDeleteChecklist(record.id)} okText="Yes" cancelText="No">
+            <Button type="text" size="small" icon={<DeleteOutlined />} danger />
+          </Popconfirm>
+        </Space>
+      ) },
+  ];
 
-      {/* ── Main content card ── */}
-      <div style={{
-        background: T.surface, border: `1px solid ${T.border}`,
-        borderRadius: T.radius, boxShadow: T.shadow, overflow: 'hidden',
-        minHeight: 'calc(100vh - 320px)',
-      }}>
-        <Table
+  const renderEditCheckpointRow = (item, index) => {
+    const isEditing = editingCheckpointId === item.id;
+    const gridCols = '30px 200px 60px 70px 85px 70px 70px 1fr 100px';
+    if (isEditing) {
+      return (
+        <div key={item.id} style={{ display: 'grid', gridTemplateColumns: gridCols, padding: 4, gap: 4, alignItems: 'center', borderBottom: '1px solid #f0f0f0', background: '#fff' }}>
+          <div style={{ fontSize: 10, color: '#8c8c8c' }}>{index + 1}</div>
+          <Input size="small" value={item.item_text} onChange={(e) => patchEditItem(item.id, { item_text: e.target.value })} style={{ borderRadius: 0 }} />
+          <select value={item.item_type} onChange={(e) => patchEditItem(item.id, { item_type: e.target.value })} style={nativeSelectStyle}>
+            <option value="Boolean">Yes/No</option><option value="Numeric">Num</option><option value="Text">Text</option>
+          </select>
+          <Input size="small" value={item.expected_value || ''} onChange={(e) => patchEditItem(item.id, { expected_value: e.target.value })} style={{ borderRadius: 0 }} />
+          <select value={item.frequency_type} onChange={(e) => patchEditItem(item.id, { frequency_type: e.target.value })} style={nativeSelectStyle}>
+            <option value="Time Based">Time</option><option value="Usage Based">Usage</option><option value="Condition Based">Condition</option>
+          </select>
+          {['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
+            <select value={item.interval_unit || ''} onChange={(e) => patchEditItem(item.id, { interval_unit: e.target.value })} style={nativeSelectStyle}>
+              <option value="">Unit</option>{['Day','Week','Month','Year'].map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          ) : <div />}
+          {item.frequency_type === 'Usage Based' ? (
+            <Input size="small" type="number" value={item.trigger_hours || ''} onChange={(e) => patchEditItem(item.id, { trigger_hours: e.target.value ? parseInt(e.target.value, 10) : null })} style={{ borderRadius: 0 }} />
+          ) : ['Time Based', 'Condition Based'].includes(item.frequency_type) ? (
+            <Input size="small" type="number" value={item.interval_value || ''} onChange={(e) => patchEditItem(item.id, { interval_value: e.target.value ? parseInt(e.target.value, 10) : null })} style={{ borderRadius: 0 }} />
+          ) : <div />}
+          <Input size="small" value={item.remarks || ''} onChange={(e) => patchEditItem(item.id, { remarks: e.target.value })} style={{ borderRadius: 0 }} />
+          <Space size={4}>
+            <Button type="text" icon={<CheckCircleOutlined />} onClick={() => setEditingCheckpointId(null)} style={{ color: '#52c41a', padding: 2 }} />
+            {!String(item.id).startsWith('tmp-') && (
+              <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }}
+                onClick={() => handleDeleteCheckpoint(editingChecklist.id, item.id)} />
+            )}
+          </Space>
+        </div>
+      );
+    }
+    return (
+      <div key={item.id} style={{ display: 'grid', gridTemplateColumns: gridCols, padding: 4, gap: 4, alignItems: 'center', borderBottom: '1px solid #f0f0f0', background: index % 2 === 0 ? '#fff' : '#fafafa' }}>
+        <div style={{ fontSize: 10, color: '#8c8c8c' }}>{index + 1}</div>
+        <div style={{ fontSize: 10, fontWeight: 600 }}>{item.item_text}</div>
+        <Tag style={{ fontSize: 9, borderRadius: 0 }}>{itemTypeShort(item.item_type)}</Tag>
+        <div style={{ fontSize: 10 }}>{item.expected_value || '-'}</div>
+        <Tag color={FREQ_TAG_COLORS[item.frequency_type]} style={{ fontSize: 9, borderRadius: 0 }}>{item.frequency_type || '-'}</Tag>
+        <div style={{ fontSize: 10 }}>{item.interval_unit || '-'}</div>
+        <div style={{ fontSize: 10 }}>{item.interval_value || item.trigger_hours || '-'}</div>
+        <div style={{ fontSize: 10 }}>{item.remarks || '-'}</div>
+        <Space size={4}>
+          <Button type="text" icon={<EditOutlined />} onClick={() => setEditingCheckpointId(item.id)} style={{ color: '#1890ff', padding: 2 }} />
+          <Button type="text" icon={<DeleteOutlined />} danger style={{ padding: 2 }}
+            onClick={() => {
+              if (editCheckpoints.length <= 1) message.warning('At least one checkpoint is required');
+              else if (!String(item.id).startsWith('tmp-')) handleDeleteCheckpoint(editingChecklist.id, item.id);
+              else setEditCheckpoints((p) => p.filter((x) => x.id !== item.id));
+            }} />
+        </Space>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding: 0, background: PM_T.bg }}>
+      <Space wrap style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
+        <Input.Search placeholder="Search by name or description..." allowClear style={{ flex: '1 1 280px', maxWidth: 400, borderRadius: 0 }}
+          onChange={(e) => setSearchText(e.target.value)} />
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading} style={btnSharp}>Refresh</Button>
+          <Button type="primary" icon={<PlusOutlined />} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary, fontWeight: 600 }}
+            onClick={() => { setInitialItems([emptyCheckpoint()]); setCreateModalVisible(true); }}>
+            New Checklist
+          </Button>
+        </Space>
+      </Space>
+
+      <Table
         columns={columns}
         dataSource={filteredChecklists}
         loading={loading}
         rowKey="id"
         size="small"
-        scroll={{ x: 1000 }}
+        scroll={{ x: 900 }}
         bordered
+        tableLayout="fixed"
         pagination={{
-          current: pagination.current,
-          pageSize: pagination.pageSize,
-          showSizeChanger: true,
-          showQuickJumper: true,
+          current: pagination.current, pageSize: pagination.pageSize,
+          showSizeChanger: true, showQuickJumper: true,
           showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
           pageSizeOptions: ['10', '20', '50', '100'],
-          onChange: (page, pageSize) => {
-            setPagination({ current: page, pageSize: pageSize });
-          },
-          onShowSizeChange: (current, size) => {
-            setPagination({ current: 1, pageSize: size });
-          },
+          onChange: (page, pageSize) => setPagination({ current: page, pageSize }),
         }}
         onRow={(record) => ({
           onClick: () => {
             const key = record.id;
-            setExpandedRowKeys(prev => 
-              prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-            );
+            setExpandedRowKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
           },
+          style: { cursor: 'pointer' },
         })}
         expandable={{
           expandedRowKeys,
           onExpand: (expanded, record) => {
-            const key = record.id;
-            setExpandedRowKeys(expanded ? [...expandedRowKeys, key] : expandedRowKeys.filter(k => k !== key));
+            setExpandedRowKeys(expanded
+              ? [...expandedRowKeys, record.id]
+              : expandedRowKeys.filter((k) => k !== record.id));
           },
-          expandedRowRender: (record) => (
-            <div style={{ padding: '16px', background: '#fafafa' }}>
-              <div style={{ marginBottom: '12px' }}>
-                <Text strong style={{ fontSize: '13px' }}>Checkpoints ({record.items?.length || 0})</Text>
-              </div>
-              {record.items?.length > 0 ? (
-                <div style={{ 
-                  border: '1px solid #d9d9d9', 
-                  borderRadius: '6px', 
-                  overflow: 'hidden',
-                  background: '#fff'
-                }}>
-                  {/* Table Header */}
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: '50px 350px 80px 60px 100px 100px 80px 80px 1fr',
-                    background: '#fafafa',
-                    padding: '8px 12px',
-                    borderBottom: '1px solid #d9d9d9',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    color: '#262626',
-                    gap: '12px'
-                  }}>
-                    <div>#</div>
-                    <div>Checkpoint</div>
-                    <div>Type</div>
-                    <div>Required</div>
-                    <div>Expected</div>
-                    <div>Frequency</div>
-                    <div>Unit</div>
-                    <div>Value</div>
-                    <div>Remarks</div>
-                  </div>
-                  {/* Table Rows */}
-                  {record.items.map((item, index) => (
-                    <div key={item.id} style={{
-                      display: 'grid',
-                      gridTemplateColumns: '50px 350px 80px 60px 100px 100px 80px 80px 1fr',
-                      padding: '6px 12px',
-                      borderBottom: index < record.items.length - 1 ? '1px solid #f0f0f0' : 'none',
-                      gap: '12px',
-                      alignItems: 'center',
-                      background: index % 2 === 0 ? '#fff' : '#fafafa'
-                    }}>
-                      <div style={{ fontSize: '12px', fontWeight: 500, color: '#8c8c8c' }}>
-                        {index + 1}
-                      </div>
-                      <div style={{ fontSize: '12px', fontWeight: 600 }}>{item.item_text}</div>
-                      <Tag color="blue" style={{ fontSize: '11px', padding: '2px 8px' }}>
-                        {item.item_type === 'boolean' ? 'Yes/No' : item.item_type === 'numerical' ? 'Num' : item.item_type}
-                      </Tag>
-                      <div style={{ textAlign: 'center' }}>
-                        {item.is_required ? <Tag color="red" style={{ fontSize: '11px' }}>Yes</Tag> : <Tag color="green" style={{ fontSize: '11px' }}>No</Tag>}
-                      </div>
-                      <div style={{ fontSize: '12px' }}>{item.expected_value || '-'}</div>
-                      <Tag color={item.frequency_type === 'Time Based' ? 'blue' : item.frequency_type === 'Usage Based' ? 'orange' : 'purple'} style={{ fontSize: '11px' }}>
-                        {item.frequency_type || '-'}
-                      </Tag>
-                      <div style={{ fontSize: '12px' }}>{item.interval_unit || '-'}</div>
-                      <div style={{ fontSize: '12px' }}>{item.interval_value || item.trigger_hours || '-'}</div>
-                      <div style={{ fontSize: '12px' }}>{item.remarks || '-'}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
-                  No checkpoints added yet
-                </div>
-              )}
-            </div>
-          ),
-          rowExpandable: (record) => true,
+          expandedRowRender: (record) => <ExpandedCheckpoints items={record.items} />,
+          rowExpandable: () => true,
         }}
-        style={{
-          background: T.surface,
-        }}
+        style={{ background: PM_T.surface }}
       />
-      </div>
 
-      {/* Create Checklist Modal */}
-      <Modal
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <PlusOutlined style={{ color: '#1890ff' }} />
-            Create New Checklist
-          </div>
-        }
-        open={createModalVisible}
-        onCancel={() => {
-          setCreateModalVisible(false);
-          form.resetFields();
-          setInitialItems([]);
-        }}
-        footer={null}
-        width={1000}
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleCreateChecklist}
-          style={{ marginTop: '20px' }}
-        >
-          {/* Checklist Name and Description in same row */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-            <Form.Item
-              name="name"
-              label="Checklist Name"
-              rules={[{ required: true, message: 'Please enter checklist name' }]}
-              style={{ marginBottom: 0 }}
-            >
-              <Input placeholder="Enter checklist name" style={{ borderRadius: '6px' }} />
+      {/* Create Modal */}
+      <Modal title={<><PlusOutlined style={{ color: '#1890ff' }} /> Create New Checklist</>} open={createModalVisible}
+        onCancel={() => { setCreateModalVisible(false); form.resetFields(); setInitialItems([emptyCheckpoint()]); }}
+        footer={null} width={1000}>
+        <Form form={form} layout="vertical" onFinish={handleCreateChecklist} style={{ marginTop: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <Form.Item name="name" label="Checklist Name" rules={[{ required: true, message: 'Please enter checklist name' }]} style={{ marginBottom: 0 }}>
+              <Input placeholder="Enter checklist name" style={{ borderRadius: 0 }} />
             </Form.Item>
-            
-            <Form.Item
-              name="description"
-              label="Description"
-              style={{ marginBottom: 0 }}
-            >
-              <Input 
-                placeholder="Enter checklist description (optional)" 
-                style={{ borderRadius: '6px' }}
-              />
+            <Form.Item name="description" label="Description" style={{ marginBottom: 0 }}>
+              <Input placeholder="Enter description (optional)" style={{ borderRadius: 0 }} />
             </Form.Item>
           </div>
-
           <Divider />
-
-          <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Title level={5} style={{ margin: 0 }}>Check Points <Text type="danger" style={{ fontSize: '12px' }}>*</Text></Title>
-            <Text type="secondary" style={{ fontSize: '12px' }}>Total: {initialItems.length}</Text>
+          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+            <Title level={5} style={{ margin: 0 }}>Check Points <Text type="danger" style={{ fontSize: 12 }}>*</Text></Title>
+            <Text type="secondary" style={{ fontSize: 12 }}>Total: {initialItems.length}</Text>
           </div>
-
-          {/* Compact Table Layout */}
-          <div style={{ 
-            border: '1px solid #d9d9d9', 
-            borderRadius: '6px', 
-            overflow: 'hidden',
-            marginBottom: '12px'
-          }}>
-            {/* Table Header */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '30px 250px 70px 45px 75px 95px 80px 80px 1fr 30px',
-              background: '#fafafa',
-              padding: '8px 6px',
-              borderBottom: '1px solid #d9d9d9',
-              fontSize: '11px',
-              fontWeight: 600,
-              color: '#262626',
-              gap: '6px'
-            }}>
-              <div>#</div>
-              <div>Checkpoint</div>
-              <div>Type</div>
-              <div>Req</div>
-              <div>Expected</div>
-              <div>Frequency</div>
-              <div>Unit</div>
-              <div>Value</div>
-              <div>Remarks</div>
-              <div></div>
-            </div>
-
-            {/* Table Rows */}
-            {initialItems.map((item, index) => (
-              <div key={item.id} style={{
-                display: 'grid',
-                gridTemplateColumns: '30px 250px 70px 45px 75px 95px 80px 80px 1fr 30px',
-                padding: '6px',
-                borderBottom: index < initialItems.length - 1 ? '1px solid #f0f0f0' : 'none',
-                gap: '6px',
-                alignItems: 'center',
-                background: index % 2 === 0 ? '#fff' : '#fafafa'
-              }}>
-                {/* Sequence Number */}
-                <div style={{ fontSize: '11px', fontWeight: 500, color: '#8c8c8c' }}>
-                  {index + 1}
-                </div>
-
-                {/* Checkpoint */}
-                <Input
-                  placeholder="Checkpoint"
-                  value={item.item_text}
-                  onChange={(e) => {
-                    setInitialItems(prev =>
-                      prev.map(x => x.id === item.id ? { ...x, item_text: e.target.value } : x)
-                    );
-                  }}
-                  style={{ fontSize: '11px', height: '28px' }}
-                />
-
-                {/* Type */}
-                <select
-                  value={item.item_type}
-                  onChange={(e) => {
-                    setInitialItems(prev =>
-                      prev.map(x => x.id === item.id ? { ...x, item_type: e.target.value } : x)
-                    );
-                  }}
-                  style={{
-                    width: '100%',
-                    height: '28px',
-                    borderRadius: '4px',
-                    border: '1px solid #d9d9d9',
-                    padding: '0 4px',
-                    fontSize: '10px'
-                  }}
-                >
-                  <option value="">Select</option>
-                  <option value="boolean">Yes/No</option>
-                  <option value="numerical">Num</option>
-                  <option value="text">Text</option>
-                </select>
-
-                {/* Required */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <input
-                    type="checkbox"
-                    checked={item.is_required}
-                    onChange={(e) => {
-                      setInitialItems(prev =>
-                        prev.map(x => x.id === item.id ? { ...x, is_required: e.target.checked } : x)
-                      );
-                    }}
-                    style={{ cursor: 'pointer' }}
-                  />
-                </div>
-
-                {/* Expected Value */}
-                <Input
-                  placeholder="Expected"
-                  value={item.expected_value}
-                  onChange={(e) => {
-                    setInitialItems(prev =>
-                      prev.map(x => x.id === item.id ? { ...x, expected_value: e.target.value } : x)
-                    );
-                  }}
-                  style={{ fontSize: '11px', height: '28px' }}
-                />
-
-                {/* Frequency Type */}
-                <select
-                  value={item.frequency_type || ''}
-                  onChange={(e) => {
-                    setInitialItems(prev =>
-                      prev.map(x => x.id === item.id ? { ...x, frequency_type: e.target.value } : x)
-                    );
-                  }}
-                  style={{
-                    width: '100%',
-                    height: '28px',
-                    borderRadius: '4px',
-                    border: '1px solid #d9d9d9',
-                    padding: '0 4px',
-                    fontSize: '10px'
-                  }}
-                >
-                  <option value="">None</option>
-                  <option value="Time Based">Time</option>
-                  <option value="Usage Based">Usage</option>
-                  <option value="Condition Based">Condition</option>
-                </select>
-
-                {/* Unit Column */}
-                {(item.frequency_type === 'Time Based' || item.frequency_type === 'Condition Based') ? (
-                  <select
-                    value={item.interval_unit || ''}
-                    onChange={(e) => {
-                      setInitialItems(prev =>
-                        prev.map(x => x.id === item.id ? { ...x, interval_unit: e.target.value } : x)
-                      );
-                    }}
-                    style={{
-                      width: '100%',
-                      height: '28px',
-                      borderRadius: '4px',
-                      border: '1px solid #d9d9d9',
-                      padding: '0 2px',
-                      fontSize: '10px'
-                    }}
-                  >
-                    <option value="">Unit</option>
-                    <option value="Day">Day</option>
-                    <option value="Week">Week</option>
-                    <option value="Month">Month</option>
-                    <option value="Year">Year</option>
-                  </select>
-                ) : (
-                  <div></div>
-                )}
-
-                {/* Value Column */}
-                {item.frequency_type === 'Time Based' ? (
-                  <Input
-                    type="number"
-                    placeholder="Value"
-                    value={item.interval_value || ''}
-                    onChange={(e) => {
-                      setInitialItems(prev =>
-                        prev.map(x => x.id === item.id ? { ...x, interval_value: e.target.value ? parseInt(e.target.value) : null } : x)
-                      );
-                    }}
-                    style={{ fontSize: '10px', height: '28px' }}
-                  />
-                ) : item.frequency_type === 'Usage Based' ? (
-                  <Input
-                    type="number"
-                    placeholder="Hours"
-                    value={item.trigger_hours || ''}
-                    onChange={(e) => {
-                      setInitialItems(prev =>
-                        prev.map(x => x.id === item.id ? { ...x, trigger_hours: e.target.value ? parseInt(e.target.value) : null } : x)
-                      );
-                    }}
-                    style={{ fontSize: '10px', height: '28px' }}
-                  />
-                ) : item.frequency_type === 'Condition Based' ? (
-                  <Input
-                    type="number"
-                    placeholder="Value"
-                    value={item.interval_value || ''}
-                    onChange={(e) => {
-                      setInitialItems(prev =>
-                        prev.map(x => x.id === item.id ? { ...x, interval_value: e.target.value ? parseInt(e.target.value) : null } : x)
-                      );
-                    }}
-                    style={{ fontSize: '10px', height: '28px' }}
-                  />
-                ) : (
-                  <div></div>
-                )}
-
-                {/* Remarks Column */}
-                <Input
-                  placeholder="Remarks"
-                  value={item.remarks || ''}
-                  onChange={(e) => {
-                    setInitialItems(prev =>
-                      prev.map(x => x.id === item.id ? { ...x, remarks: e.target.value } : x)
-                    );
-                  }}
-                  style={{ fontSize: '10px', height: '28px' }}
-                />
-
-                {/* Delete Button */}
-                <Button
-                  type="text"
-                  icon={<DeleteOutlined />}
-                  onClick={() => {
-                    if (initialItems.length > 1) {
-                      setInitialItems(prev => prev.filter(x => x.id !== item.id));
-                    } else {
-                      message.warning('At least one check point is required');
-                    }
-                  }}
-                  style={{ color: '#ff4d4f', padding: '2px', fontSize: '12px' }}
-                />
-              </div>
-            ))}
+          <div style={{ border: '1px solid #d9d9d9', marginBottom: 12 }}>
+            <CreateCheckpointRows items={initialItems} onChange={patchCreateItem}
+              onRemove={(id) => {
+                if (initialItems.length > 1) setInitialItems((p) => p.filter((x) => x.id !== id));
+                else message.warning('At least one checkpoint is required');
+              }} />
           </div>
-
-          <Button
-            type="dashed"
-            block
-            onClick={() => {
-              setInitialItems(prev => [
-                ...prev,
-                {
-                  id: Date.now() + Math.random(),
-                  item_text: '',
-                  item_type: '',
-                  expected_value: '',
-                  is_required: false,
-                  frequency_type: 'Time Based',
-                  interval_value: null,
-                  interval_unit: '',
-                  trigger_hours: null,
-                  inspection_interval: '',
-                  remarks: ''
-                }
-              ]);
-            }}
-            icon={<PlusOutlined />}
-            style={{ marginBottom: '16px', borderRadius: '6px' }}
-          >
-            Add Checkpoint
-          </Button>
-
-          <Text type="secondary" style={{ fontSize: '11px', display: 'block', marginBottom: '16px' }}>
-            Note: Select frequency type to configure scheduling details inline for each checkpoint.
-          </Text>
-          
+          <Button type="dashed" block icon={<PlusOutlined />} style={{ ...btnSharp, marginBottom: 16 }}
+            onClick={() => setInitialItems((p) => [...p, emptyCheckpoint(p.length + 1)])}>Add Checkpoint</Button>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button 
-                onClick={() => {
-                  setCreateModalVisible(false);
-                  form.resetFields();
-                }}
-                style={{ borderRadius: '6px' }}
-              >
-                Cancel
-              </Button>
-              <Button 
-                type="primary" 
-                htmlType="submit"
-                style={{ background: T.primary, borderColor: T.primary, borderRadius: '6px', fontWeight: 600 }}
-              >
-                Save Checklist
-              </Button>
+              <Button onClick={() => setCreateModalVisible(false)} style={btnSharp}>Cancel</Button>
+              <Button type="primary" htmlType="submit" style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary, fontWeight: 600 }}>Save Checklist</Button>
             </Space>
           </Form.Item>
         </Form>
       </Modal>
 
       {/* Preview Modal */}
-      <Modal
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <EyeOutlined style={{ color: '#1890ff' }} />
-            Preview Checklist
-          </div>
-        }
-        open={previewModalVisible}
-        onCancel={() => setPreviewModalVisible(false)}
+      <Modal title={<><EyeOutlined style={{ color: '#1890ff' }} /> Preview Checklist</>} open={previewModalVisible}
+        onCancel={() => setPreviewModalVisible(false)} width={1200}
         footer={[
-          <Button key="close" onClick={() => setPreviewModalVisible(false)}>
-            Close
-          </Button>,
-          <Button
-            key="addItem"
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setPreviewModalVisible(false);
-              setAddItemModalVisible(true);
-            }}
-            style={{
-              background: T.primary,
-              borderColor: T.primary,
-              borderRadius: '8px',
-              fontWeight: 600
-            }}
-          >
-            Add New Checkpoint
-          </Button>
-        ]}
-        width={1200}
-      >
+          <Button key="close" onClick={() => setPreviewModalVisible(false)} style={btnSharp}>Close</Button>,
+          <Button key="add" type="primary" icon={<PlusOutlined />} style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}
+            onClick={() => { setPreviewModalVisible(false); setAddItemModalVisible(true); }}>Add New Checkpoint</Button>,
+        ]}>
         {selectedChecklist && (
-          <div style={{ display: 'flex', gap: '20px' }}>
-            {/* Left side - Checklist details */}
+          <div style={{ display: 'flex', gap: 20 }}>
             <div style={{ flex: '0 0 300px' }}>
-              <Card size="small" style={{ backgroundColor: '#f8f9fa' }}>
-                <div style={{ marginBottom: '12px' }}>
-                  <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Checklist Name</Text>
-                  <Text style={{ fontSize: '12px' }}>{selectedChecklist.name}</Text>
-                </div>
-                <div style={{ marginBottom: '12px' }}>
-                  <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Description</Text>
-                  <Text style={{ fontSize: '12px' }}>{selectedChecklist.description || '-'}</Text>
-                </div>
-                <div>
-                  <Text strong style={{ fontSize: '13px', display: 'block', marginBottom: '4px' }}>Created</Text>
-                  <Text style={{ fontSize: '12px' }}>{formatDate(selectedChecklist.created_at)}</Text>
-                </div>
+              <Card size="small" style={{ backgroundColor: '#f8f9fa', borderRadius: 0 }}>
+                <div style={{ marginBottom: 12 }}><Text strong style={{ fontSize: 13, display: 'block' }}>Checklist Name</Text><Text style={{ fontSize: 12 }}>{selectedChecklist.name}</Text></div>
+                <div style={{ marginBottom: 12 }}><Text strong style={{ fontSize: 13, display: 'block' }}>Description</Text><Text style={{ fontSize: 12 }}>{selectedChecklist.description || '-'}</Text></div>
+                <div><Text strong style={{ fontSize: 13, display: 'block' }}>Created</Text><Text style={{ fontSize: 12 }}>{formatDateTime(selectedChecklist.created_at)}</Text></div>
               </Card>
             </div>
-
-            {/* Right side - Checkpoints */}
-            <div style={{ flex: '1' }}>
-              <div style={{ marginBottom: '12px' }}>
-                <Text strong style={{ fontSize: '13px' }}>Checkpoints ({selectedChecklist.items?.length || 0})</Text>
-              </div>
-              <div style={{ 
-                border: '1px solid #d9d9d9', 
-                borderRadius: '6px', 
-                overflow: 'hidden',
-                background: '#fff',
-                maxHeight: '500px',
-                overflowY: 'auto'
-              }}>
-                {/* Table Header */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: '30px 200px 60px 40px 70px 85px 70px 70px 1fr',
-                  background: '#fafafa',
-                  padding: '6px 4px',
-                  borderBottom: '1px solid #d9d9d9',
-                  fontSize: '10px',
-                  fontWeight: 600,
-                  color: '#262626',
-                  gap: '4px',
-                  position: 'sticky',
-                  top: 0,
-                  zIndex: 1
-                }}>
-                  <div>#</div>
-                  <div>Checkpoint</div>
-                  <div>Type</div>
-                  <div>Req</div>
-                  <div>Expected</div>
-                  <div>Frequency</div>
-                  <div>Unit</div>
-                  <div>Value</div>
-                  <div>Remarks</div>
-                </div>
-                {/* Table Rows */}
-                {selectedChecklist.items?.length > 0 ? (
-                  selectedChecklist.items.map((item, index) => (
-                    <div key={item.id} style={{
-                      display: 'grid',
-                      gridTemplateColumns: '30px 200px 60px 40px 70px 85px 70px 70px 1fr',
-                      padding: '4px',
-                      borderBottom: index < selectedChecklist.items.length - 1 ? '1px solid #f0f0f0' : 'none',
-                      gap: '4px',
-                      alignItems: 'center',
-                      background: index % 2 === 0 ? '#fff' : '#fafafa'
-                    }}>
-                      <div style={{ fontSize: '10px', fontWeight: 500, color: '#8c8c8c' }}>
-                        {index + 1}
-                      </div>
-                      <div style={{ fontSize: '10px', fontWeight: 600 }}>{item.item_text}</div>
-                      <Tag color="blue" style={{ fontSize: '9px', padding: '1px 4px' }}>
-                        {item.item_type === 'boolean' ? 'Yes/No' : item.item_type === 'numerical' ? 'Num' : item.item_type}
-                      </Tag>
-                      <div style={{ textAlign: 'center' }}>
-                        {item.is_required ? <Tag color="red" style={{ fontSize: '9px', padding: '1px 4px' }}>Yes</Tag> : <Tag color="green" style={{ fontSize: '9px', padding: '1px 4px' }}>No</Tag>}
-                      </div>
-                      <div style={{ fontSize: '10px' }}>{item.expected_value || '-'}</div>
-                      <Tag color={item.frequency_type === 'Time Based' ? 'blue' : item.frequency_type === 'Usage Based' ? 'orange' : 'purple'} style={{ fontSize: '9px', padding: '1px 4px' }}>
-                        {item.frequency_type || '-'}
-                      </Tag>
-                      <div style={{ fontSize: '10px' }}>{item.interval_unit || '-'}</div>
-                      <div style={{ fontSize: '10px' }}>{item.interval_value || item.trigger_hours || '-'}</div>
-                      <div style={{ fontSize: '10px' }}>{item.remarks || '-'}</div>
-                    </div>
-                  ))
-                ) : (
-                  <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-                    No checkpoints added yet
-                  </div>
-                )}
+            <div style={{ flex: 1 }}>
+              <Text strong style={{ fontSize: 13 }}>Checkpoints ({selectedChecklist.items?.length || 0})</Text>
+              <div style={{ marginTop: 6, maxHeight: 500, overflowY: 'auto' }}>
+                <ExpandedCheckpoints items={selectedChecklist.items} compact />
               </div>
             </div>
           </div>
         )}
       </Modal>
 
-      {/* Add Checkpoint Modal */}
-      <Modal
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <PlusOutlined style={{ color: '#1890ff' }} />
-            Add New Checkpoint
+      {/* Edit Modal — checklist + checkpoints */}
+      <Modal title={<><EditOutlined style={{ color: '#faad14' }} /> Edit Checklist</>} open={editModalVisible}
+        onCancel={() => { setEditModalVisible(false); setEditingChecklist(null); editForm.resetFields(); setEditCheckpoints([]); }}
+        footer={null} width={1200}>
+        <div style={{ display: 'flex', gap: 20 }}>
+          <div style={{ flex: '0 0 300px' }}>
+            <Form form={editForm} layout="vertical" onFinish={handleUpdateChecklist}>
+              <Form.Item name="name" label="Checklist Name" rules={[{ required: true }]}><Input style={{ borderRadius: 0 }} /></Form.Item>
+              <Form.Item name="description" label="Description"><Input.TextArea rows={4} style={{ borderRadius: 0 }} /></Form.Item>
+              <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+                <Space>
+                  <Button onClick={() => setEditModalVisible(false)} style={btnSharp}>Cancel</Button>
+                  <Button type="primary" htmlType="submit" style={{ ...btnSharp, background: '#F59E0B', borderColor: '#F59E0B', fontWeight: 600 }}>Update Checklist</Button>
+                </Space>
+              </Form.Item>
+            </Form>
           </div>
-        }
-        open={addItemModalVisible}
-        onCancel={() => {
-          setAddItemModalVisible(false);
-          itemForm.resetFields();
-        }}
-        footer={null}
-        width={600}
-      >
-        <Form
-          form={itemForm}
-          layout="vertical"
-          onFinish={handleAddItem}
-          style={{ marginTop: '20px' }}
-        >
-          <Form.Item
-            name="item_text"
-            label="Checkpoint"
-            rules={[{ required: true, message: 'Please enter checkpoint' }]}
-          >
-            <Input placeholder="Enter checkpoint" style={{ borderRadius: '6px' }} />
-          </Form.Item>
-          
-          <Form.Item
-            name="item_type"
-            label="Type"
-            rules={[{ required: true, message: 'Please select type' }]}
-          >
-            <select 
-              style={{ 
-                width: '100%', 
-                height: '40px', 
-                borderRadius: '6px',
-                border: '1px solid #d9d9d9',
-                padding: '0 12px'
-              }}
-            >
-              <option value="">Select type</option>
-              <option value="boolean">Yes/No</option>
-              <option value="numerical">Numerical</option>
-              <option value="text">Text</option>
-            </select>
-          </Form.Item>
-          
-          <Form.Item
-            name="expected_value"
-            label="Expected Value"
-            rules={[
-              { required: true, message: 'Please enter expected value' },
-              {
-                validator: (_, value) => {
-                  const itemType = itemForm.getFieldValue('item_type');
-                  if (!itemType || !value) return Promise.resolve();
-                  
-                  if (validateExpectedValue(itemType, value)) {
-                    return Promise.resolve();
-                  }
-                  
-                  let errorMsg = '';
-                  if (itemType === 'boolean') {
-                    errorMsg = 'Expected value must be: true, false, yes, no, 1, or 0';
-                  } else if (itemType === 'numerical') {
-                    errorMsg = 'Expected value must be: a number, range (e.g., 18-25), or comparison (e.g., >=50, <=100, =75)';
-                  } else if (itemType === 'text') {
-                    errorMsg = 'Expected value must be a non-empty text';
-                  }
-                  
-                  return Promise.reject(new Error(errorMsg));
-                }
-              }
-            ]}
-            dependencies={['item_type']}
-          >
-            <Input 
-              placeholder={
-                itemForm.getFieldValue('item_type') === 'boolean' ? 'e.g., true, false, yes, no, 1, 0' :
-                itemForm.getFieldValue('item_type') === 'numerical' ? 'e.g., 50, 18-25, >=50, <=100, =75' :
-                'e.g., Enter text value'
-              } 
-              style={{ borderRadius: '6px' }} 
-            />
-          </Form.Item>
-          
-          <Form.Item
-            name="is_required"
-            valuePropName="checked"
-          >
-            <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <input type="checkbox" />
-              <span>Required</span>
-            </label>
-          </Form.Item>
+          <div style={{ flex: 1 }}>
+            <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text strong style={{ fontSize: 13 }}>Checkpoints ({editCheckpoints.length})</Text>
+              <Button type="primary" size="small" icon={<PlusOutlined />} style={btnSharp}
+                onClick={() => setEditCheckpoints((p) => [...p, { ...emptyCheckpoint(p.length + 1), _original: {} }])}>Add Checkpoint</Button>
+            </div>
+            <div style={{ border: '1px solid #d9d9d9', maxHeight: 500, overflowY: 'auto' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '30px 200px 60px 70px 85px 70px 70px 1fr 100px', background: '#fafafa', padding: '6px 4px', borderBottom: '1px solid #d9d9d9', fontSize: 10, fontWeight: 600, gap: 4, position: 'sticky', top: 0, zIndex: 1 }}>
+                <div>#</div><div>Checkpoint</div><div>Type</div><div>Expected</div><div>Frequency</div><div>Unit</div><div>Value</div><div>Remarks</div><div>Actions</div>
+              </div>
+              {editCheckpoints.map((item, i) => renderEditCheckpointRow(item, i))}
+            </div>
+          </div>
+        </div>
+      </Modal>
 
-          <Form.Item
-            name="frequency_type"
-            label="Frequency Type"
-            initialValue="Time Based"
-          >
-            <select 
-              style={{ 
-                width: '100%', 
-                height: '40px', 
-                borderRadius: '6px',
-                border: '1px solid #d9d9d9',
-                padding: '0 12px'
-              }}
-            >
-              <option value="">None</option>
-              <option value="Time Based">Time Based</option>
-              <option value="Usage Based">Usage Based</option>
-              <option value="Condition Based">Condition Based</option>
-            </select>
+      {/* Add Checkpoint Modal */}
+      <Modal title={<><PlusOutlined style={{ color: '#1890ff' }} /> Add New Checkpoint</>} open={addItemModalVisible}
+        onCancel={() => { setAddItemModalVisible(false); itemForm.resetFields(); }} footer={null} width={600}>
+        <Form form={itemForm} layout="vertical" onFinish={handleAddItem} style={{ marginTop: 20 }}
+          initialValues={{ item_type: 'Boolean', frequency_type: 'Time Based', interval_value: 1, interval_unit: 'Week' }}>
+          <Form.Item name="item_text" label="Checkpoint" rules={[{ required: true }]}><Input style={{ borderRadius: 0 }} /></Form.Item>
+          <Form.Item name="item_type" label="Type" rules={[{ required: true }]}>
+            <Select style={{ borderRadius: 0 }} options={[
+              { value: 'Boolean', label: 'Yes/No' },
+              { value: 'Numeric', label: 'Numerical' },
+              { value: 'Text', label: 'Text' },
+            ]} />
           </Form.Item>
-
-          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.frequency_type !== curr.frequency_type}>
+          <Form.Item name="expected_value" label="Expected Value"><Input style={{ borderRadius: 0 }} /></Form.Item>
+          <Form.Item name="frequency_type" label="Frequency Type" rules={[{ required: true }]}>
+            <Select style={{ borderRadius: 0 }} options={[
+              { value: 'Time Based', label: 'Time Based' },
+              { value: 'Usage Based', label: 'Usage Based' },
+              { value: 'Condition Based', label: 'Condition Based' },
+            ]} />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(p, c) => p.frequency_type !== c.frequency_type}>
             {({ getFieldValue }) => {
-              const frequencyType = getFieldValue('frequency_type');
-              if (frequencyType === 'Time Based' || frequencyType === 'Condition Based') {
+              const ft = getFieldValue('frequency_type');
+              if (ft === 'Usage Based') {
                 return (
-                  <>
-                    <Form.Item
-                      name="interval_unit"
-                      label="Unit"
-                    >
-                      <select 
-                        style={{ 
-                          width: '100%', 
-                          height: '40px', 
-                          borderRadius: '6px',
-                          border: '1px solid #d9d9d9',
-                          padding: '0 12px'
-                        }}
-                      >
-                        <option value="">Select unit</option>
-                        <option value="Day">Day</option>
-                        <option value="Week">Week</option>
-                        <option value="Month">Month</option>
-                        <option value="Year">Year</option>
-                      </select>
-                    </Form.Item>
-                    <Form.Item
-                      name="interval_value"
-                      label="Value"
-                    >
-                      <Input type="number" placeholder="Enter value" style={{ borderRadius: '6px' }} />
-                    </Form.Item>
-                  </>
+                  <Form.Item name="trigger_hours" label="Trigger Hours" rules={[{ required: true }]}>
+                    <InputNumber min={1} style={{ width: '100%', borderRadius: 0 }} />
+                  </Form.Item>
                 );
               }
-              if (frequencyType === 'Usage Based') {
+              if (['Time Based', 'Condition Based'].includes(ft)) {
                 return (
-                  <Form.Item
-                    name="trigger_hours"
-                    label="Trigger Hours"
-                  >
-                    <Input type="number" placeholder="Enter hours" style={{ borderRadius: '6px' }} />
-                  </Form.Item>
+                  <>
+                    <Form.Item name="interval_unit" label="Unit" rules={[{ required: true }]}>
+                      <Select style={{ borderRadius: 0 }} options={['Day', 'Week', 'Month', 'Year'].map((u) => ({ value: u, label: u }))} />
+                    </Form.Item>
+                    <Form.Item name="interval_value" label="Value" rules={[{ required: true }]}>
+                      <InputNumber min={1} style={{ width: '100%', borderRadius: 0 }} />
+                    </Form.Item>
+                  </>
                 );
               }
               return null;
             }}
           </Form.Item>
-
-          <Form.Item
-            name="remarks"
-            label="Remarks"
-          >
-            <Input placeholder="Enter remarks" style={{ borderRadius: '6px' }} />
-          </Form.Item>
-          
+          <Form.Item name="remarks" label="Remarks"><Input style={{ borderRadius: 0 }} /></Form.Item>
           <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
             <Space>
-              <Button 
-                onClick={() => {
-                  setAddItemModalVisible(false);
-                  itemForm.resetFields();
-                }}
-                style={{ borderRadius: '6px' }}
-              >
-                Cancel
-              </Button>
-              <Button 
-                type="primary" 
-                htmlType="submit"
-                style={{
-                  background: T.primary,
-                  borderColor: T.primary,
-                  borderRadius: '8px',
-                  fontWeight: 600
-                }}
-              >
-                Add Checkpoint
-              </Button>
+              <Button onClick={() => setAddItemModalVisible(false)} style={btnSharp}>Cancel</Button>
+              <Button type="primary" htmlType="submit" style={{ ...btnSharp, background: PM_T.primary, borderColor: PM_T.primary }}>Add Checkpoint</Button>
             </Space>
           </Form.Item>
         </Form>
-      </Modal>
-
-      {/* Edit Checklist Modal */}
-      <Modal
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <EditOutlined style={{ color: '#faad14' }} />
-            Edit Checklist
-          </div>
-        }
-        open={editModalVisible}
-        onCancel={() => {
-          setEditModalVisible(false);
-          setEditingChecklist(null);
-          editForm.resetFields();
-          setEditCheckpoints([]);
-        }}
-        footer={null}
-        width={1200}
-      >
-        <div style={{ display: 'flex', gap: '20px' }}>
-          {/* Left side - Checklist details */}
-          <div style={{ flex: '0 0 300px' }}>
-            <Form
-              form={editForm}
-              layout="vertical"
-              onFinish={handleUpdateChecklist}
-            >
-              <Form.Item
-                name="name"
-                label="Checklist Name"
-                rules={[{ required: true, message: 'Please enter checklist name' }]}
-              >
-                <Input placeholder="Enter checklist name" style={{ borderRadius: '6px' }} />
-              </Form.Item>
-              
-              <Form.Item
-                name="description"
-                label="Description"
-              >
-                <TextArea 
-                  placeholder="Enter checklist description (optional)" 
-                  rows={4}
-                  style={{ borderRadius: '6px' }}
-                />
-              </Form.Item>
-              
-              <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-                <Space>
-                  <Button 
-                    onClick={() => {
-                      setEditModalVisible(false);
-                      setEditingChecklist(null);
-                      editForm.resetFields();
-                      setEditCheckpoints([]);
-                    }}
-                    style={{ borderRadius: '6px' }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button 
-                    type="primary" 
-                    htmlType="submit"
-                    style={{
-                      background: '#F59E0B',
-                      borderColor: '#F59E0B',
-                      borderRadius: '8px',
-                      fontWeight: 600
-                    }}
-                  >
-                    Update Checklist
-                  </Button>
-                </Space>
-              </Form.Item>
-            </Form>
-          </div>
-
-          {/* Right side - Checkpoints */}
-          <div style={{ flex: '1' }}>
-            <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text strong style={{ fontSize: '13px' }}>Checkpoints ({editCheckpoints.length})</Text>
-              <Button
-                type="primary"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  setEditCheckpoints(prev => [
-                    ...prev,
-                    {
-                      id: Date.now(),
-                      item_text: '',
-                      item_type: '',
-                      expected_value: '',
-                      is_required: false,
-                      frequency_type: 'Time Based',
-                      interval_value: null,
-                      interval_unit: '',
-                      trigger_hours: null,
-                      inspection_interval: '',
-                      remarks: ''
-                    }
-                  ]);
-                }}
-                style={{ borderRadius: '6px' }}
-              >
-                Add Checkpoint
-              </Button>
-            </div>
-
-            <div style={{ 
-              border: '1px solid #d9d9d9', 
-              borderRadius: '6px', 
-              overflow: 'hidden',
-              background: '#fff',
-              maxHeight: '500px',
-              overflowY: 'auto'
-            }}>
-              {/* Table Header */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '30px 200px 60px 40px 70px 85px 70px 70px 1fr 80px',
-                background: '#fafafa',
-                padding: '6px 4px',
-                borderBottom: '1px solid #d9d9d9',
-                fontSize: '10px',
-                fontWeight: 600,
-                color: '#262626',
-                gap: '4px',
-                position: 'sticky',
-                top: 0,
-                zIndex: 1
-              }}>
-                <div>#</div>
-                <div>Checkpoint</div>
-                <div>Type</div>
-                <div>Req</div>
-                <div>Expected</div>
-                <div>Frequency</div>
-                <div>Unit</div>
-                <div>Value</div>
-                <div>Remarks</div>
-                <div>Actions</div>
-              </div>
-              {/* Table Rows */}
-              {editCheckpoints.map((item, index) => (
-                <div key={item.id} style={{
-                  display: 'grid',
-                  gridTemplateColumns: '30px 200px 60px 40px 70px 85px 70px 70px 1fr 100px',
-                  padding: '4px',
-                  borderBottom: index < editCheckpoints.length - 1 ? '1px solid #f0f0f0' : 'none',
-                  gap: '4px',
-                  alignItems: 'center',
-                  background: index % 2 === 0 ? '#fff' : '#fafafa'
-                }}>
-                  <div style={{ fontSize: '10px', fontWeight: 500, color: '#8c8c8c' }}>
-                    {index + 1}
-                  </div>
-                  {editingCheckpointId === item.id ? (
-                    <>
-                      <Input
-                        placeholder="Checkpoint"
-                        value={item.item_text}
-                        onChange={(e) => {
-                          setEditCheckpoints(prev =>
-                            prev.map(x => x.id === item.id ? { ...x, item_text: e.target.value } : x)
-                          );
-                        }}
-                        style={{ fontSize: '10px', height: '24px' }}
-                      />
-                      <select
-                        value={item.item_type}
-                        onChange={(e) => {
-                          setEditCheckpoints(prev =>
-                            prev.map(x => x.id === item.id ? { ...x, item_type: e.target.value } : x)
-                          );
-                        }}
-                        style={{
-                          width: '100%',
-                          height: '24px',
-                          borderRadius: '4px',
-                          border: '1px solid #d9d9d9',
-                          padding: '0 2px',
-                          fontSize: '9px'
-                        }}
-                      >
-                        <option value="">Select</option>
-                        <option value="boolean">Yes/No</option>
-                        <option value="numerical">Num</option>
-                        <option value="text">Text</option>
-                      </select>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <input
-                          type="checkbox"
-                          checked={item.is_required}
-                          onChange={(e) => {
-                            setEditCheckpoints(prev =>
-                              prev.map(x => x.id === item.id ? { ...x, is_required: e.target.checked } : x)
-                            );
-                          }}
-                          style={{ cursor: 'pointer' }}
-                        />
-                      </div>
-                      <Input
-                        placeholder="Expected"
-                        value={item.expected_value}
-                        onChange={(e) => {
-                          setEditCheckpoints(prev =>
-                            prev.map(x => x.id === item.id ? { ...x, expected_value: e.target.value } : x)
-                          );
-                        }}
-                        style={{ fontSize: '10px', height: '24px' }}
-                      />
-                      <select
-                        value={item.frequency_type || ''}
-                        onChange={(e) => {
-                          setEditCheckpoints(prev =>
-                            prev.map(x => x.id === item.id ? { ...x, frequency_type: e.target.value } : x)
-                          );
-                        }}
-                        style={{
-                          width: '100%',
-                          height: '24px',
-                          borderRadius: '4px',
-                          border: '1px solid #d9d9d9',
-                          padding: '0 2px',
-                          fontSize: '9px'
-                        }}
-                      >
-                        <option value="">None</option>
-                        <option value="Time Based">Time</option>
-                        <option value="Usage Based">Usage</option>
-                        <option value="Condition Based">Condition</option>
-                      </select>
-                      {(item.frequency_type === 'Time Based' || item.frequency_type === 'Condition Based') ? (
-                        <select
-                          value={item.interval_unit || ''}
-                          onChange={(e) => {
-                            setEditCheckpoints(prev =>
-                              prev.map(x => x.id === item.id ? { ...x, interval_unit: e.target.value } : x)
-                            );
-                          }}
-                          style={{
-                            width: '100%',
-                            height: '24px',
-                            borderRadius: '4px',
-                            border: '1px solid #d9d9d9',
-                            padding: '0 2px',
-                            fontSize: '9px'
-                          }}
-                        >
-                          <option value="">Unit</option>
-                          <option value="Day">Day</option>
-                          <option value="Week">Week</option>
-                          <option value="Month">Month</option>
-                          <option value="Year">Year</option>
-                        </select>
-                      ) : (
-                        <div></div>
-                      )}
-                      {item.frequency_type === 'Time Based' || item.frequency_type === 'Condition Based' ? (
-                        <Input
-                          type="number"
-                          placeholder="Value"
-                          value={item.interval_value || ''}
-                          onChange={(e) => {
-                            setEditCheckpoints(prev =>
-                              prev.map(x => x.id === item.id ? { ...x, interval_value: e.target.value ? parseInt(e.target.value) : null } : x)
-                            );
-                          }}
-                          style={{ fontSize: '10px', height: '24px' }}
-                        />
-                      ) : item.frequency_type === 'Usage Based' ? (
-                        <Input
-                          type="number"
-                          placeholder="Hours"
-                          value={item.trigger_hours || ''}
-                          onChange={(e) => {
-                            setEditCheckpoints(prev =>
-                              prev.map(x => x.id === item.id ? { ...x, trigger_hours: e.target.value ? parseInt(e.target.value) : null } : x)
-                            );
-                          }}
-                          style={{ fontSize: '10px', height: '24px' }}
-                        />
-                      ) : (
-                        <div></div>
-                      )}
-                      <Input
-                        placeholder="Remarks"
-                        value={item.remarks || ''}
-                        onChange={(e) => {
-                          setEditCheckpoints(prev =>
-                            prev.map(x => x.id === item.id ? { ...x, remarks: e.target.value } : x)
-                          );
-                        }}
-                        style={{ fontSize: '10px', height: '24px' }}
-                      />
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <Button
-                          type="text"
-                          icon={<CheckCircleOutlined />}
-                          onClick={() => setEditingCheckpointId(null)}
-                          style={{ color: '#52c41a', padding: '2px', fontSize: '11px' }}
-                        />
-                        <Button
-                          type="text"
-                          icon={<DeleteOutlined />}
-                          onClick={() => {
-                            if (editCheckpoints.length > 1) {
-                              setEditCheckpoints(prev => prev.filter(x => x.id !== item.id));
-                            } else {
-                              message.warning('At least one checkpoint is required');
-                            }
-                          }}
-                          style={{ color: '#ff4d4f', padding: '2px', fontSize: '11px' }}
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ fontSize: '10px', fontWeight: 600 }}>{item.item_text}</div>
-                      <Tag color="blue" style={{ fontSize: '9px', padding: '1px 4px' }}>{item.item_type}</Tag>
-                      <div style={{ textAlign: 'center' }}>
-                        {item.is_required ? <Tag color="red" style={{ fontSize: '9px' }}>Yes</Tag> : <Tag color="green" style={{ fontSize: '9px' }}>No</Tag>}
-                      </div>
-                      <div style={{ fontSize: '10px' }}>{item.expected_value || '-'}</div>
-                      <Tag color={item.frequency_type === 'Time Based' ? 'blue' : item.frequency_type === 'Usage Based' ? 'orange' : 'purple'} style={{ fontSize: '9px' }}>
-                        {item.frequency_type || '-'}
-                      </Tag>
-                      <div style={{ fontSize: '10px' }}>{item.interval_unit || '-'}</div>
-                      <div style={{ fontSize: '10px' }}>{item.interval_value || item.trigger_hours || '-'}</div>
-                      <div style={{ fontSize: '10px' }}>{item.remarks || '-'}</div>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <Button
-                          type="text"
-                          icon={<EditOutlined />}
-                          onClick={() => setEditingCheckpointId(item.id)}
-                          style={{ color: '#1890ff', padding: '2px', fontSize: '11px' }}
-                        />
-                        <Button
-                          type="text"
-                          icon={<DeleteOutlined />}
-                          onClick={() => {
-                            if (editCheckpoints.length > 1) {
-                              setEditCheckpoints(prev => prev.filter(x => x.id !== item.id));
-                            } else {
-                              message.warning('At least one checkpoint is required');
-                            }
-                          }}
-                          style={{ color: '#ff4d4f', padding: '2px', fontSize: '11px' }}
-                        />
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       </Modal>
     </div>
   );

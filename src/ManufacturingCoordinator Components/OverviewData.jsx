@@ -77,17 +77,7 @@ const OverviewData = () => {
         }}
         bodyStyle={{ padding: '16px 24px' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <HistoryOutlined style={{ fontSize: '28px', color: '#1890ff' }} />
-          <div>
-            <Title level={3} style={{ margin: 0, fontSize: '22px', fontWeight: 600, color: '#1a1a1a' }}>
-              Inventory Overview
-            </Title>
-            <Text type="secondary" style={{ fontSize: '14px', marginTop: '2px', display: 'block' }}>
-              Track requests, returns, issues and transaction history
-            </Text>
-          </div>
-        </div>
+       
       </Card>
       
       <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
