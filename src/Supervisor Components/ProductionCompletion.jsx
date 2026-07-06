@@ -6,13 +6,17 @@ import {
 import {
   SearchOutlined, CheckCircleOutlined, ClockCircleOutlined,
   SyncOutlined, ReloadOutlined, EditOutlined, CheckSquareOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import dayjs from 'dayjs';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
+import { API_BASE_URL } from '../Config/auth.js';
+import cmtisLogo from '../assets/cmtis.png';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { TextArea } = Input;
-const { Option } = Select;
 const { RangePicker } = DatePicker;
 
 // ── Highlight helper ──────────────────────────────────────────────────────────
@@ -63,6 +67,10 @@ const ProductionCompletion = () => {
   const [selectedMachines, setSelectedMachines] = useState([]);
   const [searchText, setSearchText] = useState('');
   const [dateRange, setDateRange] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedParts, setSelectedParts] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -134,6 +142,119 @@ const ProductionCompletion = () => {
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
 
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/orders/`);
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(Array.isArray(data) ? data : []);
+        }
+      } catch (e) {
+        console.error('Error fetching orders:', e);
+      }
+    };
+    fetchOrders();
+  }, []);
+
+  const supervisorMeta = useMemo(() => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        const user = JSON.parse(storedUser);
+        return {
+          name: user.user_name || user.name || user.username || 'N/A',
+          id: user.id ?? null,
+        };
+      }
+    } catch { /* ignore */ }
+    return { name: 'N/A', id: null };
+  }, []);
+
+  const selectedSaleOrder = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return orders.find((o) => o.id === selectedProjectId)?.sale_order_number ?? null;
+  }, [selectedProjectId, orders]);
+
+  const handleProjectChange = (orderId) => {
+    setSelectedProjectId(orderId);
+    setSelectedParts([]);
+    setParts([]);
+    setCurrentPage(1);
+
+    if (!orderId) return;
+
+    const order = orders.find((o) => o.id === orderId);
+    const saleOrder = order?.sale_order_number;
+    if (!saleOrder) return;
+
+    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        const list = Array.isArray(d) ? d : (d.parts || []);
+        setParts(list);
+      })
+      .catch(() => setParts([]));
+  };
+
+  const getFilterPeriodLabel = () => {
+    if (dateRange && dateRange.length === 2) {
+      return `${dateRange[0].format('DD-MM-YYYY')} to ${dateRange[1].format('DD-MM-YYYY')}`;
+    }
+    return 'All Dates';
+  };
+
+  const applyBaseFilters = useCallback((source) => {
+    let result = source;
+
+    if (selectedMachines.length > 0) {
+      result = result.filter((log) =>
+        selectedMachines.includes(log.planned_schedule_item?.machine_name)
+      );
+    }
+
+    if (selectedSaleOrder) {
+      result = result.filter(
+        (log) => log.operation?.order?.sale_order_number === selectedSaleOrder
+      );
+    }
+
+    if (selectedParts.length > 0) {
+      result = result.filter((log) =>
+        selectedParts.includes(log.operation?.part?.part_number)
+      );
+    }
+
+    if (dateRange && dateRange.length === 2) {
+      const [start, end] = dateRange;
+      const startDay = start.startOf('day');
+      const endDay = end.endOf('day');
+      result = result.filter((log) => {
+        const d = log.from_date ? dayjs(log.from_date) : (log.created_at ? dayjs(log.created_at) : null);
+        return d && d.valueOf() >= startDay.valueOf() && d.valueOf() <= endDay.valueOf();
+      });
+    }
+
+    return result;
+  }, [selectedMachines, selectedSaleOrder, selectedParts, dateRange]);
+
+  const getPdfExportLogs = () => applyBaseFilters(logs);
+
+  const loadImageAsDataUrl = (src) =>
+    new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
+
   const machineOptions = useMemo(() => {
     const names = new Set();
     logs.forEach((log) => {
@@ -144,10 +265,8 @@ const ProductionCompletion = () => {
   }, [logs]);
 
   const filteredLogs = useMemo(() => {
-    let result = logs;
-    if (selectedMachines.length > 0) {
-      result = result.filter(log => selectedMachines.includes(log.planned_schedule_item?.machine_name));
-    }
+    let result = applyBaseFilters(logs);
+
     if (searchText) {
       const q = searchText.toLowerCase();
       result = result.filter(log => [
@@ -164,16 +283,14 @@ const ProductionCompletion = () => {
         log.remarks,
       ].some(f => f && String(f).toLowerCase().includes(q)));
     }
-    if (dateRange && dateRange.length === 2) {
-      const [startDate, endDate] = dateRange;
-      result = result.filter(log => {
-        const logDate = log.created_at ? dayjs(log.created_at) : null;
-        if (!logDate) return false;
-        return logDate.isAfter(startDate.startOf('day')) && logDate.isBefore(endDate.endOf('day'));
-      });
-    }
+
     return result;
-  }, [logs, selectedMachines, searchText, dateRange]);
+  }, [logs, applyBaseFilters, searchText]);
+
+  useEffect(() => {
+    const maxPage = Math.max(1, Math.ceil(filteredLogs.length / pageSize) || 1);
+    if (currentPage > maxPage) setCurrentPage(maxPage);
+  }, [filteredLogs.length, pageSize, currentPage]);
 
   const openRemarkModal = (log, newStatus) =>
     setRemarkModal({ visible: true, log, newStatus, remark: '', approvedQuantity: 0 });
@@ -321,6 +438,175 @@ const ProductionCompletion = () => {
       record.remarks,
     ].some(f => f && String(f).toLowerCase().includes(q));
     return matches ? 'search-highlight-row' : '';
+  };
+
+  const formatDateTime = (date, time) => {
+    if (!date) return 'N/A';
+    const datePart = dayjs(date).format('DD-MM-YYYY');
+    const timePart = time ? time.replace('.000Z', '').substring(0, 8) : '';
+    return timePart ? `${datePart}, ${timePart}` : datePart;
+  };
+
+  const getMachineName = (log) => log.planned_schedule_item?.machine_name || 'N/A';
+
+  const handleDownloadPDF = async () => {
+    try {
+      const exportLogs = getPdfExportLogs();
+      const doc = new jsPDF('l', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 10;
+      let logoDataUrl = null;
+      try {
+        logoDataUrl = await loadImageAsDataUrl(cmtisLogo);
+      } catch {
+        /* logo optional */
+      }
+
+      const metaLabel = { fontStyle: 'bold', fillColor: [255, 255, 255], textColor: [0, 0, 0] };
+      const metaValue = { fillColor: [255, 255, 255], textColor: [0, 0, 0] };
+      const tableWidth = pageWidth - margin * 2;
+      const headerColRest = (tableWidth - 32) / 2;
+
+      autoTable(doc, {
+        startY: 8,
+        margin: { left: margin, right: margin },
+        tableWidth,
+        theme: 'grid',
+        styles: {
+          fontSize: 8,
+          cellPadding: 2.5,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.2,
+          valign: 'middle',
+        },
+        body: [
+          [
+            { content: '', styles: { minCellHeight: 16 } },
+            {
+              content: 'PRODUCTION COMPLETION',
+              colSpan: 2,
+              styles: { fontStyle: 'bold', fontSize: 13, halign: 'center', valign: 'middle', minCellHeight: 16 },
+            },
+          ],
+          [
+            { content: 'Supervisor :', styles: metaLabel },
+            { content: supervisorMeta.name, styles: metaValue },
+            { content: `Date : ${dayjs().format('DD/MM/YYYY')}`, styles: metaValue },
+          ],
+          [
+            { content: 'Period :', styles: metaLabel },
+            { content: getFilterPeriodLabel(), styles: metaValue },
+            { content: `Generated At: ${dayjs().format('DD-MM-YYYY, HH:mm:ss')}`, styles: metaValue },
+          ],
+        ],
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: headerColRest },
+          2: { cellWidth: headerColRest },
+        },
+        didDrawCell: (data) => {
+          if (data.section === 'body' && data.row.index === 0 && data.column.index === 0 && logoDataUrl) {
+            const pad = 2;
+            doc.addImage(
+              logoDataUrl,
+              'PNG',
+              data.cell.x + pad,
+              data.cell.y + pad,
+              data.cell.width - pad * 2,
+              data.cell.height - pad * 2
+            );
+          }
+        },
+      });
+
+      const startY = (doc.lastAutoTable?.finalY ?? 40) + 4;
+
+      if (exportLogs.length === 0) {
+        doc.setFontSize(11);
+        doc.text('No production logs found.', pageWidth / 2, startY + 10, { align: 'center' });
+        doc.save('production_completion.pdf');
+        message.success('PDF downloaded successfully');
+        return;
+      }
+
+      const partQty = (log) => {
+        const qty = log.operation?.part?.quantity ?? 0;
+        const unit = log.operation?.part?.unit || '';
+        return unit ? `${qty} ${unit}` : String(qty);
+      };
+
+      const tableData = exportLogs.map((log, index) => [
+        index + 1,
+        log.operation?.order?.sale_order_number || '-',
+        log.operation?.product?.product_name || '-',
+        log.operation?.part?.part_name || '-',
+        log.operation?.part?.part_number || '-',
+        log.planned_schedule_item?.operation_name || '-',
+        log.planned_schedule_item?.operation_number || '-',
+        log.operator?.user_name || log.operator_name || 'N/A',
+        getMachineName(log),
+        partQty(log),
+        log.produced_quantity ?? '-',
+        log.approved_quantity ?? '-',
+        log.rework_quantity ?? '-',
+        log.rejected_quantity ?? '-',
+        log.notes || '-',
+        formatDateTime(log.from_date, log.from_time),
+        formatDateTime(log.to_date, log.to_time),
+        log.remarks || '-',
+      ]);
+
+      const pdfColWeights = [8, 16, 20, 16, 14, 16, 10, 16, 18, 12, 11, 11, 11, 11, 14, 20, 20, 16];
+      const pdfColWeightTotal = pdfColWeights.reduce((sum, w) => sum + w, 0);
+      const pdfColumnStyles = Object.fromEntries(
+        pdfColWeights.map((weight, index) => [
+          index,
+          {
+            cellWidth: (weight / pdfColWeightTotal) * tableWidth,
+            ...(index === 0 || [6, 9, 10, 11, 12, 13].includes(index) ? { halign: 'center' } : {}),
+          },
+        ])
+      );
+
+      autoTable(doc, {
+        startY,
+        margin: { left: margin, right: margin },
+        tableWidth,
+        head: [[
+          'Sl No', 'Sale Order', 'Product', 'Part Name', 'Part No', 'Operation', 'Op No',
+          'Operator', 'Machine', 'Total Qty', 'Produced', 'Approved', 'Rework', 'Rejected',
+          'Notes', 'Start Time', 'End Time', 'Remarks',
+        ]],
+        body: tableData,
+        theme: 'grid',
+        styles: {
+          fontSize: 6,
+          cellPadding: 1.5,
+          overflow: 'linebreak',
+          valign: 'middle',
+          lineColor: [0, 0, 0],
+          lineWidth: 0.15,
+          textColor: [0, 0, 0],
+        },
+        bodyStyles: {
+          textColor: [0, 0, 0],
+          fontStyle: 'normal',
+        },
+        headStyles: {
+          fillColor: [220, 220, 220],
+          textColor: [0, 0, 0],
+          fontStyle: 'bold',
+          halign: 'center',
+        },
+        columnStyles: pdfColumnStyles,
+      });
+
+      doc.save('production_completion.pdf');
+      message.success('PDF downloaded successfully');
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      message.error('Failed to generate PDF');
+    }
   };
 
   const ActionButtons = ({ record }) => {
@@ -517,7 +803,7 @@ const ProductionCompletion = () => {
   const isComplete = remarkModal.newStatus === 'completed';
 
   return (
-    <div style={{ padding: 24 }}>
+    <div style={{ padding: 24, height: '100%', display: 'flex', flexDirection: 'column' }}>
       <style>{`
         .modern-table .ant-table-thead > tr > th {
           background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
@@ -528,16 +814,16 @@ const ProductionCompletion = () => {
         .modern-table .ant-table-tbody > tr > td { border-bottom: 1px solid #f0f0f0; }
         .search-highlight-row > td { background-color: #e6f4ff !important; }
         .search-highlight-row:hover > td { background-color: #bae0ff !important; }
+        .production-completion-table-wrap {
+          flex: 1;
+          min-height: 0;
+          overflow: auto;
+        }
       `}</style>
 
       <Card
-        title={
-          <Space>
-            <Title level={4} style={{ margin: 0 }}>Production Completion Monitor</Title>
-            {refreshing && <SyncOutlined spin />}
-          </Space>
-        }
-        className="shadow-sm"
+        style={{ height: '84vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 16 } }}
       >
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <Space wrap>
@@ -548,7 +834,7 @@ const ProductionCompletion = () => {
               placeholder="Filter by machines..."
               style={{ minWidth: 250, maxWidth: 400 }}
               value={selectedMachines}
-              onChange={setSelectedMachines}
+              onChange={(val) => { setSelectedMachines(val); setCurrentPage(1); }}
               options={machineOptions}
               optionFilterProp="label"
             />
@@ -557,48 +843,89 @@ const ProductionCompletion = () => {
               allowClear
               prefix={<SearchOutlined />}
               value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
+              onChange={(e) => { setSearchText(e.target.value); setCurrentPage(1); }}
               style={{ minWidth: 200, maxWidth: 300 }}
+            />
+            <Select
+              placeholder="Select Project"
+              showSearch
+              allowClear
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              value={selectedProjectId}
+              onChange={handleProjectChange}
+              style={{ minWidth: 180 }}
+              options={orders.map((o) => ({
+                value: o.id,
+                label: o.sale_order_number || `Order ${o.id}`,
+              }))}
+            />
+            <Select
+              mode="multiple"
+              placeholder="Select Parts"
+              showSearch
+              allowClear
+              disabled={!selectedProjectId}
+              maxTagCount={1}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              value={selectedParts}
+              onChange={(val) => { setSelectedParts(val); setCurrentPage(1); }}
+              style={{ minWidth: 220, maxWidth: 320 }}
+              options={parts.map((p) => ({
+                value: p.part_number,
+                label: p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number,
+              }))}
             />
             <RangePicker
               allowClear
               placeholder={['Start Date', 'End Date']}
               value={dateRange}
-              onChange={setDateRange}
+              onChange={(dates) => { setDateRange(dates); setCurrentPage(1); }}
               format="DD-MM-YYYY"
               style={{ minWidth: 250 }}
             />
           </Space>
-          <Button icon={<ReloadOutlined />} onClick={() => { setRefreshing(true); fetchLogs(); }} loading={refreshing}>
-            Refresh
-          </Button>
+          <Space>
+            <Button icon={<DownloadOutlined />} onClick={handleDownloadPDF}>
+              Download PDF
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { setRefreshing(true); fetchLogs(); }} loading={refreshing}>
+              Refresh
+            </Button>
+          </Space>
         </div>
 
-        <Table
-          columns={columns}
-          dataSource={filteredLogs}
-          rowKey="id"
-          loading={loading}
-          rowClassName={rowClassName}
-          className="modern-table"
-          locale={{
-            emptyText: (
-              <Empty description={selectedMachines.length > 0 ? 'No production logs found for selected machines' : 'No production logs found for this supervisor'} />
-            ),
-          }}
-          pagination={{
-            current: currentPage,
-            pageSize,
-            total: filteredLogs.length,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-            pageSizeOptions: ['10', '20', '50', '100'],
-            onChange: (page, size) => { setCurrentPage(page); setPageSize(size); },
-            onShowSizeChange: (_, size) => { setCurrentPage(1); setPageSize(size); },
-          }}
-          scroll={{ x: 'max-content' }}
-        />
+        <div className="production-completion-table-wrap">
+          <Table
+            columns={columns}
+            dataSource={filteredLogs}
+            rowKey="id"
+            loading={loading}
+            rowClassName={rowClassName}
+            className="modern-table"
+            locale={{
+              emptyText: (
+                <Empty description={selectedMachines.length > 0 ? 'No production logs found for selected machines' : 'No production logs found for this supervisor'} />
+              ),
+            }}
+            pagination={{
+              current: currentPage,
+              pageSize,
+              total: filteredLogs.length,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              pageSizeOptions: ['10', '20', '50', '100'],
+              position: ['bottomCenter'],
+              onChange: (page, size) => { setCurrentPage(page); setPageSize(size); },
+              onShowSizeChange: (_, size) => { setCurrentPage(1); setPageSize(size); },
+            }}
+            scroll={{ x: 'max-content', y: 'calc(84vh - 300px)' }}
+          />
+        </div>
       </Card>
 
       {/* ── Remark / Status Modal ─────────────────────────────────────────── */}

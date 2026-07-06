@@ -268,6 +268,8 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
 
   const rawMaterialColumns = [
     { title: 'Raw Material Name', dataIndex: 'raw_material_name', key: 'name' },
+    { title: 'Form Type', dataIndex: 'form_type', key: 'form_type' },
+    { title: 'Stock Dimensions', dataIndex: 'stock_dimensions', key: 'stock_dimensions' },
     {
       title: 'Raw Material Status', dataIndex: 'raw_material_status', key: 'status',
       render: (status) => <Tag color={status === 'Available' ? 'green' : 'red'}>{status}</Tag>
@@ -523,7 +525,9 @@ const PartDocumentTab = ({ selectedJob, isActivated, onActivate, completedQuanti
   const partDocuments = partData?.documents || partData?.part_documents || [];
   const rawMaterials = partData?.part?.raw_material_name ? [{
     raw_material_name: partData.part.raw_material_name,
-    raw_material_status: partData.part.raw_material_status || 'N/A'
+    raw_material_status: partData.part.raw_material_status || 'N/A',
+    form_type: partData.part.raw_material_unit_details?.form_type || '-',
+    stock_dimensions: partData.part.raw_material_unit_details?.stock_dimensions || '-'
   }] : [];
 
   const tools = selectedOperation?.tools || selectedOperation?.operation_tools || partData?.tools || [];

@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { message, Spin, DatePicker } from 'antd';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { message, Spin, DatePicker, Button } from 'antd';
 import dayjs from 'dayjs';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   CheckCircleFilled, CloseCircleFilled,
   CalendarOutlined, ClockCircleOutlined, ThunderboltOutlined,
+  DownloadOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { API_BASE_URL } from '../Config/auth.js';
 
@@ -59,6 +62,80 @@ const toYMD = (d) =>
 
 const parseYMD = (str) => { const [y,m,d] = str.split('-').map(Number); return new Date(y,m-1,d); };
 
+const isConformingResponse = (sub, item = {}) => {
+  if (sub.is_confirming !== undefined && sub.is_confirming !== null) {
+    return sub.is_confirming === true || sub.is_confirming === 'true';
+  }
+  const status = String(sub.status ?? sub.approval_status ?? '').toLowerCase();
+  if (status === 'approved') return true;
+  if (status === 'rejected') return false;
+
+  const val = String(sub.response_value ?? '').toLowerCase();
+  const expected = String(item.expected_value ?? sub.expected_value ?? 'yes').toLowerCase();
+  const truthy = new Set(['true', 'yes', 'y', '1', 'on']);
+  const falsy = new Set(['false', 'no', 'n', '0', 'off']);
+  if (truthy.has(val) && truthy.has(expected)) return true;
+  if (falsy.has(val) && falsy.has(expected)) return true;
+  return val === expected;
+};
+
+const isApprovedSubmission = (sub) =>
+  String(sub?.approval_status ?? sub?.status ?? sub?.overall_approval_status ?? '').toLowerCase() === 'approved';
+
+const normalizePmSubmissions = (data) => {
+  const rawList = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.submissions)
+      ? data.submissions
+      : Array.isArray(data?.data)
+        ? data.data
+        : [];
+
+  if (rawList.length > 0 && rawList[0].item_responses) {
+    return rawList.filter((log) => isApprovedSubmission(log));
+  }
+
+  const flatSubmissions = rawList.flatMap((entry) => {
+    if (Array.isArray(entry.submissions) && !entry.schedule_id && !entry.assignment_item_id) {
+      return (entry.submissions ?? []).map((sub) => ({
+        ...sub,
+        checklist_id: sub.checklist_id ?? entry.checklist_id,
+        checklist_name: sub.checklist_name ?? entry.checklist_name ?? entry.checklist?.name,
+      }));
+    }
+    return [entry];
+  });
+
+  return flatSubmissions
+    .filter((sub) => isApprovedSubmission(sub))
+    .map((sub) => {
+      const item = sub.checklist_item ?? {};
+      return {
+        completed_at: sub.submitted_at ?? sub.completed_at ?? sub.created_at ?? sub.timestamp,
+        checklist_id: sub.checklist_id ?? item.checklist_id ?? sub.checklist?.id,
+        checklist_name: sub.checklist_name ?? sub.checklist?.name,
+        overall_approval_status: sub.approval_status ?? sub.status ?? null,
+        item_responses: [{
+          item_id: item.id ?? sub.checklist_item_id ?? sub.item_id ?? sub.assignment_item_id,
+          sequence_number: item.sequence_number ?? sub.sequence_number,
+          item_text: item.item_text ?? sub.item_text ?? sub.checkpoint_name ?? sub.item_name,
+          remarks: item.remarks ?? sub.remarks ?? sub.operator_comments ?? null,
+          frequency_type: item.frequency_type ?? sub.frequency_type,
+          interval_value: item.interval_value ?? sub.interval_value,
+          interval_unit: item.interval_unit ?? sub.interval_unit,
+          trigger_hours: item.trigger_hours ?? sub.trigger_hours,
+          inspection_interval: item.inspection_interval ?? sub.inspection_interval,
+          expected_value: item.expected_value ?? sub.expected_value,
+          is_required: item.is_required ?? sub.is_required ?? true,
+          is_confirming: isConformingResponse(sub, item),
+          approval_status: sub.approval_status ?? sub.status,
+          response_value: sub.response_value,
+        }],
+      };
+    })
+    .filter((log) => log.completed_at && log.checklist_id != null);
+};
+
 /* ─── Column builders ───────────────────────────────────────────────────── */
 const buildMonthColumns = (year, month) => {
   const today = toYMD(new Date());
@@ -107,6 +184,20 @@ const PokayokeHistory = ({ machineId }) => {
   const [historyData, setHistoryData] = useState([]);
 
   const now = new Date();
+  const monthLabel = now.toLocaleString('default', { month: 'long' });
+  const currentYear = now.getFullYear();
+
+  const machineMeta = useMemo(() => {
+    try {
+      const m = JSON.parse(localStorage.getItem('selectedMachine') || 'null');
+      return {
+        make:  m?.make  ?? m?.machine_make  ?? null,
+        model: m?.model ?? m?.machine_model ?? null,
+        name:  m?.name  ?? m?.machine_name  ?? null,
+        code:  m?.code  ?? m?.machine_code  ?? null,
+      };
+    } catch { return {}; }
+  }, []);
 
   /* ── View state ── */
   const [viewMode,      setViewMode]      = useState('month');
@@ -117,15 +208,27 @@ const PokayokeHistory = ({ machineId }) => {
   const [customEnd,     setCustomEnd]     = useState(toYMD(now));
 
   /* ── Fetch ── */
-  useEffect(() => {
+  const loadHistory = useCallback(async () => {
     if (!machineId) return;
     setLoading(true);
-    fetch(`${API_BASE_URL}/pokayoke-completed-logs/machines/${machineId}/logs`, { headers: { accept: 'application/json' } })
-      .then((r) => r.json())
-      .then((d) => setHistoryData(Array.isArray(d) ? d : []))
-      .catch((e) => { message.error('Failed to fetch checklist history'); console.error(e); })
-      .finally(() => setLoading(false));
+    try {
+      const r = await fetch(`${API_BASE_URL}/pm/machines/${machineId}/submissions`, {
+        headers: { accept: 'application/json' },
+      });
+      if (!r.ok) throw new Error('Failed to fetch');
+      const d = await r.json();
+      setHistoryData(normalizePmSubmissions(d));
+    } catch (e) {
+      message.error('Failed to fetch checklist history');
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   }, [machineId]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   /* ── Columns ── */
   const columns = useMemo(() => {
@@ -151,12 +254,16 @@ const PokayokeHistory = ({ machineId }) => {
       if (!map[cid]) map[cid] = { id: cid, name: cName, items: {} };
       const logTs = new Date(log.completed_at).getTime();
       for (const item of (log.item_responses ?? [])) {
+        const itemStatus = String(item.approval_status ?? log.overall_approval_status ?? '').toLowerCase();
+        if (itemStatus !== 'approved') continue;
+
         const ikey = String(item.item_id);
         if (!map[cid].items[ikey]) {
           map[cid].items[ikey] = {
             id: item.item_id,
             item_text:           item.item_text           ?? `Item #${item.item_id}`,
             remarks:             item.remarks             ?? null,
+            sequence_number:      item.sequence_number      ?? null,
             frequency_type:      item.frequency_type      ?? null,
             interval_value:      item.interval_value      ?? null,
             interval_unit:       item.interval_unit       ?? null,
@@ -173,6 +280,7 @@ const PokayokeHistory = ({ machineId }) => {
           map[cid].items[ikey].submissions[ymd] = {
             is_confirming:   item.is_confirming,
             approval_status: item.approval_status ?? log.overall_approval_status ?? null,
+            response_value:  item.response_value,
             _ts:             log.completed_at,
           };
         }
@@ -257,6 +365,135 @@ const PokayokeHistory = ({ machineId }) => {
 
   const colSpanTotal = 3 + columns.length;
   const monthNames   = MONTH_COLORS.map((m) => m.label);
+
+  const machineDisplay = [machineMeta.make, machineMeta.model].filter(Boolean).join(' — ')
+    || machineMeta.name
+    || `ID ${machineId}`;
+
+  const getViewPeriodLabel = () => {
+    if (viewMode === 'day') return selectedDayjs.format('DD MMM YYYY');
+    if (viewMode === 'month') return `${monthNames[selMonth]} ${selYear}`;
+    if (viewMode === 'year') return String(selYear);
+    if (viewMode === 'custom') return `${customStart} to ${customEnd}`;
+    return '';
+  };
+
+  const pdfCellMark = (sub) => {
+    if (!sub) return '';
+    const ok = sub.is_confirming === true || sub.is_confirming === 'true';
+    return ok ? '✓' : '✗';
+  };
+
+  const handleDownloadPDF = () => {
+    try {
+      const doc = new jsPDF(viewMode === 'year' || viewMode === 'custom' ? 'l' : 'p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      let y = 12;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.text('CENTRAL MANUFACTURING FACILITY (CMF)', pageWidth / 2, y, { align: 'center' });
+      y += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.text('ISO 9001-2015', pageWidth / 2, y, { align: 'center' });
+      y += 5;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Preventive Maintenance Checklist', pageWidth / 2, y, { align: 'center' });
+      y += 8;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text(
+        `Machine: ${machineDisplay}    Month: ${monthLabel}    Year: ${currentYear}    Location: Workshop`,
+        14,
+        y
+      );
+      y += 5;
+      doc.text(`Period: ${getViewPeriodLabel()}`, 14, y);
+      y += 6;
+
+      if (grouped.length === 0) {
+        doc.setFontSize(11);
+        doc.text('No approved checklist history found.', pageWidth / 2, y + 10, { align: 'center' });
+        doc.save(`pm_checklist_history_${machineId ?? 'machine'}.pdf`);
+        message.success('PDF downloaded successfully');
+        return;
+      }
+
+      const dayHeaders = columns.map((col) => String(col.day));
+      const headRow = ['Sl.', 'Check Point', 'Frequency', ...dayHeaders];
+
+      const bodyRows = [];
+      grouped.forEach((checklist, ci) => {
+        bodyRows.push([{
+          content: `${ci + 1}. ${checklist.name}`,
+          colSpan: headRow.length,
+          styles: { fillColor: [30, 58, 95], textColor: 255, fontStyle: 'bold', halign: 'left' },
+        }]);
+
+        const items = Object.values(checklist.items).sort(
+          (a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0)
+        );
+
+        items.forEach((item, ii) => {
+          const pointLabel = `${item.is_required ? '* ' : ''}${item.item_text}${
+            item.expected_value ? `\nExpected: ${item.expected_value}` : ''
+          }`;
+          bodyRows.push([
+            `${ii + 1}.`,
+            pointLabel,
+            freqLabel(item),
+            ...columns.map((col) => pdfCellMark(item.submissions[col.key])),
+          ]);
+        });
+      });
+
+      autoTable(doc, {
+        startY: y,
+        head: [headRow],
+        body: bodyRows,
+        styles: {
+          fontSize: viewMode === 'year' || viewMode === 'custom' ? 5 : 7,
+          cellPadding: 1.5,
+          overflow: 'linebreak',
+          valign: 'middle',
+        },
+        headStyles: {
+          fillColor: [240, 245, 255],
+          textColor: [30, 58, 95],
+          fontStyle: 'bold',
+          halign: 'center',
+        },
+        columnStyles: {
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: viewMode === 'year' || viewMode === 'custom' ? 40 : 55 },
+          2: { cellWidth: viewMode === 'year' || viewMode === 'custom' ? 22 : 28 },
+        },
+        didParseCell: (data) => {
+          if (data.section === 'body' && data.column.index >= 3) {
+            const text = data.cell.raw;
+            if (text === '✓') {
+              data.cell.styles.textColor = [34, 197, 94];
+              data.cell.styles.fontStyle = 'bold';
+              data.cell.styles.halign = 'center';
+            } else if (text === '✗') {
+              data.cell.styles.textColor = [239, 68, 68];
+              data.cell.styles.fontStyle = 'bold';
+              data.cell.styles.halign = 'center';
+            }
+          }
+        },
+      });
+
+      doc.save(`pm_checklist_history_${machineId ?? 'machine'}.pdf`);
+      message.success('PDF downloaded successfully');
+    } catch (error) {
+      console.error('PDF error:', error);
+      message.error('Failed to generate PDF');
+    }
+  };
 
   /* ── Legend (top-left) ── */
   const legend = (
@@ -364,11 +601,29 @@ const PokayokeHistory = ({ machineId }) => {
     </div>
   );
 
-  /* ── Top bar: legend left, filter right ── */
+  /* ── Top bar: legend left, filter + actions right ── */
   const topBar = (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12, flexWrap:'wrap', gap:8 }}>
       {legend}
-      {filterControls}
+      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+        {filterControls}
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={loadHistory}
+          loading={loading}
+          size="small"
+          style={{ borderRadius: 7 }}
+        />
+        <Button
+          type="primary"
+          icon={<DownloadOutlined />}
+          onClick={handleDownloadPDF}
+          size="small"
+          style={{ borderRadius: 7 }}
+        >
+          Download PDF
+        </Button>
+      </div>
     </div>
   );
 
@@ -390,9 +645,11 @@ const PokayokeHistory = ({ machineId }) => {
           {loading ? (
             <tr><td colSpan={colSpanTotal} style={{ ...TD, textAlign:'center', padding:48 }}><Spin size="large" /></td></tr>
           ) : grouped.length === 0 ? (
-            <tr><td colSpan={colSpanTotal} style={{ ...TD, textAlign:'center', padding:48, color:'#9ca3af' }}>No checklist history found.</td></tr>
+            <tr><td colSpan={colSpanTotal} style={{ ...TD, textAlign:'center', padding:48, color:'#9ca3af' }}>No approved checklist history found.</td></tr>
           ) : grouped.map((checklist, ci) => {
-            const items = Object.values(checklist.items);
+            const items = Object.values(checklist.items).sort(
+              (a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0)
+            );
             return (
               <React.Fragment key={checklist.id}>
                 <tr>
@@ -454,6 +711,47 @@ const PokayokeHistory = ({ machineId }) => {
 
   return (
     <>
+      <div style={{ border: '2px solid #1e3a5f', marginBottom: 14, background: '#fff' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid #1e3a5f' }}>
+          <div style={{
+            width: 180, minWidth: 180, padding: '10px 16px',
+            borderRight: '1px solid #1e3a5f',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <img
+              src="/src/assets/cmtis.png" alt="CMTI Logo"
+              style={{ maxWidth: 120, maxHeight: 48, objectFit: 'contain' }}
+              onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'block'; }}
+            />
+            <span style={{ display: 'none', fontWeight: 900, fontSize: 20, color: '#1e3a5f', fontStyle: 'italic' }}>cmti</span>
+          </div>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '8px 16px' }}>
+            <div style={{ fontWeight: 800, fontSize: 16, color: '#1e3a5f', letterSpacing: 0.5 }}>CENTRAL MANUFACTURING FACILITY (CMF)</div>
+            <div style={{ fontSize: 12, color: '#374151', marginTop: 2 }}>ISO 9001-2015</div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#111827', marginTop: 4, borderTop: '1px solid #e5e7eb', paddingTop: 4, width: '100%', textAlign: 'center' }}>
+              Preventive Maintenance Checklist
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', borderTop: '1px solid #d1d5db' }}>
+          {[
+            { label: 'Machine', value: [machineMeta.make, machineMeta.model].filter(Boolean).join(' — ') || machineMeta.name || `ID ${machineId}` },
+            { label: 'Month', value: monthLabel },
+            { label: 'Year', value: currentYear },
+            { label: 'Location', value: 'Workshop' },
+          ].map(({ label, value }, i, arr) => (
+            <div key={label} style={{
+              flex: label === 'Machine' ? 2 : 1,
+              padding: '6px 12px',
+              borderRight: i < arr.length - 1 ? '1px solid #d1d5db' : 'none',
+              fontSize: 12,
+            }}>
+              <span style={{ fontWeight: 700 }}>{label}:</span>
+              <span style={{ marginLeft: 4, color: '#1d4ed8', textDecoration: 'underline' }}>{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
       {topBar}
       {table}
     </>

@@ -1,29 +1,73 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Table, Tag, Spin, message, Button, Badge, Empty } from 'antd';
-import { CheckOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Table, Tag, Spin, message, Button, Select, Space } from 'antd';
+import { CheckOutlined, ReloadOutlined, ClearOutlined } from '@ant-design/icons';
 import config from '../Config/config';
-import dayjs from 'dayjs';
+import { API_BASE_URL } from '../Config/auth.js';
 
 const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
   const [pokayokeChecklistNotifications, setPokayokeChecklistNotifications] = useState([]);
   const [pokayokeChecklistLoading, setPokayokeChecklistLoading] = useState(true);
   const [pokayokeChecklistPagination, setPokayokeChecklistPagination] = useState({ current: 1, pageSize: 10 });
   const [acknowledgingChecklistIds, setAcknowledgingChecklistIds] = useState(new Set());
+  const [machineFilter, setMachineFilter] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedParts, setSelectedParts] = useState([]);
+  const [selectedOperations, setSelectedOperations] = useState([]);
 
   useEffect(() => {
     fetchPokayokeChecklistNotifications();
   }, []);
 
-  // Report unacknowledged count to parent
   useEffect(() => {
-    const unacknowledgedCount = pokayokeChecklistNotifications.filter(log => !log.supervisor_ack_by).length;
-    if (onUnacknowledgedCountChange) {
-      onUnacknowledgedCountChange(unacknowledgedCount);
-    }
+    const fetchOrders = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/orders/`);
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(Array.isArray(data) ? data : []);
+        }
+      } catch (e) {
+        console.error('Error fetching orders:', e);
+      }
+    };
+    fetchOrders();
+  }, []);
+
+  useEffect(() => {
+    const unacknowledgedCount = pokayokeChecklistNotifications.filter((log) => !log.supervisor_ack_by).length;
+    onUnacknowledgedCountChange?.(unacknowledgedCount);
   }, [pokayokeChecklistNotifications, onUnacknowledgedCountChange]);
 
-  const fetchPokayokeChecklistNotifications = async () => {
-    setPokayokeChecklistLoading(true);
+  const selectedSaleOrder = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return orders.find((o) => o.id === selectedProjectId)?.sale_order_number ?? null;
+  }, [selectedProjectId, orders]);
+
+  const handleProjectChange = (orderId) => {
+    setSelectedProjectId(orderId);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+
+    if (!orderId) return;
+
+    const order = orders.find((o) => o.id === orderId);
+    const saleOrder = order?.sale_order_number;
+    if (!saleOrder) return;
+
+    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        const list = Array.isArray(d) ? d : (d.parts || []);
+        setParts(list);
+      })
+      .catch(() => setParts([]));
+  };
+
+  const fetchPokayokeChecklistNotifications = async () => {    setPokayokeChecklistLoading(true);
     try {
       const apiUrl = `${config.API_BASE_URL}/operation-checklists/submissions`;
       const response = await fetch(apiUrl);
@@ -52,6 +96,74 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
     } finally {
       setPokayokeChecklistLoading(false);
     }
+  };
+
+  const machineOptions = useMemo(() => {
+    const machineMap = new Map();
+    pokayokeChecklistNotifications.forEach((record) => {
+      const machine = record.machine;
+      if (machine && machine.id !== undefined && machine.id !== null && !machineMap.has(machine.id)) {
+        const label = [machine.make, machine.model].filter(Boolean).join(' - ') || `Machine ${machine.id}`;
+        machineMap.set(machine.id, label);
+      }
+    });
+    return Array.from(machineMap.entries()).map(([id, label]) => ({ value: id, label }));
+  }, [pokayokeChecklistNotifications]);
+
+  const operationOptions = useMemo(() => {
+    const opMap = new Map();
+    pokayokeChecklistNotifications.forEach((record) => {
+      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) return;
+      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) return;
+
+      const opNum = record.operation?.operation_number;
+      if (opNum === undefined || opNum === null || opMap.has(opNum)) return;
+
+      const opName = record.operation?.operation_name;
+      const label = opName ? `${opName} (#${opNum})` : `#${opNum}`;
+      opMap.set(opNum, label);
+    });
+    return Array.from(opMap.entries()).map(([value, label]) => ({ value, label }));
+  }, [pokayokeChecklistNotifications, selectedSaleOrder, selectedParts]);
+
+  const filteredPokayokeChecklistNotifications = useMemo(() => {
+    return pokayokeChecklistNotifications.filter((record) => {
+      if (machineFilter.length > 0) {
+        if (!record.machine?.id || !machineFilter.includes(record.machine.id)) {
+          return false;
+        }
+      }
+
+      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) {
+        return false;
+      }
+
+      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) {
+        return false;
+      }
+
+      if (selectedOperations.length > 0 && !selectedOperations.includes(record.operation?.operation_number)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [pokayokeChecklistNotifications, machineFilter, selectedSaleOrder, selectedParts, selectedOperations]);
+
+  const hasActiveFilters = useMemo(() => (
+    machineFilter.length > 0 ||
+    selectedProjectId != null ||
+    selectedParts.length > 0 ||
+    selectedOperations.length > 0
+  ), [machineFilter, selectedProjectId, selectedParts, selectedOperations]);
+
+  const clearFilters = () => {
+    setMachineFilter([]);
+    setSelectedProjectId(null);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
   };
 
   const handleChecklistAcknowledge = async (submissionId) => {
@@ -136,7 +248,8 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
       key: 'slNo',
       align: 'center',
       width: 50,
-      render: (text, record, index) => index + 1,
+      render: (text, record, index) =>
+        (pokayokeChecklistPagination.current - 1) * pokayokeChecklistPagination.pageSize + index + 1,
     },
     {
       title: 'Project Details',
@@ -306,9 +419,92 @@ const PokayokeOperationNotification = ({ onUnacknowledgedCountChange }) => {
 
   return (
     <Spin spinning={pokayokeChecklistLoading}>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, padding: '16px 16px 0' }}>
+        <Space wrap>
+          <Select
+            mode="multiple"
+            showSearch
+            allowClear
+            placeholder="Filter by machine"
+            style={{ minWidth: 220, maxWidth: 320 }}
+            value={machineFilter}
+            onChange={(value) => {
+              setMachineFilter(value || []);
+              setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+            }}
+            options={machineOptions}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+          />
+          <Select
+            placeholder="Select Project"
+            showSearch
+            allowClear
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            value={selectedProjectId}
+            onChange={handleProjectChange}
+            style={{ minWidth: 180 }}
+            options={orders.map((o) => ({
+              value: o.id,
+              label: o.sale_order_number || `Order ${o.id}`,
+            }))}
+          />
+          <Select
+            mode="multiple"
+            placeholder="Select Parts"
+            showSearch
+            allowClear
+            disabled={!selectedProjectId}
+            maxTagCount={1}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            value={selectedParts}
+            onChange={(val) => {
+              setSelectedParts(val);
+              setSelectedOperations([]);
+              setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+            }}
+            style={{ minWidth: 220, maxWidth: 320 }}
+            options={parts.map((p) => ({
+              value: p.part_number,
+              label: p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number,
+            }))}
+          />
+          <Select
+            mode="multiple"
+            placeholder="Select Operations"
+            showSearch
+            allowClear
+            disabled={!selectedProjectId}
+            maxTagCount={1}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            value={selectedOperations}
+            onChange={(val) => {
+              setSelectedOperations(val);
+              setPokayokeChecklistPagination((prev) => ({ ...prev, current: 1 }));
+            }}
+            style={{ minWidth: 220, maxWidth: 320 }}
+            options={operationOptions}
+          />
+          {hasActiveFilters && (
+            <Button icon={<ClearOutlined />} onClick={clearFilters}>
+              Clear
+            </Button>
+          )}
+        </Space>
+        <Button icon={<ReloadOutlined />} onClick={fetchPokayokeChecklistNotifications} loading={pokayokeChecklistLoading}>
+          Refresh
+        </Button>
+      </div>
       <Table
         columns={pokayokeChecklistColumns}
-        dataSource={pokayokeChecklistNotifications}
+        dataSource={filteredPokayokeChecklistNotifications}
         rowKey="id"
         pagination={{
           current: pokayokeChecklistPagination.current,
