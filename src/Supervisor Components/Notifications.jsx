@@ -1541,7 +1541,16 @@ const Notifications = () => {
 
   return (
     <div style={{ padding: '16px' }}>
-      
+      <style>{`
+        .modern-table .ant-table-thead > tr > th {
+          background: linear-gradient(to bottom, #f0f5ff, #e6f0ff);
+          font-weight: 600;
+          border-bottom: 2px solid #1890ff;
+        }
+        .modern-table .ant-table-tbody > tr:hover > td { background: #f0f8ff !important; }
+        .modern-table .ant-table-tbody > tr > td { border-bottom: 1px solid #f0f0f0; }
+      `}</style>
+
       {/* Tabs Section */}
       <Card
         style={{ borderRadius: 8 }}
@@ -1692,6 +1701,7 @@ const Notifications = () => {
                   </div>
                   <Spin spinning={inspectionLoading}>
                     <Table
+                      className="modern-table"
                       rowKey="id"
                       dataSource={planRequests}
                       columns={planColumns}
@@ -1722,6 +1732,7 @@ const Notifications = () => {
                   </div>
                   <Spin spinning={inspectionLoading}>
                     <Table
+                      className="modern-table"
                       rowKey="id"
                       dataSource={ftpRequests}
                       columns={ftpColumns}
