@@ -42,7 +42,7 @@ from .inventory_return_requests import router as inventory_return_requests_route
 
 from .transaction_history import router as transaction_history_router
 
-from .pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
+
 
 from .tool_issues import router as tool_issues_router
 
@@ -53,7 +53,12 @@ from .out_source_parts_status import router as out_source_parts_status_router
 from .order_tracking import router as order_tracking_router
 from .monitoring import router as monitoring_router
 from .production_analytics import router as production_analytics_router
+<<<<<<< HEAD
 from .order_additional_costs import router as order_additional_costs_router
+=======
+from .pm import router as pm_router
+from .operation_checklists import router as operation_checklists_router
+>>>>>>> 1858a342a61561527468567bcbd924c2dd50609d
 
 
 __all__ = [
@@ -100,7 +105,7 @@ __all__ = [
 
     "transaction_history_router",
 
-    "pokayoke_checklists_router",
+
 
     "pokayoke_completed_logs_router",
 
@@ -112,6 +117,11 @@ __all__ = [
     "order_tracking_router",
     "monitoring_router",
     "production_analytics_router",
+<<<<<<< HEAD
     "order_additional_costs_router",
+=======
+    "pm_router",
+    "operation_checklists_router",
+>>>>>>> 1858a342a61561527468567bcbd924c2dd50609d
 ]
 

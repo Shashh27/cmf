@@ -27,6 +27,7 @@ def get_live_monitoring(db: Session = Depends(get_db)):
         display_data = {
             "machine_id": machine.id,
             "machine_name": f"{machine.make or ''} {machine.model or ''}".strip(),
+            "machine_type": machine.type,
             "status": "OFF",
             "last_updated": datetime.now(),
             "sale_order_number": None,

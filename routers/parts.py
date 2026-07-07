@@ -22,7 +22,7 @@ from DB.models.oms import (
     Assembly as AssemblyModel,
     DocumentExtractedData as DocumentExtractedDataModel,
 )
-from DB.models.configuration import PokayokeCompletedLog
+
 from DB.models.inventory import RawMaterial, RawMaterialStock, RawMaterialUnit, Vendors
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
@@ -482,24 +482,7 @@ def delete_part(part_id: int, db: Session = Depends(get_db)):
     )
 
     try:
-        # 1. Delete pokayoke logs for this part
-        result = db.execute(
-            text(
-                "SELECT id FROM configuration.pokayoke_completed_logs "
-                "WHERE part_id = :pid"
-            ),
-            {"pid": part_id},
-        )
-        log_ids = [row[0] for row in result]
-        for log_id in log_ids:
-            log_obj = (
-                db.query(PokayokeCompletedLog)
-                .filter(PokayokeCompletedLog.id == log_id)
-                .first()
-            )
-            if log_obj:
-                db.delete(log_obj)
-        db.flush()
+       
 
         # 2. Delete from scheduling.part_schedule_status
         db.execute(
@@ -1067,26 +1050,7 @@ def bulk_delete_parts_by_assembly(assembly_id: int, db: Session = Depends(get_db
     part_ids = [p.id for p in parts]
 
     try:
-        # ── 2. Pokayoke logs ──────────────────────────────────────────────────
-        for part_id in part_ids:
-            result = db.execute(
-                text(
-                    "SELECT id FROM configuration.pokayoke_completed_logs "
-                    "WHERE part_id = :pid"
-                ),
-                {"pid": part_id},
-            )
-            log_ids = [row[0] for row in result]
-            for log_id in log_ids:
-                log_obj = (
-                    db.query(PokayokeCompletedLog)
-                    .filter(PokayokeCompletedLog.id == log_id)
-                    .first()
-                )
-                if log_obj:
-                    db.delete(log_obj)
-        db.flush()
-
+      
         # ── 3. Scheduling: part_schedule_status ──────────────────────────────
         db.execute(
             text(
@@ -1229,25 +1193,7 @@ def bulk_delete_parts_by_product(product_id: int, db: Session = Depends(get_db))
     part_ids = [p.id for p in parts]
 
     try:
-        # ── 2. Pokayoke logs ──────────────────────────────────────────────────
-        for part_id in part_ids:
-            result = db.execute(
-                text(
-                    "SELECT id FROM configuration.pokayoke_completed_logs "
-                    "WHERE part_id = :pid"
-                ),
-                {"pid": part_id},
-            )
-            log_ids = [row[0] for row in result]
-            for log_id in log_ids:
-                log_obj = (
-                    db.query(PokayokeCompletedLog)
-                    .filter(PokayokeCompletedLog.id == log_id)
-                    .first()
-                )
-                if log_obj:
-                    db.delete(log_obj)
-        db.flush()
+       
 
         # ── 3. Scheduling: part_schedule_status ──────────────────────────────
         db.execute(

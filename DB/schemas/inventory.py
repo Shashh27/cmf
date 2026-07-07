@@ -1,8 +1,8 @@
 from pydantic import BaseModel, field_validator
 
-from typing import Optional, List, Text
+from typing import Optional, List, Text, Dict
 
-from datetime import datetime, time
+from datetime import datetime, date, time
 
 from typing_extensions import Self
 
@@ -379,6 +379,11 @@ class ToolsListBase(BaseModel):
 
     type:                Optional[str]   = None       # CONSUMABLES / NON-CONSUMABLES
 
+    # Calibration fields (only for Instruments category)
+    calibration_date: Optional[date] = None
+    calibration_due_date: Optional[date] = None
+    calibration_frequency: Optional[str] = None  # e.g., '6 months', '1 year'
+
     category:            Optional[str]   = None       # Tools / Instruments / Misc (for convenience, will be resolved to ID)
 
     sub_category:        Optional[str]   = None       # Keys & Wrenches, Micrometers … (for convenience, will be resolved to ID)
@@ -386,6 +391,10 @@ class ToolsListBase(BaseModel):
     category_id:         Optional[int]   = None       # Foreign key to categories table
 
     sub_category_id:     Optional[int]   = None       # Foreign key to categories table (for sub-categories)
+
+    custom_fields:       Optional[dict] = None  # JSON field for custom column values
+
+    user_id:             Optional[int]   = None  # User who created this tool (individual or bulk)
 
  
 
@@ -425,9 +434,16 @@ class ToolsListUpdate(BaseModel):
 
     type:                Optional[str]   = None
 
+    # Calibration fields (only for Instruments category)
+    calibration_date: Optional[date] = None
+    calibration_due_date: Optional[date] = None
+    calibration_frequency: Optional[str] = None  # e.g., '6 months', '1 year'
+
     category:            Optional[str]   = None
 
     sub_category:        Optional[str]   = None
+
+    custom_fields:       Optional[dict] = None  # JSON field for custom column values
 
  
 
@@ -437,8 +453,8 @@ class ToolsListBulkDelete(BaseModel):
     """Request model for bulk deleting tools by IDs or filters"""
     tool_ids: Optional[List[int]] = None  # Specific tool IDs to delete
     delete_all: Optional[bool] = False  # Delete all tools
-    category: Optional[str] = None  # Filter by category
-    sub_category: Optional[str] = None  # Filter by sub_category
+    category_id: Optional[int] = None  # Filter by category ID
+    sub_category_id: Optional[int] = None  # Filter by sub_category ID
     type: Optional[str] = None  # Filter by type (CONSUMABLES/NON-CONSUMABLES)
 
  
@@ -448,10 +464,12 @@ class ToolsListBulkDelete(BaseModel):
 class ToolsList(ToolsListBase):
 
     id: int
-    
+
     # Additional fields for display (not in DB, computed from joins)
     category_name: Optional[str] = None
     sub_category_name: Optional[str] = None
+    creator_name: Optional[str] = None
+    custom_fields: Optional[Dict] = None  # JSON field for custom column values
 
  
 
@@ -459,9 +477,67 @@ class ToolsList(ToolsListBase):
 
         from_attributes = True
 
- 
 
- 
+class ToolsListBulkUploadResponse(BaseModel):
+    """Response model for bulk upload with duplicate information"""
+    tools: List[ToolsList]
+    processed_count: int
+    skipped_duplicates: int
+    message: Optional[str] = None
+
+
+# =======================
+
+# Custom Columns Schemas
+
+# =======================
+
+
+
+class CustomColumnBase(BaseModel):
+
+    column_name: str
+
+    data_type: str  # "text", "number", "date", "boolean"
+
+    category_id: Optional[int] = None
+
+    sub_category_id: Optional[int] = None
+
+    is_required: bool = False
+
+
+
+class CustomColumnCreate(CustomColumnBase):
+
+    pass
+
+
+
+class CustomColumnUpdate(BaseModel):
+
+    column_name: Optional[str] = None
+
+    data_type: Optional[str] = None
+
+    is_required: Optional[bool] = None
+
+
+
+class CustomColumn(CustomColumnBase):
+
+    id: int
+
+    created_at: Optional[datetime] = None
+
+    updated_at: Optional[datetime] = None
+
+
+
+    class Config:
+
+        from_attributes = True
+
 
 # =======================
 
@@ -493,6 +569,8 @@ class SubCategoryNode(BaseModel):
 
     sub_category: str
 
+    id: int  # Category ID (for sub-categories)
+
     count: int
 
     items: List[ItemNode] = []
@@ -506,6 +584,8 @@ class CategoryTree(BaseModel):
     """Root node — 'Tools' or 'Instruments'"""
 
     category: str
+
+    id: int  # Category ID
 
     total_count: int
 

@@ -52,21 +52,11 @@ class OEEIssueBase(BaseModel):
     @field_validator("issue_reason")
     @classmethod
     def validate_reason(cls, v: List[str]):
-        allowed = {
-            "machine oeeissue",
-            "tool change",
-            "setup/adjustment",
-            "power failure",
-            "material shortage",
-            "planned maintenance",
-        }
         if not v or not isinstance(v, list):
             raise ValueError("issue_reason must be a non-empty list")
-        norm = [s.strip().lower() for s in v]
-        for s in norm:
-            if s not in allowed:
-                raise ValueError("invalid issue_reason value")
-        return norm
+        # Allow any text - validation is handled by frontend UI which shows predefined options
+        # Backend just ensures it's a non-empty list of strings
+        return [s.strip() for s in v if s.strip()]
 
     @field_validator("end_time")
     @classmethod
@@ -132,22 +122,11 @@ class MachineBreakdownBase(BaseModel):
     @field_validator("issue_reason")
     @classmethod
     def validate_reason(cls, v: List[str]):
-        allowed = {
-            "machine breakdown",
-            "electrical issue",
-            "mechanical issue",
-            "hydraulic issue",
-            "pneumatic issue",
-            "software issue",
-            "emergency stop",
-        }
         if not v or not isinstance(v, list):
             raise ValueError("issue_reason must be a non-empty list")
-        norm = [s.strip().lower() for s in v]
-        for s in norm:
-            if s not in allowed:
-                raise ValueError("invalid issue_reason value")
-        return norm
+        # Allow any text - validation is handled by frontend UI which shows predefined options
+        # Backend just ensures it's a non-empty list of strings
+        return [s.strip() for s in v if s.strip()]
 
     @field_validator("machine_status")
     @classmethod
@@ -193,6 +172,7 @@ class ComponentIssueBase(BaseModel):
     component_status: str
     production_order_id: int
     part_id: int
+    operation_id: int
     description: str
 
     @field_validator("component_status")
@@ -217,6 +197,7 @@ class ComponentIssueUpdate(BaseModel):
     component_status: Optional[str] = None
     production_order_id: Optional[int] = None
     part_id: Optional[int] = None
+    operation_id: Optional[int] = None
     description: Optional[str] = None
 
 
@@ -226,6 +207,10 @@ class ComponentIssue(ComponentIssueBase):
     operator_name: Optional[str] = None
     order_name: Optional[str] = None
     part_name: Optional[str] = None
+    part_number: Optional[str] = None
+    operation_name: Optional[str] = None
+    operation_number: Optional[str] = None
+    product_name: Optional[str] = None
     reported_at: Optional[datetime] = None
 
     class Config:
@@ -240,6 +225,7 @@ class HelpSupportBase(BaseModel):
     reported_by: int
     production_order_id: int
     part_id: int
+    operation_id: int
     description: str
     mc_reply: Optional[str] = None
     replied_by: Optional[int] = None
@@ -255,6 +241,7 @@ class HelpSupportUpdate(BaseModel):
     reported_by: Optional[int] = None
     production_order_id: Optional[int] = None
     part_id: Optional[int] = None
+    operation_id: Optional[int] = None
     description: Optional[str] = None
     mc_reply: Optional[str] = None
     replied_by: Optional[int] = None
@@ -267,6 +254,10 @@ class HelpSupport(HelpSupportBase):
     operator_name: Optional[str] = None
     order_name: Optional[str] = None
     part_name: Optional[str] = None
+    part_number: Optional[str] = None
+    operation_name: Optional[str] = None
+    operation_number: Optional[str] = None
+    product_name: Optional[str] = None
     replied_by_name: Optional[str] = None
     reported_at: Optional[datetime] = None
 

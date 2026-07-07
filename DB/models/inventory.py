@@ -12,13 +12,17 @@ from sqlalchemy import (
 
     TIMESTAMP,
 
+    Date,
+
     TIME,
 
     Boolean,
 
     Float,
 
-    func
+    func,
+
+    JSON
 
 )
 
@@ -261,11 +265,53 @@ class ToolsList(Base):
 
     type                = Column(String, nullable=True)       # CONSUMABLES / NON-CONSUMABLES
 
+    # Calibration fields (only for Instruments category)
+    calibration_date = Column(Date, nullable=True)
+    calibration_due_date = Column(Date, nullable=True)
+    calibration_frequency = Column(String, nullable=True)  # e.g., '6 months', '1 year'
+
     issues_qty          = Column(Integer, nullable=True)      # aggregate issued qty
 
     category_id         = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)      # Foreign key to categories table (for top-level categories only, without sub-category)
 
     sub_category_id     = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)      # Foreign key to categories table (for sub-categories, parent_id points to parent category)
+
+    custom_fields       = Column(JSON, nullable=True)  # JSON field for custom column values
+
+    user_id             = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
+    creator             = relationship("AccessUser", foreign_keys=[user_id])
+# =======================
+
+# Custom Columns (for dynamic columns in tools table)
+
+# =======================
+
+class CustomColumn(Base):
+
+    __tablename__ = "custom_columns"
+
+    __table_args__ = {'schema': 'inventory'}
+
+
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+
+    column_name = Column(String(100), nullable=False)  # Display name of the column
+
+    column_key = Column(String(100), nullable=True, unique=True)  # Internal key (e.g., "custom_field_1"), auto-generated if not provided
+
+    data_type = Column(String(50), nullable=False)  # "text", "number", "date", "boolean"
+
+    category_id = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)  # If set, applies to this category
+
+    sub_category_id = Column(Integer, ForeignKey('inventory.categories.id'), nullable=True)  # If set, applies to this sub-category
+
+    is_required = Column(Boolean, default=False)  # Whether the field is mandatory
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 

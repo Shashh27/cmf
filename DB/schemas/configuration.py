@@ -1,6 +1,6 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List, Text, TYPE_CHECKING
-from datetime import datetime, time
+from typing import Optional, List, Text, TYPE_CHECKING, Literal
+from datetime import datetime, time, date
 from typing_extensions import Self
 from .access_control import AccessUserResponse
 
@@ -155,308 +155,7 @@ class Customer(CustomerBase):
         from_attributes = True
 
 
-# =======================
-# Pokayoke Checklists Schemas
-# =======================
-class PokayokeChecklistBase(BaseModel):
-    name: str
-    description: str
 
-
-class PokayokeChecklistItemBase(BaseModel):
-    item_text: str
-    item_type: str  # 'boolean', 'numerical', 'text'
-    is_required: bool = True
-    expected_value: Optional[str] = None
-
-
-class PokayokeMachineAssignmentBase(BaseModel):
-    machine_id: int
-    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
-    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
-    scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
-
-
-# Response schemas
-class PokayokeChecklist(PokayokeChecklistBase):
-    id: int
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class PokayokeChecklistItem(PokayokeChecklistItemBase):
-    id: int
-    checklist_id: int
-    sequence_number: int
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class PokayokeMachineAssignment(PokayokeMachineAssignmentBase):
-    id: int
-    checklist_id: int
-    assigned_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-# Create schemas
-class PokayokeChecklistItemCreate(PokayokeChecklistItemBase):
-    pass
-
-
-class PokayokeChecklistCreate(PokayokeChecklistBase):
-    items: List[PokayokeChecklistItemCreate] = []
-
-
-class PokayokeMachineAssignmentCreate(BaseModel):
-    machine_ids: List[int]
-    checklist_ids: List[int]
-    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
-    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both' (if Daily)
-    scheduled_day: Optional[str] = None # Day of week (Weekly) or Day of month (Monthly)
-
-
-# Update schemas
-class PokayokeChecklistUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-
-
-class PokayokeChecklistItemUpdate(BaseModel):
-    item_text: Optional[str] = None
-    sequence_number: Optional[int] = None
-    item_type: Optional[str] = None
-    is_required: Optional[bool] = None
-    expected_value: Optional[str] = None
-
-
-class PokayokeMachineAssignmentUpdate(BaseModel):
-    checklist_id: Optional[int] = None
-    machine_id: Optional[int] = None
-    frequency: Optional[str] = None
-    shift: Optional[str] = None
-    scheduled_day: Optional[str] = None
-
-
-# Response with nested data
-class PokayokeChecklistWithItems(PokayokeChecklist):
-    items: List[PokayokeChecklistItem] = []
-    machine_assignments: List[PokayokeMachineAssignment] = []
-
-
-class PokayokeMachineAssignmentWithChecklist(PokayokeMachineAssignment):
-    checklist: PokayokeChecklistWithItems
-
-
-# =======================
-# POKAYOKE COMPLETED LOGS
-# =======================
-class PokayokeCompletedLogBase(BaseModel):
-    checklist_id: int
-    machine_id: int
-    operator_id: int
-    production_order_id: Optional[int] = None
-    part_id: Optional[int] = None
-    completed_at: datetime
-    all_items_passed: Optional[bool] = None
-    comments: Optional[str] = None
-    read: bool = False
-    assignment_id: Optional[int] = None
-    frequency: Optional[str] = None  # 'Daily', 'Weekly', 'Monthly'
-    shift: Optional[str] = None      # 'Morning', 'Evening', 'Both'
-    operator_acknowledged: bool = False
-    operator_acknowledged_at: Optional[datetime] = None
-    supervisor_acknowledged: bool = False
-    supervisor_acknowledged_at: Optional[datetime] = None
-    supervisor_id: Optional[int] = None
-
-
-class PokayokeCompletedLog(PokayokeCompletedLogBase):
-    id: int
-
-    class Config:
-        from_attributes = True
-
-
-# =======================
-# POKAYOKE ITEM RESPONSES
-# =======================
-class PokayokeItemResponseBase(BaseModel):
-    completed_log_id: int
-    item_id: int
-    response_value: str
-    is_confirming: Optional[bool] = None
-    timestamp: datetime
-    approval_status: Optional[str] = None  # 'approved', 'rejected', 'pending'
-    approved_by: Optional[int] = None
-    approved_at: Optional[datetime] = None
-    approval_comments: Optional[str] = None
-
-
-class PokayokeItemResponse(PokayokeItemResponseBase):
-    id: int
-
-    class Config:
-        from_attributes = True
-
-
-class PokayokeItemResponseWithItem(PokayokeItemResponse):
-    item: PokayokeChecklistItem
-    approver: Optional[AccessUserResponse] = None
-
-
-# Create schemas
-class PokayokeCompletedLogCreate(PokayokeCompletedLogBase):
-    pass
-
-
-class PokayokeItemResponseCreate(PokayokeItemResponseBase):
-    pass
-
-
-# Update schemas
-class PokayokeCompletedLogUpdate(BaseModel):
-    checklist_id: Optional[int] = None
-    machine_id: Optional[int] = None
-    operator_id: Optional[int] = None
-    production_order_id: Optional[int] = None
-    part_id: Optional[int] = None
-    all_items_passed: Optional[bool] = None
-    comments: Optional[str] = None
-    read: Optional[bool] = None
-    assignment_id: Optional[int] = None
-    frequency: Optional[str] = None
-    shift: Optional[str] = None
-    operator_acknowledged: Optional[bool] = None
-    operator_acknowledged_at: Optional[datetime] = None
-    supervisor_acknowledged: Optional[bool] = None
-    supervisor_acknowledged_at: Optional[datetime] = None
-    supervisor_id: Optional[int] = None
-
-
-class PokayokeItemResponseUpdate(BaseModel):
-    completed_log_id: Optional[int] = None
-    item_id: Optional[int] = None
-    response_value: Optional[str] = None
-    is_confirming: Optional[bool] = None
-    approval_status: Optional[str] = None
-    approved_by: Optional[int] = None
-    approved_at: Optional[datetime] = None
-    approval_comments: Optional[str] = None
-
-
-# Response with nested data
-class PokayokeCompletedLogWithResponses(PokayokeCompletedLog):
-    item_responses: List[PokayokeItemResponseWithItem] = []
-    checklist: Optional[PokayokeChecklist] = None
-    machine: Optional[Machine] = None
-    part: Optional["PartSchema"] = None
-    operator: Optional[AccessUserResponse] = None
-    order: Optional["OrderSchema"] = None
-    machine_assignment: Optional[PokayokeMachineAssignment] = None
-
-
-# Simplified approver info
-class ApproverInfo(BaseModel):
-    user_name: str
-
-
-# Simplified response schema without nested item
-class PokayokeItemResponseSimple(BaseModel):
-    id: int
-    completed_log_id: int
-    response_value: str
-    is_confirming: Optional[bool] = None
-    timestamp: datetime
-    approval_status: Optional[str] = None
-    approved_by: Optional[int] = None
-    approved_at: Optional[datetime] = None
-    approval_comments: Optional[str] = None
-    approver: Optional[ApproverInfo] = None
-
-    class Config:
-        from_attributes = True
-
-
-# Schema for checklist item with approval responses
-class PokayokeChecklistItemWithApprovals(BaseModel):
-    item: PokayokeChecklistItem
-    responses: List[PokayokeItemResponseSimple] = []
-
-
-# Schema for structured approval status by completed log
-class ChecklistItemApprovalStatus(BaseModel):
-    item_id: int
-    item_text: str
-    item_type: str
-    sequence_number: int
-    response_value: str
-    responded_by: Optional[str] = None
-    responded_at: Optional[datetime] = None
-    approval_status: Optional[str] = None
-    approved_by: Optional[str] = None
-    approved_at: Optional[datetime] = None
-    approval_comments: Optional[str] = None
-
-
-class ChecklistApprovalByLog(BaseModel):
-    completed_log_id: int
-    production_order_id: Optional[int] = None
-    part_id: Optional[int] = None
-    machine_id: int
-    operator_id: int
-    operator_name: Optional[str] = None
-    completed_at: datetime
-    overall_approval_status: Optional[str] = None  # 'approved', 'rejected', 'pending'
-    items: List[ChecklistItemApprovalStatus] = []
-
-
-class ChecklistApprovalStatusResponse(BaseModel):
-    checklist_id: int
-    checklist_name: str
-    completed_logs: List[ChecklistApprovalByLog] = []
-
-
-# Simplified response schema for item responses by log
-class SimpleItemResponse(BaseModel):
-    item_id: int
-    item_text: str
-    response_value: str
-    approval_status: Optional[str] = None  # 'approved', 'rejected', 'pending'
-    approval_comments: Optional[str] = None
-
-
-class SimpleLogResponse(BaseModel):
-    log_id: int
-    operator_name: str
-    completed_at: datetime
-    overall_status: str  # 'approved', 'rejected', 'pending'
-    items: List[SimpleItemResponse] = []
-
-
-class SimpleCompletedLog(BaseModel):
-    log_id: int
-    checklist_id: int
-    checklist_name: str
-    machine_id: int
-    machine_name: str
-    operator_name: str
-    completed_at: datetime
-    overall_status: str  # 'approved', 'rejected', 'pending'
-    supervisor_name: Optional[str] = None
-    operator_acknowledged: bool = False
-    supervisor_acknowledged: bool = False
-    items: List[SimpleItemResponse] = []
-
-
-from .oms import Part as PartSchema, Order as OrderSchema
-PokayokeCompletedLogWithResponses.model_rebuild()
 
 
 # =======================
@@ -595,3 +294,297 @@ class Submission(SubmissionBase):
 
 class SubmissionWithDetails(Submission):
     details: List[SubmissionDetail] = []
+
+
+# =======================
+# Preventive Maintenance (PM) Schemas
+# =======================
+PM_ITEM_TYPES = ("Boolean", "Numeric", "Text")
+PM_FREQUENCY_TYPES = ("Time Based", "Usage Based", "Condition Based")
+PM_INTERVAL_UNITS = ("Day", "Week", "Month", "Year")
+PM_SUBMISSION_STATUSES = ("Submitted", "Approved", "Rejected")
+
+
+class PMChecklistItemBase(BaseModel):
+    item_text: str
+    sequence_number: int
+    item_type: str
+    expected_value: Optional[str] = None
+    frequency_type: str
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[float] = None
+    remarks: Optional[str] = None
+
+    @field_validator("item_type")
+    @classmethod
+    def validate_item_type(cls, v: str) -> str:
+        if v not in PM_ITEM_TYPES:
+            raise ValueError(f"item_type must be one of {PM_ITEM_TYPES}")
+        return v
+
+    @field_validator("frequency_type")
+    @classmethod
+    def validate_frequency_type(cls, v: str) -> str:
+        if v not in PM_FREQUENCY_TYPES:
+            raise ValueError(f"frequency_type must be one of {PM_FREQUENCY_TYPES}")
+        return v
+
+    @field_validator("interval_unit")
+    @classmethod
+    def validate_interval_unit(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in PM_INTERVAL_UNITS:
+            raise ValueError(f"interval_unit must be one of {PM_INTERVAL_UNITS}")
+        return v
+
+
+class PMChecklistItemCreate(PMChecklistItemBase):
+    pass
+
+
+class PMChecklistItemUpdate(BaseModel):
+    item_text: Optional[str] = None
+    sequence_number: Optional[int] = None
+    item_type: Optional[str] = None
+    expected_value: Optional[str] = None
+    frequency_type: Optional[str] = None
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[float] = None
+    remarks: Optional[str] = None
+
+
+class PMChecklistItem(PMChecklistItemBase):
+    id: int
+    checklist_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PMChecklistBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    created_by: int
+
+
+class PMChecklistCreate(PMChecklistBase):
+    items: List[PMChecklistItemCreate]
+
+    @field_validator("items")
+    @classmethod
+    def validate_items_not_empty(cls, v: List[PMChecklistItemCreate]) -> List[PMChecklistItemCreate]:
+        if not v:
+            raise ValueError("A checklist must contain at least one checkpoint")
+        return v
+
+
+class PMChecklistUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class PMChecklist(PMChecklistBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PMChecklistWithItems(PMChecklist):
+    items: List[PMChecklistItem] = []
+
+
+class PMAssignmentItemConfig(BaseModel):
+    checklist_item_id: int
+    is_required: bool = True
+
+
+class PMMachineAssignmentCreate(BaseModel):
+    machine_id: int
+    checklist_id: int
+    assigned_by: int
+    items: List[PMAssignmentItemConfig]
+
+    @field_validator("items")
+    @classmethod
+    def validate_items_not_empty(cls, v: List[PMAssignmentItemConfig]) -> List[PMAssignmentItemConfig]:
+        if not v:
+            raise ValueError("Assignment must include at least one checkpoint configuration")
+        if not any(item.is_required for item in v):
+            raise ValueError("At least one checkpoint must be marked required to assign to the machine")
+        return v
+
+
+class PMAssignmentItem(BaseModel):
+    id: int
+    assignment_id: int
+    checklist_item_id: int
+    is_required: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PMSchedule(BaseModel):
+    id: int
+    assignment_item_id: int
+    last_completed_date: Optional[date] = None
+    next_due_date: date
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PMAssignmentItemWithDetails(PMAssignmentItem):
+    checklist_item: Optional[PMChecklistItem] = None
+    schedule: Optional[PMSchedule] = None
+
+
+class PMMachineAssignment(BaseModel):
+    id: int
+    machine_id: int
+    checklist_id: int
+    assigned_by: int
+    assigned_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PMMachineAssignmentWithDetails(PMMachineAssignment):
+    checklist: Optional[PMChecklist] = None
+    assignment_items: List[PMAssignmentItemWithDetails] = []
+
+
+class PMMachineAssignmentOperatorView(PMMachineAssignment):
+    """Deprecated nested shape — use PMOperatorAssignmentView for operator API."""
+    checklist: Optional[PMChecklistWithItems] = None
+    assignment_items: List[PMAssignmentItemWithDetails] = []
+
+
+class PMOperatorCheckpoint(BaseModel):
+    """Single checkpoint row for operator — merges assignment item, definition, and schedule."""
+    assignment_item_id: int
+    schedule_id: int
+    checklist_item_id: int
+    sequence_number: int
+    item_text: str
+    item_type: str
+    expected_value: Optional[str] = None
+    frequency_type: str
+    interval_value: Optional[int] = None
+    interval_unit: Optional[str] = None
+    trigger_hours: Optional[float] = None
+    remarks: Optional[str] = None
+    is_required: bool
+    last_completed_date: Optional[date] = None
+    next_due_date: date
+    is_due: bool
+    has_pending_submission: bool = False
+    latest_submission_status: Optional[str] = None
+    needs_resubmit: bool = False
+    latest_submission_id: Optional[int] = None
+    rejection_comments: Optional[str] = None
+
+
+class PMOperatorAssignmentView(BaseModel):
+    """Flat operator assignment — checklist info once, checkpoints in order."""
+    assignment_id: int
+    machine_id: int
+    checklist_id: int
+    checklist_name: str
+    checklist_description: Optional[str] = None
+    assigned_at: datetime
+    checkpoints: List[PMOperatorCheckpoint] = []
+
+
+class PMScheduleWithDetails(PMSchedule):
+    assignment_item: Optional[PMAssignmentItemWithDetails] = None
+
+
+class DueCheckpointResponse(BaseModel):
+    schedule_id: int
+    assignment_item_id: int
+    assignment_id: int
+    machine_id: int
+    checklist_id: int
+    checklist_name: str
+    item_text: str
+    sequence_number: int
+    item_type: str
+    expected_value: Optional[str] = None
+    frequency_type: str
+    is_required: bool
+    last_completed_date: Optional[date] = None
+    next_due_date: date
+    has_pending_submission: bool = False
+    latest_submission_status: Optional[str] = None
+    needs_resubmit: bool = False
+    latest_submission_id: Optional[int] = None
+    rejection_comments: Optional[str] = None
+
+
+class PMCheckpointSubmissionCreate(BaseModel):
+    schedule_id: int
+    assignment_item_id: int
+    response_value: str
+    operator_comments: Optional[str] = None
+
+
+class PMOperatorSubmitRequest(BaseModel):
+    operator_id: int
+    submissions: List[PMCheckpointSubmissionCreate]
+
+    @field_validator("submissions")
+    @classmethod
+    def validate_submissions_not_empty(cls, v: List[PMCheckpointSubmissionCreate]) -> List[PMCheckpointSubmissionCreate]:
+        if not v:
+            raise ValueError("At least one checkpoint response is required")
+        return v
+
+
+class PMCheckpointSubmission(BaseModel):
+    id: int
+    schedule_id: int
+    assignment_item_id: int
+    operator_id: int
+    response_value: str
+    operator_comments: Optional[str] = None
+    submitted_at: datetime
+    status: str
+    supervisor_id: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    supervisor_comments: Optional[str] = None
+    supervisor_acknowledged: bool
+    supervisor_acknowledged_at: Optional[datetime] = None
+    operator_acknowledged: bool
+    operator_acknowledged_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PMCheckpointSubmissionWithDetails(PMCheckpointSubmission):
+    checklist_item: Optional[PMChecklistItem] = None
+    checklist_id: Optional[int] = None
+    checklist_name: Optional[str] = None
+    machine_id: Optional[int] = None
+    machine_label: Optional[str] = None
+
+
+class PMSupervisorReviewRequest(BaseModel):
+    supervisor_id: int
+    decision: Literal["Approved", "Rejected"]
+    supervisor_comments: Optional[str] = None
+
+
+class PMAcknowledgementRequest(BaseModel):
+    user_id: int

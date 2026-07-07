@@ -22,7 +22,7 @@ from DB.models.oms import (
 from DB.models.configuration import (
     workcenter as workcenterModel,
     Machine as MachineModel,
-    PokayokeCompletedLog,
+   
 )
 from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock, RawMaterialUnit, InventoryRequest, InventoryReturnRequest, Vendors as VendorModel, Category as CategoryModel, ToolsList as ToolsListModel
 from DB.models.access_control import AccessUser as AccessUserModel
@@ -223,26 +223,7 @@ def delete_product_cascade(db: Session, product_id: int) -> None:
     part_ids = [p.id for p in parts]
 
     if part_ids:
-        # Delete pokayoke logs for parts
-        for pid in part_ids:
-            result = db.execute(
-                text(
-                    "SELECT id FROM configuration.pokayoke_completed_logs "
-                    "WHERE part_id = :pid"
-                ),
-                {"pid": pid},
-            )
-            log_ids = [row[0] for row in result]
-            for log_id in log_ids:
-                log_obj = (
-                    db.query(PokayokeCompletedLog)
-                    .filter(PokayokeCompletedLog.id == log_id)
-                    .first()
-                )
-                if log_obj:
-                    db.delete(log_obj)
-
-        db.flush()
+       
 
         # Delete from scheduling.part_schedule_status to avoid FK violation
         db.execute(

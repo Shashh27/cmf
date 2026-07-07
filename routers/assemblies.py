@@ -15,7 +15,7 @@ from DB.models.oms import (
     OperationDocument as OperationDocumentModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
 )
-from DB.models.configuration import PokayokeCompletedLog
+
 from DB.schemas.oms import Assembly, AssemblyCreate, AssemblyUpdate
 
 router = APIRouter(

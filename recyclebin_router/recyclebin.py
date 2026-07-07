@@ -17,7 +17,7 @@ from DB.models.oms import (
     OrderPartPriority as OrderPartPriorityModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
 )
-from DB.models.configuration import PokayokeCompletedLog
+
 from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
 from services.stock_auto_update import StockAutoUpdateService
 from services.notification_service import NotificationService
@@ -57,7 +57,7 @@ def _build_hierarchical_assemblies(assemblies: list, db: Session, product_map: d
     """Build hierarchical assembly structure with child_assemblies and parts"""
     # Create a map of assemblies by id
     assembly_map = {a.id: a for a in assemblies}
-
+    
     # Group assemblies by parent_id
     children_by_parent = {}
     for assembly in assemblies:
@@ -65,7 +65,7 @@ def _build_hierarchical_assemblies(assemblies: list, db: Session, product_map: d
         if parent_id not in children_by_parent:
             children_by_parent[parent_id] = []
         children_by_parent[parent_id].append(assembly)
-
+    
     # Group parts by assembly_id
     parts_by_assembly = {}
     for part in parts:
@@ -73,41 +73,24 @@ def _build_hierarchical_assemblies(assemblies: list, db: Session, product_map: d
         if assembly_id not in parts_by_assembly:
             parts_by_assembly[assembly_id] = []
         parts_by_assembly[assembly_id].append(part)
-
+    
     # Recursive function to build hierarchy
     def build_hierarchy(assembly):
         children = children_by_parent.get(assembly.id, [])
         child_assemblies = []
         for child in children:
             child_assemblies.append(build_hierarchy(child))
-
+        
         # Get parts for this assembly
         assembly_parts = parts_by_assembly.get(assembly.id, [])
-
+        
         return _assembly_to_dict(assembly, product_map, parent_assembly_map, user_map, db, child_assemblies, assembly_parts)
-
-    # Separate assemblies into: those in recycle bin (show directly) vs those with parts in recycle bin (show in hierarchy)
-    recycle_bin_assemblies = [a for a in assemblies if a.recycle_bin == True]
-    assemblies_with_recycle_parts = [a for a in assemblies if a.recycle_bin == False]
-
-    result = []
-
-    # Add assemblies that are directly in recycle bin (regardless of parent_id)
-    for assembly in recycle_bin_assemblies:
-        children = children_by_parent.get(assembly.id, [])
-        child_assemblies = []
-        for child in children:
-            child_assemblies.append(build_hierarchy(child))
-        assembly_parts = parts_by_assembly.get(assembly.id, [])
-        result.append(_assembly_to_dict(assembly, product_map, parent_assembly_map, user_map, db, child_assemblies, assembly_parts))
-
-    # Build hierarchy for assemblies that have parts in recycle bin (only root ones)
+    
+    # Build hierarchy for root assemblies (parent_id is None)
     root_assemblies = children_by_parent.get(None, [])
-    for assembly in root_assemblies:
-        if assembly in assemblies_with_recycle_parts:
-            result.append(build_hierarchy(assembly))
-
-    return result
+    hierarchical_assemblies = [build_hierarchy(assembly) for assembly in root_assemblies]
+    
+    return hierarchical_assemblies
 
 
 def _check_and_update_assembly_recycle_bin_status(assembly_id: int, db: Session):
@@ -435,18 +418,20 @@ def permanent_delete_part(part_id: int, db: Session = Depends(get_db)):
     )
     
     try:
-        # 1. Delete from scheduling.part_schedule_status
+        
+
+        # 2. Delete from scheduling.part_schedule_status
         db.execute(
             text("DELETE FROM scheduling.part_schedule_status WHERE part_id = :pid"),
             {"pid": part_id}
         )
 
-        # 2. Delete order part priorities
+        # 3. Delete order part priorities
         db.query(OrderPartPriorityModel).filter(OrderPartPriorityModel.part_id == part_id).delete(
             synchronize_session=False
         )
 
-        # 3. Delete operations and their documents/tools
+        # 4. Delete operations and their documents/tools
         operations = db.query(OperationModel).filter(OperationModel.part_id == part_id).all()
         operation_ids = [op.id for op in operations]
         if operation_ids:
@@ -627,9 +612,9 @@ def permanent_delete_part(part_id: int, db: Session = Depends(get_db)):
         if stock_id_to_update:
             StockAutoUpdateService.update_stock_status_from_units(db, stock_id_to_update)
 
-        # Note: Do NOT remove assembly from recycle bin when permanently deleting a part
-        # The assembly should stay in recycle bin if it was already there
-        # Only remove from recycle bin when RESTORING a part
+        # Check if parent assembly should be removed from recycle bin
+        if assembly_id:
+            _check_and_update_assembly_recycle_bin_status(assembly_id, db)
 
         return {"message": f"Part with id {part_id} permanently deleted"}
         
@@ -791,8 +776,8 @@ def permanent_delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
     db.delete(assembly)
     db.commit()
 
-    # Note: Do NOT remove parent assembly from recycle bin when permanently deleting a sub-assembly
-    # The parent assembly should stay in recycle bin if it was already there
-    # Only remove from recycle bin when RESTORING an assembly
+    # Check if parent assembly should be removed from recycle bin
+    if parent_id:
+        _check_and_update_assembly_recycle_bin_status(parent_id, db)
 
     return {"message": f"Assembly with id {assembly_id} permanently deleted"}
