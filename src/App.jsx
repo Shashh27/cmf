@@ -76,6 +76,8 @@ import OperatorNotifications from "./Operator Components/Notifications";
 
 import MaintenanceManagement from "./Pages/MaintenanceManagement";
 
+import { EnergyMonitoring, Reportnew } from "./Pages/EMS";
+
 import QualityManagement from "./Quality Management Components/QualityManagement";
 
 
@@ -109,6 +111,7 @@ import ManufacturingCoordinator from "./Pages/ManufacturingCoordinator";
 
 
 import MCSShopFloorDashboard from "./ManufacturingCoordinator Components/ShopFloorDashboard";
+import { EnergyMonitoring as MCEnergyMonitoring } from "./ManufacturingCoordinator Components/EMS";
 
 
 
@@ -286,6 +289,8 @@ function App() {
 
           <Route path="/admin/maintenance-management/preventive-maintenance" element={<MaintenanceManagement />} />
 
+          <Route path="/admin/energy-monitoring" element={<EnergyMonitoring />} />
+
 
 
           <Route path="/admin/quality-management" element={<QualityManagement />} />
@@ -391,6 +396,7 @@ function App() {
           <Route path="/manufacturing_coordinator" element={<Navigate to="/manufacturing_coordinator/dashboard" replace />} />
           <Route path="/manufacturing_coordinator/dashboard" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/shop-floor" element={<MCSShopFloorDashboard />} />
+          <Route path="/manufacturing_coordinator/energy-monitoring" element={<MCEnergyMonitoring />} />
           <Route path="/manufacturing_coordinator/oms" element={<Navigate to="/manufacturing_coordinator/oms/orders" replace />} />
           <Route path="/manufacturing_coordinator/oms/orders" element={<ManufacturingCoordinator />} />
           <Route path="/manufacturing_coordinator/oms/parts-priority" element={<ManufacturingCoordinatorPartsPriority />} />

@@ -1,13 +1,63 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Card, Empty, Spin, Table, Tag, Typography, Input, Select } from "antd";
-import { ClockCircleOutlined, AppstoreOutlined, ToolOutlined, PartitionOutlined, SearchOutlined } from "@ant-design/icons";
+import React, { useEffect, useMemo, useState, useRef } from "react";
+import { Empty, Spin, Input, Select, Button } from "antd";
+import { ClockCircleOutlined, AppstoreOutlined, ToolOutlined, PartitionOutlined, SearchOutlined, DollarOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 import ProductSummaryDownload from "../DownloadReports/ProductSummaryDownload";
+import "./pdm-theme.css";
+import AdditionalCostsSection from "./AdditionalCostsSection";
 
-const { Text } = Typography;
+// ─── Column Filter Header Component ──────────────────────────────────────────────
+const FilterHeader = ({ label, options, value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  const active = value && value.length > 0;
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', userSelect: 'none' }}
+      onClick={() => setOpen(o => !o)}>
+      <span style={{ fontWeight: 600 }}>{label}</span>
+      <span style={{ fontSize: 9, color: active ? '#2E8B57' : '#aaa' }}>▼</span>
+      {active && <span style={{ background: '#2E8B57', color: '#fff', borderRadius: 8, fontSize: 9, padding: '0 4px', lineHeight: '14px' }}>{value.length}</span>}
+      {open && (
+        <div onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: '#fff', border: '1px solid #D6D3C4', borderRadius: 0, boxShadow: '0 4px 12px rgba(0,0,0,.15)', zIndex: 9999, minWidth: 180, maxHeight: 260, overflowY: 'auto', padding: '6px 0' }}>
+          <div style={{ padding: '2px 10px', fontSize: 10, color: '#999', borderBottom: '1px solid #F5F5DC', marginBottom: 3 }}>Filter</div>
+          {options.map(opt => (
+            <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input type="checkbox" checked={value.includes(opt)} onChange={() => onChange(value.includes(opt) ? value.filter(v => v !== opt) : [...value, opt])} />
+              {opt}
+            </label>
+          ))}
+          {value.length > 0 && (
+            <div style={{ borderTop: '1px solid #F5F5DC', marginTop: 3, padding: '3px 10px' }}>
+              <span onClick={() => onChange([])} style={{ fontSize: 10, color: '#2E8B57', cursor: 'pointer' }}>Clear</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+const border = "1px solid #D6D3C4";
+const thStyle = {
+  border, padding: "4px 8px", textAlign: "center",
+  fontWeight: 600, fontSize: 12, background: "#FDF5E6",
+  whiteSpace: "nowrap", fontFamily: "'Roboto', sans-serif",
+};
+const tdStyle = {
+  border, padding: "3px 8px", fontSize: 11,
+  verticalAlign: "middle", textAlign: "center", fontFamily: "'Roboto', sans-serif",
+};
+
+const tdStyleLeft = { ...tdStyle, textAlign: "left" };
+const tdStyleRight = { ...tdStyle, textAlign: "right" };
 
 const highlightText = (text, searchTerm) => {
   if (!text || !searchTerm) return text;
@@ -53,41 +103,57 @@ const formatHms = (seconds) => {
 // ─── Stat Card ──────────────────────────────────────────────────────────────
 
 const StatCard = ({ icon, label, value, iconColor }) => (
-  <Card
-    size="small"
-    className="border border-slate-200 shadow-sm"
-    styles={{ body: { padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 } }}
+  <div
+    className="border border-[#D6D3C4] shadow-sm"
+    style={{ padding: "6px 10px", display: "flex", alignItems: "center", gap: 8, background: "#FFFFFF", fontFamily: "'Roboto', sans-serif" }}
   >
-    <div style={{ color: iconColor, fontSize: 20, lineHeight: 1 }}>{icon}</div>
+    <div style={{ color: iconColor, fontSize: 16, lineHeight: 1 }}>{icon}</div>
     <div className="min-w-0">
-      <div style={{ fontSize: 13, color: "#64748b", lineHeight: "1.3", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b", fontFamily: "monospace" }}>{value}</div>
+      <div style={{ fontSize: 11, color: "#5D4037", lineHeight: "1.2", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#2F2F2F" }}>{value}</div>
     </div>
-  </Card>
+  </div>
 );
 
 // ─── Section Header ──────────────────────────────────────────────────────────
 
 const SectionHeader = ({ icon, title, count }) => (
-  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+  <div className="flex items-center justify-between px-3 py-1.5 bg-[#FDF5E6] border-b border-[#D6D3C4" style={{ fontFamily: "'Roboto', sans-serif" }}>
     <div className="flex items-center gap-2">
-      <span className="text-blue-600">{icon}</span>
-      <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>{title}</span>
+      <span style={{ fontSize: 14, color: "#2E8B57" }}>{icon}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: "#2F2F2F" }}>{title}</span>
     </div>
     {count != null && (
-      <Tag color="blue" style={{ margin: 0, fontFamily: "monospace", fontSize: 13 }}>{count} rows</Tag>
+      <span style={{
+        background: "#2E8B57", color: "#fff", padding: "2px 6px",
+        fontSize: 11, fontWeight: 600
+      }}>
+        {count} rows
+      </span>
     )}
   </div>
 );
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-const ProductSummary = ({ productId }) => {
+// productId: the product being summarized
+// orderId: the order this summary is being viewed/quoted for — required to
+//          load/edit the order's additional project costs (Tooling, Fixture, etc.)
+// userId: optional, attached to additional-cost records that get created/edited
+const ProductSummary = ({ productId, orderId, userId }) => {
   const [loading, setLoading] = useState(false);
   const [summaryData, setSummaryData] = useState(null);
-  const [machineFilter, setMachineFilter] = useState(null);
-  const [operationFilter, setOperationFilter] = useState(null);
+  const [partFilter, setPartFilter] = useState([]);
+  const [machineFilter, setMachineFilter] = useState([]);
+  const [operationFilter, setOperationFilter] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [additionalCosts, setAdditionalCosts] = useState([]);
+  const [showAdditionalCosts, setShowAdditionalCosts] = useState(false);
+  
+  // Column header filters
+  const [colMachine, setColMachine] = useState([]);
+  const [colPart, setColPart] = useState([]);
+  const [colOperation, setColOperation] = useState([]);
 
   useEffect(() => {
     if (!productId) { setSummaryData(null); return; }
@@ -96,9 +162,14 @@ const ProductSummary = ({ productId }) => {
     const controller = new AbortController();
     setLoading(true);
 
-    // Use lightweight summary-data endpoint - only operations data for hours calculation
+    // Use lightweight summary-data endpoint - only operations data for hours calculation.
+    // Pass order_id (when available) so the backend also returns that order's
+    // additional project costs (Tooling/Fixture/Inspection etc.) in one call.
     axios
-      .get(`${API_BASE_URL}/products/${productId}/summary-data`, { signal: controller.signal })
+      .get(`${API_BASE_URL}/products/${productId}/summary-data`, {
+        params: orderId ? { order_id: orderId } : {},
+        signal: controller.signal,
+      })
       .then((res) => { if (isMounted) setSummaryData(res.data); })
       .catch((e) => {
         if (e?.name !== "CanceledError" && e?.name !== "AbortError") {
@@ -109,7 +180,17 @@ const ProductSummary = ({ productId }) => {
       .finally(() => { if (isMounted && !controller.signal.aborted) setLoading(false); });
 
     return () => { isMounted = false; controller.abort(); };
-  }, [productId]);
+  }, [productId, orderId]);
+
+  // Sync additional costs whenever a fresh summary load comes in
+  useEffect(() => {
+    setAdditionalCosts(summaryData?.additional_costs || []);
+  }, [summaryData]);
+
+  const additionalCostsSubtotal = useMemo(
+    () => additionalCosts.reduce((a, c) => a + (Number(c.cost_value) || 0), 0),
+    [additionalCosts]
+  );
 
   const summary = useMemo(() => {
     // New summary-data endpoint returns flat parts array directly
@@ -140,6 +221,7 @@ const ProductSummary = ({ productId }) => {
         const machineCost = (totalSec / 3600) * mhrRate;
         rows.push({
           key: `${part?.id || "p"}-${op?.id || op?.operation_number || Math.random()}`,
+          part_id: part?.id,
           part_number: part?.part_number || "—",
           part_name: part?.part_name || "—",
           operation_number: op?.operation_number || "—",
@@ -162,17 +244,35 @@ const ProductSummary = ({ productId }) => {
     // Apply filters
     let filteredRows = rows;
     
-    // Filter by machine
-    if (machineFilter) {
+    // Column header filters
+    if (colMachine.length > 0) {
+      filteredRows = filteredRows.filter(r => colMachine.includes(r.machine_name));
+    }
+    if (colPart.length > 0) {
+      filteredRows = filteredRows.filter(r => colPart.includes(r.part_name));
+    }
+    if (colOperation.length > 0) {
+      filteredRows = filteredRows.filter(r => colOperation.includes(r.operation_name));
+    }
+    
+    // Filter by part
+    if (partFilter.length > 0) {
       filteredRows = filteredRows.filter(r => 
-        r.machine_name === machineFilter || r.machine_id === machineFilter
+        partFilter.includes(r.part_name) || partFilter.includes(String(r.part_id))
+      );
+    }
+    
+    // Filter by machine
+    if (machineFilter.length > 0) {
+      filteredRows = filteredRows.filter(r => 
+        machineFilter.includes(r.machine_name) || machineFilter.includes(String(r.machine_id))
       );
     }
     
     // Filter by operation name
-    if (operationFilter) {
+    if (operationFilter.length > 0) {
       filteredRows = filteredRows.filter(r => 
-        r.operation_name === operationFilter
+        operationFilter.includes(r.operation_name)
       );
     }
     
@@ -203,7 +303,81 @@ const ProductSummary = ({ productId }) => {
 
     const machineRows = Array.from(byMachine.values()).sort((a, b) => b.total_seconds - a.total_seconds);
 
-    // Extract unique machines and operations for filter options
+    // Group filtered rows by Machine first, then Part within Machine, then Operations within Part
+    const machineGroups = new Map();
+    filteredRows.forEach((r) => {
+      const machineKey = r.machine_id || r.machine_name || "N/A";
+      if (!machineGroups.has(machineKey)) {
+        machineGroups.set(machineKey, {
+          machine_id: r.machine_id,
+          machine_name: r.machine_name,
+          parts: new Map()
+        });
+      }
+      
+      const machineGroup = machineGroups.get(machineKey);
+      const partKey = r.part_id || r.part_name || "unknown";
+      if (!machineGroup.parts.has(partKey)) {
+        machineGroup.parts.set(partKey, {
+          part_id: r.part_id,
+          part_name: r.part_name,
+          part_number: r.part_number,
+          part_qty: r.part_qty,
+          operations: []
+        });
+      }
+      machineGroup.parts.get(partKey).operations.push(r);
+    });
+
+    // Build flat rows with rowSpan info and calculate totals
+    const groupedRows = [];
+    let slNo = 0;
+    let totalQtyAll = 0;
+    
+    machineGroups.forEach((machineGroup) => {
+      slNo += 1;
+      const machineKey = machineGroup.machine_id || machineGroup.machine_name || "N/A";
+      
+      // Calculate total operations for this machine
+      let machineTotalOps = 0;
+      machineGroup.parts.forEach((partGroup) => {
+        machineTotalOps += partGroup.operations.length;
+      });
+      
+      let isFirstPart = true;
+      let isFirstOpInMachine = true;
+      
+      machineGroup.parts.forEach((partGroup) => {
+        const ops = partGroup.operations;
+        const partQty = partGroup.part_qty || 1;
+        totalQtyAll += partQty;
+        
+        // Calculate part-level totals
+        const totalHoursPart = ops.reduce((sum, op) => sum + op.total_seconds, 0);
+        const totalCostPart = ops.reduce((sum, op) => sum + op.machine_cost, 0);
+        const totalCostQty = totalCostPart * partQty;
+        
+        ops.forEach((op, idx) => {
+          groupedRows.push({
+            ...op,
+            slNo,
+            machine_name: machineGroup.machine_name,
+            machine_id: machineGroup.machine_id,
+            machineRowSpan: isFirstOpInMachine ? machineTotalOps : 0,
+            partRowSpan: idx === 0 ? ops.length : 0,
+            part_qty: partQty,
+            total_hours_part: totalHoursPart,
+            total_cost_part: totalCostPart,
+            total_cost_qty: totalCostQty,
+          });
+          isFirstOpInMachine = false;
+        });
+        isFirstPart = false;
+      });
+    });
+
+    // Extract unique parts, machines and operations for filter options
+    const uniqueParts = Array.from(new Set(rows.map(r => r.part_name).filter(p => p))).sort();
     const uniqueMachines = Array.from(new Set(rows.map(r => r.machine_name).filter(m => m && m !== "N/A"))).sort();
     const uniqueOperations = Array.from(new Set(rows.map(r => r.operation_name).filter(o => o))).sort();
 
@@ -211,17 +385,31 @@ const ProductSummary = ({ productId }) => {
 
     return { 
       productName: summaryData?.product?.product_name || "", 
-      rows: filteredRows, 
+      rows: groupedRows, 
       totalSetup, 
       totalCycle, 
       totalAll: totalSetup + totalCycle,
       totalCost,
       machineRows,
+      uniqueParts,
       uniqueMachines,
       uniqueOperations,
-      allRows: rows
+      allRows: rows,
+      totalQtyAll
     };
-  }, [summaryData, machineFilter, operationFilter, searchTerm]);
+  }, [summaryData, partFilter, machineFilter, operationFilter, searchTerm, colMachine, colPart, colOperation]);
+
+  // Grand total = machining cost + additional project costs (Tooling/Fixture/Inspection/etc.)
+  const grandTotal = summary.totalCost + additionalCostsSubtotal;
+
+  // Bundle passed to the download component so PDF/Excel exports include
+  // the additional costs table and the grand total.
+  const exportData = useMemo(() => ({
+    ...summary,
+    additionalCosts,
+    additionalCostsSubtotal,
+    grandTotal,
+  }), [summary, additionalCosts, additionalCostsSubtotal, grandTotal]);
 
   // ── Empty / Loading states ──────────────────────────────────────────────
 
@@ -243,346 +431,246 @@ const ProductSummary = ({ productId }) => {
     </div>
   );
 
-  // ── Column definitions ──────────────────────────────────────────────────
-
-  // Machine table — same orange/green colors as operation table
-  const machineColumns = [
-    {
-      title: "Machine",
-      dataIndex: "machine_name",
-      key: "machine_name",
-      width: 120,
-      render: (t) => (
-        <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 11, lineHeight: "1.3" }}>
-          {highlightText(t || "N/A", searchTerm)}
-        </Tag>
-      ),
-    },
-    {
-      title: "Setup Time",
-      key: "setup",
-      width: 100,
-      render: (_, r) => (
-        // ✅ Same orange Tag as op table's setup column
-        <Tag color="orange" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
-          {formatHms(r.setup_seconds)}
-        </Tag>
-      ),
-    },
-    {
-      title: "Cycle Time",
-      key: "cycle",
-      width: 100,
-      render: (_, r) => (
-        // ✅ Same green Tag as op table's cycle column
-        <Tag color="green" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
-          {formatHms(r.cycle_seconds)}
-        </Tag>
-      ),
-    },
-    {
-      title: "Total",
-      key: "total",
-      width: 100,
-      render: (_, r) => (
-        <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#1e293b", fontSize: 11 }}>
-          {formatHms(r.total_seconds)}
-        </span>
-      ),
-    },
-    {
-      title: "MHR Rate",
-      key: "mhr_rate",
-      width: 90,
-      render: (_, r) => (
-        <span style={{ fontFamily: "monospace", fontSize: 11, color: "#7c3aed" }}>
-          {r.mhr_rate ? `Rs.${r.mhr_rate}/hr` : <span style={{ color: "#94a3b8" }}>—</span>}
-        </span>
-      ),
-    },
-    {
-      title: "Machine Cost",
-      key: "machine_cost",
-      width: 110,
-      render: (_, r) => (
-        <span style={{ fontFamily: "monospace", fontWeight: 600, color: r.machine_cost > 0 ? "#15803d" : "#94a3b8", fontSize: 11 }}>
-          {r.machine_cost > 0 ? fmtCost(r.machine_cost) : "—"}
-        </span>
-      ),
-    },
-  ];
-
-  // Operations table
-  const opColumns = [
-    {
-      title: "Part",
-      key: "part",
-      width: 140,
-      render: (_, r) => (
-        <div className="min-w-0">
-          <div style={{ fontWeight: 500, color: "#1e293b", wordBreak: "break-word", lineHeight: "1.3", fontSize: 11 }}>
-            {highlightText(r.part_name, searchTerm)}
-          </div>
-          <div style={{ fontSize: 10, color: "#64748b", fontFamily: "monospace", wordBreak: "break-all" }}>
-            {highlightText(r.part_number, searchTerm)}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: "Op #",
-      dataIndex: "operation_number",
-      key: "op_num",
-      width: 60,
-      render: (t) => (
-        <Tag color="cyan" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>{t}</Tag>
-      ),
-    },
-    {
-      title: "Operation",
-      dataIndex: "operation_name",
-      key: "op_name",
-      width: 150,
-      render: (t, r) => (
-        <span style={{ 
-          wordBreak: "break-word", 
-          fontSize: 11, 
-          lineHeight: "1.3",
-          color: r.is_outsource ? "#dc2626" : "#1e293b",
-          fontWeight: r.is_outsource ? 600 : "normal"
-        }}>
-          {highlightText(t, searchTerm)} {r.is_outsource && "(OUTSOURCE)"}
-        </span>
-      ),
-    },
-    {
-      title: "Qty",
-      key: "qty",
-      width: 50,
-      render: (_, r) => (
-        <Tag color="blue" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
-          {r.part_qty || 1}
-        </Tag>
-      ),
-    },
-    {
-      title: "Machine",
-      dataIndex: "machine_name",
-      key: "machine",
-      width: 120,
-      render: (t) => (
-        <Tag color="geekblue" style={{ margin: 0, whiteSpace: "normal", fontSize: 10, lineHeight: "1.3" }}>
-          {highlightText(t || "N/A", searchTerm)}
-        </Tag>
-      ),
-    },
-    {
-      title: "Setup",
-      dataIndex: "setup_time",
-      key: "setup",
-      width: 90,
-      render: (t) => (
-        // ✅ Orange Tag — reference color for machine table
-        <Tag color="orange" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
-          {t || "00:00:00"}
-        </Tag>
-      ),
-    },
-    {
-      title: "Cycle",
-      dataIndex: "cycle_time",
-      key: "cycle",
-      width: 90,
-      render: (t) => (
-        // ✅ Green Tag — reference color for machine table
-        <Tag color="green" style={{ margin: 0, fontFamily: "monospace", fontSize: 11 }}>
-          {t || "00:00:00"}
-        </Tag>
-      ),
-    },
-    {
-      title: "Total",
-      key: "total",
-      width: 90,
-      render: (_, r) => (
-        <span style={{ fontFamily: "monospace", color: "#475569", fontSize: 11 }}>
-          {formatHms(r.total_seconds)}
-        </span>
-      ),
-    },
-    {
-      title: "Cost",
-      key: "machine_cost",
-      width: 110,
-      render: (_, r) => (
-        <span style={{ fontFamily: "monospace", fontWeight: 600, color: r.machine_cost > 0 ? "#15803d" : "#94a3b8", fontSize: 11 }}>
-          {r.machine_cost > 0 ? fmtCost(r.machine_cost) : "—"}
-        </span>
-      ),
-    },
-  ];
-
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <>
-      <style>{`
-        .ps-scroll-root {
-          height: 100%;
-          overflow-y: auto;
-          overflow-x: hidden;
-        }
-        /* ── Unified font size for ALL table cells and headers ── */
-        .ps-table .ant-table-thead > tr > th {
-          background: #f8fafc;
-          font-size: 11px !important;
-          font-weight: 600;
-          color: #475569;
-          padding: 6px 8px !important;
-          white-space: nowrap;
-          position: sticky;
-          top: 0;
-          z-index: 2;
-        }
-        .ps-table .ant-table-tbody > tr > td {
-          padding: 6px 8px !important;
-          font-size: 11px !important;
-          vertical-align: middle;
-        }
-        .ps-table .ant-table-tbody > tr:hover > td {
-          background: #f0f7ff !important;
-        }
-        /* Scrollbar styling - more visible and user-friendly */
-        .ps-table-scroll::-webkit-scrollbar { 
-          width: 8px; 
-          height: 8px; 
-        }
-        .ps-table-scroll::-webkit-scrollbar-track { 
-          background: #f1f5f9; 
-          border-radius: 4px;
-          border: 1px solid #e2e8f0;
-        }
-        .ps-table-scroll::-webkit-scrollbar-thumb { 
-          background: #94a3b8; 
-          border-radius: 4px;
-          border: 1px solid #cbd5e1;
-        }
-        .ps-table-scroll::-webkit-scrollbar-thumb:hover { 
-          background: #64748b; 
-        }
-        .ps-table-scroll::-webkit-scrollbar-corner {
-          background: #f1f5f9;
-        }
-        /* Add subtle shadow to indicate scrollable content */
-        .ps-table-scroll {
-          box-shadow: inset -1px 0 2px rgba(0,0,0,0.05);
-        }
-        /* Ensure Ant Design Tag text respects font size override */
-        .ps-table .ant-tag {
-          font-size: 11px !important;
-        }
-      `}</style>
+    <div
+      className="w-full p-2 flex flex-col gap-2 pdm-container"
+      style={{ height: "100%", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box", backgroundColor: "#F5F5DC" }}
+    >
 
-      {/* Outer scroll container */}
-      <div
-        className="ps-scroll-root w-full p-3 sm:p-5 flex flex-col gap-4"
-        style={{ height: "100%", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box" }}
-      >
-
-        {/* Product title with search and filters */}
-        <div className="flex items-center gap-2 flex-wrap justify-between">
-          <div className="flex items-center gap-2 flex-wrap">
-            <AppstoreOutlined className="text-blue-600 text-lg" />
-            <span style={{ fontWeight: 700, color: "#1e293b", fontSize: 13 }} className="truncate">
-              {summary.productName || "Product Summary"}
-            </span>
-            <Input
-              placeholder="Search part, operation, machine..."
-              prefix={<SearchOutlined className="text-slate-400" />}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              allowClear
-              size="small"
-              style={{ width: 250 }}
-            />
-            <Select
-              placeholder="Filter by Machine"
-              value={machineFilter}
-              onChange={setMachineFilter}
-              allowClear
-              size="small"
-              style={{ minWidth: 150 }}
-              options={summary.uniqueMachines.map(m => ({ label: m, value: m }))}
-            />
-            <Select
-              placeholder="Filter by Operation"
-              value={operationFilter}
-              onChange={setOperationFilter}
-              allowClear
-              size="small"
-              style={{ minWidth: 150 }}
-              options={summary.uniqueOperations.map(o => ({ label: o, value: o }))}
-            />
-          </div>
-          <ProductSummaryDownload 
-            summaryData={summary} 
-            productName={summary.productName}
-            fileName={`${summary.productName || "product"}_summary.pdf`}
+      {/* Product title with search and filters */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 justify-between" style={{ fontFamily: "'Roboto', sans-serif" }}>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <AppstoreOutlined style={{ fontSize: 16, color: "#2E8B57" }} />
+          <span style={{ fontWeight: 600, color: "#2F2F2F", fontSize: 13 }} className="truncate max-w-[150px] sm:max-w-[200px]">
+            {summary.productName || "Product Summary"}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+          <Input
+            placeholder="Search..."
+            prefix={<SearchOutlined style={{ color: "#5D4037" }} />}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            allowClear
+            size="small"
+            style={{ minWidth: 80, fontSize: 12, flex: 1, fontWeight: 600 }}
+          />
+          <Select
+            mode="multiple"
+            placeholder="Machine"
+            value={machineFilter}
+            onChange={setMachineFilter}
+            allowClear
+            size="small"
+            style={{ minWidth: 80, fontSize: 12, flex: 1, fontWeight: 600 }}
+            options={summary.uniqueMachines.map(m => ({ label: m, value: m }))}
+            maxTagCount="responsive"
+          />
+          <Select
+            mode="multiple"
+            placeholder="Part"
+            value={partFilter}
+            onChange={setPartFilter}
+            allowClear
+            size="small"
+            style={{ minWidth: 80, fontSize: 12, flex: 1, fontWeight: 600 }}
+            options={summary.uniqueParts.map(p => ({ label: p, value: p }))}
+            maxTagCount="responsive"
+          />
+          <Select
+            mode="multiple"
+            placeholder="Operation"
+            value={operationFilter}
+            onChange={setOperationFilter}
+            allowClear
+            size="small"
+            style={{ minWidth: 80, fontSize: 12, flex: 1, fontWeight: 600 }}
+            options={summary.uniqueOperations.map(o => ({ label: o, value: o }))}
+            maxTagCount="responsive"
           />
         </div>
-
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard icon={<ClockCircleOutlined />} iconColor="#f97316" label="Total Setup Time"       value={formatHms(summary.totalSetup)} />
-          <StatCard icon={<ClockCircleOutlined />} iconColor="#16a34a" label="Total Cycle Time"       value={formatHms(summary.totalCycle)} />
-          <StatCard icon={<ClockCircleOutlined />} iconColor="#2563eb" label="Total (Setup + Cycle)"  value={formatHms(summary.totalAll)}   />
-          <StatCard icon={<ToolOutlined />}         iconColor="#7c3aed" label="Total Machining Cost"  value={fmtCost(summary.totalCost)}     />
-        </div>
-
-        {/* ── Table 1: Machine-wise ─────────────────────────────────────── */}
-        <div className="bg-white rounded-lg border border-slate-200 shadow-sm" style={{ display: "flex", flexDirection: "column" }}>
-          <SectionHeader
-            icon={<ToolOutlined />}
-            title="Machine-wise Total Hours"
-            count={summary.machineRows.length}
-          />
-          <div className="ps-table-scroll" style={{ overflowY: "auto", overflowX: "auto", maxHeight: 320 }}>
-            <Table
-              className="ps-table"
-              columns={machineColumns}
-              dataSource={summary.machineRows}
-              rowKey={(r) => r.machine_name}
-              pagination={false}
-              size="small"
-              scroll={{ x: 620 }}
-              locale={{ emptyText: <Empty description="No IN-House operations" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-            />
-          </div>
-        </div>
-
-        {/* ── Table 2: Part Operations ──────────────────────────────────── */}
-        <div className="bg-white rounded-lg border border-slate-200 shadow-sm" style={{ display: "flex", flexDirection: "column" }}>
-          <SectionHeader
-            icon={<PartitionOutlined />}
-            title="Part Operations (ALL)"
-            count={summary.rows.length}
-          />
-          <div className="ps-table-scroll" style={{ overflowY: "auto", overflowX: "auto", maxHeight: 420 }}>
-            <Table
-              className="ps-table"
-              columns={opColumns}
-              dataSource={summary.rows}
-              rowKey="key"
-              pagination={false}
-              size="small"
-              scroll={{ x: 1100 }}
-              locale={{ emptyText: <Empty description="No operations found" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
-            />
-          </div>
-        </div>
-
+        <ProductSummaryDownload 
+          summaryData={exportData} 
+          productName={summary.productName}
+          fileName={`${summary.productName || "product"}_summary.pdf`}
+        />
       </div>
-    </>
+
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+        <StatCard icon={<ClockCircleOutlined />} iconColor="#F59E0B" label="Total Setup Time"       value={formatHms(summary.totalSetup)} />
+        <StatCard icon={<ClockCircleOutlined />} iconColor="#16A34A" label="Total Cycle Time"       value={formatHms(summary.totalCycle)} />
+        <StatCard icon={<ClockCircleOutlined />} iconColor="#2E8B57" label="Total (Setup + Cycle)"  value={formatHms(summary.totalAll)}   />
+        <StatCard icon={<ToolOutlined />}         iconColor="#8B4513" label="Total Machining Cost"  value={fmtCost(summary.totalCost)}     />
+        <StatCard icon={<DollarOutlined />}       iconColor="#DC2626" label="Grand Total" value={fmtCost(grandTotal)} />
+      </div>
+
+      {/* ── Table: Part Operations ──────────────────────────────────── */}
+      <div className="bg-white border border-[#D6D3C4] shadow-sm flex flex-col" style={{ flex: 1, minHeight: 0, maxHeight: showAdditionalCosts ? "calc(100% - 200px)" : "calc(100% - 60px)" }}>
+        <SectionHeader
+          icon={<PartitionOutlined />}
+          title="Part Operations (ALL)"
+          count={summary.rows.length}
+        />
+        <div style={{ overflowX: "auto", overflowY: "auto", WebkitOverflowScrolling: "touch", flex: 1, minHeight: 0 }}>
+          {summary.rows.length === 0 ? (
+            <div className="p-4 text-center text-gray-500" style={{ fontSize: 10 }}>No operations found</div>
+          ) : (
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1200, tableLayout: "fixed", border }}>
+              <thead>
+                <tr>
+                  <th rowSpan={2} style={{ ...thStyle, width: 100 }}>
+                    <FilterHeader label="Machine" options={summary.uniqueMachines} value={colMachine} onChange={setColMachine} />
+                  </th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 140, textAlign: "left" }}>
+                    <FilterHeader label="Part" options={summary.uniqueParts} value={colPart} onChange={setColPart} />
+                  </th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 50, textAlign: "right" }}>Qty</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 50, textAlign: "right" }}>Op #</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 140, textAlign: "left" }}>
+                    <FilterHeader label="Operation" options={summary.uniqueOperations} value={colOperation} onChange={setColOperation} />
+                  </th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 75, textAlign: "right" }}>Setup</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 75, textAlign: "right" }}>Cycle</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 85, textAlign: "right" }}>Machining Hr</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 75, textAlign: "right" }}>MHR Rate</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 95, textAlign: "right" }}>Cost/Op</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 85, textAlign: "right" }}>Total Hrs/Part</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 95, textAlign: "right" }}>Cost/Part (1 Qty)</th>
+                  <th rowSpan={2} style={{ ...thStyle, width: 95, textAlign: "right" }}>Cost (All Qty)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.rows.map((row, idx) => (
+                  <tr key={row.key} style={{ background: "#FFFFFF" }}>
+                    {/* Machine cell — rowspan across all parts and operations within machine */}
+                    {row.machineRowSpan > 0 && (
+                      <td rowSpan={row.machineRowSpan} style={{ ...tdStyle, fontWeight: 600, fontSize: 11 }}>
+                        {highlightText(row.machine_name || "N/A", searchTerm)}
+                      </td>
+                    )}
+
+                    {/* Part cell — rowspan across all its operation rows */}
+                    {row.partRowSpan > 0 && (
+                      <td rowSpan={row.partRowSpan} style={{ ...tdStyle, fontWeight: 600, textAlign: "left" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          <div style={{ fontWeight: 500, wordBreak: "break-word", fontSize: 11 }}>
+                            {highlightText(row.part_name, searchTerm)}
+                          </div>
+                          <div style={{ fontSize: 10, fontFamily: "monospace", wordBreak: "break-all" }}>
+                            {highlightText(row.part_number, searchTerm)}
+                          </div>
+                        </div>
+                      </td>
+                    )}
+                    {row.partRowSpan > 0 && (
+                      <td rowSpan={row.partRowSpan} style={{ ...tdStyleRight, fontWeight: 600 }}>
+                        {row.part_qty || 1}
+                      </td>
+                    )}
+
+                    {/* Operation cells */}
+                    <td style={{ ...tdStyleRight, fontWeight: 600 }}>
+                      {row.operation_number}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "left", wordBreak: "break-word", fontWeight: row.is_outsource ? 600 : "normal", fontSize: 11 }}>
+                      {highlightText(row.operation_name, searchTerm)} {row.is_outsource && <span style={{ fontWeight: 600, fontSize: 10 }}>(OUT)</span>}
+                    </td>
+                    <td style={{ ...tdStyleRight }}>
+                      {row.setup_time || "00:00:00"}
+                    </td>
+                    <td style={{ ...tdStyleRight }}>
+                      {row.cycle_time || "00:00:00"}
+                    </td>
+                    <td style={{ ...tdStyleRight }}>
+                      {formatHms(row.total_seconds)}
+                    </td>
+                    <td style={{ ...tdStyleRight }}>
+                      {row.mhr_rate ? `Rs.${row.mhr_rate}/hr` : "—"}
+                    </td>
+                    <td style={{ ...tdStyleRight, fontWeight: 600 }}>
+                      {row.machine_cost > 0 ? fmtCost(row.machine_cost) : "—"}
+                    </td>
+                    {row.partRowSpan > 0 && (
+                      <td rowSpan={row.partRowSpan} style={{ ...tdStyleRight, fontWeight: 600 }}>
+                        {formatHms(row.total_hours_part)}
+                      </td>
+                    )}
+                    {row.partRowSpan > 0 && (
+                      <td rowSpan={row.partRowSpan} style={{ ...tdStyleRight, fontWeight: 600 }}>
+                        {row.total_cost_part > 0 ? fmtCost(row.total_cost_part) : "—"}
+                      </td>
+                    )}
+                    {row.partRowSpan > 0 && (
+                      <td rowSpan={row.partRowSpan} style={{ ...tdStyleRight, fontWeight: 600 }}>
+                        {row.total_cost_qty > 0 ? fmtCost(row.total_cost_qty) : "—"}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {/* Summary row */}
+                <tr style={{ background: "#FDF5E6", fontWeight: 700 }}>
+                  <td colSpan={2} style={{ ...tdStyle, textAlign: "right", fontWeight: 700 }}>TOTAL</td>
+                  <td style={{ ...tdStyleRight, fontWeight: 700 }}>{summary.totalQtyAll}</td>
+                  <td colSpan={6} style={{ ...tdStyle }}></td>
+                  <td style={{ ...tdStyleRight, fontWeight: 700 }}>
+                    {fmtCost(summary.totalCost)}
+                  </td>
+                  <td colSpan={3} style={{ ...tdStyle }}></td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* ── Toggle Button for Additional Project Costs ── */}
+      <Button
+        type="default"
+        size="small"
+        icon={showAdditionalCosts ? <UpOutlined /> : <DownOutlined />}
+        onClick={() => setShowAdditionalCosts(!showAdditionalCosts)}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          fontWeight: 600,
+          fontSize: 11,
+          height: 28,
+          background: showAdditionalCosts ? "#f1f5f9" : "#fff",
+          borderColor: "#cbd5e1",
+        }}
+      >
+        {showAdditionalCosts ? "Hide" : "Show"} Additional Costs
+        {additionalCosts.length > 0 && (
+          <span style={{
+            background: "#2563eb",
+            color: "#fff",
+            borderRadius: 4,
+            padding: "1px 5px",
+            fontSize: 9,
+            fontWeight: 600,
+          }}>
+            {additionalCosts.length}
+          </span>
+        )}
+      </Button>
+
+      {/* ── Additional Project Costs (Tooling / Fixture / Inspection / etc.) ── */}
+      {showAdditionalCosts && (
+        <AdditionalCostsSection
+          orderId={orderId}
+          costs={additionalCosts}
+          onCostsChange={setAdditionalCosts}
+          userId={userId}
+        />
+      )}
+
+    </div>
   );
 };
 

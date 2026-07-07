@@ -1,25 +1,20 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../../Config/auth";
-import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, message, Tabs, App } from "antd";
+import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, App, Tabs } from "antd";
 import { 
   ExperimentOutlined, 
   PlusOutlined, 
   EditOutlined, 
   DeleteOutlined,
-  ShopOutlined,
-  DatabaseOutlined,
-  EyeOutlined,
-  AppstoreOutlined
+  DatabaseOutlined
 } from "@ant-design/icons";
 import { RawMaterialsInventoryPdfDownload } from "../../DownloadReports/RawMaterialsPdfDownload";
 import { StockDetailsPdfDownload } from "../../DownloadReports/StockDetailsPdfDownload";
-import UnitsViewModal from "./UnitsViewModal";
 
 const { Option } = Select;
-const { TabPane } = Tabs;
 
-const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange, onRefresh }) => {
+const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange }) => {
   const { message, modal } = App.useApp();
   const [form] = Form.useForm();
   const [rawMaterials, setRawMaterials] = useState(propRawMaterials || []);
@@ -29,9 +24,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const [rawMaterialModalOpen, setRawMaterialModalOpen] = useState(false);
   const [editingRawMaterial, setEditingRawMaterial] = useState(null);
   const [savingRawMaterial, setSavingRawMaterial] = useState(false);
-  const [decimalWarnings, setDecimalWarnings] = useState({});
-  const [vendors, setVendors] = useState([]);
-  const [vendorsLoading, setVendorsLoading] = useState(false);
   const [stockModalOpen, setStockModalOpen] = useState(false);
   const [selectedMaterialStock, setSelectedMaterialStock] = useState(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -44,11 +36,8 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     orderNumber: null,
     partNumber: null,
   });
-  const [unitsModalOpen, setUnitsModalOpen] = useState(false);
-  const [selectedStockForUnits, setSelectedStockForUnits] = useState(null);
 
   const fetchingRawMaterials = useRef(false);
-  const initializedRef = useRef(false);
 
   const getCurrentUserId = () => {
     try {
@@ -79,7 +68,7 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
         params: uid != null ? { manufacturing_coordinator_id: uid } : undefined,
       });
       const materials = response.data || [];
-      
+
       // Backend already returns materials with stock status
       // No need for individual stock calls
       setRawMaterials(materials);
@@ -95,19 +84,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     } finally {
       setLoading(false);
       fetchingRawMaterials.current = false;
-    }
-  };
-
-  const fetchVendors = async () => {
-    setVendorsLoading(true);
-    try {
-      const response = await axios.get(`${API_BASE_URL}/rawmaterials/vendors`);
-      setVendors(response.data || []);
-    } catch (error) {
-      console.error("Error fetching vendors:", error);
-      setVendors([]);
-    } finally {
-      setVendorsLoading(false);
     }
   };
 
@@ -161,11 +137,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
     });
   };
 
-  const openUnitsModal = (stock) => {
-    setSelectedStockForUnits(stock);
-    setUnitsModalOpen(true);
-  };
-
   const openCreateRawMaterial = () => {
     setEditingRawMaterial(null);
     form.resetFields();
@@ -185,95 +156,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
   const closeRawMaterialModal = () => {
     setRawMaterialModalOpen(false);
     setEditingRawMaterial(null);
-  };
-
-  const limitDecimals = (value, fieldName, precision = 3) => {
-    if (value === null || value === undefined || value === '') return value;
-    const cleaned = String(value).replace(/[^0-9.]/g, '');
-    let str = cleaned;
-    
-    if (precision === 0) {
-      str = str.replace(/\./g, '');
-      if (str.length > 5) {
-        showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
-        return str.slice(0, 5);
-      }
-      return str;
-    }
-
-    if (str.includes('.')) {
-      const [int, dec] = str.split('.');
-      let finalInt = int;
-      if (int.length > 6) {
-        showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-        finalInt = int.slice(0, 6);
-      }
-      
-      if (dec.length > precision) {
-        showDecimalWarning(fieldName, precision);
-        return `${finalInt}.${dec.slice(0, precision)}`;
-      }
-      return `${finalInt}.${dec}`;
-    } else {
-      if (str.length > 6) {
-        showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-        return str.slice(0, 6);
-      }
-    }
-    return str;
-  };
-
-  const showDecimalWarning = (fieldName, precision, customMsg) => {
-    if (!fieldName) return;
-    const msg = customMsg ?? (precision === 0 ? "Only whole numbers allowed" : `Max ${precision} decimal places allowed`);
-    setDecimalWarnings(prev => ({ ...prev, [fieldName]: msg }));
-    setTimeout(() => {
-      setDecimalWarnings(prev => ({ ...prev, [fieldName]: null }));
-    }, 3000);
-  };
-
-  const blockExtraDecimals = (e, fieldName, precision = 3) => {
-    const { value } = e.target;
-    const controlKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter', 'Escape', 'Control'];
-    if (controlKeys.includes(e.key) || e.ctrlKey || e.metaKey) return;
-    if (!/[0-9.]/.test(e.key)) { e.preventDefault(); return; }
-    if (precision === 0 && e.key === '.') { showDecimalWarning(fieldName, 0); e.preventDefault(); return; }
-
-    if (/[0-9]/.test(e.key)) {
-      const hasSelection = e.target.selectionStart !== e.target.selectionEnd;
-      if (precision === 0) {
-        const digitsOnly = String(value).replace(/\D/g, '');
-        if (digitsOnly.length >= 5 && !hasSelection) {
-          showDecimalWarning(fieldName, 0, 'Max 5 digits allowed');
-          e.preventDefault();
-          return;
-        }
-      } else {
-        const parts = value.split('.');
-        const selectionStart = e.target.selectionStart;
-        const dotIndex = value.indexOf('.');
-        if ((dotIndex === -1 || selectionStart <= dotIndex) && !hasSelection) {
-          const integerPart = dotIndex === -1 ? value : parts[0];
-          if (integerPart.length >= 6) {
-            showDecimalWarning(fieldName, precision, 'Max 6 digits allowed before decimal');
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-    }
-    if (e.key === '.' && value.includes('.')) { e.preventDefault(); return; }
-    if (value.includes('.')) {
-      const parts = value.split('.');
-      const selectionStart = e.target.selectionStart;
-      const dotIndex = value.indexOf('.');
-      if (selectionStart > dotIndex && parts[1].length >= precision) {
-        if (e.target.selectionStart === e.target.selectionEnd) {
-          showDecimalWarning(fieldName, precision);
-          e.preventDefault();
-        }
-      }
-    }
   };
 
   const handleSaveRawMaterial = async (values) => {
@@ -299,50 +181,50 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange,
       await axios({
         url,
         method,
-        data: payload,
         headers: { "Content-Type": "application/json" },
+        data: payload,
       });
 
-      message.success(`Raw material ${isEdit ? "updated" : "created"} successfully`);
       await fetchRawMaterials();
+      message.success(isEdit ? "Raw material updated successfully" : "Raw material created successfully");
       closeRawMaterialModal();
     } catch (error) {
       console.error("Error saving raw material:", error);
       const detail =
         error?.response?.data?.detail ||
         error?.response?.data?.message ||
-        `Failed to ${isEdit ? "update" : "create"} raw material`;
+        "Error saving raw material";
       message.error(detail);
     } finally {
       setSavingRawMaterial(false);
     }
   };
 
-const handleDeleteRawMaterial = async (material) => {
-  modal.confirm({
-    title: 'Confirm Delete',
-    content: `Are you sure you want to delete raw material "${material.material_name}"?`,
-    okText: 'Delete',
-    okType: 'danger',
-    cancelText: 'Cancel',
-    onOk: async () => {
-      try {
-        await axios.delete(`${API_BASE_URL}/rawmaterials/${material.id}`, {
-          params: { user_id: getCurrentUserId() ?? undefined },
-        });
-        await fetchRawMaterials();
-        message.success("Raw material deleted successfully");
-      } catch (error) {
-        console.error("Error deleting raw material:", error);
-        const detail =
-          error?.response?.data?.detail ||
-          error?.response?.data?.message ||
-          "Failed to delete raw material";
-        message.error(detail);
+  const handleDeleteRawMaterial = async (material) => {
+    modal.confirm({
+      title: 'Confirm Delete',
+      content: `Are you sure you want to delete raw material "${material.material_name}"?`,
+      okText: 'Delete',
+      okType: 'danger',
+      cancelText: 'Cancel',
+      onOk: async () => {
+        try {
+          await axios.delete(`${API_BASE_URL}/rawmaterials/${material.id}`, {
+            params: { user_id: getCurrentUserId() ?? undefined },
+          });
+          await fetchRawMaterials();
+          message.success("Raw material deleted successfully");
+        } catch (error) {
+          console.error("Error deleting raw material:", error);
+          const detail =
+            error?.response?.data?.detail ||
+            error?.response?.data?.message ||
+            "Failed to delete raw material";
+          message.error(detail);
+        }
       }
-    }
-  });
-};
+    });
+  };
 
   const handleSearch = (value) => {
     // Remove special characters but keep alphanumeric, spaces, and decimal points for number search
@@ -400,10 +282,9 @@ const handleDeleteRawMaterial = async (material) => {
            numericContent.includes(searchLower);
   }).sort((a, b) => (a.id || 0) - (b.id || 0));
 
-  const columns = [
+  const listColumns = [
     {
       title: <span className="font-semibold text-gray-700">Sl No</span>,
-      dataIndex: 'index',
       key: 'index',
       width: 60,
       render: (_, __, index) => {
@@ -422,7 +303,6 @@ const handleDeleteRawMaterial = async (material) => {
         </Tooltip>
       ),
     },
-    
     {
       title: <span className="font-semibold text-gray-700">Density (kg/m³)</span>,
       dataIndex: 'density',
@@ -436,33 +316,11 @@ const handleDeleteRawMaterial = async (material) => {
       render: (text) => text !== null && text !== undefined ? `₹${text.toFixed(2)}` : "-",
     },
     {
-      title: <span className="font-semibold text-gray-700">Status</span>,
-      dataIndex: 'status',
-      key: 'status',
-      render: (_, record) => {
-        // Use has_available_stock from backend response
-        // If at least one stock has 'available' status, show as AVAILABLE
-        const hasAvailableStock = record.has_available_stock;
-        const text = hasAvailableStock ? 'AVAILABLE' : 'NOT AVAILABLE';
-        const color = hasAvailableStock ? 'success' : 'error';
-        return <Tag color={color}>{text}</Tag>;
-      },
-    },
-    {
       title: <span className="font-semibold text-gray-700">Actions</span>,
       key: 'actions',
-      width: 180,
+      width: 100,
       render: (_, record) => (
         <Space>
-          <Tooltip title="View Stock">
-            <Button
-              type="text"
-              size="small"
-              icon={<DatabaseOutlined />}
-              className="text-green-500 hover:bg-green-50"
-              onClick={() => openStockModal(record)}
-            />
-          </Tooltip>
           <Tooltip title="Edit">
             <Button
               type="text"
@@ -483,7 +341,7 @@ const handleDeleteRawMaterial = async (material) => {
           </Tooltip>
         </Space>
       ),
-    }
+    },
   ];
 
   return (
@@ -495,9 +353,11 @@ const handleDeleteRawMaterial = async (material) => {
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
                 <div className="flex items-center gap-2">
                     <ExperimentOutlined className="text-purple-600" />
-                    <span className="font-bold text-gray-800 text-sm sm:text-base">Raw Materials Inventory</span>
+                    <span className="font-bold text-gray-800 text-sm sm:text-base">
+                      Raw Material List
+                    </span>
                 </div>
-                <Space className="w-full sm:w-auto flex-col sm:flex-row gap-2">
+                <Space wrap>
                   <Input.Search
                     placeholder="Search all columns..."
                     allowClear
@@ -505,48 +365,46 @@ const handleDeleteRawMaterial = async (material) => {
                     onChange={(e) => handleSearch(e.target.value)}
                     value={searchText}
                     maxLength={50}
-                    className="w-full sm:w-64"
+                    className="w-52"
                     size="middle"
                   />
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    <RawMaterialsInventoryPdfDownload rawMaterials={rawMaterials} />
-                    <Button
-                      type="primary"
-                      icon={<PlusOutlined />}
-                      onClick={openCreateRawMaterial}
-                      size="middle"
-                      style={{ backgroundColor: '#2563eb' }}
-                      className="border-none shadow-md no-hover-btn flex-1 sm:flex-initial"
-                    >
-                      <span className="hidden sm:inline">Add Raw Material</span>
-                      <span className="sm:hidden">Add</span>
-                    </Button>
-                  </div>
+                  <RawMaterialsInventoryPdfDownload rawMaterials={rawMaterials} />
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={openCreateRawMaterial}
+                    size="middle"
+                    style={{ backgroundColor: '#2563eb' }}
+                    className="border-none shadow-md no-hover-btn"
+                  >
+                    <span className="hidden sm:inline">Add Raw Material</span>
+                    <span className="sm:hidden">Add</span>
+                  </Button>
                 </Space>
             </div>
         }
       >
         <Table
-            columns={columns}
-            dataSource={filteredMaterials}
-            rowKey="id"
-            size="small"
-            bordered
-            scroll={{ x: 1400 }}
-            pagination={{
-              current: rawMaterialsPagination.current,
-              pageSize: rawMaterialsPagination.pageSize,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-              pageSizeOptions: ['10', '20', '50', '100'],
-              placement: 'bottom',
-              responsive: true,
-            }}
-            onChange={(p) => setRawMaterialsPagination({ current: p.current, pageSize: p.pageSize })}
-            locale={{ emptyText: <Empty description={searchText ? "No raw materials found matching your search" : "No raw materials found"} /> }}
-            className="modern-table"
-            loading={loading}
+          columns={listColumns}
+          dataSource={filteredMaterials}
+          rowKey="id"
+          size="small"
+          bordered
+          scroll={{ x: 800 }}
+          pagination={{
+            current: rawMaterialsPagination.current,
+            pageSize: rawMaterialsPagination.pageSize,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            placement: 'bottom',
+            responsive: true,
+          }}
+          onChange={(p) => setRawMaterialsPagination({ current: p.current, pageSize: p.pageSize })}
+          locale={{ emptyText: <Empty description={searchText ? "No raw materials found matching your search" : "No raw materials found"} /> }}
+          className="modern-table"
+          loading={loading}
         />
       </Card>
 
@@ -813,26 +671,15 @@ const handleDeleteRawMaterial = async (material) => {
                           { title: 'User Name', dataIndex: 'creator_name', key: 'creator_name', render: (name) => name || '-' },
                           { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'available' ? 'green' : 'red'}>{s}</Tag> },
                           { title: 'Actions', key: 'actions', render: (_, record) => (
-                            <Space size="small">
-                              <Tooltip title="View Units">
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<AppstoreOutlined />}
-                                  className="text-blue-500 hover:bg-blue-50"
-                                  onClick={() => openUnitsModal(record)}
-                                />
-                              </Tooltip>
-                              <Tooltip title="Delete">
-                                <Button
-                                  type="text"
-                                  size="small"
-                                  icon={<DeleteOutlined />}
-                                  className="text-red-500 hover:bg-red-50"
-                                  onClick={() => handleDeleteStock(record.id)}
-                                />
-                              </Tooltip>
-                            </Space>
+                            <Tooltip title="Delete">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<DeleteOutlined />}
+                                className="text-red-500 hover:bg-red-50"
+                                onClick={() => handleDeleteStock(record.id)}
+                              />
+                            </Tooltip>
                           )},
                         ]}
                       />
@@ -860,16 +707,11 @@ const handleDeleteRawMaterial = async (material) => {
         </div>
       </Modal>
 
-      <UnitsViewModal
-        open={unitsModalOpen}
-        onCancel={() => setUnitsModalOpen(false)}
-        stock={selectedStockForUnits}
-      />
     </div>
   );
 };
 
-const StockForm = ({ materialId, materialCost, onSuccess }) => {
+export const StockForm = ({ materialId, materialCost, onSuccess }) => {
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
@@ -1278,9 +1120,9 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
     <Form form={form} layout="vertical" onFinish={handleSubmit}>
       <Row gutter={[16, 0]}>
         <Col xs={24} sm={8}>
-          <Form.Item
-            name="process_type"
-            label="Process Type"
+          <Form.Item 
+            name="process_type" 
+            label="Process Type" 
             rules={[{ required: true, message: 'Please select process type' }]}
           >
             <Select placeholder="Select Process Type">
@@ -1307,19 +1149,21 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
         {renderDimensionFields()}
         <Col xs={24} sm={12}>
           <Form.Item name="quantity" label="Quantity" rules={[{ required: true }]}>
-            <InputNumber 
-              style={{ width: '100%' }} 
-              min={1} 
+            <InputNumber
+              style={{ width: '100%' }}
+              min={1}
               step={1}
-              precision={0} 
+              precision={0}
               placeholder="Units"
               onBeforeInput={(e) => {
                 const char = e.data;
                 const currentValue = e.target.value || '';
+                // Block non-digits
                 if (char && !/[0-9]/.test(char)) {
                   e.preventDefault();
                   return false;
                 }
+                // Block 0 as first digit
                 if (char === '0' && currentValue === '') {
                   e.preventDefault();
                   return false;
@@ -1328,19 +1172,26 @@ const StockForm = ({ materialId, materialCost, onSuccess }) => {
               onKeyPress={(e) => {
                 const char = String.fromCharCode(e.which);
                 const currentValue = e.target.value || '';
-                if (!/[0-9]/.test(char) && 
-                    e.which !== 8 && e.which !== 46 && e.which !== 9 && 
-                    e.which !== 13 && e.which !== 37 && e.which !== 39 && 
-                    e.which !== 36 && e.which !== 35) {
+                if (!/[0-9]/.test(char) &&
+                    e.which !== 8 &&
+                    e.which !== 46 &&
+                    e.which !== 9 &&
+                    e.which !== 13 &&
+                    e.which !== 37 &&
+                    e.which !== 39 &&
+                    e.which !== 36 &&
+                    e.which !== 35) {
                   e.preventDefault();
                   return false;
                 }
+                // Block 0 as first digit
                 if (char === '0' && currentValue === '') {
                   e.preventDefault();
                   return false;
                 }
               }}
               onKeyDown={(e) => {
+                // Block decimal point and special characters
                 if (e.key === '.' || e.key === ',' || e.key === '-' || e.key === '+') {
                   e.preventDefault();
                   return false;

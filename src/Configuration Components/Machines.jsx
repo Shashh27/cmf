@@ -5,7 +5,7 @@ import { Table, Button, message, Popconfirm, Space, Card, Tooltip, Input } from 
 import { ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, EyeInvisibleOutlined } from "@ant-design/icons";
 import MachineModal from "../Configuration Components/MachineModal";
 
-const Machines = ({ workCenter, onBack, userId, searchText }) => {
+const Machines = ({ workcenter, onBack, userId, searchText }) => {
   const [machines, setMachines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [machineModalOpen, setMachineModalOpen] = useState(false);
@@ -16,14 +16,14 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
-    if (workCenter) {
+    if (workcenter) {
       fetchMachines();
     }
-  }, [workCenter]);
+  }, [workcenter]);
 
   const fetchMachines = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/machines/work-center/${workCenter.id}`, {
+      const response = await axios.get(`${API_BASE_URL}/machines/workcenter/${workcenter.id}`, {
         params: userId != null ? { user_id: userId } : undefined,
       });
       setMachines(response.data);
@@ -274,7 +274,7 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
           <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3">
             <span className="text-lg font-bold">Machines</span>
             <span className="text-xs sm:text-sm text-gray-500 font-normal">
-              Work Center: <strong>{workCenter?.work_center_name}</strong>
+              Work Center: <strong>{workcenter?.work_center_name}</strong>
             </span>
           </div>
         </div>
@@ -359,7 +359,7 @@ const Machines = ({ workCenter, onBack, userId, searchText }) => {
       {machineModalOpen && (
         <MachineModal
           machine={editingMachine}
-          workCenterId={workCenter?.id}
+          workcenterId={workcenter?.id}
           userId={userId}
           isOpen={machineModalOpen}
           onClose={() => setMachineModalOpen(false)}

@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { Tabs, App as AntApp } from "antd";
 
-import { ExperimentOutlined, LinkOutlined, SafetyCertificateOutlined, HistoryOutlined } from "@ant-design/icons";
+import { ExperimentOutlined, LinkOutlined, SafetyCertificateOutlined, HistoryOutlined, DatabaseOutlined } from "@ant-design/icons";
 
 import axios from "axios";
 
@@ -14,6 +14,8 @@ import { API_BASE_URL } from "../Config/auth";
 // Import split components
 
 import RawMaterialsTab from "../RawMaterialComponents/RawMaterialsTab";
+
+import RawMaterialInventoryTab from "../RawMaterialComponents/RawMaterialInventoryTab";
 
 import PartsWithRawMaterialStatusTab from "../RawMaterialComponents/PartsWithRawMaterialStatusTab";
 
@@ -106,6 +108,16 @@ const RawMaterialsContent = () => {
       label: <span className="flex items-center gap-2 px-2"><ExperimentOutlined /> Raw Materials</span>,
 
       children: <RawMaterialsTab rawMaterials={sharedRawMaterials} onRawMaterialsChange={setSharedRawMaterials} onRefresh={refreshRawMaterials} />
+
+    },
+
+    {
+
+      key: 'raw-material-inventory',
+
+      label: <span className="flex items-center gap-2 px-2"><DatabaseOutlined /> Raw Material Inventory</span>,
+
+      children: <RawMaterialInventoryTab />
 
     },
 

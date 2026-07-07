@@ -1,6 +1,7 @@
 import React from "react";
 import { useLocation } from "react-router-dom";
 import Dashboard from "../ManufacturingCoordinator Components/Dashboard";
+import ShopFloor from "../ManufacturingCoordinator Components/shopfloordashboard/ShopFloor";
 import MCOMS from "../ManufacturingCoordinator Components/OMS";
 import MCPDM from "../ManufacturingCoordinator Components/PDM";
 import MCPPS from "../ManufacturingCoordinator Components/PPS";
@@ -20,6 +21,9 @@ const ManufacturingCoordinator = () => {
   const location = useLocation();
   const path = location.pathname || "";
 
+  if (path === "/manufacturing_coordinator/dashboard") {
+    return <ShopFloor />;
+  }
   if (path.startsWith("/manufacturing_coordinator/oms/rawmaterials")) {
     return <MCRawMaterials />;
   }
@@ -61,7 +65,7 @@ const ManufacturingCoordinator = () => {
   }
 
   // Default: dashboard
-  return <Dashboard />;
+  return <ShopFloor />;
 };
 
 export default ManufacturingCoordinator;

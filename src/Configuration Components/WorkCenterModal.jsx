@@ -3,36 +3,36 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Modal, Form, Input, Checkbox, Button, message } from "antd";
 
-const WorkCenterModal = ({ workCenter, isOpen, userId, onClose, onSave }) => {
+const workcenterModal = ({ workcenter, isOpen, userId, onClose, onSave }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (workCenter && isOpen) {
+    if (workcenter && isOpen) {
       // Use setTimeout to ensure form is mounted
       setTimeout(() => {
         if (form) {
           form.setFieldsValue({
-            code: workCenter.code || "",
-            work_center_name: workCenter.work_center_name || "",
-            description: workCenter.description || "",
-            is_schedulable: workCenter.is_schedulable || false,
+            code: workcenter.code || "",
+            work_center_name: workcenter.work_center_name || "",
+            description: workcenter.description || "",
+            is_schedulable: workcenter.is_schedulable || false,
           });
         }
       }, 0);
     } else if (isOpen && form) {
       form.resetFields();
     }
-  }, [workCenter, isOpen, form]);
+  }, [workcenter, isOpen, form]);
 
   const handleSubmit = async (values) => {
     setLoading(true);
     try {
-      const url = workCenter 
-        ? `${API_BASE_URL}/workcenters/${workCenter.id}`
+      const url = workcenter 
+        ? `${API_BASE_URL}/workcenters/${workcenter.id}`
         : `${API_BASE_URL}/workcenters/`;
       
-      const method = workCenter ? "put" : "post";
+      const method = workcenter ? "put" : "post";
       
       await axios({
         url,
@@ -58,7 +58,7 @@ const WorkCenterModal = ({ workCenter, isOpen, userId, onClose, onSave }) => {
 
   return (
     <Modal
-      title={workCenter ? "Edit Work Center" : "Add Work Center"}
+      title={workcenter ? "Edit Work Center" : "Add Work Center"}
       open={isOpen}
       onCancel={onClose}
       footer={null}
@@ -121,7 +121,7 @@ const WorkCenterModal = ({ workCenter, isOpen, userId, onClose, onSave }) => {
             Cancel
           </Button>
           <Button type="primary" htmlType="submit" loading={loading}>
-            {workCenter ? "Update" : "Create"}
+            {workcenter ? "Update" : "Create"}
           </Button>
         </div>
       </Form>
@@ -129,4 +129,4 @@ const WorkCenterModal = ({ workCenter, isOpen, userId, onClose, onSave }) => {
   );
 };
 
-export default WorkCenterModal;
+export default workcenterModal;

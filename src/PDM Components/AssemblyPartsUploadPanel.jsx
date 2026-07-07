@@ -559,6 +559,7 @@ const AssemblyPartsUploadPanel = ({
       </div>
 
       <Modal
+        className="pdm-container"
         title={
           <div className="flex items-center gap-2">
             <FileWordOutlined className="text-indigo-500" />

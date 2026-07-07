@@ -5,6 +5,7 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
 
 import { Modal, Form, Input, Select, Button, App, Badge } from "antd";
+import "./pdm-theme.css";
 
 
 
@@ -686,6 +687,7 @@ const CreateProductModal = ({
       style={{ maxWidth: 1000, top: 30 }}
 
       styles={{ body: { padding: '16px 24px', maxHeight: '70vh', overflowY: 'auto' } }}
+      className="pdm-container"
 
     >
 
@@ -693,15 +695,15 @@ const CreateProductModal = ({
 
         {`
 
-          .no-hover-btn, .no-hover-btn:hover, .no-hover-btn:focus, .no-hover-btn:active {
+          .pdm-modal-primary-btn, .pdm-modal-primary-btn:hover, .pdm-modal-primary-btn:focus, .pdm-modal-primary-btn:active {
 
-            background-color: #2563eb !important;
+            background-color: #2E8B57 !important;
 
-            color: white !important;
+            color: #FFFFFF !important;
 
             opacity: 1 !important;
 
-            border: none !important;
+            border-color: #2E8B57 !important;
 
             box-shadow: none !important;
 
@@ -724,6 +726,8 @@ const CreateProductModal = ({
             font-size: 12px !important;
 
             height: auto !important;
+
+            color: #2F2F2F !important;
 
           }
 
@@ -755,7 +759,7 @@ const CreateProductModal = ({
 
             count={`Creating under: ${selectedProduct?.product_name || 'Selected Product'}`} 
 
-            style={{ backgroundColor: '#f0f0f0', color: '#000', padding: '0 8px', fontSize: 'clamp(10px, 2.5vw, 12px)' }} 
+            style={{ backgroundColor: '#FDF5E6', color: '#2F2F2F', padding: '0 8px', fontSize: 'clamp(10px, 2.5vw, 12px)', border: '1px solid #D6D3C4' }} 
 
           />
 
@@ -803,11 +807,11 @@ const CreateProductModal = ({
 
                 style={{ 
 
-                  backgroundColor: '#f5f5f5', 
+                  backgroundColor: '#FDF5E6', 
 
-                  color: '#6b7280', 
+                  color: '#5D4037', 
 
-                  borderColor: '#e5e7eb' 
+                  borderColor: '#D6D3C4' 
 
                 }} 
 
@@ -855,11 +859,11 @@ const CreateProductModal = ({
 
                 style={{
 
-                  backgroundColor: '#f5f5f5',
+                  backgroundColor: '#FDF5E6',
 
-                  color: '#6b7280',
+                  color: '#5D4037',
 
-                  borderColor: '#e5e7eb'
+                  borderColor: '#D6D3C4'
 
                 }}
 
@@ -1130,13 +1134,13 @@ const CreateProductModal = ({
 
         <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 mt-6">
 
-          <Button onClick={handleCancel} size="large" className="w-full sm:w-auto">
+          <Button onClick={handleCancel} size="large" className="w-full sm:w-auto" style={{ borderColor: '#D6D3C4', color: '#2F2F2F' }}>
 
             Cancel
 
           </Button>
 
-          <Button type="primary" htmlType="submit" loading={loading} className="no-hover-btn w-full sm:w-auto" size="large">
+          <Button type="primary" htmlType="submit" loading={loading} className="pdm-modal-primary-btn w-full sm:w-auto" size="large">
 
             {mode === 'edit' ? 'Save Changes' : 'Create'}
 

@@ -1,0 +1,641 @@
+/* PDM Theme - Sea Green + Beige Color Palette with Sharp Edges */
+
+/* ===== COLOR VARIABLES ===== */
+:root {
+  --pdm-primary: #2E8B57;
+  --pdm-primary-dark: #1B5E3A;
+  --pdm-primary-light: #8FBC8F;
+  --pdm-background: #F5F5DC;
+  --pdm-background-alt: #FDF5E6;
+  --pdm-card: #FFFFFF;
+  --pdm-text: #2F2F2F;
+  --pdm-text-secondary: #5D4037;
+  --pdm-border: #D6D3C4;
+  --pdm-border-dark: #8B4513;
+  --pdm-success: #16A34A;
+  --pdm-warning: #F59E0B;
+  --pdm-danger: #DC2626;
+  --pdm-info: #2563EB;
+  --pdm-sand: #F4A460;
+  --pdm-cream: #FFFDD0;
+}
+
+/* ===== SHARP EDGES OVERRIDE - GLOBAL ===== */
+/* Force sharp edges everywhere in PDM */
+.pdm-container *,
+.pdm-container .ant-btn,
+.pdm-container .ant-card,
+.pdm-container .ant-input,
+.pdm-container .ant-modal,
+.pdm-container .ant-table,
+.pdm-container .ant-tag,
+.pdm-container .ant-select-selector,
+.pdm-container .ant-dropdown,
+.pdm-container .ant-popover,
+.pdm-container .ant-tooltip,
+.pdm-container .ant-drawer,
+.pdm-container .ant-menu,
+.pdm-container .ant-tabs,
+.pdm-container .ant-collapse,
+.pdm-container .ant-tree,
+.pdm-container .ant-badge,
+.pdm-container .ant-avatar,
+.pdm-container .ant-progress,
+.pdm-container .ant-spin,
+.pdm-container .ant-empty,
+.pdm-container .ant-alert,
+.pdm-container .ant-message,
+.pdm-container .ant-notification,
+.pdm-container .ant-form-item,
+.pdm-container .ant-checkbox,
+.pdm-container .ant-radio,
+.pdm-container .ant-switch,
+.pdm-container .ant-slider,
+.pdm-container .ant-upload,
+.pdm-container .ant-transfer,
+.pdm-container .ant-calendar,
+.pdm-container .ant-picker,
+.pdm-container .ant-statistic,
+.pdm-container .ant-timeline,
+.pdm-container .ant-list,
+.pdm-container .ant-descriptions,
+.pdm-container .ant-result {
+  border-radius: 0 !important;
+}
+
+/* Allow border radius for bordered tables */
+.docs-ops-table,
+.docs-ebom-table {
+  border-radius: 4px !important;
+}
+.docs-ops-table .ant-table,
+.docs-ebom-table .ant-table {
+  border-radius: 4px !important;
+}
+
+/* ===== PDM CONTAINER STYLING ===== */
+.pdm-container {
+  background-color: var(--pdm-background);
+  color: var(--pdm-text);
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ===== BUTTON STYLING ===== */
+.pdm-container .ant-btn-primary {
+  background-color: var(--pdm-primary) !important;
+  border-color: var(--pdm-primary) !important;
+  color: #FFFFFF !important;
+}
+
+.pdm-container .ant-btn-primary:hover {
+  background-color: var(--pdm-primary) !important;
+  border-color: var(--pdm-primary) !important;
+  color: #FFFFFF !important;
+}
+
+.pdm-container .ant-btn-default {
+  background-color: var(--pdm-card) !important;
+  border-color: var(--pdm-border) !important;
+  color: var(--pdm-text) !important;
+}
+
+.pdm-container .ant-btn-default:hover {
+  background-color: var(--pdm-card) !important;
+  border-color: var(--pdm-border) !important;
+  color: var(--pdm-text) !important;
+}
+
+.pdm-container .ant-btn-danger {
+  background-color: var(--pdm-danger) !important;
+  border-color: var(--pdm-danger) !important;
+  color: #FFFFFF !important;
+}
+
+.pdm-container .ant-btn-danger:hover {
+  background-color: var(--pdm-danger) !important;
+  border-color: var(--pdm-danger) !important;
+  color: #FFFFFF !important;
+}
+
+.pdm-container .ant-btn-text {
+  color: var(--pdm-text) !important;
+}
+
+.pdm-container .ant-btn-text:hover {
+  color: var(--pdm-text) !important;
+  background-color: transparent !important;
+}
+
+/* ===== CARD STYLING ===== */
+.pdm-container .ant-card {
+  background-color: var(--pdm-card);
+  border-color: var(--pdm-border);
+}
+
+.pdm-container .ant-card-head {
+  background-color: var(--pdm-background-alt);
+  border-bottom-color: var(--pdm-border);
+}
+
+/* ===== INPUT STYLING ===== */
+.pdm-container .ant-input,
+.pdm-container .ant-input-number,
+.pdm-container .ant-select-selector {
+  background-color: var(--pdm-card);
+  border-color: var(--pdm-border);
+  color: var(--pdm-text);
+}
+
+.pdm-container .ant-input:focus,
+.pdm-container .ant-input-number:focus,
+.pdm-container .ant-select-focused .ant-select-selector {
+  border-color: var(--pdm-primary);
+  box-shadow: 0 0 0 2px rgba(46, 139, 87, 0.1);
+}
+
+/* ===== TABLE STYLING ===== */
+.pdm-container .ant-table {
+  background-color: var(--pdm-card);
+}
+
+.pdm-container .ant-table-thead > tr > th {
+  background-color: var(--pdm-background-alt);
+  border-color: var(--pdm-border);
+  color: var(--pdm-text);
+  font-weight: 600;
+}
+
+.pdm-container .ant-table-tbody > tr > td {
+  border-color: var(--pdm-border);
+}
+
+.pdm-container .ant-table-tbody > tr:hover > td {
+  background-color: var(--pdm-background);
+}
+
+.pdm-container .ant-table-row-selected > td {
+  background-color: rgba(46, 139, 87, 0.1);
+}
+
+/* ===== TAG STYLING ===== */
+.pdm-container .ant-tag {
+  border-color: var(--pdm-border);
+}
+
+.pdm-container .ant-tag-green {
+  background-color: rgba(22, 163, 74, 0.1);
+  border-color: var(--pdm-success);
+  color: var(--pdm-success);
+}
+
+.pdm-container .ant-tag-blue {
+  background-color: rgba(37, 99, 235, 0.1);
+  border-color: var(--pdm-info);
+  color: var(--pdm-info);
+}
+
+.pdm-container .ant-tag-orange {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-color: var(--pdm-warning);
+  color: var(--pdm-warning);
+}
+
+.pdm-container .ant-tag-red {
+  background-color: rgba(220, 38, 38, 0.1);
+  border-color: var(--pdm-danger);
+  color: var(--pdm-danger);
+}
+
+/* ===== MODAL STYLING ===== */
+.pdm-container .ant-modal-content {
+  background-color: var(--pdm-card);
+  border-color: var(--pdm-border);
+}
+
+.pdm-container .ant-modal-header {
+  background-color: var(--pdm-background-alt);
+  border-bottom-color: var(--pdm-border);
+}
+
+.pdm-container .ant-modal-footer {
+  border-top-color: var(--pdm-border);
+}
+
+/* ===== TABS STYLING ===== */
+.pdm-container .ant-tabs-tab {
+  color: var(--pdm-text-secondary);
+}
+
+.pdm-container .ant-tabs-tab-active {
+  color: var(--pdm-primary);
+}
+
+.pdm-container .ant-tabs-ink-bar {
+  background-color: var(--pdm-primary);
+}
+
+.pdm-container .ant-tabs-content {
+  background-color: var(--pdm-card);
+}
+
+/* ===== TREE STYLING ===== */
+.pdm-container .ant-tree-node-selected {
+  background-color: rgba(46, 139, 87, 0.1);
+}
+
+.pdm-container .ant-tree-node-content-wrapper:hover {
+  background-color: var(--pdm-background);
+}
+
+/* ===== DROPDOWN STYLING ===== */
+.pdm-container .ant-dropdown-menu {
+  background-color: var(--pdm-card);
+  border-color: var(--pdm-border);
+}
+
+.pdm-container .ant-dropdown-menu-item:hover {
+  background-color: var(--pdm-background);
+}
+
+/* ===== SELECT STYLING ===== */
+.pdm-container .ant-select-dropdown {
+  background-color: var(--pdm-card);
+  border-color: var(--pdm-border);
+}
+
+.pdm-container .ant-select-item-option-selected {
+  background-color: rgba(46, 139, 87, 0.1);
+}
+
+/* ===== CHECKBOX & RADIO STYLING ===== */
+.pdm-container .ant-checkbox-checked .ant-checkbox-inner {
+  background-color: var(--pdm-primary);
+  border-color: var(--pdm-primary);
+}
+
+.pdm-container .ant-radio-checked .ant-radio-inner {
+  border-color: var(--pdm-primary);
+}
+
+.pdm-container .ant-radio-checked .ant-radio-inner::after {
+  background-color: var(--pdm-primary);
+}
+
+/* ===== SIDER STYLING ===== */
+.pdm-container .ant-layout-sider {
+  background-color: var(--pdm-card);
+  border-right-color: var(--pdm-border);
+}
+
+/* ===== DRAWER STYLING ===== */
+.pdm-container .ant-drawer-content {
+  background-color: var(--pdm-card);
+}
+
+.pdm-container .ant-drawer-header {
+  background-color: var(--pdm-background-alt);
+  border-bottom-color: var(--pdm-border);
+}
+
+/* ===== PDM-SPECIFIC COMPONENTS ===== */
+
+/* BOM Tree Item Styling */
+.pdm-bom-item {
+  padding: 2px 6px;
+  border-left: 3px solid transparent;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.pdm-bom-item:hover {
+  background-color: var(--pdm-background);
+  border-left-color: var(--pdm-primary-light);
+}
+
+.pdm-bom-item-selected {
+  background-color: rgba(46, 139, 87, 0.1);
+  border-left-color: var(--pdm-primary);
+}
+
+.pdm-bom-item-product {
+  border-left-color: #9333EA;
+}
+
+.pdm-bom-item-assembly {
+  border-left-color: var(--pdm-info);
+}
+
+.pdm-bom-item-subassembly {
+  border-left-color: #6366F1;
+}
+
+.pdm-bom-item-inhouse {
+  border-left-color: var(--pdm-success);
+}
+
+.pdm-bom-item-outsource {
+  border-left-color: var(--pdm-warning);
+}
+
+.pdm-bom-item-standard {
+  border-left-color: #6B7280;
+}
+
+/* CAD-like Icon Styling */
+.pdm-cad-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #FFFFFF;
+  text-transform: uppercase;
+}
+
+.pdm-cad-icon-product {
+  background-color: #9333EA;
+}
+
+.pdm-cad-icon-assembly {
+  background-color: var(--pdm-info);
+}
+
+.pdm-cad-icon-subassembly {
+  background-color: #6366F1;
+}
+
+.pdm-cad-icon-inhouse {
+  background-color: var(--pdm-success);
+}
+
+.pdm-cad-icon-outsource {
+  background-color: var(--pdm-warning);
+}
+
+.pdm-cad-icon-standard {
+  background-color: #6B7280;
+}
+
+/* 3D Viewer Container */
+.pdm-3d-viewer {
+  background-color: var(--pdm-card);
+  border: 1px solid var(--pdm-border);
+  overflow: hidden;
+}
+
+.pdm-3d-viewer-controls {
+  background-color: rgba(245, 245, 220, 0.9);
+  border: 1px solid var(--pdm-border);
+  padding: 8px;
+}
+
+.pdm-3d-viewer-controls button {
+  background-color: var(--pdm-card);
+  border: 1px solid var(--pdm-border);
+  color: var(--pdm-text);
+  padding: 4px 8px;
+  margin: 0 2px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pdm-3d-viewer-controls button:hover {
+  background-color: var(--pdm-primary);
+  color: #FFFFFF;
+  border-color: var(--pdm-primary);
+}
+
+/* Document Card Styling */
+.pdm-doc-card {
+  background-color: var(--pdm-card);
+  border: 1px solid var(--pdm-border);
+  padding: 12px;
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
+}
+
+.pdm-doc-card:hover {
+  border-color: var(--pdm-primary);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+/* Stat Card Styling */
+.pdm-stat-card {
+  background-color: var(--pdm-card);
+  border: 1px solid var(--pdm-border);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pdm-stat-card-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--pdm-background);
+  color: var(--pdm-primary);
+  font-size: 20px;
+}
+
+.pdm-stat-card-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--pdm-text);
+}
+
+.pdm-stat-card-label {
+  font-size: 12px;
+  color: var(--pdm-text-secondary);
+  margin-top: 4px;
+}
+
+/* Section Header Styling */
+.pdm-section-header {
+  background-color: var(--pdm-background-alt);
+  border-bottom: 1px solid var(--pdm-border);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pdm-section-header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pdm-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Action Button Group */
+.pdm-action-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.pdm-action-button {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--pdm-border);
+  background-color: var(--pdm-card);
+  color: var(--pdm-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pdm-action-button:hover {
+  background-color: var(--pdm-primary);
+  color: #FFFFFF;
+  border-color: var(--pdm-primary);
+}
+
+.pdm-action-button-danger:hover {
+  background-color: var(--pdm-danger);
+  border-color: var(--pdm-danger);
+}
+
+/* Status Badge */
+.pdm-status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border: 1px solid;
+}
+
+.pdm-status-badge-available {
+  background-color: rgba(22, 163, 74, 0.1);
+  border-color: var(--pdm-success);
+  color: var(--pdm-success);
+}
+
+.pdm-status-badge-not-available {
+  background-color: rgba(220, 38, 38, 0.1);
+  border-color: var(--pdm-danger);
+  color: var(--pdm-danger);
+}
+
+.pdm-status-badge-in-stock {
+  background-color: rgba(22, 163, 74, 0.1);
+  border-color: var(--pdm-success);
+  color: var(--pdm-success);
+}
+
+.pdm-status-badge-reserved {
+  background-color: rgba(245, 158, 11, 0.1);
+  border-color: var(--pdm-warning);
+  color: var(--pdm-warning);
+}
+
+.pdm-status-badge-used {
+  background-color: rgba(107, 114, 128, 0.1);
+  border-color: #6B7280;
+  color: #6B7280;
+}
+
+/* Scrollbar Styling */
+.pdm-container ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.pdm-container ::-webkit-scrollbar-track {
+  background-color: var(--pdm-background);
+}
+
+.pdm-container ::-webkit-scrollbar-thumb {
+  background-color: var(--pdm-border);
+}
+
+.pdm-container ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--pdm-primary-light);
+}
+
+/* Loading State */
+.pdm-loading-overlay {
+  background-color: rgba(245, 245, 220, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+/* Empty State */
+.pdm-empty-state {
+  background-color: var(--pdm-card);
+  border: 1px dashed var(--pdm-border);
+  padding: 32px;
+  text-align: center;
+  color: var(--pdm-text-secondary);
+}
+
+/* Divider */
+.pdm-divider {
+  height: 1px;
+  background-color: var(--pdm-border);
+  margin: 16px 0;
+}
+
+/* Search Bar */
+.pdm-search-bar {
+  background-color: var(--pdm-card);
+  border: 1px solid var(--pdm-border);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+}
+
+.pdm-search-bar input {
+  border: none;
+  background: transparent;
+  outline: none;
+  flex: 1;
+  color: var(--pdm-text);
+  font-size: 12px;
+}
+
+.pdm-search-bar input::placeholder {
+  color: var(--pdm-text-secondary);
+}
+
+/* Filter Chips */
+.pdm-filter-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.pdm-filter-chip {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid var(--pdm-border);
+  background-color: var(--pdm-card);
+  color: var(--pdm-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pdm-filter-chip:hover {
+  border-color: var(--pdm-primary);
+  color: var(--pdm-primary);
+}
+
+.pdm-filter-chip-active {
+  background-color: var(--pdm-primary);
+  color: #FFFFFF;
+  border-color: var(--pdm-primary);
+}

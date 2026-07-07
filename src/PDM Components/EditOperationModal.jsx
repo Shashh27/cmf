@@ -64,7 +64,7 @@ const EditOperationModal = ({
   const [uploadType, setUploadType]             = useState('Image');
   const [uploadTypeOther, setUploadTypeOther]   = useState('');
   const [selectedFileList, setSelectedFileList] = useState([]);
-  const [workCenters, setWorkCenters]           = useState([]);
+  const [workcenters, setworkcenters]           = useState([]);
   const [allMachines, setAllMachines]           = useState([]);
   const [existingTools, setExistingTools]       = useState([]);
   const [loadingTools, setLoadingTools]         = useState(false);
@@ -74,7 +74,7 @@ const EditOperationModal = ({
   const [partTypes, setPartTypes]               = useState([]);
   const [vendors, setVendors]                 = useState([]);
   const [partTypesLoading, setPartTypesLoading]     = useState(false);
-  const [workCentersLoading, setWorkCentersLoading] = useState(false);
+  const [workcentersLoading, setworkcentersLoading] = useState(false);
   const [machinesLoading, setMachinesLoading]       = useState(false);
   const [vendorsLoading, setVendorsLoading]         = useState(false);
   const [toolsSelectorVisible, setToolsSelectorVisible] = useState(false);
@@ -101,7 +101,7 @@ const EditOperationModal = ({
   const { inHouseId, outsourceId } = getPartTypeIds();
 
   // ── fetch helpers ──────────────────────────────────────────────────────────
-  const fetchWorkCenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setWorkCenters, setWorkCentersLoading, workCenters.length > 0);
+  const fetchworkcenters = () => fetchInto(`${API_BASE_URL}/workcenters/`, setworkcenters, setworkcentersLoading, workcenters.length > 0);
   const fetchPartTypes   = () => fetchInto(`${API_BASE_URL}/part-types/`,  setPartTypes,   setPartTypesLoading,   partTypes.length > 0);
   const fetchMachines    = () => fetchInto(`${API_BASE_URL}/machines/`,    setAllMachines, setMachinesLoading,    allMachines.length > 0);
   const fetchVendors     = () => fetchInto(`${API_BASE_URL}/rawmaterials/vendors`,     setVendors,     setVendorsLoading,     vendors.length > 0);
@@ -149,7 +149,7 @@ const EditOperationModal = ({
   useEffect(() => { if (open) setActiveTab(defaultTab); }, [open, defaultTab]);
   useEffect(() => {
     if (open && !showAddToolForm) {
-      fetchWorkCenters();
+      fetchworkcenters();
       fetchMachines();
       fetchPartTypes();
     }
@@ -671,9 +671,9 @@ const EditOperationModal = ({
                   </Form.Item>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                  <Form.Item name="workcenter_id" label="Workcenter">
-                    <Select placeholder="Select WC" allowClear loading={workCentersLoading} onOpenChange={o => { if (o) fetchWorkCenters(); }} onChange={() => form.setFieldValue('machine_id', undefined)}>
-                      {workCenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
+                  <Form.Item name="workcenter_id" label="workcenter">
+                    <Select placeholder="Select WC" allowClear loading={workcentersLoading} onOpenChange={o => { if (o) fetchworkcenters(); }} onChange={() => form.setFieldValue('machine_id', undefined)}>
+                      {workcenters.map(wc => <Select.Option key={wc.id} value={wc.id}>{wc.work_center_name}</Select.Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
@@ -724,6 +724,7 @@ const EditOperationModal = ({
 
   return (
     <Modal
+      className="pdm-container"
       title={
         <div className="flex items-center gap-2">
           <ToolOutlined className="text-blue-600" />
@@ -742,7 +743,7 @@ const EditOperationModal = ({
       styles={{ body: { maxHeight: 'calc(100vh - 120px)', overflowY: 'auto', overflowX: 'hidden', padding: '8px 16px' } }}
       centered maskClosable={false} destroyOnHidden
     >
-      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{background-color:#2563eb!important;color:#fff!important;border:none!important;box-shadow:none!important;}`}</style>
+      <style>{`.no-hover-btn,.no-hover-btn:hover,.no-hover-btn:focus,.no-hover-btn:active{background-color:#2E8B57!important;color:#fff!important;border:none!important;box-shadow:none!important;}`}</style>
       <div className="mt-2">
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={filteredTabs} />
       </div>
@@ -762,15 +763,15 @@ const EditOperationModal = ({
             <iframe src={`${preview.url}#toolbar=0`} title={preview.title} width="100%" height="100%" style={{ border: 'none' }} />
           ) : preview.type === 'text' ? (
             <div className="h-full bg-gray-50 p-4 overflow-auto">
-              <iframe 
-                src={preview.url} 
-                title={preview.title} 
-                width="100%" 
-                height="100%" 
-                style={{ 
-                  border: 'none', 
+              <iframe
+                src={preview.url}
+                title={preview.title}
+                width="100%"
+                height="100%"
+                style={{
+                  border: 'none',
                   backgroundColor: 'white',
-                  fontFamily: 'monospace',
+                  fontFamily: 'Roboto, sans-serif',
                   fontSize: '12px',
                   whiteSpace: 'pre'
                 }} 

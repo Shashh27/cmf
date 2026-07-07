@@ -398,8 +398,40 @@ const Recyclebin = ({ orderId }) => {
   };
 
   const onCheck = (checkedKeys, info) => {
+    // If an assembly is checked, auto-select all its parts and child assemblies
+    if (info.node && info.node.key && info.node.key.startsWith('assembly-')) {
+      const assemblyId = parseInt(info.node.key.replace('assembly-', ''));
+      const assembly = allAssemblies.find(a => a.id === assemblyId);
+
+      if (assembly && info.checked) {
+        // Collect all parts and child assemblies for this assembly
+        const keysToAdd = collectAssemblyChildrenKeys(assembly);
+        const newCheckedKeys = Array.from(new Set([...checkedKeys, ...keysToAdd]));
+        setCheckedKeys(newCheckedKeys);
+
+        const items = [];
+        newCheckedKeys.forEach(key => {
+          if (key.startsWith('part-')) {
+            const partId = parseInt(key.replace('part-', ''));
+            const part = allParts.find(p => p.id === partId);
+            if (part) {
+              items.push({ id: partId, type: 'part', ...part });
+            }
+          } else if (key.startsWith('assembly-')) {
+            const asmId = parseInt(key.replace('assembly-', ''));
+            const asm = allAssemblies.find(a => a.id === asmId);
+            if (asm) {
+              items.push({ id: asmId, type: 'assembly', ...asm });
+            }
+          }
+        });
+        setSelectedItems(items);
+        return;
+      }
+    }
+
     setCheckedKeys(checkedKeys);
-    
+
     const items = [];
     checkedKeys.forEach(key => {
       if (key.startsWith('part-')) {
@@ -417,6 +449,27 @@ const Recyclebin = ({ orderId }) => {
       }
     });
     setSelectedItems(items);
+  };
+
+  const collectAssemblyChildrenKeys = (assembly) => {
+    const keys = [];
+    keys.push(`assembly-${assembly.id}`);
+
+    // Add parts
+    if (assembly.parts && assembly.parts.length > 0) {
+      assembly.parts.forEach(part => {
+        keys.push(`part-${part.id}`);
+      });
+    }
+
+    // Add child assemblies recursively
+    if (assembly.child_assemblies && assembly.child_assemblies.length > 0) {
+      assembly.child_assemblies.forEach(child => {
+        keys.push(...collectAssemblyChildrenKeys(child));
+      });
+    }
+
+    return keys;
   };
 
   const buildBOMTreeData = (data) => {
@@ -834,6 +887,7 @@ const Recyclebin = ({ orderId }) => {
                   defaultExpandAll
                   showLine
                   checkable
+                  checkStrictly
                   checkedKeys={checkedKeys}
                   onCheck={onCheck}
                   switcherIcon={({ expanded }) => expanded ? <CaretDownOutlined /> : <CaretRightOutlined />}

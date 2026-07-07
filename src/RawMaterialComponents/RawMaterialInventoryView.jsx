@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Spin, Empty, Modal, App, message, Popconfirm } from "antd";
+import { Spin, Empty, Modal, App, message, Popconfirm, Button, Badge } from "antd";
+import { FileOutlined } from "@ant-design/icons";
 import { StockForm } from "./RawMaterialsTab";
+import QualityDocumentsModal from "./QualityDocumentsModal";
 
 const border = "1px solid #d0d0d0";
 const thStyle = {
@@ -77,6 +79,7 @@ const RawMaterialInventoryView = ({
   const [allUnits, setAllUnits] = useState({});
   const [loading, setLoading] = useState(false);
   const [addStockModal, setAddStockModal] = useState({ open: false, material: null });
+  const [qualityDocsModal, setQualityDocsModal] = useState({ open: false, stock: null });
   // ── Column header filters ──────────────────────────────────────────────────
   const [colProcess, setColProcess] = useState([]);
   const [colForm, setColForm] = useState([]);
@@ -297,6 +300,18 @@ const RawMaterialInventoryView = ({
     }
   };
 
+  const openQualityDocs = (stock, material) => {
+    const dimensions = fmtDim(stock);
+    setQualityDocsModal({ 
+      open: true, 
+      stock, 
+      materialName: material?.material_name || '',
+      dimensions 
+    });
+  };
+
+  const closeQualityDocs = () => setQualityDocsModal({ open: false, stock: null });
+
   return (
     <App>
     <div className="mt-4 bg-white rounded-lg shadow-sm border border-gray-100 p-3">
@@ -320,6 +335,7 @@ const RawMaterialInventoryView = ({
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 90 }}>Order No</th>
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 90 }}><FilterHeader label="Stock Status" options={colFilterOptions.stockStatus} value={colStockStatus} onChange={setColStockStatus} /></th>
                 <th rowSpan={2} style={{ ...thStyle, minWidth: 60, background: "#fff1f0" }}>Del Stock</th>
+                <th rowSpan={2} style={{ ...thStyle, minWidth: 80, background: "#e6f7ff" }}>Quality Docs</th>
                 <th colSpan={6} style={{ ...thStyle, background: "#f0fff4" }}>Units</th>
               </tr>
               <tr>
@@ -380,6 +396,29 @@ const RawMaterialInventoryView = ({
                             >
                               <button style={{ border: "1px solid #ff4d4f", background: "#fff1f0", color: "#cf1322", borderRadius: 4, padding: "1px 6px", fontSize: 10, cursor: "pointer" }}>Delete</button>
                             </Popconfirm>
+                          </td>
+                          <td rowSpan={row.stockRowSpan} style={tdStyle}>
+                            <Badge 
+                              count={row.stock.quality_document_count || 0} 
+                              showZero 
+                              offset={[0, 0]}
+                              style={{ 
+                                backgroundColor: '#ff4d4f',
+                                fontSize: '9px',
+                                height: '14px',
+                                minWidth: '14px',
+                                lineHeight: '14px',
+                                padding: '0 3px',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              <button
+                                onClick={() => openQualityDocs(row.stock, row.material)}
+                                style={{ border: "1px solid #1890ff", background: "#e6f7ff", color: "#1890ff", borderRadius: 4, padding: "1px 4px", fontSize: 9, cursor: "pointer", whiteSpace: "nowrap" }}
+                              >
+                                <FileOutlined style={{ fontSize: 10 }} /> Docs
+                              </button>
+                            </Badge>
                           </td>
                         </>
                       )}
@@ -442,6 +481,14 @@ const RawMaterialInventoryView = ({
           />
         )}
       </Modal>
+
+      <QualityDocumentsModal
+        open={qualityDocsModal.open}
+        onClose={closeQualityDocs}
+        stock={qualityDocsModal.stock}
+        materialName={qualityDocsModal.materialName}
+        dimensions={qualityDocsModal.dimensions}
+      />
     </div>
     </App>
   );

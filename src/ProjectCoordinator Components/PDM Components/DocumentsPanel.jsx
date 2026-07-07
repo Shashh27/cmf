@@ -577,7 +577,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded }) => {
       render: t => <Tag color="green" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag>
     },
     {
-      title: <span><EnvironmentOutlined className="mr-0.5" />Workcenter</span>, dataIndex: 'workcenter_id', key: 'wc',
+      title: <span><EnvironmentOutlined className="mr-0.5" />workcenter</span>, dataIndex: 'workcenter_id', key: 'wc',
       render: (id, r) => <Tag color="purple" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.work_center_name || id || 'N/A'}</Tag>
     },
     {

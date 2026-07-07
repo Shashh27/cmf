@@ -432,6 +432,32 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
     message.success(type === 'operation' ? `Operation "${newItem.operation_name}" created successfully!` : `Document "${newItem.document_name}" created successfully!`);
     await fetchDocuments(); setImportOperations([]);
   };
+   
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/operations/template/download`, {
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'Operations_Template.docx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      message.success('Template downloaded successfully');
+    } catch (e) {
+      console.error(e);
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.message ||
+        'Failed to download template';
+      message.error(detail);
+    }
+  };
+
 
   const onOperationDragEnd = async ({ active, over }) => {
     if (active.id !== over?.id) {
@@ -489,7 +515,7 @@ const DocumentsPanel = ({ selectedItem, onDocumentsLoaded, compactMode = false, 
       render: t => <Tag color="orange" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
     { title: <span><ClockCircleOutlined className="mr-0.5" />Cycle</span>, dataIndex: 'cycle_time', key: 'cycle', width: 100,
       render: t => <Tag color="green" className="text-sm font-medium m-0 px-1.5 py-0.5">{t || '00:00:00'}</Tag> },
-    { title: <span><EnvironmentOutlined className="mr-0.5" />Workcenter</span>, dataIndex: 'workcenter_id', key: 'wc',
+    { title: <span><EnvironmentOutlined className="mr-0.5" />workcenter</span>, dataIndex: 'workcenter_id', key: 'wc',
       render: (id, r) => <Tag color="purple" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.work_center_name || id || 'N/A'}</Tag> },
     { title: <span className="font-semibold text-slate-700">Machine</span>, dataIndex: 'machine_id', key: 'mc',
       render: (id, r) => <Tag color="geekblue" className="text-sm font-medium m-0 px-1.5 py-0.5 whitespace-normal">{r.machine_name || id || 'N/A'}</Tag> },

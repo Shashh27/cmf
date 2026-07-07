@@ -458,6 +458,16 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
     },
 
+    {
+
+      key: `${prefix}/energy-monitoring`,
+
+      label: <Link to={`${prefix}/energy-monitoring`} onClick={() => setMobileDrawerOpen(false)}>Energy Monitoring</Link>,
+
+      icon: <MonitorOutlined />,
+
+    },
+
     // {
 
     //   key: `${prefix}/quality-management`,
@@ -813,6 +823,16 @@ const Sidebar = ({ collapsed, onCollapse }) => {
           { key: `${prefix}/maintenance-management/preventive-maintenance`, label: <Link to={`${prefix}/maintenance-management/preventive-maintenance`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link> },
 
         ],
+
+      },
+
+      {
+
+        key: `${prefix}/energy-monitoring`,
+
+        label: <Link to={`${prefix}/energy-monitoring`} onClick={() => setMobileDrawerOpen(false)}>Energy Monitoring</Link>,
+
+        icon: <MonitorOutlined />,
 
       },
 

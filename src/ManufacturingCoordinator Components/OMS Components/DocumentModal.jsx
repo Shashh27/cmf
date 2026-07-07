@@ -110,7 +110,6 @@ const DocumentModal = ({ isOpen, onClose, onDocumentUploaded, orderId, orders })
 
       const result = response.data;
       onDocumentUploaded(result);
-      message.success("Document uploaded successfully");
       form.resetFields();
       form.setFieldsValue({ document_version: "" });
       setParentId(null);

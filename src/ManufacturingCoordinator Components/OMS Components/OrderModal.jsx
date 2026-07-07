@@ -294,13 +294,13 @@ const OrderModal = ({ isOpen, onClose, onOrderCreated, editingOrder }) => {
             : parseInt(values.manufacturing_coordinator_id),
       };
 
-      // Admin id is required by backend; use current logged-in user as admin.
+      // Manufacturing coordinator id is required by backend; use current logged-in user as MC.
       try {
         const stored = localStorage.getItem("user");
         if (stored) {
           const userObj = JSON.parse(stored);
           if (userObj?.id != null) {
-            payload.admin_id = parseInt(userObj.id, 10);
+            payload.manufacturing_coordinator_id = parseInt(userObj.id, 10);
           }
         }
       } catch {

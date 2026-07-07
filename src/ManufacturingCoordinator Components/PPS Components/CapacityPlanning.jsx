@@ -63,7 +63,7 @@ const CustomTooltip = ({ active, payload, label }) => {
           Utilization: {dataItem.utilization_percentage}%
         </p>
         <p style={{ margin: 0, color: "#8c8c8c", fontSize: "12px", marginTop: 5 }}>
-          Workcenter: {workcenterName}
+          workcenter: {workcenterName}
         </p>
       </div>
     );
@@ -75,7 +75,7 @@ const CapacityPlanning = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [range, setRange] = useState(null);
-  const [selectedWorkcenter, setSelectedWorkcenter] = useState(null);
+  const [selectedworkcenter, setSelectedworkcenter] = useState(null);
 
   const [efficiency, setEfficiency] = useState(0.85);
   const [saving, setSaving] = useState(false);
@@ -177,8 +177,8 @@ const CapacityPlanning = () => {
   ))].sort();
 
   // Filtered data for chart
-  const filteredData = selectedWorkcenter
-    ? data.filter(item => (item.work_center_name || item.work_center || item.workcenter || "N/A") === selectedWorkcenter)
+  const filteredData = selectedworkcenter
+    ? data.filter(item => (item.work_center_name || item.work_center || item.workcenter || "N/A") === selectedworkcenter)
     : data;
 
   return (
@@ -207,16 +207,16 @@ const CapacityPlanning = () => {
             </Button>
           </Col>
 
-          {/* WORKCENTER FILTER */}
+          {/* workcenter FILTER */}
           <Col xs={24} sm={12} md={5}>
-            <Text strong style={{ display: "block", marginBottom: 8 }}>Filter by Workcenter</Text>
+            <Text strong style={{ display: "block", marginBottom: 8 }}>Filter by workcenter</Text>
             <Select
               showSearch
               allowClear
               style={{ width: "100%" }}
-              placeholder="Select Workcenter"
-              onChange={setSelectedWorkcenter}
-              value={selectedWorkcenter}
+              placeholder="Select workcenter"
+              onChange={setSelectedworkcenter}
+              value={selectedworkcenter}
             >
               {workcenters.map(wc => (
                 <Select.Option key={wc} value={wc}>{wc}</Select.Option>

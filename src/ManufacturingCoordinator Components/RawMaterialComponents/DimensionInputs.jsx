@@ -1,7 +1,7 @@
 import React from "react";
 import { InputNumber } from "antd";
 
-const handleInputKeyDown = (e) => {
+export const handleInputKeyDown = (e) => {
   // Allow: Backspace, Delete, Tab, Escape, Enter, Arrow keys
   if ([8, 9, 27, 13, 37, 38, 39, 40].includes(e.keyCode)) {
     return;

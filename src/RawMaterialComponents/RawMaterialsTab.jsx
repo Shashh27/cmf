@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../Config/auth";
-import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, Tabs, App, Segmented } from "antd";
+import { Table, Button, Empty, Tag, Space, Tooltip, Card, Input, Modal, Form, Row, Col, InputNumber, Select, App, Tabs } from "antd";
 import { 
   ExperimentOutlined, 
   PlusOutlined, 
@@ -11,7 +11,6 @@ import {
 } from "@ant-design/icons";
 import { RawMaterialsInventoryPdfDownload } from "../DownloadReports/RawMaterialsPdfDownload";
 import { StockDetailsPdfDownload } from "../DownloadReports/StockDetailsPdfDownload";
-import RawMaterialInventoryView from "./RawMaterialInventoryView";
 
 const { Option } = Select;
 
@@ -37,20 +36,6 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
     orderNumber: null,
     partNumber: null,
   });
-  const [viewMode, setViewMode] = useState(() => localStorage.getItem('rmViewMode') || 'list');
-  const [invSearch, setInvSearch] = useState("");
-  const [invFilters, setInvFilters] = useState({ fMaterial: [], fSource: [], fOrder: [], fPart: [], fStockStatus: [], fUnitStatus: [] });
-  const [invFilterOptions, setInvFilterOptions] = useState({ materials: [], orders: [], partsByOrder: {} });
-
-  const [invRows, setInvRows] = useState([]);
-  const setF = (key, val) => setInvFilters(prev => ({ ...prev, [key]: val || [] }));
-  const handleFilterOptionsReady = useCallback((opts) => setInvFilterOptions(opts), []);
-  const handleRowsReady = useCallback((r) => setInvRows(r), []);
-
-  const handleViewModeChange = (val) => {
-    localStorage.setItem('rmViewMode', val);
-    setViewMode(val);
-  };
 
   const fetchingRawMaterials = useRef(false);
 
@@ -369,126 +354,59 @@ const RawMaterialsTab = ({ rawMaterials: propRawMaterials, onRawMaterialsChange 
                 <div className="flex items-center gap-2">
                     <ExperimentOutlined className="text-purple-600" />
                     <span className="font-bold text-gray-800 text-sm sm:text-base">
-                      {viewMode === 'inventory' ? 'Raw Materials Inventory' : 'Raw Material List'}
+                      Raw Material List
                     </span>
                 </div>
                 <Space wrap>
-                  <Segmented
-                    options={[
-                      { label: 'List', value: 'list' },
-                      { label: 'Inventory', value: 'inventory' },
-                    ]}
-                    value={viewMode}
-                    onChange={handleViewModeChange}
+                  <Input.Search
+                    placeholder="Search all columns..."
+                    allowClear
+                    onSearch={handleSearch}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    value={searchText}
+                    maxLength={50}
+                    className="w-52"
                     size="middle"
                   />
-                  {viewMode === 'inventory' && (
-                    <>
-                      <Input.Search
-                        placeholder="Search material / stock..."
-                        allowClear
-                        value={invSearch}
-                        onChange={(e) => setInvSearch(e.target.value)}
-                        onSearch={setInvSearch}
-                        style={{ width: 200 }}
-                        size="middle"
-                      />
-                      <Select mode="multiple" placeholder="Material" allowClear showSearch optionFilterProp="children" value={invFilters.fMaterial} onChange={v => setF('fMaterial', v)} style={{ minWidth: 160, maxWidth: 260 }} size="middle" maxTagCount="responsive">
-                        {invFilterOptions.materials.map(m => <Option key={m.id} value={m.id}>{m.name}</Option>)}
-                      </Select>
-                      <Select mode="multiple" placeholder="Source" allowClear value={invFilters.fSource} onChange={v => { setInvFilters(p => ({ ...p, fSource: v || [], fOrder: [], fPart: [] })); }} style={{ minWidth: 110, maxWidth: 200 }} size="middle" maxTagCount="responsive">
-                        <Option value="general">General</Option>
-                        <Option value="order">Order</Option>
-                      </Select>
-                      <Select mode="multiple" placeholder="Order No" allowClear showSearch optionFilterProp="children" value={invFilters.fOrder} onChange={v => { setInvFilters(p => ({ ...p, fOrder: v || [], fPart: [] })); }} style={{ minWidth: 140, maxWidth: 260 }} size="middle" maxTagCount="responsive" disabled={invFilters.fSource.length > 0 && !invFilters.fSource.includes('order')}>
-                        {invFilterOptions.orders.map(o => <Option key={o} value={o}>{o}</Option>)}
-                      </Select>
-                      <Select mode="multiple" placeholder="Part No" allowClear showSearch optionFilterProp="children" value={invFilters.fPart} onChange={v => setF('fPart', v)} style={{ minWidth: 130, maxWidth: 260 }} size="middle" maxTagCount="responsive" disabled={invFilters.fOrder.length === 0}>
-                        {Array.from(new Set(invFilters.fOrder.flatMap(o => invFilterOptions.partsByOrder[o] || []))).sort().map(p => <Option key={p} value={p}>{p}</Option>)}
-                      </Select>
-                      <Select mode="multiple" placeholder="Stock Status" allowClear value={invFilters.fStockStatus} onChange={v => setF('fStockStatus', v)} style={{ minWidth: 140, maxWidth: 240 }} size="middle" maxTagCount="responsive">
-                        <Option value="available">Available</Option>
-                        <Option value="not_available">Not Available</Option>
-                        <Option value="exhausted">Exhausted</Option>
-                      </Select>
-                      <Select mode="multiple" placeholder="Unit Status" allowClear value={invFilters.fUnitStatus} onChange={v => setF('fUnitStatus', v)} style={{ minWidth: 140, maxWidth: 240 }} size="middle" maxTagCount="responsive">
-                        <Option value="available">Available</Option>
-                        <Option value="partially_used">Partially Used</Option>
-                        <Option value="not_available">Not Available</Option>
-                        <Option value="exhausted">Exhausted</Option>
-                      </Select>
-                      <StockDetailsPdfDownload rows={invRows} label={`Inventory — ${invRows.length} rows`} />
-                    </>
-                  )}
-                  {viewMode === 'list' && (
-                    <>
-                      <Input.Search
-                        placeholder="Search all columns..."
-                        allowClear
-                        onSearch={handleSearch}
-                        onChange={(e) => handleSearch(e.target.value)}
-                        value={searchText}
-                        maxLength={50}
-                        className="w-52"
-                        size="middle"
-                      />
-                      <RawMaterialsInventoryPdfDownload rawMaterials={rawMaterials} />
-                      <Button
-                        type="primary"
-                        icon={<PlusOutlined />}
-                        onClick={openCreateRawMaterial}
-                        size="middle"
-                        style={{ backgroundColor: '#2563eb' }}
-                        className="border-none shadow-md no-hover-btn"
-                      >
-                        <span className="hidden sm:inline">Add Raw Material</span>
-                        <span className="sm:hidden">Add</span>
-                      </Button>
-                    </>
-                  )}
+                  <RawMaterialsInventoryPdfDownload rawMaterials={rawMaterials} />
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={openCreateRawMaterial}
+                    size="middle"
+                    style={{ backgroundColor: '#2563eb' }}
+                    className="border-none shadow-md no-hover-btn"
+                  >
+                    <span className="hidden sm:inline">Add Raw Material</span>
+                    <span className="sm:hidden">Add</span>
+                  </Button>
                 </Space>
             </div>
         }
       >
-        {viewMode === 'list' ? (
-          <Table
-            columns={listColumns}
-            dataSource={filteredMaterials}
-            rowKey="id"
-            size="small"
-            bordered
-            scroll={{ x: 800 }}
-            pagination={{
-              current: rawMaterialsPagination.current,
-              pageSize: rawMaterialsPagination.pageSize,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-              pageSizeOptions: ['10', '20', '50', '100'],
-              placement: 'bottom',
-              responsive: true,
-            }}
-            onChange={(p) => setRawMaterialsPagination({ current: p.current, pageSize: p.pageSize })}
-            locale={{ emptyText: <Empty description={searchText ? "No raw materials found matching your search" : "No raw materials found"} /> }}
-            className="modern-table"
-            loading={loading}
-          />
-        ) : null}
-      </Card>
-
-      {viewMode === 'inventory' && (
-        <RawMaterialInventoryView
-          searchText={invSearch}
-          fMaterial={invFilters.fMaterial}
-          fSource={invFilters.fSource}
-          fOrder={invFilters.fOrder}
-          fPart={invFilters.fPart}
-          fStockStatus={invFilters.fStockStatus}
-          fUnitStatus={invFilters.fUnitStatus}
-          onFilterOptionsReady={handleFilterOptionsReady}
-          onRowsReady={handleRowsReady}
+        <Table
+          columns={listColumns}
+          dataSource={filteredMaterials}
+          rowKey="id"
+          size="small"
+          bordered
+          scroll={{ x: 800 }}
+          pagination={{
+            current: rawMaterialsPagination.current,
+            pageSize: rawMaterialsPagination.pageSize,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            placement: 'bottom',
+            responsive: true,
+          }}
+          onChange={(p) => setRawMaterialsPagination({ current: p.current, pageSize: p.pageSize })}
+          locale={{ emptyText: <Empty description={searchText ? "No raw materials found matching your search" : "No raw materials found"} /> }}
+          className="modern-table"
+          loading={loading}
         />
-      )}
+      </Card>
 
       <Modal
         open={rawMaterialModalOpen}

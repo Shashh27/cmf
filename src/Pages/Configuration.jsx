@@ -3,20 +3,20 @@ import axios from "axios";
 import { API_BASE_URL } from "../Config/auth.js";
 import { Table, Tabs, Button, Tag, message, Popconfirm, Tooltip, Space, Card, Input } from "antd";
 import { EditOutlined, DeleteOutlined, PlusOutlined, EyeOutlined } from "@ant-design/icons";
-import WorkCenterModal from "../Configuration Components/WorkCenterModal";
+import workcenterModal from "../Configuration Components/workcenterModal";
 import Machines from "../Configuration Components/Machines";
 import CustomersTable from "../Configuration Components/CustomersTable";
 import VendorsTable from "../Configuration Components/VendorsTable";
 
 const Configuration = () => {
-  const [workCenters, setWorkCenters] = useState([]);
+  const [workcenters, setworkcenters] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [workCenterModalOpen, setWorkCenterModalOpen] = useState(false);
-  const [editingWorkCenter, setEditingWorkCenter] = useState(null);
-  const [selectedWorkCenter, setSelectedWorkCenter] = useState(null);
+  const [workcenterModalOpen, setworkcenterModalOpen] = useState(false);
+  const [editingworkcenter, setEditingworkcenter] = useState(null);
+  const [selectedworkcenter, setSelectedworkcenter] = useState(null);
   const [showMachines, setShowMachines] = useState(false);
   const [searchText, setSearchText] = useState('');
-  const [workCenterMachines, setWorkCenterMachines] = useState({});
+  const [workcenterMachines, setworkcenterMachines] = useState({});
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -35,57 +35,57 @@ const Configuration = () => {
   const userId = getCurrentUserId();
 
   useEffect(() => {
-    fetchWorkCenters();
+    fetchworkcenters();
   }, []);
 
-  const fetchWorkCenters = async () => {
+  const fetchworkcenters = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/workcenters/`, {
         params: userId != null ? { user_id: userId } : undefined,
       });
-      setWorkCenters(response.data);
+      setworkcenters(response.data);
     } catch (error) {
       console.error("Error fetching work centers:", error);
-      setWorkCenters([]);
+      setworkcenters([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchMachinesForAllWorkCenters = async () => {
+  const fetchMachinesForAllworkcenters = async () => {
     try {
-      const machinePromises = workCenters.map(async (workCenter) => {
+      const machinePromises = workcenters.map(async (workcenter) => {
         try {
-          const response = await axios.get(`${API_BASE_URL}/machines/work-center/${workCenter.id}`, {
+          const response = await axios.get(`${API_BASE_URL}/machines/workcenter/${workcenter.id}`, {
             params: userId != null ? { user_id: userId } : undefined,
           });
-          return { workCenterId: workCenter.id, machines: response.data };
+          return { workcenterId: workcenter.id, machines: response.data };
         } catch (error) {
-          console.error(`Error fetching machines for work center ${workCenter.id}:`, error);
-          return { workCenterId: workCenter.id, machines: [] };
+          console.error(`Error fetching machines for work center ${workcenter.id}:`, error);
+          return { workcenterId: workcenter.id, machines: [] };
         }
       });
 
       const results = await Promise.all(machinePromises);
       const machinesMap = {};
-      results.forEach(({ workCenterId, machines }) => {
-        machinesMap[workCenterId] = machines;
+      results.forEach(({ workcenterId, machines }) => {
+        machinesMap[workcenterId] = machines;
       });
-      setWorkCenterMachines(machinesMap);
+      setworkcenterMachines(machinesMap);
     } catch (error) {
       console.error("Error fetching machines for work centers:", error);
     }
   };
 
   useEffect(() => {
-    if (searchText && workCenters.length > 0 && Object.keys(workCenterMachines).length === 0) {
-      fetchMachinesForAllWorkCenters();
+    if (searchText && workcenters.length > 0 && Object.keys(workcenterMachines).length === 0) {
+      fetchMachinesForAllworkcenters();
     }
-  }, [searchText, workCenters.length]);
+  }, [searchText, workcenters.length]);
 
-  const handleEdit = (workCenter) => {
-    setEditingWorkCenter(workCenter);
-    setWorkCenterModalOpen(true);
+  const handleEdit = (workcenter) => {
+    setEditingworkcenter(workcenter);
+    setworkcenterModalOpen(true);
   };
 
   const handleDelete = async (id) => {
@@ -94,7 +94,7 @@ const Configuration = () => {
         params: userId != null ? { user_id: userId } : undefined,
       });
       message.success("Work center deleted successfully");
-      fetchWorkCenters();
+      fetchworkcenters();
     } catch (error) {
       console.error("Error deleting work center:", error);
       let detail =
@@ -106,24 +106,24 @@ const Configuration = () => {
     }
   };
 
-  const handleViewMachines = (workCenter) => {
-    setSelectedWorkCenter(workCenter);
+  const handleViewMachines = (workcenter) => {
+    setSelectedworkcenter(workcenter);
     setShowMachines(true);
   };
 
-  const handleBackToWorkCenters = () => {
+  const handleBackToworkcenters = () => {
     setShowMachines(false);
-    setSelectedWorkCenter(null);
+    setSelectedworkcenter(null);
   };
 
-  const filteredWorkCenters = workCenters.filter(workCenter => {
+  const filteredworkcenters = workcenters.filter(workcenter => {
     const searchLower = searchText.toLowerCase();
-    const machines = workCenterMachines[workCenter.id] || [];
+    const machines = workcenterMachines[workcenter.id] || [];
     
     return (
-      workCenter.code?.toLowerCase().includes(searchLower) ||
-      workCenter.work_center_name?.toLowerCase().includes(searchLower) ||
-      workCenter.description?.toLowerCase().includes(searchLower) ||
+      workcenter.code?.toLowerCase().includes(searchLower) ||
+      workcenter.work_center_name?.toLowerCase().includes(searchLower) ||
+      workcenter.description?.toLowerCase().includes(searchLower) ||
       machines.some(machine => 
         machine.type?.toLowerCase().includes(searchLower) ||
         machine.make?.toLowerCase().includes(searchLower) ||
@@ -139,9 +139,9 @@ const Configuration = () => {
     if (!searchText) return '';
     
     const searchLower = searchText.toLowerCase();
-    const machines = workCenterMachines[record.id] || [];
+    const machines = workcenterMachines[record.id] || [];
     
-    const workCenterMatches = 
+    const workcenterMatches = 
       record.code?.toLowerCase().includes(searchLower) ||
       record.work_center_name?.toLowerCase().includes(searchLower) ||
       record.description?.toLowerCase().includes(searchLower);
@@ -155,7 +155,7 @@ const Configuration = () => {
       machine.password?.toLowerCase().includes(searchLower)
     );
     
-    return machineMatches && !workCenterMatches ? 'highlighted-row' : '';
+    return machineMatches && !workcenterMatches ? 'highlighted-row' : '';
   };
 
   const columns = [
@@ -242,9 +242,9 @@ const Configuration = () => {
     return (
       <div className="p-4 sm:p-6 lg:p-8">
         <Machines 
-          workCenter={selectedWorkCenter}
+          workcenter={selectedworkcenter}
           userId={userId}
-          onBack={handleBackToWorkCenters}
+          onBack={handleBackToworkcenters}
           searchText={searchText}
         />
       </div>
@@ -253,7 +253,7 @@ const Configuration = () => {
 
   const items = [
     {
-      key: 'work-center',
+      key: 'workcenter',
       label: 'Work Center',
       children: (
         <Card 
@@ -273,8 +273,8 @@ const Configuration = () => {
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={() => {
-                  setEditingWorkCenter(null);
-                  setWorkCenterModalOpen(true);
+                  setEditingworkcenter(null);
+                  setworkcenterModalOpen(true);
                 }}
               >
                 Add Work Center
@@ -286,7 +286,7 @@ const Configuration = () => {
         >
           <Table
             columns={columns}
-            dataSource={filteredWorkCenters}
+            dataSource={filteredworkcenters}
             rowKey="id"
             rowClassName={getRowClassName}
             loading={loading}
@@ -370,21 +370,21 @@ const Configuration = () => {
       `}</style>
      
       <Tabs 
-        defaultActiveKey="work-center" 
+        defaultActiveKey="workcenter" 
         items={items} 
         className="responsive-tabs"
       />
 
-      <WorkCenterModal
-        workCenter={editingWorkCenter}
-        isOpen={workCenterModalOpen}
+      <workcenterModal
+        workcenter={editingworkcenter}
+        isOpen={workcenterModalOpen}
         userId={userId}
-        onClose={() => setWorkCenterModalOpen(false)}
+        onClose={() => setworkcenterModalOpen(false)}
         onSave={() => {
-          setWorkCenterModalOpen(false);
-          fetchWorkCenters();
+          setworkcenterModalOpen(false);
+          fetchworkcenters();
           message.success(
-            editingWorkCenter 
+            editingworkcenter 
               ? "Work center updated successfully" 
               : "Work center created successfully"
           );
