@@ -72,24 +72,15 @@ from routers import (
     order_tracking_router,
     monitoring_router,
     production_analytics_router,
-<<<<<<< HEAD
-    order_additional_costs_router,
-=======
     pm_router,
     operation_checklists_router,
->>>>>>> 1858a342a61561527468567bcbd924c2dd50609d
 )
 
 # Import planned raw materials router
 from routers.planned_raw_materials import router as planned_raw_materials_router
 
-<<<<<<< HEAD
-# Import stock quality documents router
-from routers.stock_quality_documents import router as stock_quality_documents_router
-=======
 # Import raw material summary router
 from routers.raw_material_summary import router as raw_material_summary_router
->>>>>>> 1858a342a61561527468567bcbd924c2dd50609d
 
 # Import recycle bin router
 from recyclebin_router.recyclebin import router as recycle_bin_router
@@ -127,12 +118,6 @@ from notification_routers import (
 
 
 
-<<<<<<< HEAD
-from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
-
-from routers.operation_checklists import router as operation_checklists_router
-=======
->>>>>>> 1858a342a61561527468567bcbd924c2dd50609d
 
 from routers.ems import router as ems_router
 
@@ -353,17 +338,11 @@ app.include_router(monitoring_router, prefix="/api/v1")
 
 app.include_router(production_analytics_router, prefix="/api/v1")
 
-<<<<<<< HEAD
-app.include_router(order_additional_costs_router, prefix="/api/v1")
-
-app.include_router(stock_quality_documents_router, prefix="/api/v1")
-=======
 app.include_router(pm_router, prefix="/api/v1")
 
 app.include_router(operation_checklists_router, prefix="/api/v1")
 
 app.include_router(raw_material_summary_router, prefix="/api/v1")
->>>>>>> 1858a342a61561527468567bcbd924c2dd50609d
 
 app.include_router(recycle_bin_router, prefix="/api/v1")
 
