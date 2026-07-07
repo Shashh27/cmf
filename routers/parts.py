@@ -28,6 +28,7 @@ from DB.models.access_control import AccessUser
 from DB.schemas.oms import Part, PartCreate, PartUpdate
 from services.stock_auto_update import StockAutoUpdateService
 from services.notification_service import NotificationService
+from services.raw_material_history_service import RawMaterialHistoryService
 
 router = APIRouter(
     prefix="/parts",
@@ -353,10 +354,16 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
         # Special case: All raw material fields are being cleared
         if is_clearing_raw_material:
             # If there's an existing unit assignment, restore it
+            material_name_for_history = None
+            unit_id_for_history = None
             if db_part.raw_material_unit_id:
                 # Get the unit
                 unit = db.query(RawMaterialUnit).filter(RawMaterialUnit.id == db_part.raw_material_unit_id).first()
                 if unit:
+                    # Store for history before clearing
+                    unit_id_for_history = unit.id
+                    material_name_for_history = unit.stock.material.material_name if unit.stock and unit.stock.material else "Unknown"
+                    
                     # Get usage record
                     from DB.models.inventory import RawMaterialUsage as RawMaterialUsageModel
                     usage = db.query(RawMaterialUsageModel).filter(
@@ -381,6 +388,19 @@ def update_part(part_id: int, part: PartUpdate, db: Session = Depends(get_db)):
             db_part.raw_material_id = None
             db_part.raw_material_unit_id = None
             db_part.required_length = None
+            
+            # Log history for material unlinking
+            if unit_id_for_history:
+                try:
+                    RawMaterialHistoryService.log_material_unlinked(
+                        db=db,
+                        unit_id=unit_id_for_history,
+                        part_id=part_id,
+                        material_name=material_name_for_history,
+                        user_id=db_part.user_id
+                    )
+                except Exception as e:
+                    print(f"Error logging material unlinking history: {e}")
     
     # Update other fields normally
     for field, value in update_data.items():

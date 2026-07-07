@@ -17,13 +17,14 @@ from DB.models.oms import (
     DocumentExtractedData as DocumentExtractedDataModel,
     OrderPartPriority as OrderPartPriorityModel,
     OutSourcePartStatus as OutSourcePartStatusModel,
+    OrderAdditionalCost as OrderAdditionalCostModel,
 )
 from DB.models.configuration import (
-    WorkCenter as WorkCenterModel,
+    workcenter as workcenterModel,
     Machine as MachineModel,
     PokayokeCompletedLog,
 )
-from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock, RawMaterialUnit, InventoryRequest, InventoryReturnRequest, Vendors as VendorModel
+from DB.models.inventory import RawMaterial as RawMaterialModel, RawMaterialStock, RawMaterialUnit, InventoryRequest, InventoryReturnRequest, Vendors as VendorModel, Category as CategoryModel, ToolsList as ToolsListModel
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.oms import (
     Product,
@@ -39,7 +40,9 @@ from DB.schemas.oms import (
     ProductHierarchicalLightweight,
     AssemblyLightweight,
     PartLightweight,
+    ToolWithPart as ToolWithPartSchema,
 )
+from DB.schemas.inventory import ToolsList as ToolsListSchema
 from DB.minio_client import get_minio_client
 
 router = APIRouter(
@@ -459,7 +462,7 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     all_parts = db.query(PartModel).options(joinedload(PartModel.vendor)).filter(PartModel.product_id == product_id).order_by(PartModel.id.asc()).all()
 
     # Get all work centers for mapping
-    all_work_centers = db.query(WorkCenterModel).all()
+    all_work_centers = db.query(workcenterModel).all()
     work_center_map = {wc.id: wc.work_center_name for wc in all_work_centers}
     # Get all machines for mapping
     all_machines = db.query(MachineModel).all()
@@ -484,6 +487,10 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
     # User map for part.user_id -> user_name (hierarchy part payload)
     all_users = db.query(AccessUserModel).all()
     user_map = {u.id: u.user_name for u in all_users}
+
+    # Category map for resolving category_name and sub_category_name in tools
+    all_categories = db.query(CategoryModel).all()
+    category_map = {c.id: c for c in all_categories}
     
     # Create mappings for easy lookup
     assembly_map = {asm.id: asm for asm in all_assemblies}
@@ -547,15 +554,63 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
         # Get tools with details
         tools = db.query(ToolWithPartModel).options(joinedload(ToolWithPartModel.tool)).filter(ToolWithPartModel.part_id.in_(part_ids)).all()
         for tool in tools:
+            # Resolve category_name and sub_category_name from category_map
+            cat_name = None
+            sub_cat_name = None
+            if tool.tool:
+                t = tool.tool
+                if t.sub_category_id and t.sub_category_id in category_map:
+                    sub_cat = category_map[t.sub_category_id]
+                    sub_cat_name = sub_cat.name
+                    if sub_cat.parent_id and sub_cat.parent_id in category_map:
+                        cat_name = category_map[sub_cat.parent_id].name
+                elif t.category_id and t.category_id in category_map:
+                    cat_name = category_map[t.category_id].name
+
+            # Build enriched tool dict so Pydantic receives category_name/sub_category_name
+            tool_dict = None
+            if tool.tool:
+                t = tool.tool
+                tool_dict = ToolsListSchema(
+                    id=t.id,
+                    item_description=t.item_description,
+                    range=t.range,
+                    identification_code=t.identification_code,
+                    make=t.make,
+                    quantity=t.quantity,
+                    total_quantity=t.total_quantity,
+                    issues_qty=t.issues_qty,
+                    location=t.location,
+                    gauge=t.gauge,
+                    remarks=t.remarks,
+                    amount=t.amount,
+                    ref_ledger=t.ref_ledger,
+                    type=t.type,
+                    category_id=t.category_id,
+                    sub_category_id=t.sub_category_id,
+                    category_name=cat_name,
+                    sub_category_name=sub_cat_name,
+                )
+            enriched_tool = ToolWithPartSchema(
+                id=tool.id,
+                tool_id=tool.tool_id,
+                part_id=tool.part_id,
+                operation_id=tool.operation_id,
+                user_id=tool.user_id,
+                tool=tool_dict,
+                created_at=getattr(tool, 'created_at', None),
+                updated_at=getattr(tool, 'updated_at', None),
+            )
+
             if tool.part_id not in tools_by_part:
                 tools_by_part[tool.part_id] = []
-            tools_by_part[tool.part_id].append(tool)
+            tools_by_part[tool.part_id].append(enriched_tool)
             
             # Also map to operation if applicable
             if tool.operation_id:
                 if tool.operation_id not in tools_by_operation:
                     tools_by_operation[tool.operation_id] = []
-                tools_by_operation[tool.operation_id].append(tool)
+                tools_by_operation[tool.operation_id].append(enriched_tool)
     # Get documents for assemblies (if any)
     if assembly_ids:
         asm_docs = db.query(DocumentModel).filter(DocumentModel.assembly_id.in_(assembly_ids)).all()
@@ -741,11 +796,13 @@ def fetch_product_hierarchy(db: Session, product_id: int) -> ProductHierarchical
 
 
 @router.get("/{product_id}/summary-data")
-def get_product_summary_data(product_id: int, db: Session = Depends(get_db)):
+def get_product_summary_data(product_id: int, order_id: int = None, db: Session = Depends(get_db)):
     """
     Get minimal data for ProductSummary hours calculation.
     Only returns: parts with qty, operations with setup_time/cycle_time/machine info.
     Much faster than full hierarchical endpoint.
+    
+    If order_id is provided, also returns additional costs for that order.
     """
     # Get product
     product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
@@ -788,7 +845,7 @@ def get_product_summary_data(product_id: int, db: Session = Depends(get_db)):
                     "id": part.id,
                     "part_name": part.part_name,
                     "part_number": part.part_number,
-                    "qty": part.qty or 1,
+                    "qty": part.qty if part.qty is not None else 1,
                 },
                 "operations": [
                     {
@@ -807,13 +864,34 @@ def get_product_summary_data(product_id: int, db: Session = Depends(get_db)):
                 ]
             })
 
-    return {
+    response = {
         "product": {
             "id": product.id,
             "product_name": product.product_name,
         },
         "parts": parts_with_ops,
     }
+
+    # If order_id is provided, fetch additional costs
+    if order_id:
+        additional_costs = db.query(OrderAdditionalCostModel).filter(
+            OrderAdditionalCostModel.order_id == order_id
+        ).all()
+        
+        response["additional_costs"] = [
+            {
+                "id": cost.id,
+                "cost_name": cost.cost_name,
+                "cost_value": cost.cost_value,
+            }
+            for cost in additional_costs
+        ]
+        response["additional_costs_subtotal"] = sum(cost.cost_value for cost in additional_costs)
+    else:
+        response["additional_costs"] = []
+        response["additional_costs_subtotal"] = 0
+
+    return response
 
 
 @router.get("/{product_id}/tools-data")

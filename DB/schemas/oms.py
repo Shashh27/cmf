@@ -633,6 +633,8 @@ class OperationDocument(OperationDocumentBase):
 class OperationDocumentWithDetails(OperationDocument):
     operation_name: Optional[str] = None
     operation_number: Optional[str] = None
+    user_name: Optional[str] = None
+    user_role: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -876,3 +878,32 @@ class ExtractedDataUpdate(BaseModel):
     note: Optional[str] = None
     title: Optional[str] = None
     user_id: Optional[int] = None
+
+
+# =======================
+# Order Additional Costs Schemas
+# =======================
+class OrderAdditionalCostBase(BaseModel):
+    order_id: Optional[int] = None  # Optional since it's in the URL path
+    cost_name: str
+    cost_value: float
+    user_id: Optional[int] = None
+
+
+class OrderAdditionalCostCreate(OrderAdditionalCostBase):
+    pass
+
+
+class OrderAdditionalCostUpdate(BaseModel):
+    cost_name: Optional[str] = None
+    cost_value: Optional[float] = None
+    user_id: Optional[int] = None
+
+
+class OrderAdditionalCost(OrderAdditionalCostBase):
+    id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

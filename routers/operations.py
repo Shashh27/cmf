@@ -22,7 +22,7 @@ from DB.models.oms import (
     ToolWithPart as ToolWithPartModel,
     PartType as PartTypeModel
 )
-from DB.models.configuration import WorkCenter as WorkCenterModel, Machine as MachineModel
+from DB.models.configuration import workcenter as workcenterModel, Machine as MachineModel
 from DB.models.inventory import Vendors
 from DB.models.access_control import AccessUser
 from DB.schemas.oms import Operation, OperationCreate, OperationUpdate
@@ -456,7 +456,7 @@ def get_operations(user_id: int | None = None, db: Session = Depends(get_db)):
     part_type_map = {}
     vendor_map = {}
     if work_center_ids:
-        work_centers = db.query(WorkCenterModel).filter(WorkCenterModel.id.in_(work_center_ids)).all()
+        work_centers = db.query(workcenterModel).filter(workcenterModel.id.in_(work_center_ids)).all()
         work_center_map = {wc.id: wc.work_center_name for wc in work_centers}
     if machine_ids:
         machines = db.query(MachineModel).filter(MachineModel.id.in_(machine_ids)).all()
@@ -492,7 +492,7 @@ def get_operation(operation_id: int, db: Session = Depends(get_db)):
         )
     work_center = None
     if operation.workcenter_id is not None:
-        work_center = db.query(WorkCenterModel).filter(WorkCenterModel.id == operation.workcenter_id).first()
+        work_center = db.query(workcenterModel).filter(workcenterModel.id == operation.workcenter_id).first()
     machine = None
     if operation.machine_id is not None:
         machine = db.query(MachineModel).filter(MachineModel.id == operation.machine_id).first()
@@ -537,7 +537,7 @@ def get_operations_by_part(part_id: int, user_id: int | None = None, db: Session
     part_type_map = {}
     vendor_map = {}
     if work_center_ids:
-        work_centers = db.query(WorkCenterModel).filter(WorkCenterModel.id.in_(work_center_ids)).all()
+        work_centers = db.query(workcenterModel).filter(workcenterModel.id.in_(work_center_ids)).all()
         work_center_map = {wc.id: wc.work_center_name for wc in work_centers}
     if machine_ids:
         machines = db.query(MachineModel).filter(MachineModel.id.in_(machine_ids)).all()

@@ -566,3 +566,170 @@ class RawMaterialUsage(Base):
 
     user = relationship("AccessUser", foreign_keys=[user_id])
 
+
+# =======================
+
+# Stock Quality Documents
+
+# =======================
+
+class StockQualityDocument(Base):
+
+    __tablename__ = "stock_quality_documents"
+
+    __table_args__ = {'schema': 'inventory'}
+
+
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+
+    stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=False)
+
+    document_name = Column(String(255), nullable=False)
+
+    document_url = Column(String(500), nullable=False)
+
+    version = Column(Float, nullable=False, default=1.0)
+
+    parent_id = Column(Integer, ForeignKey("inventory.stock_quality_documents.id"), nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=False)
+
+
+
+    # Relationship with stock
+
+    stock = relationship("RawMaterialStock", backref="quality_documents")
+
+
+
+    # Relationship with user
+
+    user = relationship("AccessUser", foreign_keys=[user_id])
+
+
+
+    # Self-referential relationship for document versions
+
+    parent = relationship("StockQualityDocument", remote_side=[id], back_populates="versions")
+
+    versions = relationship("StockQualityDocument", back_populates="parent")
+
+# =======================
+
+# 🔥 Raw Material History (HISTORY TRACKING TABLE)
+
+# =======================
+
+class RawMaterialHistory(Base):
+
+    __tablename__ = "raw_material_history"
+
+    __table_args__ = {'schema': 'inventory'}
+
+
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    activity_type = Column(String, nullable=False)  # "material_created", "material_updated", "material_deleted", "stock_created", "stock_updated", "stock_deleted", "unit_created", "unit_deleted", "material_linked", "material_unlinked", "order_created", "order_status_changed"
+
+    timestamp = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
+    user_role = Column(String, nullable=True)  # Store user role for historical context
+
+
+
+    # Material details
+
+    material_id = Column(Integer, ForeignKey("inventory.raw_materials.id"), nullable=True)
+
+    material_name = Column(String, nullable=True)  # Store name for historical context
+
+
+
+    # Stock details
+
+    stock_id = Column(Integer, ForeignKey("inventory.raw_material_stock.id"), nullable=True)
+
+    source_type = Column(String, nullable=True)  # "general" or "order"
+
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=True)
+
+    order_status = Column(String, nullable=True)
+
+    quantity = Column(Integer, nullable=True)
+
+    form_type = Column(String, nullable=True)
+
+    dimensions = Column(String, nullable=True)  # Formatted dimensions string
+
+
+
+    # Part details
+
+    part_id = Column(Integer, ForeignKey("oms.parts.id"), nullable=True)
+
+    part_name = Column(String, nullable=True)
+
+    part_number = Column(String, nullable=True)
+
+    used_length = Column(Float, nullable=True)
+
+
+
+    # Unit details
+
+    unit_id = Column(Integer, ForeignKey("inventory.raw_material_units.id"), nullable=True)
+
+    total_length = Column(Float, nullable=True)
+
+    remaining_length = Column(Float, nullable=True)
+
+
+
+    # Vendor details
+
+    vendor_id = Column(Integer, ForeignKey("inventory.vendors.id"), nullable=True)
+
+    vendor_name = Column(String, nullable=True)
+
+    enquiry_vendor_name = Column(String, nullable=True)  # Comma-separated vendor names for enquiry
+
+    enquiry_vendor_count = Column(Integer, nullable=True)
+
+    received_vendor_name = Column(String, nullable=True)
+
+
+
+    # Additional details
+
+    description = Column(Text, nullable=True)
+
+    old_values = Column(Text, nullable=True)  # JSON string of old values for updates
+
+    new_values = Column(Text, nullable=True)  # JSON string of new values for updates
+
+
+
+    # RELATIONS
+
+    material = relationship("RawMaterial", foreign_keys=[material_id])
+
+    stock = relationship("RawMaterialStock", foreign_keys=[stock_id])
+
+    unit = relationship("RawMaterialUnit", foreign_keys=[unit_id])
+
+    part = relationship("Part", foreign_keys=[part_id])
+
+    order = relationship("Order", foreign_keys=[order_id])
+
+    vendor = relationship("Vendors", foreign_keys=[vendor_id])
+
+    user = relationship("AccessUser", foreign_keys=[user_id])
+

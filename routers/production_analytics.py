@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from DB.database import get_db
 from DB.models.production import ShiftSummary, OEEIssue
 from DB.models.monitoring import MachineLiveStatus
-from DB.models.configuration import Machine, WorkCenter
+from DB.models.configuration import Machine, workcenter
 from DB.models.oms import Operation, Part
 from DB.schemas.production_analytics import (
     OverallOEEAnalysis, OEELosses, OEETrend, ShiftOEE, MachineOEE,

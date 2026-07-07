@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 # =======================
 # Work Center Schemas
 # =======================
-class WorkCenterBase(BaseModel):
+class workcenterBase(BaseModel):
     code: str
     work_center_name: str
     description: Optional[str] = None
@@ -19,11 +19,11 @@ class WorkCenterBase(BaseModel):
     user_id: Optional[int] = None
 
 
-class WorkCenterCreate(WorkCenterBase):
+class workcenterCreate(workcenterBase):
     pass
 
 
-class WorkCenterUpdate(BaseModel):
+class workcenterUpdate(BaseModel):
     code: Optional[str] = None
     work_center_name: Optional[str] = None
     description: Optional[str] = None
@@ -31,7 +31,7 @@ class WorkCenterUpdate(BaseModel):
     user_id: Optional[int] = None
 
 
-class WorkCenter(WorkCenterBase):
+class workcenter(workcenterBase):
     id: int
 
     class Config:
@@ -104,11 +104,19 @@ class MachinePublic(BaseModel):
         from_attributes = True
 
 
-class MachineWithWorkCenter(Machine):
-    work_center: WorkCenter
+class MachinePublicWithStatus(MachinePublic):
+    machine_state: Optional[str] = None
+    work_center_name: Optional[str] = None
 
-class MachineWithWorkCenterPublic(MachinePublic):
-    work_center: WorkCenter
+    class Config:
+        from_attributes = True
+
+
+class MachineWithworkcenter(Machine):
+    work_center: workcenter
+
+class MachineWithworkcenterPublic(MachinePublic):
+    work_center: workcenter
 
 
 # =======================

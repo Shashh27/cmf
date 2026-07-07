@@ -30,7 +30,7 @@ from DB.models.oms import (
 
 )
 
-from DB.models.configuration import Customer, PokayokeCompletedLog, Machine, WorkCenter
+from DB.models.configuration import Customer, PokayokeCompletedLog, Machine, workcenter
 
 from DB.models.inventory import InventoryRequest, InventoryReturnRequest, RawMaterialStock
 

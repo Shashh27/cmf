@@ -7,14 +7,15 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 from DB.database import get_db
-from DB.models.configuration import Machine as MachineModel, WorkCenter as WorkCenterModel
+from DB.models.configuration import Machine as MachineModel, workcenter as workcenterModel
 from DB.schemas.configuration import (
     Machine,
     MachineCreate,
     MachineUpdate,
-    MachineWithWorkCenter,
+    MachineWithworkcenter,
     MachinePublic,
-    MachineWithWorkCenterPublic,
+    MachinePublicWithStatus,
+    MachineWithworkcenterPublic,
 )
 from DB.models.notifications import MachineCalibrationNotification as MachineCalibrationNotificationModel
 
@@ -57,7 +58,7 @@ def calculate_due_date(calibration_date: datetime, frequency: str) -> Optional[d
 def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     """Create a new machine"""
     # Check if work center exists
-    work_center = db.query(WorkCenterModel).filter(WorkCenterModel.id == machine.work_center_id).first()
+    work_center = db.query(workcenterModel).filter(workcenterModel.id == machine.work_center_id).first()
     if not work_center:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -104,16 +105,30 @@ def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
     return db_machine
 
 
-@router.get("/", response_model=List[MachinePublic])
+@router.get("/", response_model=List[MachinePublicWithStatus])
 def get_machines(db: Session = Depends(get_db)):
-    """Get all machines"""
-    return db.query(MachineModel).order_by(MachineModel.id.asc()).all()
+    """Get all machines with live status and work center name"""
+    query = text("""
+        SELECT
+            m.id, m.work_center_id, m.type, m.make, m.model,
+            m.year_of_installation, m.cnc_controller, m.cnc_controller_service,
+            m.remarks, m.mhr, m.calibration_date, m.calibration_due_date,
+            m.calibration_frequency,
+            UPPER(mls.status) AS machine_state,
+            wc.work_center_name AS work_center_name
+        FROM configuration.machines m
+        LEFT JOIN production_monitoring.machine_live_status mls ON mls.machine_id = m.id
+        LEFT JOIN configuration.work_centers wc ON wc.id = m.work_center_id
+        ORDER BY m.id ASC
+    """)
+    rows = db.execute(query).mappings().all()
+    return [MachinePublicWithStatus(**dict(row)) for row in rows]
 
 
-@router.get("/with-work-center", response_model=List[MachineWithWorkCenterPublic])
+@router.get("/with-workcenter", response_model=List[MachineWithworkcenterPublic])
 def get_machines_with_work_center(db: Session = Depends(get_db)):
     """Get all machines with their work center information"""
-    return db.query(MachineModel).join(WorkCenterModel).order_by(MachineModel.id.asc()).all()
+    return db.query(MachineModel).join(workcenterModel).order_by(MachineModel.id.asc()).all()
 
 
 @router.get("/verify", response_model=MachinePublic)
@@ -144,7 +159,7 @@ def get_machine(machine_id: int, db: Session = Depends(get_db)):
     return machine
 
 
-@router.get("/{machine_id}/with-work-center", response_model=MachineWithWorkCenterPublic)
+@router.get("/{machine_id}/with-workcenter", response_model=MachineWithworkcenterPublic)
 def get_machine_with_work_center(machine_id: int, db: Session = Depends(get_db)):
     """Get a specific machine with its work center information"""
     machine = db.query(MachineModel).filter(MachineModel.id == machine_id).first()
@@ -170,7 +185,7 @@ def update_machine(machine_id: int, machine: MachineUpdate, db: Session = Depend
     
     # Check if work_center_id is being updated and if the new work center exists
     if 'work_center_id' in update_data:
-        work_center = db.query(WorkCenterModel).filter(WorkCenterModel.id == update_data['work_center_id']).first()
+        work_center = db.query(workcenterModel).filter(workcenterModel.id == update_data['work_center_id']).first()
         if not work_center:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -281,11 +296,11 @@ def delete_machine(machine_id: int, db: Session = Depends(get_db)):
     return None
 
 
-@router.get("/work-center/{work_center_id}", response_model=List[Machine])
+@router.get("/workcenter/{work_center_id}", response_model=List[Machine])
 def get_machines_by_work_center(work_center_id: int, db: Session = Depends(get_db)):
     """Get all machines for a specific work center"""
     # Check if work center exists
-    work_center = db.query(WorkCenterModel).filter(WorkCenterModel.id == work_center_id).first()
+    work_center = db.query(workcenterModel).filter(workcenterModel.id == work_center_id).first()
     if not work_center:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

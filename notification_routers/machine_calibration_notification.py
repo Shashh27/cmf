@@ -7,7 +7,7 @@ from datetime import datetime, timezone, timedelta
 from DB.database import get_db
 from DB.models.notifications import MachineCalibrationNotification as MachineCalibrationNotificationModel
 from DB.models.access_control import AccessUser as AccessUserModel
-from DB.models.configuration import Machine, WorkCenter
+from DB.models.configuration import Machine, workcenter
 from DB.schemas.notifications import (
     MachineCalibrationNotification as MachineCalibrationNotificationSchema,
     MachineCalibrationNotificationWithDetails,
@@ -66,7 +66,7 @@ def list_machine_calibration_notifications(
     machines = db.query(Machine).filter(Machine.id.in_(machine_ids)).all() if machine_ids else []
     machine_map = {m.id: m for m in machines}
     work_center_ids = {m.work_center_id for m in machines if m.work_center_id is not None}
-    work_centers = db.query(WorkCenter).filter(WorkCenter.id.in_(list(work_center_ids))).all() if work_center_ids else []
+    work_centers = db.query(workcenter).filter(workcenter.id.in_(list(work_center_ids))).all() if work_center_ids else []
     wc_map = {wc.id: wc for wc in work_centers}
     response: List[MachineCalibrationNotificationWithDetails] = []
     for n in notifications:

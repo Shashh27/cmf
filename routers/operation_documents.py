@@ -659,7 +659,15 @@ def get_documents_by_operation(operation_id: int, user_id: int | None = None, db
     documents = query.all()
     result = []
     for document in documents:
-        # Create document dict with operation details
+        # Get user information for filtering
+        user_name = None
+        user_role = None
+        if document.user_id:
+            user = db.query(AccessUser).filter(AccessUser.id == document.user_id).first()
+            user_name = user.user_name if user else None
+            user_role = user.role if user else None
+        
+        # Create document dict with operation details and user info
         document_dict = {
             "id": document.id,
             "document_name": document.document_name,
@@ -669,7 +677,10 @@ def get_documents_by_operation(operation_id: int, user_id: int | None = None, db
             "operation_id": document.operation_id,
             "parent_id": document.parent_id,
             "operation_name": operation.operation_name,
-            "operation_number": operation.operation_number
+            "operation_number": operation.operation_number,
+            "user_id": document.user_id,
+            "user_name": user_name,
+            "user_role": user_role
         }
         result.append(document_dict)
     return result

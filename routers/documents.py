@@ -17,6 +17,8 @@ from DB.minio_client import get_minio_client
 from .step_converter import StepConverter
 from .rawmaterial_extract import extract_pdf_data
 from services.notification_service import NotificationService
+from DB.models.oms import Assembly as AssemblyModel
+
 
 router = APIRouter(
     prefix="/documents",

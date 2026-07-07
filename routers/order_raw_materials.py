@@ -12,6 +12,7 @@ from DB.models.inventory import (
     RawMaterialUnit as RawMaterialUnitModel,
     RawMaterialUsage as RawMaterialUsageModel,
     Vendors as VendorsModel,
+    StockQualityDocument as StockQualityDocumentModel,
 )
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.inventory import (
@@ -24,6 +25,8 @@ from DB.schemas.inventory import (
 from services.raw_material_calculations import RawMaterialCalculationService
 from services.stock_auto_update import StockAutoUpdateService
 from services.auto_extract_service import AutoExtractService
+from services.raw_material_history_service import RawMaterialHistoryService
+from services.purchase_request_service import generate_purchase_request_docx
 
 # Import models for hierarchy fetching
 from DB.models.oms import (
@@ -176,6 +179,17 @@ def link_material_to_order(request: OrderMaterialLinkRequest, db: Session = Depe
             # Note: raw_material_unit_id will be set when order is received
         
         db.commit()
+        
+        # Log history
+        try:
+            RawMaterialHistoryService.log_stock_created(
+                db=db,
+                stock_id=stock.id,
+                user_id=request.user_id
+            )
+        except Exception as e:
+            # Log error but don't fail the operation
+            print(f"Error logging stock creation history: {e}")
         
         return {
             "message": "Material linked to order successfully",
@@ -348,6 +362,19 @@ def receive_order_material(stock_id: int, final_cost: Optional[float] = None, db
                     )
                     db.add(usage)
                     
+                    # Log history for material linking
+                    try:
+                        RawMaterialHistoryService.log_material_linked(
+                            db=db,
+                            unit_id=unit.id,
+                            part_id=part.id,
+                            used_length=part.required_length,
+                            user_id=user_id
+                        )
+                    except Exception as e:
+                        # Log error but don't fail the operation
+                        print(f"Error logging material linking history: {e}")
+                    
                     # Update unit remaining length
                     unit.remaining_length -= part.required_length
                     if unit.remaining_length <= 0:
@@ -359,6 +386,19 @@ def receive_order_material(stock_id: int, final_cost: Optional[float] = None, db
         
         # 🔥 Update stock status based on unit statuses
         StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
+        
+        # Log history for order status change
+        try:
+            RawMaterialHistoryService.log_order_status_changed(
+                db=db,
+                stock_id=stock.id,
+                old_status="enquiry",
+                new_status="received",
+                user_id=user_id
+            )
+        except Exception as e:
+            # Log error but don't fail the operation
+            print(f"Error logging order status change history: {e}")
         
         return {
             "message": "Order material received successfully",
@@ -547,6 +587,20 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
             part_ids = [int(pid.strip()) for pid in stock.part_id.split(',') if pid.strip()]
             parts = db.query(PartModel).filter(PartModel.id.in_(part_ids)).all()
             for part in parts:
+                # Log history for material unlinking before clearing
+                if part.raw_material_unit_id:
+                    try:
+                        RawMaterialHistoryService.log_material_unlinked(
+                            db=db,
+                            unit_id=part.raw_material_unit_id,
+                            part_id=part.id,
+                            material_name=material.material_name if material else "Unknown",
+                            user_id=user_id
+                        )
+                    except Exception as e:
+                        # Log error but don't fail the operation
+                        print(f"Error logging material unlinking history: {e}")
+                
                 part.required_length = None
                 part.raw_material_id = None
                 part.raw_material_unit_id = None
@@ -555,9 +609,44 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
         for unit in units:
             db.delete(unit)
         
+        # Delete quality documents for this stock (cascade delete from DB and MinIO)
+        from DB.minio_client import get_minio_client
+        quality_docs = db.query(StockQualityDocumentModel).filter(
+            StockQualityDocumentModel.stock_id == stock_id
+        ).all()
+        for doc in quality_docs:
+            try:
+                minio_client = get_minio_client()
+                url_parts = doc.document_url.split('/')
+                object_name = '/'.join(url_parts[4:])
+                minio_client.delete_file(object_name)
+            except Exception as e:
+                print(f"Error deleting file from MinIO: {e}")
+            db.delete(doc)
+        
+        # Delete history records for this stock
+        db.query(RawMaterialHistoryModel).filter(
+            RawMaterialHistoryModel.stock_id == stock_id
+        ).delete(synchronize_session=False)
+        
         # Delete stock
+        material_name = material.material_name if material else "Unknown"
+        source_type = stock.source_type
         db.delete(stock)
         db.commit()
+        
+        # Log history
+        try:
+            RawMaterialHistoryService.log_stock_deleted(
+                db=db,
+                stock_id=stock_id,
+                material_name=material_name,
+                source_type=source_type,
+                user_id=user_id
+            )
+        except Exception as e:
+            # Log error but don't fail the operation
+            print(f"Error logging stock deletion history: {e}")
         
         return {"message": "Order material deleted successfully"}
         
@@ -575,9 +664,10 @@ def delete_order_material(stock_id: int, db: Session = Depends(get_db)):
 def get_order_parts_raw_material_linked(
     manufacturing_coordinator_id: Optional[int] = None,
     admin_id: Optional[int] = None,
+    project_coordinator_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get order-linked raw materials filtered by order association (admin or MC involved in order)"""
+    """Get order-linked raw materials filtered by order association (admin, PC, or MC involved in order)"""
     from routers.rawmaterials import _stock_with_details
     
     # Query order-type stock items
@@ -587,9 +677,9 @@ def get_order_parts_raw_material_linked(
         joinedload(RawMaterialStockModel.vendor),
     ).filter(RawMaterialStockModel.source_type == "order")
     
-    # Filter by order association: get orders where user is admin or manufacturing coordinator
-    if manufacturing_coordinator_id or admin_id:
-        # Get order IDs where the user is either admin or manufacturing coordinator
+    # Filter by order association: get orders where user is admin, PC, or manufacturing coordinator
+    if manufacturing_coordinator_id or admin_id or project_coordinator_id:
+        # Get order IDs where the user is admin, PC, or manufacturing coordinator
         order_query = db.query(OrderModel.id)
         
         if manufacturing_coordinator_id:
@@ -598,17 +688,17 @@ def get_order_parts_raw_material_linked(
         if admin_id:
             order_query = order_query.filter(OrderModel.admin_id == admin_id)
         
+        if project_coordinator_id:
+            order_query = order_query.filter(OrderModel.project_coordinator_id == project_coordinator_id)
+        
         order_ids = [order[0] for order in order_query.all()]
         
-        # Filter stock items by these order IDs, BUT include auto-extracted materials regardless
+        # Filter stock items by these order IDs only (no auto-extracted fallback)
         if order_ids:
-            query = query.filter(
-                (RawMaterialStockModel.source_order_id.in_(order_ids)) |
-                (RawMaterialStockModel.creation_source == 'auto_extract')
-            )
+            query = query.filter(RawMaterialStockModel.source_order_id.in_(order_ids))
         else:
-            # If no orders found, only return auto-extracted materials
-            query = query.filter(RawMaterialStockModel.creation_source == 'auto_extract')
+            # If no orders found, return empty result
+            return []
     
     stock_items = query.order_by(RawMaterialStockModel.id.asc()).all()
     
@@ -1146,7 +1236,28 @@ def delete_order_parts_raw_material_linked(
         for unit in units:
             db.delete(unit)
         
-        # 6. Delete stock
+        # 6. Delete quality documents for this stock (cascade delete from DB and MinIO)
+        from DB.minio_client import get_minio_client
+        quality_docs = db.query(StockQualityDocumentModel).filter(
+            StockQualityDocumentModel.stock_id == stock.id
+        ).all()
+        for doc in quality_docs:
+            try:
+                minio_client = get_minio_client()
+                url_parts = doc.document_url.split('/')
+                object_name = '/'.join(url_parts[4:])
+                minio_client.delete_file(object_name)
+            except Exception as e:
+                print(f"Error deleting file from MinIO: {e}")
+            db.delete(doc)
+        
+        # 7. Delete raw material history records for this stock
+        from DB.models.inventory import RawMaterialHistory as RawMaterialHistoryModel
+        db.query(RawMaterialHistoryModel).filter(
+            RawMaterialHistoryModel.stock_id == stock.id
+        ).delete()
+        
+        # 8. Delete stock
         db.delete(stock)
         
         db.commit()
@@ -1674,6 +1785,23 @@ def update_group(
     """
     from routers.rawmaterials import _stock_with_details
     
+    # Validate merge_group_id
+    if not merge_group_id or merge_group_id.strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid merge_group_id: '{merge_group_id}'. Please provide a valid group ID."
+        )
+    
+    # Trim the merge_group_id for database query
+    merge_group_id = merge_group_id.strip()
+    
+    # Check if it's just "Group" without a number (invalid)
+    if merge_group_id == "Group":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid merge_group_id: '{merge_group_id}'. Group ID must be in format 'Group #N'."
+        )
+    
     # Get all stocks in the group
     stocks = db.query(RawMaterialStockModel).filter(
         RawMaterialStockModel.merge_group_id == merge_group_id
@@ -1690,6 +1818,10 @@ def update_group(
         for stock in stocks:
             update_fields = update_data.copy()
             
+            # Track vendor changes for history
+            old_vendor_id = stock.received_vendor_id
+            new_vendor_id = None
+            
             # Handle vendor_id update (for enquiry)
             if 'vendor_id' in update_fields:
                 stock.vendor_id = update_fields['vendor_id']
@@ -1697,6 +1829,7 @@ def update_group(
             # Handle received_vendor_id update (for PO/received)
             if 'received_vendor_id' in update_fields:
                 stock.received_vendor_id = update_fields['received_vendor_id']
+                new_vendor_id = update_fields['received_vendor_id']
             
             # Handle order_status update
             if 'order_status' in update_fields:
@@ -1724,6 +1857,20 @@ def update_group(
         
         db.commit()
         
+        # Log history for vendor changes
+        if new_vendor_id is not None and old_vendor_id != new_vendor_id:
+            for stock in stocks:
+                try:
+                    RawMaterialHistoryService.log_vendor_changed(
+                        db=db,
+                        stock_id=stock.id,
+                        old_vendor_id=old_vendor_id,
+                        new_vendor_id=new_vendor_id,
+                        user_id=user_id
+                    )
+                except Exception as e:
+                    print(f"Error logging vendor change history: {e}")
+        
         # Update stock status based on unit statuses
         for stock in stocks:
             StockAutoUpdateService.update_stock_status_from_units(db, stock.id)
@@ -1742,4 +1889,46 @@ def update_group(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error updating group: {str(e)}"
+        )
+
+
+# ==================== Purchase Request Download ====================
+
+@router.post("/order-materials/{stock_id}/purchase-request")
+def download_purchase_request(
+    stock_id: int,
+    request_data: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Download a populated Purchase Requisition .docx for order material.
+    Accepts edited data from frontend and fills in the template.
+    """
+    from fastapi.responses import StreamingResponse
+    
+    try:
+        template_type = request_data.get("template_type", "auto")
+        data = request_data.get("data", {})
+        
+        # Generate document using service
+        buffer, filename = generate_purchase_request_docx(
+            stock_id=stock_id,
+            template_type=template_type,
+            data=data,
+            db=db
+        )
+        
+        return StreamingResponse(
+            buffer,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating purchase request: {str(e)}"
         )

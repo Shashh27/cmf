@@ -20,7 +20,7 @@ from .oms import Order
 # =======================
 # Work Center
 # =======================
-class WorkCenter(Base):
+class workcenter(Base):
     __tablename__ = "work_centers"
     __table_args__ = {'schema': 'configuration'}
 
@@ -58,7 +58,7 @@ class Machine(Base):
     password = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
 
-    work_center = relationship("WorkCenter", back_populates="machines")
+    work_center = relationship("workcenter", back_populates="machines")
     user = relationship("AccessUser")
 
 

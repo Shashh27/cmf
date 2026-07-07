@@ -1037,13 +1037,11 @@ class RawMaterialUsageWithDetails(RawMaterialUsage):
 # 🔥 Raw Material History Schemas
 # =======================
 
-class RawMaterialHistoryItem(BaseModel):
-    """Single history item for raw material activities"""
-    id: int
-    activity_type: str  # "stock_created", "material_linked", "order_status_changed", "stock_updated", "material_unlinked"
-    timestamp: datetime
+class RawMaterialHistoryBase(BaseModel):
+    """Base schema for raw material history"""
+    activity_type: str
     user_id: Optional[int] = None
-    user_name: Optional[str] = None
+    user_role: Optional[str] = None
     
     # Material details
     material_id: Optional[int] = None
@@ -1051,7 +1049,69 @@ class RawMaterialHistoryItem(BaseModel):
     
     # Stock details
     stock_id: Optional[int] = None
-    source_type: Optional[str] = None  # "general" or "order"
+    source_type: Optional[str] = None
+    order_id: Optional[int] = None
+    order_status: Optional[str] = None
+    quantity: Optional[int] = None
+    form_type: Optional[str] = None
+    dimensions: Optional[str] = None
+    
+    # Part details
+    part_id: Optional[int] = None
+    part_name: Optional[str] = None
+    part_number: Optional[str] = None
+    used_length: Optional[float] = None
+    
+    # Unit details
+    unit_id: Optional[int] = None
+    total_length: Optional[float] = None
+    remaining_length: Optional[float] = None
+    
+    # Vendor details
+    vendor_id: Optional[int] = None
+    vendor_name: Optional[str] = None
+    enquiry_vendor_name: Optional[str] = None
+    enquiry_vendor_count: Optional[int] = None
+    received_vendor_name: Optional[str] = None
+    
+    # Additional details
+    description: Optional[str] = None
+    old_values: Optional[str] = None
+    new_values: Optional[str] = None
+
+
+class RawMaterialHistoryCreate(RawMaterialHistoryBase):
+    """Schema for creating raw material history records"""
+    pass
+
+
+class RawMaterialHistory(RawMaterialHistoryBase):
+    """Schema for raw material history records"""
+    id: int
+    timestamp: datetime
+    user_name: Optional[str] = None
+    order_number: Optional[str] = None  # Computed from order relationship
+    
+    class Config:
+        from_attributes = True
+
+
+class RawMaterialHistoryItem(BaseModel):
+    """Single history item for raw material activities (legacy compatibility)"""
+    id: int
+    activity_type: str
+    timestamp: datetime
+    user_id: Optional[int] = None
+    user_name: Optional[str] = None
+    user_role: Optional[str] = None
+    
+    # Material details
+    material_id: Optional[int] = None
+    material_name: Optional[str] = None
+    
+    # Stock details
+    stock_id: Optional[int] = None
+    source_type: Optional[str] = None
     order_id: Optional[int] = None
     order_number: Optional[str] = None
     order_status: Optional[str] = None
@@ -1073,6 +1133,9 @@ class RawMaterialHistoryItem(BaseModel):
     # Vendor details
     vendor_id: Optional[int] = None
     vendor_name: Optional[str] = None
+    enquiry_vendor_name: Optional[str] = None
+    enquiry_vendor_count: Optional[int] = None
+    received_vendor_name: Optional[str] = None
     
     # Additional details
     description: Optional[str] = None
@@ -1083,4 +1146,51 @@ class RawMaterialHistoryResponse(BaseModel):
     history: List[RawMaterialHistoryItem]
     total_count: int
     filtered_count: int
+
+
+# =======================
+
+# Stock Quality Document Schemas
+
+# =======================
+
+class StockQualityDocumentBase(BaseModel):
+    stock_id: int
+    document_name: str
+    document_url: str
+    version: float
+    parent_id: Optional[int] = None
+    user_id: int
+
+
+class StockQualityDocumentCreate(StockQualityDocumentBase):
+    pass
+
+
+class StockQualityDocumentUpdate(BaseModel):
+    document_name: Optional[str] = None
+    document_url: Optional[str] = None
+    user_id: int
+
+
+class StockQualityDocument(StockQualityDocumentBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class StockQualityDocumentWithVersions(StockQualityDocument):
+    versions: List[StockQualityDocument] = []
+
+
+class StockQualityDocumentVersionResponse(BaseModel):
+    id: int
+    document_name: str
+    document_url: str
+    version: float
+    created_at: datetime
+    parent_id: Optional[int] = None
 

@@ -14,7 +14,7 @@ from .models.oms import (
 )
 from .models.configuration import (
     Customer,
-    WorkCenter,
+    workcenter,
     Machine
 )
 from .models.inventory import (
@@ -49,7 +49,7 @@ __all__ = [
     "OperationDocument",
     # "OrderPartsRawMaterialLinked",
     "Customer",
-    "WorkCenter",
+    "workcenter",
     "Machine",
     "RawMaterial",
     "ToolsList",

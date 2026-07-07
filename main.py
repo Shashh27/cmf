@@ -72,10 +72,14 @@ from routers import (
     order_tracking_router,
     monitoring_router,
     production_analytics_router,
+    order_additional_costs_router,
 )
 
 # Import planned raw materials router
 from routers.planned_raw_materials import router as planned_raw_materials_router
+
+# Import stock quality documents router
+from routers.stock_quality_documents import router as stock_quality_documents_router
 
 # Import recycle bin router
 from recyclebin_router.recyclebin import router as recycle_bin_router
@@ -116,9 +120,9 @@ from notification_routers import (
 
 from routers.pokayoke_checklists import router as pokayoke_checklists_router, completed_logs_router as pokayoke_completed_logs_router
 
-from routers.raw_material_summary import router as raw_material_summary_router
-
 from routers.operation_checklists import router as operation_checklists_router
+
+from routers.ems import router as ems_router
 
 
 # Import document routers
@@ -332,13 +336,17 @@ app.include_router(out_source_parts_status_router, prefix="/api/v1")
 
 app.include_router(maintenance_router, prefix="/api/v1")
 
+app.include_router(ems_router, prefix="/api/v1")
+
 app.include_router(order_tracking_router, prefix="/api/v1")
 
 app.include_router(monitoring_router, prefix="/api/v1")
 
 app.include_router(production_analytics_router, prefix="/api/v1")
 
-app.include_router(raw_material_summary_router, prefix="/api/v1")
+app.include_router(order_additional_costs_router, prefix="/api/v1")
+
+app.include_router(stock_quality_documents_router, prefix="/api/v1")
 
 app.include_router(recycle_bin_router, prefix="/api/v1")
 

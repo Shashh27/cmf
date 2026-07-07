@@ -10,7 +10,7 @@ from DB.models.notifications import (
 )
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.models.oms import Order as OrderModel, Part as PartModel, Operation as OperationModel, Document as DocumentModel, OrderDocument as OrderDocumentModel, PartType as PartTypeModel
-from DB.models.configuration import WorkCenter as WorkCenterModel, Machine as MachineModel
+from DB.models.configuration import workcenter as workcenterModel, Machine as MachineModel
 from DB.models.inventory import Vendors as VendorModel
 from DB.schemas.notifications import (
     PCNotificationWithDetails as PCNotificationSchema,
@@ -85,7 +85,7 @@ def enrich_details_with_names(db: Session, details: Dict[str, Any], entity_type:
     # Fetch names in batch
     workcenter_names = {}
     if workcenter_ids:
-        workcenters = db.query(WorkCenterModel).filter(WorkCenterModel.id.in_(workcenter_ids)).all()
+        workcenters = db.query(workcenterModel).filter(workcenterModel.id.in_(workcenter_ids)).all()
         workcenter_names = {wc.id: wc.work_center_name for wc in workcenters}
     
     machine_names = {}

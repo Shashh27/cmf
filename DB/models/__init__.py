@@ -13,7 +13,7 @@ from .oms import (
     OutSourcePartStatus
 )
 from .configuration import (
-    WorkCenter,
+    workcenter,
     Machine,
     Customer
 )
@@ -51,7 +51,7 @@ __all__ = [
     "OrderDocument",
     "OperationDocument",
     "OutSourcePartStatus",
-    "WorkCenter",
+    "workcenter",
     "Machine",
     "Customer",
     "OperationChecklist",

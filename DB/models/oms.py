@@ -509,6 +509,8 @@ class Order(Base):
 
     part_priorities = relationship("OrderPartPriority", back_populates="order", cascade="all, delete-orphan")
 
+    additional_costs = relationship("OrderAdditionalCost", back_populates="order", cascade="all, delete-orphan")
+
 
 
     # Kept for backward compatibility in code that still expects an
@@ -761,4 +763,40 @@ class OutSourcePartStatus(Base):
     part = relationship("Part")
 
     order = relationship("Order")
+
+
+
+# =======================
+
+# Order Additional Costs
+
+# =======================
+
+class OrderAdditionalCost(Base):
+
+    __tablename__ = "order_additional_costs"
+
+    __table_args__ = {'schema': 'oms'}
+
+
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    order_id = Column(Integer, ForeignKey("oms.orders.id"), nullable=False)
+
+    cost_name = Column(String, nullable=False)
+
+    cost_value = Column(Float, nullable=False)
+
+    user_id = Column(Integer, ForeignKey("accesscontrol.access_users.id"), nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+
+    order = relationship("Order", back_populates="additional_costs")
+
+    user = relationship("AccessUser")
 

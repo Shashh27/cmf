@@ -9,6 +9,7 @@ from typing import Dict, Any
 from DB.models.inventory import RawMaterialStock, RawMaterialUnit
 from DB.models.oms import Part
 from .raw_material_calculations import RawMaterialCalculationService
+from .raw_material_history_service import RawMaterialHistoryService
 
 
 class StockAutoUpdateService:
@@ -335,6 +336,19 @@ class StockAutoUpdateService:
             stock.available_quantity = available_count
             
             db.commit()
+            
+            # Log history for stock status change if it changed
+            if old_status != new_status:
+                try:
+                    RawMaterialHistoryService.log_stock_status_changed(
+                        db=db,
+                        stock_id=stock_id,
+                        old_status=old_status,
+                        new_status=new_status,
+                        user_id=None
+                    )
+                except Exception as e:
+                    print(f"Error logging stock status change history: {e}")
             
             return {
                 "success": True,

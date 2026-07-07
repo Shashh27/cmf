@@ -4,8 +4,8 @@ from typing import List
 from sqlalchemy.exc import IntegrityError
 
 from DB.database import get_db
-from DB.models.configuration import WorkCenter as WorkCenterModel
-from DB.schemas.configuration import WorkCenter, WorkCenterCreate, WorkCenterUpdate
+from DB.models.configuration import workcenter as workcenterModel
+from DB.schemas.configuration import workcenter, workcenterCreate, workcenterUpdate
 
 router = APIRouter(
     prefix="/workcenters",
@@ -13,35 +13,35 @@ router = APIRouter(
 )
 
 
-@router.post("/", response_model=WorkCenter, status_code=status.HTTP_201_CREATED)
-def create_work_center(work_center: WorkCenterCreate, db: Session = Depends(get_db)):
+@router.post("/", response_model=workcenter, status_code=status.HTTP_201_CREATED)
+def create_work_center(work_center: workcenterCreate, db: Session = Depends(get_db)):
     """Create a new work center"""
     # Check if work center with same code already exists
-    db_work_center = db.query(WorkCenterModel).filter(WorkCenterModel.code == work_center.code).first()
+    db_work_center = db.query(workcenterModel).filter(workcenterModel.code == work_center.code).first()
     if db_work_center:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Work center with code {work_center.code} already exists"
         )
 
-    db_work_center = WorkCenterModel(**work_center.model_dump())
+    db_work_center = workcenterModel(**work_center.model_dump())
     db.add(db_work_center)
     db.commit()
     db.refresh(db_work_center)
     return db_work_center
 
 
-@router.get("/", response_model=List[WorkCenter])
+@router.get("/", response_model=List[workcenter])
 def get_work_centers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """Get all work centers with pagination"""
-    work_centers = db.query(WorkCenterModel).offset(skip).limit(limit).all()
+    work_centers = db.query(workcenterModel).offset(skip).limit(limit).all()
     return work_centers
 
 
-@router.get("/{work_center_id}", response_model=WorkCenter)
+@router.get("/{work_center_id}", response_model=workcenter)
 def get_work_center(work_center_id: int, db: Session = Depends(get_db)):
     """Get a specific work center by ID"""
-    work_center = db.query(WorkCenterModel).filter(WorkCenterModel.id == work_center_id).first()
+    work_center = db.query(workcenterModel).filter(workcenterModel.id == work_center_id).first()
     if not work_center:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -50,10 +50,10 @@ def get_work_center(work_center_id: int, db: Session = Depends(get_db)):
     return work_center
 
 
-@router.put("/{work_center_id}", response_model=WorkCenter)
-def update_work_center(work_center_id: int, work_center: WorkCenterUpdate, db: Session = Depends(get_db)):
+@router.put("/{work_center_id}", response_model=workcenter)
+def update_work_center(work_center_id: int, work_center: workcenterUpdate, db: Session = Depends(get_db)):
     """Update a work center"""
-    db_work_center = db.query(WorkCenterModel).filter(WorkCenterModel.id == work_center_id).first()
+    db_work_center = db.query(workcenterModel).filter(workcenterModel.id == work_center_id).first()
     if not db_work_center:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -72,7 +72,7 @@ def update_work_center(work_center_id: int, work_center: WorkCenterUpdate, db: S
 @router.delete("/{work_center_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_work_center(work_center_id: int, db: Session = Depends(get_db)):
     """Delete a work center"""
-    db_work_center = db.query(WorkCenterModel).filter(WorkCenterModel.id == work_center_id).first()
+    db_work_center = db.query(workcenterModel).filter(workcenterModel.id == work_center_id).first()
     if not db_work_center:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
