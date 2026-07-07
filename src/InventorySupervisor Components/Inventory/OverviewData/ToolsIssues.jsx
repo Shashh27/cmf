@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Button, Tag, Space, message, Modal, Input, Row, Col, Card, DatePicker, Select } from 'antd';
 import { API_BASE_URL } from '../../../Config/auth.js';
+import { getInventoryOverviewTableProps, InventoryOverviewTableStyles } from './inventoryOverviewTable.jsx';
 
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
@@ -107,6 +108,8 @@ const ToolsIssues = () => {
   const handleClear = () => {
     setDateRange([null, null]);
     setSearchText('');
+    setStatusFilter('all');
+    setPagination((prev) => ({ ...prev, current: 1 }));
   };
 
   const showConfirmModal = (record, action) => {
@@ -197,124 +200,103 @@ const ToolsIssues = () => {
     {
       title: 'SL NO',
       key: 'sl_no',
-      width: 70,
-      fixed: 'left',
       align: 'center',
-      className: 'table-header-styled',
       render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1,
     },
     {
       title: 'Tool Name',
       dataIndex: 'tool_name',
       key: 'tool_name',
-      width: 200,
-      fixed: 'left',
-      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Range',
       dataIndex: 'tool_range',
       key: 'tool_range',
-      width: 80,
-      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'ID Code',
       dataIndex: 'identification_code',
       key: 'identification_code',
-      width: 100,
-      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Project',
-      dataIndex: 'sale_order_number',
       key: 'project_number',
-      width: 140,
-      className: 'table-header-styled',
+      minWidth: 130,
+      ellipsis: true,
+      sortValue: (r) => `${r.sale_order_number || r.project_name || ''} ${r.product_name || ''}`,
       render: (_, record) => {
         const projName = record.sale_order_number || record.project_name || '-';
         const productName = record.product_name || '';
-        return (
-          <div>
-            <div>{projName}</div>
-            {productName && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>{productName}</div>}
-          </div>
-        );
+        return productName ? `${projName} · ${productName}` : projName;
       },
     },
     {
       title: 'Part',
       key: 'part',
-      width: 140,
-      className: 'table-header-styled',
+      minWidth: 120,
+      ellipsis: true,
+      sortValue: (r) => `${r.part_name || ''} ${r.part_number || ''}`,
       render: (_, record) => {
         const partName = record.part_name || '-';
         const partNum = record.part_number || '';
-        return (
-          <div>
-            <div>{partName}</div>
-            {partNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{partNum}</div>}
-          </div>
-        );
+        return partNum ? `${partName} · ${partNum}` : partName;
       },
     },
     {
       title: 'Operation',
       key: 'operation',
-      width: 130,
-      className: 'table-header-styled',
+      minWidth: 120,
+      ellipsis: true,
+      sortValue: (r) => `${r.operation_name || ''} ${r.operation_number || ''}`,
       render: (_, record) => {
         const opName = record.operation_name || '-';
         const opNum = record.operation_number || '';
-        return (
-          <div>
-            <div>{opName}</div>
-            {opNum && <div style={{ fontSize: '12px', color: '#8c8c8c' }}>#{opNum}</div>}
-          </div>
-        );
+        return opNum ? `${opName} #${opNum}` : opName;
       },
     },
     {
       title: 'Issue Raised By',
       dataIndex: 'operator_name',
       key: 'operator_name',
-      width: 150,
-      className: 'table-header-styled',
+      minWidth: 120,
       render: (text) => text || '-',
+    },
+    {
+      title: 'Issue Raised At',
+      dataIndex: 'created_at',
+      key: 'issue_raised_at',
+      align: 'center',
+      minWidth: 128,
+      render: (v) => formatDate(v),
     },
     {
       title: 'Issue Raised Qty',
       dataIndex: 'tool_issue_qty',
       key: 'tool_issue_qty',
-      width: 150,
       align: 'center',
-      className: 'table-header-styled',
     },
     {
       title: 'Issue Category',
       dataIndex: 'issue_category',
       key: 'issue_category',
-      width: 140,
-      className: 'table-header-styled',
       render: (text) => text || '-',
     },
     {
       title: 'Description',
       dataIndex: 'description',
       key: 'description',
-      width: 200,
-      className: 'table-header-styled',
+      minWidth: 140,
+      ellipsis: true,
       render: (text) => text || '-',
     },
     {
       title: 'Document',
       key: 'document',
-      width: 120,
       align: 'center',
-      className: 'table-header-styled',
+      sorter: false,
       render: (_, record) => (
         <Button
           type="default"
@@ -331,17 +313,23 @@ const ToolsIssues = () => {
       title: 'Approved By',
       dataIndex: 'inventory_supervisor_name',
       key: 'inventory_supervisor_name',
-      width: 140,
-      className: 'table-header-styled',
+      minWidth: 120,
       render: (text) => text || '-',
+    },
+    {
+      title: 'Approved At',
+      key: 'approved_at',
+      align: 'center',
+      minWidth: 128,
+      sortValue: (r) => ((r.status || '').toLowerCase() !== 'pending' ? r.updated_at : ''),
+      render: (_, record) =>
+        (record.status || '').toLowerCase() !== 'pending' ? formatDate(record.updated_at) : '-',
     },
     {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
       align: 'center',
-      className: 'table-header-styled',
       render: (status) => (
         <Tag color={getStatusColor(status)}>
           {status?.toUpperCase() || '-'}
@@ -351,10 +339,8 @@ const ToolsIssues = () => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 180,
-      fixed: 'right',
       align: 'center',
-      className: 'table-header-styled',
+      sorter: false,
       render: (_, record) => {
         const { role } = getCurrentUserInfo();
         // Only show actions for inventory_supervisor
@@ -449,48 +435,35 @@ const ToolsIssues = () => {
           </Col>
         </Row>
       </div>
+      <InventoryOverviewTableStyles />
       <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={filteredIssues}
-        loading={loading}
-        size="small"
-        className="modern-table"
-        pagination={{
-          current: pagination.current,
-          pageSize: pagination.pageSize,
-          showSizeChanger: true,
-          showQuickJumper: true,
-          showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-          pageSizeOptions: ['10', '20', '50', '100'],
-          onChange: (page, pageSize) => {
-            setPagination({
-              current: page,
-              pageSize: pageSize || pagination.pageSize,
-            });
+        {...getInventoryOverviewTableProps({
+          columns,
+          dataSource: filteredIssues,
+          rowKey: 'id',
+          loading,
+          scrollX: 1700,
+          pagination: {
+            current: pagination.current,
+            pageSize: pagination.pageSize,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+            onChange: (page, pageSize) => {
+              setPagination({
+                current: page,
+                pageSize: pageSize || pagination.pageSize,
+              });
+            },
+            onShowSizeChange: (current, size) => {
+              setPagination({
+                current: 1,
+                pageSize: size,
+              });
+            },
           },
-          onShowSizeChange: (current, size) => {
-            setPagination({
-              current: 1,
-              pageSize: size,
-            });
-          },
-        }}
-        scroll={{ x: 1500 }}
-        components={{
-          header: {
-            cell: (props) => (
-              <th
-                {...props}
-                style={{
-                  ...(props.style || {}),
-                  paddingTop: 10,
-                  paddingBottom: 10,
-                }}
-              />
-            ),
-          },
-        }}
+        })}
       />
 
       <Modal

@@ -229,11 +229,11 @@ const ReportSheetEditor = forwardRef(function ReportSheetEditor(
     <div
       ref={pageRef}
       id={printRootId}
-      className={`ir-page ir-a4-sheet${embedded ? ' ir-a4-sheet--embedded' : ''}${qtyGroupStart ? ' ir-a4-sheet--qty-start' : ''}`}
+      className={`ir-page ir-a4-sheet${embedded ? ' ir-a4-sheet--embedded' : ''}${payload?.showFooter !== false ? ' ir-a4-sheet--with-footer' : ''}${qtyGroupStart ? ' ir-a4-sheet--qty-start' : ''}`}
       data-qty={payload?.totalQuantity ?? ''}
       data-page-index={pageIndex}
     >
-      <div className="ir-sheet-stack">
+      <div className={`ir-sheet-stack${payload?.showFooter !== false ? ' ir-sheet-stack--with-footer' : ''}`}>
         <ReportBannerHeader />
         <EditorContent editor={editor} className="ir-editor-root" />
       </div>

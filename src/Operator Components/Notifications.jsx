@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Table, Typography, Tag, Spin, message, Button, Row, Col, Tabs, Badge } from 'antd';
-import { BellOutlined, CheckOutlined, ReloadOutlined } from '@ant-design/icons';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Card, Table, Typography, Tag, Spin, message, Button, Tabs, Badge, Select, Space } from 'antd';
+import { CheckOutlined, ReloadOutlined, ClearOutlined } from '@ant-design/icons';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig';
+import { API_BASE_URL } from '../Config/auth.js';
 import config from '../Config/config';
 import dayjs from 'dayjs';
+import NotificationPokaYoke from './NotificationPokaYoke';
 
 const { Title, Text } = Typography;
 
@@ -16,11 +18,62 @@ const Notifications = () => {
   const [pokayokePagination, setPokayokePagination] = useState({ current: 1, pageSize: 10 });
   const [activeTab, setActiveTab] = useState('production');
   const [acknowledgingIds, setAcknowledgingIds] = useState(new Set());
+  const [productionMachineFilter, setProductionMachineFilter] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [parts, setParts] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedParts, setSelectedParts] = useState([]);
+  const [selectedOperations, setSelectedOperations] = useState([]);
+  const [pokayokeChecklistUnacknowledgedCount, setPokayokeChecklistUnacknowledgedCount] = useState(0);
+  const [pokayokeMachineFilter, setPokayokeMachineFilter] = useState([]);
+  const [pokayokeChecklistFilter, setPokayokeChecklistFilter] = useState([]);
 
   useEffect(() => {
     fetchNotifications();
     fetchPokayokeNotifications();
   }, []);
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/orders/`);
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(Array.isArray(data) ? data : []);
+        }
+      } catch (e) {
+        console.error('Error fetching orders:', e);
+      }
+    };
+    fetchOrders();
+  }, []);
+
+  const selectedSaleOrder = useMemo(() => {
+    if (!selectedProjectId) return null;
+    return orders.find((o) => o.id === selectedProjectId)?.sale_order_number ?? null;
+  }, [selectedProjectId, orders]);
+
+  const handleProjectChange = (orderId) => {
+    setSelectedProjectId(orderId);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setPagination((prev) => ({ ...prev, current: 1 }));
+
+    if (!orderId) return;
+
+    const order = orders.find((o) => o.id === orderId);
+    const saleOrder = order?.sale_order_number;
+    if (!saleOrder) return;
+
+    fetch(`${API_BASE_URL}/orders/sale-order/${saleOrder}/parts`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        const list = Array.isArray(d) ? d : (d.parts || []);
+        setParts(list);
+      })
+      .catch(() => setParts([]));
+  };
 
   const fetchNotifications = async () => {
     setLoading(true);
@@ -332,33 +385,138 @@ const Notifications = () => {
     }
   };
 
+  // Build a de-duplicated list of machines present in the production logs, for the dropdown
+  const productionMachineOptions = useMemo(() => {
+    const machineMap = new Map();
+    notifications.forEach((record) => {
+      const machine = record.machine;
+      if (machine && machine.id !== undefined && machine.id !== null && !machineMap.has(machine.id)) {
+        const label = [machine.make, machine.model].filter(Boolean).join(' - ') || `Machine ${machine.id}`;
+        machineMap.set(machine.id, label);
+      }
+    });
+    return Array.from(machineMap.entries()).map(([id, label]) => ({ value: id, label }));
+  }, [notifications]);
+
+  const productionOperationOptions = useMemo(() => {
+    const opMap = new Map();
+    notifications.forEach((record) => {
+      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) return;
+      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) return;
+
+      const opNum = record.operation?.operation_number;
+      if (opNum === undefined || opNum === null || opMap.has(opNum)) return;
+
+      const opName = record.operation?.operation_name;
+      const label = opName ? `${opName} (#${opNum})` : `#${opNum}`;
+      opMap.set(opNum, label);
+    });
+    return Array.from(opMap.entries()).map(([value, label]) => ({ value, label }));
+  }, [notifications, selectedSaleOrder, selectedParts]);
+
+  const filteredNotifications = useMemo(() => {
+    return notifications.filter((record) => {
+      if (productionMachineFilter.length > 0) {
+        if (!record.machine?.id || !productionMachineFilter.includes(record.machine.id)) {
+          return false;
+        }
+      }
+
+      if (selectedSaleOrder && record.operation?.order?.sale_order_number !== selectedSaleOrder) {
+        return false;
+      }
+
+      if (selectedParts.length > 0 && !selectedParts.includes(record.operation?.part?.part_number)) {
+        return false;
+      }
+
+      if (selectedOperations.length > 0 && !selectedOperations.includes(record.operation?.operation_number)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [notifications, productionMachineFilter, selectedSaleOrder, selectedParts, selectedOperations]);
+
+  const pokayokeMachineOptions = useMemo(() => {
+    const machineMap = new Map();
+    pokayokeNotifications.forEach((record) => {
+      if (record.machine_id !== undefined && record.machine_id !== null && !machineMap.has(record.machine_id)) {
+        machineMap.set(record.machine_id, record.machine_name || `Machine ${record.machine_id}`);
+      }
+    });
+    return Array.from(machineMap.entries()).map(([id, label]) => ({ value: id, label }));
+  }, [pokayokeNotifications]);
+
+  const pokayokeChecklistOptions = useMemo(() => {
+    const checklistMap = new Map();
+    pokayokeNotifications.forEach((record) => {
+      if (record.checklist_id !== undefined && record.checklist_id !== null && !checklistMap.has(record.checklist_id)) {
+        checklistMap.set(record.checklist_id, record.checklist_name || `Checklist ${record.checklist_id}`);
+      }
+    });
+    return Array.from(checklistMap.entries()).map(([id, label]) => ({ value: id, label }));
+  }, [pokayokeNotifications]);
+
+  const filteredPokayokeNotifications = useMemo(() => {
+    return pokayokeNotifications.filter((record) => {
+      if (pokayokeMachineFilter.length > 0 && !pokayokeMachineFilter.includes(record.machine_id)) {
+        return false;
+      }
+
+      if (pokayokeChecklistFilter.length > 0 && !pokayokeChecklistFilter.includes(record.checklist_id)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [pokayokeNotifications, pokayokeMachineFilter, pokayokeChecklistFilter]);
+
+  const hasProductionFilters = useMemo(() => (
+    productionMachineFilter.length > 0 ||
+    selectedProjectId != null ||
+    selectedParts.length > 0 ||
+    selectedOperations.length > 0
+  ), [productionMachineFilter, selectedProjectId, selectedParts, selectedOperations]);
+
+  const hasPmFilters = useMemo(() => (
+    pokayokeMachineFilter.length > 0 || pokayokeChecklistFilter.length > 0
+  ), [pokayokeMachineFilter, pokayokeChecklistFilter]);
+
+  const clearProductionFilters = () => {
+    setProductionMachineFilter([]);
+    setSelectedProjectId(null);
+    setSelectedParts([]);
+    setSelectedOperations([]);
+    setParts([]);
+    setPagination((prev) => ({ ...prev, current: 1 }));
+  };
+
+  const clearPmFilters = () => {
+    setPokayokeMachineFilter([]);
+    setPokayokeChecklistFilter([]);
+    setPokayokePagination((prev) => ({ ...prev, current: 1 }));
+  };
+
   const columns = [
     {
       title: 'Sl\nNo',
       key: 'slNo',
       align: 'center',
       width: 50,
-      render: (text, record, index) => index + 1,
-    },
-    {
-      title: 'Operation\nNo',
-      key: 'operationNumber',
-      align: 'center',
-      width: 80,
-      render: (text, record) => record.operation?.operation_number || 'N/A',
-    },
-    {
-      title: 'Operation\nName',
-      key: 'operationName',
-      align: 'center',
-      width: 100,
-      render: (text, record) => record.operation?.operation_name || 'N/A',
+      render: (text, record, index) =>
+        (pagination.current - 1) * pagination.pageSize + index + 1,
     },
     {
       title: 'Project\nDetails',
       key: 'projectDetails',
       align: 'center',
       width: 100,
+      sorter: (a, b) => {
+        const orderA = a.operation?.order?.sale_order_number || '';
+        const orderB = b.operation?.order?.sale_order_number || '';
+        return orderA.localeCompare(orderB);
+      },
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{record.operation?.order?.sale_order_number || 'N/A'}</div>
@@ -371,10 +529,32 @@ const Notifications = () => {
       key: 'partDetails',
       align: 'center',
       width: 80,
+      sorter: (a, b) => {
+        const partA = a.operation?.part?.part_name || '';
+        const partB = b.operation?.part?.part_name || '';
+        return partA.localeCompare(partB);
+      },
       render: (text, record) => (
         <div>
           <div style={{ fontWeight: 'bold' }}>{record.operation?.part?.part_name || 'N/A'}</div>
           <div style={{ fontSize: '12px', color: '#666' }}>{record.operation?.part?.part_number || 'N/A'}</div>
+        </div>
+      ),
+    },
+    {
+      title: 'Operation\nDetails',
+      key: 'operationDetails',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const opA = a.operation?.operation_name || '';
+        const opB = b.operation?.operation_name || '';
+        return opA.localeCompare(opB);
+      },
+      render: (text, record) => (
+        <div>
+          <div style={{ fontWeight: 'bold' }}>{record.operation?.operation_name || 'N/A'}</div>
+          <div style={{ fontSize: '12px', color: '#666' }}>{record.operation?.operation_number ? `#${record.operation.operation_number}` : 'N/A'}</div>
         </div>
       ),
     },
@@ -395,6 +575,11 @@ const Notifications = () => {
       key: 'fromDateTime',
       align: 'center',
       width: 100,
+      sorter: (a, b) => {
+        const dateA = new Date(`${a.from_date} ${a.from_time}`);
+        const dateB = new Date(`${b.from_date} ${b.from_time}`);
+        return dateA - dateB;
+      },
       render: (text, record) => formatDateTime(record.from_date, record.from_time),
     },
     {
@@ -402,6 +587,11 @@ const Notifications = () => {
       key: 'toDateTime',
       align: 'center',
       width: 100,
+      sorter: (a, b) => {
+        const dateA = new Date(`${a.to_date} ${a.to_time}`);
+        const dateB = new Date(`${b.to_date} ${b.to_time}`);
+        return dateA - dateB;
+      },
       render: (text, record) => formatDateTime(record.to_date, record.to_time),
     },
     {
@@ -449,6 +639,11 @@ const Notifications = () => {
       dataIndex: 'status',
       key: 'status',
       align: 'center',
+      filters: [
+        { text: 'Completed', value: 'completed' },
+        { text: 'In Progress', value: 'inprogress' },
+      ],
+      onFilter: (value, record) => record.status?.toLowerCase() === value,
       render: (text) => (
         <Tag color={getStatusColor(text)}>
           {(text || 'N/A').toUpperCase()}
@@ -469,6 +664,35 @@ const Notifications = () => {
       align: 'center',
       width: 120,
       render: (text) => text || '-',
+    },
+    {
+      title: 'Acknowledged At',
+      dataIndex: 'operator_acknowledged_at',
+      key: 'acknowledgedAt',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const dateA = new Date(a.operator_acknowledged_at);
+        const dateB = new Date(b.operator_acknowledged_at);
+        return dateA - dateB;
+      },
+      render: (text) => {
+        if (!text) return 'N/A';
+        try {
+          const date = new Date(text);
+          return date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          });
+        } catch (error) {
+          return 'N/A';
+        }
+      },
     },
     {
       title: 'Action',
@@ -496,7 +720,8 @@ const Notifications = () => {
       key: 'slNo',
       align: 'center',
       width: 50,
-      render: (text, record, index) => index + 1,
+      render: (text, record, index) =>
+        (pokayokePagination.current - 1) * pokayokePagination.pageSize + index + 1,
     },
     {
       title: 'Checklist Name',
@@ -504,6 +729,7 @@ const Notifications = () => {
       key: 'checklistName',
       align: 'center',
       width: 120,
+      sorter: (a, b) => (a.checklist_name || '').localeCompare(b.checklist_name || ''),
     },
     {
       title: 'Machine Name',
@@ -513,7 +739,15 @@ const Notifications = () => {
       width: 100,
     },
     {
-      title: 'Supervisor Name',
+      title: 'Operator',
+      dataIndex: 'operator_name',
+      key: 'operatorName',
+      align: 'center',
+      width: 100,
+      render: (text) => text || 'N/A',
+    },
+    {
+      title: 'Supervisor',
       dataIndex: 'supervisor_name',
       key: 'supervisorName',
       align: 'center',
@@ -526,6 +760,11 @@ const Notifications = () => {
       key: 'completedAt',
       align: 'center',
       width: 120,
+      sorter: (a, b) => {
+        const dateA = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const dateB = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+        return dateA - dateB;
+      },
       render: (text) => {
         if (!text) return 'N/A';
         try {
@@ -536,6 +775,7 @@ const Notifications = () => {
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
+            second: '2-digit',
             hour12: false
           });
         } catch (error) {
@@ -562,6 +802,34 @@ const Notifications = () => {
       ),
     },
     {
+      title: 'Acknowledged At',
+      dataIndex: 'operator_acknowledged_at',
+      key: 'acknowledgedAt',
+      align: 'center',
+      width: 120,
+      sorter: (a, b) => {
+        const dateA = a.operator_acknowledged_at ? new Date(a.operator_acknowledged_at).getTime() : 0;
+        const dateB = b.operator_acknowledged_at ? new Date(b.operator_acknowledged_at).getTime() : 0;
+        return dateA - dateB;
+      },
+      render: (text) => {
+        if (!text) return 'N/A';
+        try {
+          const date = new Date(text);
+          return date.toLocaleString('en-GB', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          });
+        } catch (error) {
+          return 'N/A';
+        }
+      },
+    },
+    {
       title: 'Action',
       key: 'action',
       align: 'center',
@@ -583,42 +851,11 @@ const Notifications = () => {
 
   return (
     <div style={{ padding: '16px' }}>
-      {/* Header Card */}
-      <Card
-        style={{ borderRadius: 8, marginBottom: '16px' }}
-        styles={{ body: { padding: '16px' } }}
-      >
-        <Row justify="space-between" align="middle">
-          <Col>
-            <div>
-              <Title level={3} style={{ margin: 0, marginBottom: '8px' }}>
-                <BellOutlined /> Notifications
-              </Title>
-              <Text type="secondary">
-                View and acknowledge supervisor responses
-              </Text>
-            </div>
-          </Col>
-          <Col>
-            <Button
-              type="primary"
-              icon={<ReloadOutlined />}
-              size="large"
-              onClick={() => {
-                fetchNotifications();
-                fetchPokayokeNotifications();
-              }}
-            >
-              Refresh
-            </Button>
-          </Col>
-        </Row>
-      </Card>
 
       {/* Tabs Section */}
       <Card
         style={{ borderRadius: 8 }}
-        styles={{ body: { padding: 0 } }}
+        styles={{ body: { padding: '0 16px' } }}
       >
         <Tabs
           activeKey={activeTab}
@@ -629,9 +866,92 @@ const Notifications = () => {
               label: 'Production Logs',
               children: (
                 <Spin spinning={loading}>
+                  <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, padding: '16px 16px 0' }}>
+                    <Space wrap>
+                      <Select
+                        mode="multiple"
+                        showSearch
+                        allowClear
+                        placeholder="Filter by machine"
+                        style={{ minWidth: 220, maxWidth: 320 }}
+                        value={productionMachineFilter}
+                        onChange={(value) => {
+                          setProductionMachineFilter(value || []);
+                          setPagination((prev) => ({ ...prev, current: 1 }));
+                        }}
+                        options={productionMachineOptions}
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                      <Select
+                        placeholder="Select Project"
+                        showSearch
+                        allowClear
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        value={selectedProjectId}
+                        onChange={handleProjectChange}
+                        style={{ minWidth: 180 }}
+                        options={orders.map((o) => ({
+                          value: o.id,
+                          label: o.sale_order_number || `Order ${o.id}`,
+                        }))}
+                      />
+                      <Select
+                        mode="multiple"
+                        placeholder="Select Parts"
+                        showSearch
+                        allowClear
+                        disabled={!selectedProjectId}
+                        maxTagCount={1}
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        value={selectedParts}
+                        onChange={(val) => {
+                          setSelectedParts(val);
+                          setSelectedOperations([]);
+                          setPagination((prev) => ({ ...prev, current: 1 }));
+                        }}
+                        style={{ minWidth: 220, maxWidth: 320 }}
+                        options={parts.map((p) => ({
+                          value: p.part_number,
+                          label: p.part_name ? `${p.part_name} (${p.part_number})` : p.part_number,
+                        }))}
+                      />
+                      <Select
+                        mode="multiple"
+                        placeholder="Select Operations"
+                        showSearch
+                        allowClear
+                        disabled={!selectedProjectId}
+                        maxTagCount={1}
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                        value={selectedOperations}
+                        onChange={(val) => {
+                          setSelectedOperations(val);
+                          setPagination((prev) => ({ ...prev, current: 1 }));
+                        }}
+                        style={{ minWidth: 220, maxWidth: 320 }}
+                        options={productionOperationOptions}
+                      />
+                      {hasProductionFilters && (
+                        <Button icon={<ClearOutlined />} onClick={clearProductionFilters}>
+                          Clear
+                        </Button>
+                      )}
+                    </Space>
+                    <Button icon={<ReloadOutlined />} onClick={fetchNotifications} loading={loading}>
+                      Refresh
+                    </Button>
+                  </div>
                   <Table
                     columns={columns}
-                    dataSource={notifications}
+                    dataSource={filteredNotifications}
                     rowKey="id"
                     pagination={{
                       current: pagination.current,
@@ -673,9 +993,53 @@ const Notifications = () => {
               ),
               children: (
                 <Spin spinning={pokayokeLoading}>
+                  <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, padding: '16px 16px 0' }}>
+                    <Space wrap>
+                      <Select
+                        mode="multiple"
+                        showSearch
+                        allowClear
+                        placeholder="Filter by machine"
+                        style={{ minWidth: 220, maxWidth: 320 }}
+                        value={pokayokeMachineFilter}
+                        onChange={(value) => {
+                          setPokayokeMachineFilter(value || []);
+                          setPokayokePagination((prev) => ({ ...prev, current: 1 }));
+                        }}
+                        options={pokayokeMachineOptions}
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                      <Select
+                        mode="multiple"
+                        showSearch
+                        allowClear
+                        placeholder="Filter by checklist"
+                        style={{ minWidth: 220, maxWidth: 320 }}
+                        value={pokayokeChecklistFilter}
+                        onChange={(value) => {
+                          setPokayokeChecklistFilter(value || []);
+                          setPokayokePagination((prev) => ({ ...prev, current: 1 }));
+                        }}
+                        options={pokayokeChecklistOptions}
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                      {hasPmFilters && (
+                        <Button icon={<ClearOutlined />} onClick={clearPmFilters}>
+                          Clear
+                        </Button>
+                      )}
+                    </Space>
+                    <Button icon={<ReloadOutlined />} onClick={fetchPokayokeNotifications} loading={pokayokeLoading}>
+                      Refresh
+                    </Button>
+                  </div>
                   <Table
                     columns={pokayokeColumns}
-                    dataSource={pokayokeNotifications}
+                    dataSource={filteredPokayokeNotifications}
                     rowKey="log_id"
                     pagination={{
                       current: pokayokePagination.current,
@@ -706,6 +1070,17 @@ const Notifications = () => {
                     }}
                   />
                 </Spin>
+              ),
+            },
+            {
+              key: 'pokayoke-checklist',
+              label: (
+                <Badge count={pokayokeChecklistUnacknowledgedCount} showZero={false}>
+                  PokaYoke Checklist
+                </Badge>
+              ),
+              children: (
+                <NotificationPokaYoke onUnacknowledgedCountChange={setPokayokeChecklistUnacknowledgedCount} />
               ),
             },
           ]}

@@ -1,13 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Typography, Button, Card } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
-import Lottie from 'lottie-react';
-import documentIcon from '../assets/DocumentIcon.json';
 import DocumentTree from '../Document Components/DocumentTree';
 import DocumentContent from '../Document Components/DocumentContent';
-
-const { Sider, Content } = Layout;
-const { Title, Text } = Typography;
 
 const Document = () => {
   const [selectedNode, setSelectedNode] = useState(null);
@@ -70,39 +63,9 @@ const Document = () => {
             overflow: 'hidden'
           }}
         >
-          {/* Tree Header with Search Bar and New Folder Button */}
-          <div style={{ 
-            padding: '12px 16px', 
-            borderBottom: '1px solid #f0f0f0',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            backgroundColor: '#fafafa'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Title level={5} style={{ margin: 0, color: '#262626' }}>Folders and Documents</Title>
-              <Button 
-                type="primary" 
-                size="middle"
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  if (documentTreeRef.current) {
-                    documentTreeRef.current.openNewFolderModal();
-                  }
-                }}
-                style={{ 
-                  fontSize: '12px',
-                  height: '32px'
-                }}
-              >
-                New Folder
-              </Button>
-            </div>
-          </div>
-          
           {/* Tree Content */}
-          <div style={{ flex: 1, overflow: 'auto' }}>
-            <DocumentTree 
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <DocumentTree
               ref={documentTreeRef}
               onNodeSelect={handleNodeSelect} 
               isMobile={isMobile}

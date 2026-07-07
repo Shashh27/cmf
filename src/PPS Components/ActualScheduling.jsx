@@ -1,103 +1,35 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { Layout, Card, Button, Select, DatePicker, Tooltip, message, Modal } from 'antd';
-
+import { Layout, Button, Select, DatePicker, Tooltip, message, Modal } from 'antd';
+import { motion, AnimatePresence } from 'framer-motion';
+import SchedulingGanttTimeline from '../components/SchedulingGanttTimeline.jsx';
+import { getComponentColors, getTimeRange } from './schedulingTimelineUtils.js';
+import {
+  CONTROL_BAR_MOTION,
+  LEGEND_CHIP_MOTION,
+  LEGEND_MOTION,
+  getWindowAnimation,
+} from './schedulingTimelineMotion.js';
 import { SyncOutlined, ReloadOutlined, LeftOutlined, RightOutlined, InfoCircleOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, CalendarOutlined, WarningOutlined } from '@ant-design/icons';
-import { Timeline } from "vis-timeline";
-import { DataSet } from "vis-data";
-import "vis-timeline/styles/vis-timeline-graph2d.css";
 import moment from 'moment';
 import dayjs from 'dayjs';
 import { API_BASE_URL } from '../Config/auth.js';
 import { SCHEDULING_API_BASE_URL } from '../Config/schedulingconfig.js';
+import useLenis from '../hooks/useLenis.js';
 
 const { Content } = Layout;
 const { Option } = Select;
 
 // ─────────────────────────────────────────────────────────────
-//  COLOUR HELPERS
-// ─────────────────────────────────────────────────────────────
-const generateDistinctColors = (count) => {
-  const base = [
-    '#1890ff', '#13c2c2', '#52c41a', '#faad14', '#f5222d',
-    '#722ed1', '#eb2f96', '#fa8c16', '#a0d911', '#fadb14',
-    '#2f54eb', '#fa541c', '#08979c', '#389e0d', '#9254de',
-  ];
-  const colors = [...base];
-  while (colors.length < count) {
-    const hue = (colors.length * 137.508) % 360;
-    colors.push(`hsl(${hue},70%,50%)`);
-  }
-  return colors;
-};
-
-const getComponentColors = (operations) => {
-  const uniqueOrders = [...new Set(operations.map(op => op.production_order))];
-  const colors = generateDistinctColors(uniqueOrders.length);
-  return uniqueOrders.reduce((acc, order, i) => {
-    acc[order] = {
-      backgroundColor: colors[i],
-      borderColor: colors[i],
-      hoverColor: colors[i] + '80',
-    };
-    return acc;
-  }, {});
-};
-
-// ─────────────────────────────────────────────────────────────
-//  TIME HELPERS
-// ─────────────────────────────────────────────────────────────
-const getTimeAxisScale = (v) => ({ year: 'month', month: 'day', week: 'hour', day: 'hour' }[v] || 'hour');
-const getTimeAxisStep = (v) => ({ year: 1, month: 1, week: 4, day: 4 }[v] || 1);
-
-const getTimeRange = (viewType, dateRange, scheduleData) => {
-  const now = moment();
-  const allOps = scheduleData?.scheduled_operations || [];
-
-  const dataMin = allOps.length
-    ? moment(Math.min(...allOps.map(o => new Date(o.start_time)))).subtract(1, 'month').toDate()
-    : now.clone().subtract(1, 'year').toDate();
-  const dataMax = allOps.length
-    ? moment(Math.max(...allOps.map(o => new Date(o.end_time)))).add(1, 'month').toDate()
-    : now.clone().add(1, 'year').toDate();
-
-  let start, end;
-  if (dateRange && dateRange[0] && dateRange[1]) {
-    start = moment(dateRange[0]).hour(0).minute(0).second(0).toDate();
-    end = moment(dateRange[1]).hour(23).minute(59).second(59).toDate();
-  } else {
-    switch (viewType) {
-      case 'year':
-        start = now.clone().startOf('year').toDate();
-        end = now.clone().endOf('year').toDate();
-        break;
-      case 'month':
-        start = now.clone().startOf('month').toDate();
-        end = now.clone().endOf('month').toDate();
-        break;
-      case 'day':
-        start = now.clone().startOf('day').hour(0).minute(0).toDate();
-        end = now.clone().endOf('day').hour(23).minute(59).toDate();
-        break;
-      case 'week':
-      default:
-        start = now.clone().startOf('isoWeek').hour(0).minute(0).toDate();
-        end = now.clone().startOf('isoWeek').add(5, 'days').hour(23).minute(59).toDate();
-    }
-  }
-
-  return { start, end, dataMin, dataMax };
-};
-
-// ─────────────────────────────────────────────────────────────
 //  ComponentLegend
 // ─────────────────────────────────────────────────────────────
-const ComponentLegend = ({ componentColors, title, onToggle, active }) => (
+const ComponentLegend = React.memo(({ componentColors, title, onToggle, active }) => (
   <div style={{ marginTop: 12, padding: '10px 14px', background: '#fafafa', borderRadius: 6, border: '1px solid #f0f0f0' }}>
     <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{title}</div>
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-      {Object.entries(componentColors).map(([po, c]) => (
-        <span
+      {Object.entries(componentColors).map(([po, c], index) => (
+        <motion.span
           key={po}
+          {...LEGEND_CHIP_MOTION(index)}
           onClick={() => onToggle && onToggle(po)}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -108,11 +40,11 @@ const ComponentLegend = ({ componentColors, title, onToggle, active }) => (
         >
           <span style={{ width: 13, height: 13, borderRadius: 3, flexShrink: 0, background: c.backgroundColor, display: 'inline-block' }} />
           {po}
-        </span>
+        </motion.span>
       ))}
     </div>
   </div>
-);
+));
 
 // ─────────────────────────────────────────────────────────────
 //  MAIN COMPONENT
@@ -129,7 +61,6 @@ const ActualScheduling = () => {
   const [selectedMachines, setSelectedMachines] = useState([]);
   const [selectedComponents, setSelectedComponents] = useState([]);
   const [selectedProductionOrders, setSelectedProductionOrders] = useState([]);
-  const [componentColors, setComponentColors] = useState({});
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
@@ -141,10 +72,16 @@ const ActualScheduling = () => {
     skipped_parts: [],
     parts_without_operations: []
   });
+  const [shiftConfigs, setShiftConfigs] = useState([]);
 
   const timelineRef = useRef(null);
-  const timelineContainerRef = useRef(null);
-  const styleElementRef = useRef(null);
+
+  useLenis(true);
+
+  const componentColors = useMemo(
+    () => getComponentColors(scheduleData.scheduled_operations),
+    [scheduleData.scheduled_operations]
+  );
 
   const fetchSchedule = async () => {
     try {
@@ -223,12 +160,6 @@ const ActualScheduling = () => {
       }));
   }, [scheduleData.machines]);
 
-  const machineMapping = useMemo(() => {
-    const map = new Map();
-    availableMachines.forEach(m => map.set(m.machineId, m.machineId));
-    return map;
-  }, [availableMachines]);
-
   useEffect(() => {
     const fetchMachines = async () => {
       try {
@@ -259,6 +190,21 @@ const ActualScheduling = () => {
   useEffect(() => {
     const id = setTimeout(() => { fetchSchedule(); }, 0);
     return () => clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    const fetchShiftConfigs = async () => {
+      try {
+        const res = await fetch(`${SCHEDULING_API_BASE_URL}/shift-hours/`);
+        if (res.ok) {
+          const data = await res.json();
+          setShiftConfigs(Array.isArray(data) ? data : []);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchShiftConfigs();
   }, []);
 
   // ── Project selection → filter Gantt by that sale order ────
@@ -296,197 +242,6 @@ const ActualScheduling = () => {
     }
   };
 
-  // ── INIT TIMELINE ────────────────────────────────────────────
-  useEffect(() => {
-    const initializeTimeline = () => {
-      if (!timelineContainerRef.current) return;
-
-      try {
-        let operations = scheduleData.scheduled_operations.filter(op => {
-          const mc = selectedComponents.length === 0 || selectedComponents.includes(op.component);
-          const mo = selectedProductionOrders.length === 0 || selectedProductionOrders.includes(op.production_order);
-          const mm = selectedMachines.length === 0 || selectedMachines.includes(op.machineId);
-          return mc && mo && mm;
-        });
-
-        const colors = getComponentColors(scheduleData.scheduled_operations);
-        setComponentColors(colors);
-
-        const items = new DataSet(
-          operations.map((op, index) => {
-            const start = new Date(op.start_time);
-            const end = new Date(op.end_time);
-            return {
-              id: index,
-              group: op.machineId,
-              content: `<div class="timeline-item" style="padding:3px 8px;height:100%;display:flex;flex-direction:column;justify-content:center;"><div style="font-weight:600;font-size:13px;line-height:1.2;">${op.component}</div><div style="font-size:10px;opacity:0.85;">${op.production_order} · ${op.description}</div></div>`,
-              start,
-              end,
-              className: `order-${op.production_order.replace(/[^a-zA-Z0-9]/g, '-')}`,
-              operation: op,
-              style: `background-color:${colors[op.production_order].backgroundColor};border-color:${colors[op.production_order].borderColor};color:white;border-radius:4px;`,
-            };
-          })
-        );
-
-        const groupsArr = availableMachines
-          .filter(machine => {
-            const machineSelected = selectedMachines.length === 0 || selectedMachines.includes(machine.machineId);
-            if (selectedComponents.length === 0 && selectedProductionOrders.length === 0) {
-              return machineSelected;
-            }
-            const hasComp = selectedComponents.length === 0 ||
-              operations.some(op => selectedComponents.includes(op.component) && op.machineId === machine.machineId);
-            const hasOrder = selectedProductionOrders.length === 0 ||
-              operations.some(op => selectedProductionOrders.includes(op.production_order) && op.machineId === machine.machineId);
-            return hasComp && hasOrder && machineSelected;
-          })
-          .map(machine => ({
-            id: machine.machineId,
-            content: `<div style="padding:4px 10px;font-size:13px;font-weight:500;white-space:nowrap;">${machine.displayName}</div>`,
-            className: operations.some(op => op.machineId === machine.machineId) ? 'machine-with-ops' : 'machine-without-ops',
-            order: machine.order,
-          }));
-
-        const groups = new DataSet(groupsArr);
-        const rowHeight = 34;
-        const timelineHeightPx = Math.max(300, groupsArr.length * rowHeight + 28);
-
-        if (styleElementRef.current) styleElementRef.current.remove();
-        const styleEl = document.createElement('style');
-        styleEl.textContent = `
-          .vis-current-time { background-color:#ff9800!important; width:2px!important; }
-          .vis-item { border-width:1px!important; min-height:28px!important; height:28px!important; }
-          .vis-item .timeline-item { height:28px!important; }
-          .vis-item.vis-selected { border:2px solid rgba(0,0,0,0.35)!important; }
-          .vis-label  { border-right:1px solid #e8e8e8; background:#fff; }
-          .vis-group  { border-bottom:none; }
-          .machine-without-ops { color:#aaa; }
-          .machine-with-ops    { font-weight:500; }
-          ${Object.entries(colors).map(([po, c]) => `
-            .order-${po.replace(/[^a-zA-Z0-9]/g, '-')} { background-color:${c.backgroundColor}!important; border-color:${c.borderColor}!important; }
-            .order-${po.replace(/[^a-zA-Z0-9]/g, '-')}:hover { background-color:${c.hoverColor}!important; }
-          `).join('')}
-        `;
-        document.head.appendChild(styleEl);
-        styleElementRef.current = styleEl;
-
-        const timeRange = getTimeRange(viewType, dateRange, scheduleData);
-        const options = {
-          stack: false,
-          moveable: true,
-          zoomable: true,
-          zoomKey: 'ctrlKey',
-          horizontalScroll: true,
-          verticalScroll: true,
-          orientation: 'top',
-          height: `${timelineHeightPx}px`,
-          margin: { item: { horizontal: 10, vertical: 4 }, axis: 5 },
-          start: timeRange.start,
-          end: timeRange.end,
-          zoomMin: 1000 * 60 * 30,
-          zoomMax: 1000 * 60 * 60 * 24 * 365 * 2,
-          editable: false,
-          showCurrentTime: true,
-          tooltip: {
-            followMouse: true,
-            overflowMethod: 'cap',
-            template: (item) => {
-              const op = item.operation;
-              if (!op) return '';
-              const displayStart = moment(op.start_time);
-              const displayEnd = moment(op.end_time);
-              const totalQty = op.quantity || 0;
-              const remainingQty = op.remaining_quantity || 0;
-              const plannedQty = totalQty - remainingQty;
-              return `<div style="padding:10px 14px;min-width:220px;font-size:13px;line-height:1.9;background:#fff;border-radius:6px;">
-                <div><b>Production Order:</b> ${op.production_order}</div>
-                <div><b>Part Number:</b> ${op.component}</div>
-                <div><b>Part Name:</b> ${op.part_name || 'N/A'}</div>
-                <div><b>Machine:</b> ${op.machineName}</div>
-                <div><b>Operation:</b> ${op.operation_number ? '#' + op.operation_number + ' - ' : ''}${op.description}</div>
-                <div><b>Quantity:</b> ${plannedQty}/${totalQty}</div>
-                <div><b>Remaining Qty:</b> ${remainingQty}</div>
-                <div><b>Start:</b> ${displayStart.format('DD-MM-YYYY, HH:mm')}</div>
-                <div><b>End:</b> ${displayEnd.format('DD-MM-YYYY, HH:mm')}</div>
-              </div>`;
-            },
-          },
-          timeAxis: { scale: getTimeAxisScale(viewType), step: getTimeAxisStep(viewType) },
-          format: {
-            minorLabels: (date, scale) => {
-              const d = moment(date);
-              if (scale === 'hour') {
-                return d.format('HH:mm');
-              }
-              if (scale === 'day') return d.format('D');
-              if (scale === 'month') return d.format('MMM');
-              return d.format('HH:mm');
-            },
-            majorLabels: (date, scale) => {
-              const d = moment(date);
-              if (scale === 'hour') return d.format('ddd D MMM');
-              if (scale === 'day') return d.format('MMMM YYYY');
-              if (scale === 'month') return d.format('YYYY');
-              return d.format('ddd D MMM');
-            },
-          },
-          hiddenDates: [
-            { start: '1970-01-04 00:00:00', end: '1970-01-05 00:00:00', repeat: 'weekly' },
-          ],
-        };
-
-        if (timelineRef.current) {
-          timelineRef.current.destroy();
-          timelineRef.current = null;
-        }
-
-        const tl = new Timeline(timelineContainerRef.current, items, groups, options);
-        timelineRef.current = tl;
-
-        // If a project is selected, auto-fit to its operations; otherwise use default window
-        if (selectedProductionOrders.length > 0 && operations.length > 0) {
-          tl.fit({ animation: false });
-        } else {
-          tl.setWindow(timeRange.start, timeRange.end, { animation: false });
-        }
-
-      } catch (err) {
-        console.error('Timeline init error:', err);
-        message.error('Timeline failed: ' + err.message);
-      }
-    };
-
-    const raf = requestAnimationFrame(initializeTimeline);
-    return () => {
-      cancelAnimationFrame(raf);
-      if (timelineRef.current) {
-        try { timelineRef.current.destroy(); } catch (e) { console.error(e); }
-        timelineRef.current = null;
-      }
-      if (styleElementRef.current) {
-        try { styleElementRef.current.remove(); } catch (e) { console.error(e); }
-        styleElementRef.current = null;
-      }
-    };
-  }, [scheduleData, selectedMachines, selectedComponents, selectedProductionOrders, dateRange, viewType, availableMachines, machineMapping]);
-
-  // ── Live current-time ticker (offset-corrected) ──────────────
-  useEffect(() => {
-    const updateCurrentTime = () => {
-      if (!timelineRef.current) return;
-
-      // Use actual "now"
-      const now = new Date();
-      timelineRef.current.setCurrentTime(now);
-    };
-
-    updateCurrentTime(); // run immediately on mount
-    const interval = setInterval(updateCurrentTime, 1000); // update every second
-
-    return () => clearInterval(interval);
-  }, []); // runs once, cleans up on unmount
-
   // ── Navigation ──────────────────────────────────────────────
   const handleTimelineNavigation = (direction) => {
     if (!timelineRef.current) return;
@@ -498,7 +253,7 @@ const ActualScheduling = () => {
     timelineRef.current.setWindow(
       start.clone().add(delta, unit).toDate(),
       end.clone().add(delta, unit).toDate(),
-      { animation: true }
+      { animation: getWindowAnimation(scheduleData.scheduled_operations.length) }
     );
   };
 
@@ -506,7 +261,11 @@ const ActualScheduling = () => {
     setViewType(v);
     if (!dateRange) {
       const r = getTimeRange(v, null, scheduleData);
-      if (timelineRef.current) timelineRef.current.setWindow(r.start, r.end, { animation: false });
+      if (timelineRef.current) {
+        timelineRef.current.setWindow(r.start, r.end, {
+          animation: getWindowAnimation(scheduleData.scheduled_operations.length),
+        });
+      }
     }
   };
 
@@ -525,7 +284,10 @@ const ActualScheduling = () => {
     <Layout className="min-h-screen bg-gray-50 p-4">
       <Content>
         {/* Controls */}
-        <div style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <motion.div
+          {...CONTROL_BAR_MOTION}
+          style={{ marginBottom: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #f0f0f0', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}
+        >
           <Select value={viewType} onChange={handleViewTypeChange} style={{ width: 110 }} size="small">
             <Option value="day">Daily</Option>
             <Option value="week">Weekly</Option>
@@ -616,7 +378,7 @@ const ActualScheduling = () => {
           <Button size="small" icon={<InfoCircleOutlined />} onClick={() => setHelpOpen(true)} />
           <Button size="small" type="primary" icon={<ReloadOutlined />} style={{ background: '#1677ff' }} onClick={() => setUpdateModalOpen(true)}>Update Actual Schedule</Button>
           <Button size="small" icon={<SyncOutlined />} onClick={handleRefresh}>Refresh</Button>
-        </div>
+        </motion.div>
 
         {/* Skipped Information Box */}
         <div style={{ marginBottom: 12 }}>
@@ -659,22 +421,36 @@ const ActualScheduling = () => {
               background: '#fff',
             }}
           >
-            <div ref={timelineContainerRef} style={{ minHeight: 300, background: '#fff' }} />
+            <SchedulingGanttTimeline
+              ref={timelineRef}
+              scheduledOperations={scheduleData.scheduled_operations}
+              availableMachines={availableMachines}
+              shiftConfigs={shiftConfigs}
+              selectedMachines={selectedMachines}
+              selectedComponents={selectedComponents}
+              selectedProductionOrders={selectedProductionOrders}
+              dateRange={dateRange}
+              viewType={viewType}
+            />
           </div>
         </div>
 
-        {Object.keys(componentColors).length > 0 && (
-          <ComponentLegend
-            componentColors={componentColors}
-            title="Production Orders"
-            active={selectedProductionOrders}
-            onToggle={(po) =>
-              setSelectedProductionOrders(prev =>
-                prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
-              )
-            }
-          />
-        )}
+        <AnimatePresence>
+          {Object.keys(componentColors).length > 0 && (
+            <motion.div key="legend" {...LEGEND_MOTION} style={{ overflow: 'hidden' }}>
+              <ComponentLegend
+                componentColors={componentColors}
+                title="Production Orders"
+                active={selectedProductionOrders}
+                onToggle={(po) =>
+                  setSelectedProductionOrders(prev =>
+                    prev.includes(po) ? prev.filter(p => p !== po) : [...prev, po]
+                  )
+                }
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Help Modal */}
         <Modal

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Modal, Upload, Table, Button, message, Space, Input, Spin } from 'antd';
-import { UploadOutlined, CloseOutlined, SaveOutlined, DeleteOutlined } from '@ant-design/icons';
+import React, { useState, useEffect } from 'react';
+import { Modal, Upload, Table, Button, message, Space, Input, Spin, Alert, Divider, Tag } from 'antd';
+import { UploadOutlined, CloseOutlined, SaveOutlined, DeleteOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import { API_BASE_URL } from '../../../Config/auth.js';
 
@@ -11,6 +11,146 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
   const [previewData, setPreviewData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [showResult, setShowResult] = useState(false);
+  const [customColumns, setCustomColumns] = useState([]);
+  const [customColumnsLoading, setCustomColumnsLoading] = useState(false);
+
+  // Fetch custom columns when modal opens
+  useEffect(() => {
+    if (visible) {
+      fetchCustomColumns();
+    } else {
+      setCustomColumns([]);
+    }
+  }, [visible, selectedCategory, selectedSubCategory]);
+
+  const fetchCustomColumns = async () => {
+    setCustomColumnsLoading(true);
+    try {
+      // Fetch all custom columns
+      const response = await fetch(`${API_BASE_URL}/tools-list/custom-columns`);
+      if (!response.ok) {
+        setCustomColumns([]);
+        return;
+      }
+
+      const responseData = await response.json();
+      const allColumns = responseData.data || [];
+
+      // Get category and sub-category IDs from tree
+      const treeResponse = await fetch(`${API_BASE_URL}/tools-list/categories/tree`);
+      if (!treeResponse.ok) {
+        setCustomColumns([]);
+        return;
+      }
+
+      const tree = await treeResponse.json();
+
+      // Find the category and sub-category IDs from the tree
+      let categoryId = null;
+      let subCategoryId = null;
+
+      if (selectedSubCategory) {
+        // Find the category that contains this sub-category
+        for (const cat of tree) {
+          const subCat = cat.sub_categories.find(sc => sc.sub_category === selectedSubCategory);
+          if (subCat) {
+            categoryId = cat.id;
+            subCategoryId = subCat.id;
+            break;
+          }
+        }
+      } else if (selectedCategory) {
+        // Find the category ID
+        const cat = tree.find(c => c.category === selectedCategory);
+        if (cat) {
+          categoryId = cat.id;
+        }
+      }
+
+      // Filter columns based on category/sub-category
+      const filteredColumns = allColumns.filter(col => {
+        if (subCategoryId) {
+          // Include columns for this sub-category OR for the parent category
+          return col.sub_category_id === subCategoryId || col.category_id === categoryId;
+        } else if (categoryId) {
+          // Only category is selected, include columns for this category
+          return col.category_id === categoryId;
+        }
+        return false;
+      });
+
+      // Deduplicate columns by column_name (sub-category columns take precedence)
+      const uniqueColumns = [];
+      const seenNames = new Set();
+      for (const col of filteredColumns) {
+        const colNameLower = col.column_name.toLowerCase().trim();
+        if (!seenNames.has(colNameLower)) {
+          seenNames.add(colNameLower);
+          uniqueColumns.push(col);
+        }
+      }
+
+      setCustomColumns(uniqueColumns);
+    } catch (error) {
+      console.error('Failed to fetch custom columns:', error);
+      setCustomColumns([]);
+    } finally {
+      setCustomColumnsLoading(false);
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    const headers = [
+      'Item Description',
+      'Range',
+      'Identification Code',
+      'Make',
+      'Quantity',
+      'Location',
+      'Gauge',
+      'Remarks',
+      'Amount',
+      'Ref Ledger',
+      'Type',
+      'Category',
+      'Sub Category',
+    ];
+
+    // Add custom column headers
+    customColumns.forEach(col => {
+      headers.push(col.column_name);
+    });
+
+    // Create a sample row
+    const sampleRow = {
+      'Item Description': 'Sample Tool',
+      'Range': '0-100mm',
+      'Identification Code': 'TOOL001',
+      'Make': 'Brand Name',
+      'Quantity': 10,
+      'Location': 'Rack A1',
+      'Gauge': 'Standard',
+      'Remarks': 'Sample remarks',
+      'Amount': '',
+      'Ref Ledger': '',
+      'Type': 'NON-CONSUMABLES',
+      'Category': selectedCategory || 'Tools',
+      'Sub Category': selectedSubCategory || '',
+    };
+
+    // Add empty values for custom columns
+    customColumns.forEach(col => {
+      sampleRow[col.column_name] = '';
+    });
+
+    const ws = XLSX.utils.json_to_sheet([headers, sampleRow], { skipHeader: true });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template');
+    XLSX.writeFile(wb, 'Tools_Upload_Template.xlsx');
+    message.success('Template downloaded successfully');
+  };
 
   const handleFileUpload = (file) => {
     const reader = new FileReader();
@@ -28,7 +168,7 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
 
         // Get headers from first row
         const headers = jsonData[0].map(h => (h || '').toString().trim().toLowerCase());
-        
+
         // Map Excel columns to our schema
         const columnMap = {
           'item description': 'item_description',
@@ -70,6 +210,12 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
           'sub category': 'sub_category',
           'sub_category': 'sub_category',
         };
+
+        // Add custom columns to the column map
+        customColumns.forEach(col => {
+          const columnNameLower = col.column_name.toLowerCase();
+          columnMap[columnNameLower] = col.column_key;
+        });
 
         // Convert data rows to objects
         const processedData = jsonData.slice(1).map((row, index) => {
@@ -135,21 +281,32 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
     setUploading(true);
     try {
       // Convert to backend format - if category/sub-category are selected, use them
-      const worksheet = XLSX.utils.json_to_sheet(previewData.map((row, index) => ({
-        'Item Description': row.item_description || '',
-        'Range': row.range || '',
-        'Identification Code': row.identification_code || '',
-        'Make': row.make || '',
-        'Quantity': row.quantity || 0,
-        'Location': row.location || '',
-        'Gauge': row.gauge || '',
-        'Remarks': row.remarks || '',
-        'Amount': row.amount || '',
-        'Ref Ledger': row.ref_ledger || '',
-        'Type': row.type || 'NON-CONSUMABLES',
-        'Category': row.category || selectedCategory || '',
-        'Sub Category': row.sub_category || selectedSubCategory || '',
-      })));
+      const worksheet = XLSX.utils.json_to_sheet(previewData.map((row, index) => {
+        const baseData = {
+          'Item Description': row.item_description || '',
+          'Range': row.range || '',
+          'Identification Code': row.identification_code || '',
+          'Make': row.make || '',
+          'Quantity': row.quantity || 0,
+          'Location': row.location || '',
+          'Gauge': row.gauge || '',
+          'Remarks': row.remarks || '',
+          'Amount': row.amount || '',
+          'Ref Ledger': row.ref_ledger || '',
+          'Type': row.type || 'NON-CONSUMABLES',
+          'Category': row.category || selectedCategory || '',
+          'Sub Category': row.sub_category || selectedSubCategory || '',
+        };
+
+        // Add custom columns to the Excel data
+        customColumns.forEach(col => {
+          if (row[col.column_key] !== undefined && row[col.column_key] !== null && row[col.column_key] !== '') {
+            baseData[col.column_name] = row[col.column_key];
+          }
+        });
+
+        return baseData;
+      }));
       
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Tools');
@@ -177,9 +334,21 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
       }
 
       const result = await response.json();
-      message.success(`Successfully uploaded ${result.length} tools`);
+      
+      // Store the upload result for display
+      setUploadResult(result);
+      setShowResult(true);
+      
+      // Show summary message
+      if (result.skipped_duplicates > 0) {
+        message.warning(
+          `Upload completed: ${result.processed_count} tools added, ${result.skipped_duplicates} duplicates skipped.`
+        );
+      } else {
+        message.success(`Successfully uploaded ${result.processed_count} tools`);
+      }
+      
       onSuccess();
-      handleCancel();
     } catch (error) {
       console.error('Upload error:', error);
       message.error('Upload failed: ' + error.message);
@@ -191,7 +360,16 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
   const handleCancel = () => {
     setFile(null);
     setPreviewData([]);
+    setUploadResult(null);
+    setShowResult(false);
     onCancel();
+  };
+
+  const handleNewUpload = () => {
+    setFile(null);
+    setPreviewData([]);
+    setUploadResult(null);
+    setShowResult(false);
   };
 
   const columns = [
@@ -360,26 +538,89 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
       open={visible}
       onCancel={handleCancel}
       width={1200}
-      footer={[
-        <Button key="cancel" onClick={handleCancel} disabled={uploading}>
-          Cancel
-        </Button>,
-        <Button
-          key="submit"
-          type="primary"
-          icon={<SaveOutlined />}
-          onClick={handleSubmit}
-          loading={uploading}
-          disabled={previewData.length === 0}
-        >
-          Upload {previewData.length} Records
-        </Button>,
-      ]}
-      destroyOnClose
+      footer={
+        showResult ? [
+          <Button key="new" onClick={handleNewUpload}>
+            Upload Another File
+          </Button>,
+          <Button key="close" type="primary" onClick={handleCancel}>
+            Close
+          </Button>,
+        ] : [
+          <Button key="cancel" onClick={handleCancel} disabled={uploading}>
+            Cancel
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            icon={<SaveOutlined />}
+            onClick={handleSubmit}
+            loading={uploading}
+            disabled={previewData.length === 0}
+          >
+            Upload {previewData.length} Records
+          </Button>,
+        ]
+      }
+      destroyOnHidden
     >
       <div style={{ minHeight: 500 }}>
-        {!file ? (
+        {showResult && uploadResult ? (
+          <div>
+            {/* Upload Summary */}
+            <Alert
+              message="Upload Completed"
+              description={
+                <div>
+                  <p style={{ margin: '8px 0' }}>
+                    <strong>Total records in file:</strong> {previewData.length}
+                  </p>
+                  <p style={{ margin: '8px 0' }}>
+                    <strong>Successfully added:</strong> <Tag color="success">{uploadResult.processed_count}</Tag>
+                  </p>
+                  <p style={{ margin: '8px 0' }}>
+                    <strong>Duplicates skipped:</strong> <Tag color="warning">{uploadResult.skipped_duplicates}</Tag>
+                  </p>
+                  {uploadResult.message && (
+                    <p style={{ margin: '8px 0', color: '#8c8c8c', fontSize: 12 }}>
+                      {uploadResult.message}
+                    </p>
+                  )}
+                </div>
+              }
+              type={uploadResult.skipped_duplicates > 0 ? 'warning' : 'success'}
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+            
+            <Divider>Successfully Added Tools</Divider>
+            
+            <Table
+              columns={columns.filter(col => col.key !== 'actions')}
+              dataSource={uploadResult.tools}
+              rowKey="id"
+              pagination={{
+                pageSize: 10,
+                showSizeChanger: true,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                showTotal: (total) => `Total ${total} records`,
+              }}
+              scroll={{ x: 1200, y: 400 }}
+              size="small"
+              bordered
+            />
+          </div>
+        ) : !file ? (
           <div style={{ padding: '40px 0' }}>
+            <div style={{ marginBottom: 16, textAlign: 'center' }}>
+              <Button
+                type="link"
+                onClick={handleDownloadTemplate}
+                style={{ fontSize: 14 }}
+              >
+                Download Excel Template (includes custom columns)
+              </Button>
+            </div>
             <Dragger
               accept=".xlsx,.xls"
               beforeUpload={handleFileUpload}
@@ -395,6 +636,7 @@ const ToolsBulkUpload = ({ visible, onCancel, onSuccess, selectedCategory = null
               <p className="ant-upload-hint" style={{ fontSize: 13, color: '#8c8c8c' }}>
                 Support for .xlsx and .xls files. The file should contain columns for:
                 Item Description, Range, ID Code, Make, Quantity, Location, Gauge, Remarks, Amount, Type
+                {customColumns.length > 0 && `, and custom columns: ${customColumns.map(c => c.column_name).join(', ')}`}
               </p>
             </Dragger>
           </div>

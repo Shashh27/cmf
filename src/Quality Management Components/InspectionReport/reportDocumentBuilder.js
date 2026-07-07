@@ -89,6 +89,42 @@ export function buildConsolidatedRows(qtyGroups) {
   return rows;
 }
 
+function fillerDataRowHtml(layout, isConsolidated = false) {
+  const { maxSamples, specCols, instCols, remCols, quantityCount } = layout;
+  const blank = '<p>&nbsp;</p>';
+  if (isConsolidated) {
+    const qtyCells = Array.from({ length: quantityCount }, () => `<td class="ir-col-qty">${blank}</td>`).join('');
+    return `<tr class="ir-data-row ir-data-row--filler" aria-hidden="true">
+      <td>${blank}</td>
+      <td colspan="${specCols}">${blank}</td>
+      <td class="ir-col-zone">${blank}</td>
+      ${qtyCells}
+      <td colspan="${instCols}">${blank}</td>
+      <td colspan="${remCols}">${blank}</td>
+    </tr>`;
+  }
+  const cells = Array.from({ length: maxSamples }, () => `<td>${blank}</td>`).join('');
+  return `<tr class="ir-data-row ir-data-row--filler" aria-hidden="true">
+    <td>${blank}</td>
+    <td colspan="${specCols}">${blank}</td>
+    <td class="ir-col-zone">${blank}</td>
+    ${cells}
+    <td colspan="${instCols}">${blank}</td>
+    <td colspan="${remCols}">${blank}</td>
+  </tr>`;
+}
+
+function buildBodyRowsHtml(rows, layout, { isConsolidated = false, padForFooter = false } = {}) {
+  const rowHtml = isConsolidated ? consolidatedDataRowHtml : dataRowHtml;
+  const dataRows = (rows || []).map((row) => rowHtml(row, layout)).join('');
+  if (!padForFooter) return dataRows;
+
+  const maxRows = computeMaxDataRowsPerPage(true, { singleHeaderRow: isConsolidated });
+  const fillerCount = Math.max(0, maxRows - (rows || []).length);
+  const fillerRows = Array.from({ length: fillerCount }, () => fillerDataRowHtml(layout, isConsolidated)).join('');
+  return dataRows + fillerRows;
+}
+
 export function buildReportPayload({
   reportRows,
   reportQty,
@@ -396,6 +432,20 @@ function footerDetailRow(label1, label2, label3, layout, values = ['', '', '']) 
   </tr>`;
 }
 
+function footerBlockHtml(data, layout) {
+  const { chemCols, ultCols, hardCols } = layout;
+  return `<tr class="ir-page-footer ir-footer-head">
+        <td colspan="${chemCols}"><p><strong>Chemical Test</strong></p></td>
+        <td colspan="${ultCols}"><p><strong>Ultrasonic Test</strong></p></td>
+        <td colspan="${hardCols}"><p><strong>Hardness Test</strong></p></td>
+      </tr>
+      ${footerDetailRow('Date', 'Date', 'Date', layout, footerRowValues(data.footerRows, 0))}
+      ${footerDetailRow('Report No', 'Report No', 'W.O.NO', layout, footerRowValues(data.footerRows, 1))}
+      ${footerDetailRow('Authoriser', 'Authoriser', 'Hardness Value', layout, footerRowValues(data.footerRows, 2))}
+      ${footerDetailRow('Status', 'Status', 'Status', layout, footerRowValues(data.footerRows, 3))}
+      ${footerSignRow(layout, data.inspectedBy || '', data.checkedBy || '')}`;
+}
+
 function footerSignRow(layout, inspectedBy = '', checkedBy = '') {
   const { signLeftCols, signRightCols } = layout;
   const leftValue = inspectedBy ? esc(inspectedBy) : '<br>';
@@ -568,27 +618,15 @@ export function buildSingleSheetTableHtml(data) {
   const colWidths = getReportColumnWidths(totalCols, false, maxSamples, colLayout);
   const layout = getFooterLayout(totalCols, colWidths);
 
-  const bodyRows = (data.rows || [])
-    .map((row) => dataRowHtml(row, { maxSamples, ...colLayout }))
-    .join('');
+  const bodyRows = buildBodyRowsHtml(data.rows, { maxSamples, ...colLayout }, {
+    padForFooter: data.showFooter !== false,
+  });
 
   const sampleHead = Array.from({ length: maxSamples }, (_, i) => `<th><p>${i + 1}</p></th>`).join('');
   const colgroup = `<colgroup>${colWidths.map((w) => `<col style="width:${w}%">`).join('')}</colgroup>`;
-  const { chemCols, ultCols, hardCols } = layout;
   const showFooter = data.showFooter !== false;
 
-  const footerHtml = showFooter
-    ? `<tr class="ir-page-footer ir-footer-head">
-        <td colspan="${chemCols}"><p><strong>Chemical Test</strong></p></td>
-        <td colspan="${ultCols}"><p><strong>Ultrasonic Test</strong></p></td>
-        <td colspan="${hardCols}"><p><strong>Hardness Test</strong></p></td>
-      </tr>
-      ${footerDetailRow('Date', 'Date', 'Date', layout, footerRowValues(data.footerRows, 0))}
-      ${footerDetailRow('Report No', 'Report No', 'W.O.NO', layout, footerRowValues(data.footerRows, 1))}
-      ${footerDetailRow('Authoriser', 'Authoriser', 'Hardness Value', layout, footerRowValues(data.footerRows, 2))}
-      ${footerDetailRow('Status', 'Status', 'Status', layout, footerRowValues(data.footerRows, 3))}
-      ${footerSignRow(layout, data.inspectedBy || '', data.checkedBy || '')}`
-    : '';
+  const footerHtml = showFooter ? footerBlockHtml(data, layout) : '';
 
   return `<table class="ir-sheet-table">
     ${colgroup}
@@ -622,13 +660,13 @@ function buildConsolidatedSheetTableHtml(data) {
   const { totalCols, specCols, instCols, remCols } = colLayout;
   const colWidths = getReportColumnWidths(totalCols, true, quantityCount, colLayout);
   const layout = getFooterLayout(totalCols, colWidths);
-  const { chemCols, ultCols, hardCols } = layout;
   const showFooter = data.showFooter !== false;
   const qtyLabel = quantityCount >= 4 ? 'Qty' : 'Quantity';
 
-  const bodyRows = (data.rows || [])
-    .map((row) => consolidatedDataRowHtml(row, { quantityCount, ...colLayout }))
-    .join('');
+  const bodyRows = buildBodyRowsHtml(data.rows, { quantityCount, ...colLayout }, {
+    isConsolidated: true,
+    padForFooter: showFooter,
+  });
 
   const qtyHead = Array.from(
     { length: quantityCount },
@@ -637,18 +675,7 @@ function buildConsolidatedSheetTableHtml(data) {
 
   const colgroup = `<colgroup>${colWidths.map((w) => `<col style="width:${w}%">`).join('')}</colgroup>`;
 
-  const footerHtml = showFooter
-    ? `<tr class="ir-page-footer ir-footer-head">
-        <td colspan="${chemCols}"><p><strong>Chemical Test</strong></p></td>
-        <td colspan="${ultCols}"><p><strong>Ultrasonic Test</strong></p></td>
-        <td colspan="${hardCols}"><p><strong>Hardness Test</strong></p></td>
-      </tr>
-      ${footerDetailRow('Date', 'Date', 'Date', layout, footerRowValues(data.footerRows, 0))}
-      ${footerDetailRow('Report No', 'Report No', 'W.O.NO', layout, footerRowValues(data.footerRows, 1))}
-      ${footerDetailRow('Authoriser', 'Authoriser', 'Hardness Value', layout, footerRowValues(data.footerRows, 2))}
-      ${footerDetailRow('Status', 'Status', 'Status', layout, footerRowValues(data.footerRows, 3))}
-      ${footerSignRow(layout, data.inspectedBy || '', data.checkedBy || '')}`
-    : '';
+  const footerHtml = showFooter ? footerBlockHtml(data, layout) : '';
 
   return `<table class="ir-sheet-table ir-sheet-table--consolidated" data-qty-count="${quantityCount}">
     ${colgroup}

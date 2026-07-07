@@ -486,11 +486,11 @@ const Inventory = () => {
 
   return (
     /*
-     * The parent layout (tabs/header above) controls the available height.
+     * Fixed height to ensure cards scroll internally instead of expanding page layout
      */
     <div style={{
       display: 'flex',
-      height: '100%',          /* ← fills parent; no magic number */
+      height: 'calc(100vh - 250px)',
       minHeight: 0,            /* ← critical for flex children to shrink */
       background: '#f5f6fa',
       overflow: 'hidden',
@@ -652,9 +652,9 @@ const Inventory = () => {
                 <h2 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a2e', margin: 0, lineHeight: 1.2 }}>
                   {selected?.sub_category || selected?.category || 'Inventory Data'}
                 </h2>
-                <p style={{ fontSize: 13, color: '#8c8c8c', marginTop: 4, marginBottom: 0 }}>
+                {/* <p style={{ fontSize: 13, color: '#8c8c8c', marginTop: 4, marginBottom: 0 }}>
                   {selected.category}{selected.sub_category && ` › ${selected.sub_category}`}
-                </p>
+                </p> */}
               </div>
               <Space wrap style={{ flex: '0 0 auto' }}>
                 <Button
@@ -666,35 +666,38 @@ const Inventory = () => {
             </div>
 
             {/* ── Table — flex: 1 + minHeight: 0 lets it fill remaining space ── */}
-            <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-              <Table
-                columns={columns}
-                dataSource={filteredData}
-                rowKey="id"
-                loading={tableLoading}
-                size="small"
-                scroll={{ x: 'max-content', y: tableScrollY }}
-                pagination={{
-                  current: pagination.current,
-                  pageSize: pagination.pageSize,
-                  showSizeChanger: true,
-                  pageSizeOptions: ['10', '20', '50'],
-                  showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-                  size: 'small',
-                  style: { padding: '8px 12px', margin: 0, borderTop: '1px solid #f0f0f0' },
-                  onChange: (page, size) => setPagination({ current: page, pageSize: size }),
-                }}
-                rowClassName={(_, i) => i % 2 === 0 ? '' : 'row-alt'}
-                components={{
-                  header: {
-                    cell: (props) => (
-                      <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
-                        {props.children}
-                      </th>
+            <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 1, overflow: 'auto' }}>
+                <Table
+                  columns={columns}
+                  dataSource={filteredData}
+                  rowKey="id"
+                  loading={tableLoading}
+                  size="small"
+                  scroll={{ x: 'max-content' }}
+                  sticky
+                  pagination={{
+                    current: pagination.current,
+                    pageSize: pagination.pageSize,
+                    showSizeChanger: true,
+                    pageSizeOptions: ['10', '20', '50'],
+                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+                    size: 'small',
+                    style: { padding: '8px 12px', margin: 0, borderTop: '1px solid #f0f0f0' },
+                    onChange: (page, size) => setPagination({ current: page, pageSize: size }),
+                  }}
+                  rowClassName={(_, i) => i % 2 === 0 ? '' : 'row-alt'}
+                  components={{
+                    header: {
+                      cell: (props) => (
+                        <th {...props} style={{ ...props.style, background: 'linear-gradient(to bottom, #f0f5ff, #e6f0ff)', fontWeight: 'bold', borderBottom: '2px solid #1890ff' }}>
+                          {props.children}
+                        </th>
                     ),
                   },
                 }}
-              />
+                />
+              </div>
             </div>
           </>
         )}

@@ -223,7 +223,8 @@ const DocumentTree = forwardRef(({ onNodeSelect, isMobile = false, onDocumentsCh
     }
 
     children.push(
-      // Operations folder
+      
+      // CNC Programs folder
       {
         title: (
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -1581,35 +1582,72 @@ const buildMachineFoldersTree = (folders, machine) => {
   };
 
   return (
+    <div
+      className="dms-tree-panel"
+      style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#f8fafc',
+        borderRight: '1px solid #c5cdd8',
+      }}
+    >
+      <div
+        style={{
+          padding: '10px 12px',
+          borderBottom: '1px solid #c5cdd8',
+          background: '#fdf9f0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontWeight: 700, fontSize: 14, color: '#0d253f' }}>Document Explorer</span>
+        <Button
+          type="primary"
+          size="small"
+          icon={<PlusOutlined />}
+          onClick={() => {
+            setParentFolderId(null);
+            setNewFolderName('');
+            setNewFolderModalVisible(true);
+          }}
+        >
+          New Folder
+        </Button>
+      </div>
     <div 
       className="tree-scroll-container"
       style={{ 
-        padding: isMobile ? '8px' : '16px',
+        flex: 1,
+        padding: isMobile ? '6px' : '8px',
         width: '100%',
-        overflowX: 'auto',
-        overflowY: 'hidden' // Vertical scroll is handled by the parent div in Document.jsx
+        overflow: 'auto',
       }}
     >
       <style>
         {`
-          .tree-scroll-container::-webkit-scrollbar {
-            width: 8px;
-          }
-          .tree-scroll-container::-webkit-scrollbar-track {
-            background: #f1f1f1;
+          .tree-scroll-container::-webkit-scrollbar { width: 6px; }
+          .tree-scroll-container::-webkit-scrollbar-track { background: #f1f5f9; }
+          .tree-scroll-container::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 3px; }
+          .tree-scroll-container { scrollbar-width: thin; scrollbar-color: #94a3b8 #f1f5f9; }
+          .dms-tree-panel .ant-tree { background: transparent; font-size: 13px; }
+          .dms-tree-panel .ant-tree .ant-tree-node-content-wrapper {
             border-radius: 4px;
+            padding: 2px 6px;
+            min-height: 28px;
+            line-height: 24px;
           }
-          .tree-scroll-container::-webkit-scrollbar-thumb {
-            background: #c1c1c1;
-            border-radius: 4px;
+          .dms-tree-panel .ant-tree .ant-tree-node-content-wrapper:hover {
+            background: #e8eef5 !important;
           }
-          .tree-scroll-container::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8;
+          .dms-tree-panel .ant-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+            background: #dbeafe !important;
+            color: #0d253f;
+            font-weight: 600;
           }
-          .tree-scroll-container {
-            scrollbar-width: thin;
-            scrollbar-color: #c1c1c1 #f1f1f1;
-          }
+          .dms-tree-panel .ant-tree .ant-tree-switcher { line-height: 28px; }
         `}
       </style>
       
@@ -1621,16 +1659,14 @@ const buildMachineFoldersTree = (folders, machine) => {
           selectedKeys={selectedKeys}
           onExpand={onExpand}
           onSelect={onSelect}
-          style={{ 
-            background: 'transparent',
-            fontSize: isMobile ? '14px' : '16px', // Increased font size
-          }}
-          showLine={false}
-          blockNode={isMobile}
-          virtual={false} // Disable virtual scrolling for better compatibility
+          style={{ background: 'transparent' }}
+          showLine={{ showLeafIcon: false }}
+          blockNode
+          virtual={false}
         />
       </Spin>
-      
+    </div>
+
       {/* New Folder Modal */}
       <Modal
         title="Create New Folder"

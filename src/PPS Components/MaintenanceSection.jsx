@@ -18,8 +18,11 @@ import {
 import {
   CheckCircleOutlined, InfoCircleOutlined, ReloadOutlined,
   ExclamationCircleOutlined, UploadOutlined, EyeOutlined, SearchOutlined,
-  LeftOutlined, DownloadOutlined, DeleteOutlined
+  LeftOutlined, DownloadOutlined, DeleteOutlined, CalendarOutlined,
+  ClockCircleOutlined, SettingOutlined,
 } from "@ant-design/icons";
+import ShiftDayAssignmentsPanel from "./ShiftDayAssignmentsPanel";
+import "./ShiftPlanning.css";
 
 const { Dragger } = Upload;
 
@@ -38,24 +41,63 @@ const NON_WORKING_DAY_SHIFTS = [
   { code: "CUSTOM",      label: "Custom Shift",                         desc: "Define your own shift timings",        color: "#722ed1", bg: "#f9f0ff", border: "#722ed1" },
 ];
 
-const ShiftOption = ({ option, selected, onChange }) => (
-  <div
-    style={{
-      padding: "12px 16px", borderRadius: "8px", cursor: "pointer", transition: "all 0.3s",
-      background: selected ? option.bg : "#fff",
-      border: `${selected ? 2 : 1}px solid ${selected ? option.border : "#d9d9d9"}`,
-    }}
-    onClick={() => onChange(option.code, !selected)}
-  >
-    <Space align="start">
-      <Checkbox checked={selected} onChange={(e) => onChange(option.code, e.target.checked)} onClick={(e) => e.stopPropagation()} />
-      <div>
-        <div style={{ fontWeight: 600, color: option.color }}>{option.label}</div>
-        <div style={{ fontSize: "12px", color: "#666" }}>{option.desc}</div>
+const getSchedulingTip = (code, isWorkingDay) => {
+  if (isWorkingDay) {
+    const tips = {
+      GENERAL: "Full working day — used in machine scheduling & capacity planning (8:30 AM – 5:00 PM, ~8.5 hrs). Calendar shows Work.",
+      NEXT: "Extended hours (5:00 PM – 9:00 PM). With General selected, overtime (OT) applies and both windows count for scheduling.",
+      HALF: "Half working day only (8:30 AM – 1:00 PM, ~4.5 hrs). Used in scheduling. Cannot combine with other shifts.",
+      CUSTOM: "Your custom start/end times will be used for scheduling and capacity on this date.",
+    };
+    return tips[code] || "";
+  }
+  const tips = {
+    GENERAL: "Calendar shows Off, but this full shift (8:30 AM – 5:00 PM, ~8.5 hrs) will still be used in scheduling. Use Working day type for a normal full workday.",
+    NEXT: "Calendar shows Off, but extended hours (5:00 PM – 9:00 PM) will still count in scheduling if saved.",
+    NON_WORKING: "Partial off-day — calendar shows Off, but a shortened window (8:30 AM – 1:00 PM, ~4.5 hrs) is still available for scheduling.",
+    CUSTOM: "Calendar shows Off. Your custom hours will still be applied in scheduling for this date.",
+  };
+  return tips[code] || "";
+};
+
+const ShiftOption = ({ option, selected, onChange, isWorkingDay }) => {
+  const schedulingTip = getSchedulingTip(option.code, isWorkingDay);
+  return (
+    <Tooltip
+      title={
+        <div className="sp-shift-tooltip">
+          <div className="sp-shift-tooltip__title">Scheduling impact</div>
+          <div>{schedulingTip}</div>
+        </div>
+      }
+      placement="left"
+      mouseEnterDelay={0.25}
+      overlayClassName="sp-shift-tooltip-overlay"
+    >
+      <div
+        className={`sp-shift-tile${selected ? " sp-shift-tile--selected" : ""}`}
+        style={{
+          background: selected ? option.bg : undefined,
+          borderColor: selected ? option.border : undefined,
+        }}
+        onClick={() => onChange(option.code, !selected)}
+      >
+        <Space align="start" size={10} style={{ width: "100%" }}>
+          <Checkbox
+            checked={selected}
+            onChange={(e) => onChange(option.code, e.target.checked)}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="sp-shift-tile__label" style={{ color: selected ? option.color : "#334155" }}>{option.label}</div>
+            <div className="sp-shift-tile__desc">{option.desc}</div>
+          </div>
+          <InfoCircleOutlined className="sp-shift-tile__hint" />
+        </Space>
       </div>
-    </Space>
-  </div>
-);
+    </Tooltip>
+  );
+};
 
 const MaintenanceSection = ({ activeTab, machineData }) => {
   // Breakdown Logs state
@@ -85,7 +127,13 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   const [pendingFormValues, setPendingFormValues] = useState(null);
   const [validationError, setValidationError] = useState(null);
   const [calendarDowntimes, setCalendarDowntimes] = useState([]);
-  const [selectedDateDowntimes, setSelectedDateDowntimes] = useState([]);
+  const [calendarMonth, setCalendarMonth] = useState(dayjs());
+  const [calendarMode, setCalendarMode] = useState("month");
+
+  // Machine assignment state (embedded in Shift Hours tab)
+  const [operators, setOperators] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [assignmentLoading, setAssignmentLoading] = useState(false);
 
   // Leave Logs state
   const [leaveLogs, setLeaveLogs] = useState([]);
@@ -98,7 +146,11 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
 
   useEffect(() => {
     if (activeTab === "downtime-logs") fetchDowntimeLogs();
-    else if (activeTab === "shift-hours") { fetchShiftConfigs(); fetchCurrentBreakdowns(); }
+    else if (activeTab === "shift-hours") {
+      fetchShiftConfigs();
+      fetchCurrentBreakdowns();
+      fetchOperators();
+    }
     else if (activeTab === "leave-logs") fetchLeaveLogs();
   }, [activeTab]);
 
@@ -386,27 +438,122 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
     try {
       const res = await fetch(`${SCHEDULING_API_BASE_URL}/machine-status/machine-status/`);
       const data = await res.json();
-      setCalendarDowntimes(data.statuses.filter(m => m.status_id === 2));
+      setCalendarDowntimes((data.statuses || []).filter((m) => m.status_id === 2));
     } catch (err) { console.error("breakdown fetch error", err); }
   };
 
-  const getDowntimesForDate = (date) =>
-    calendarDowntimes.filter(m => {
-      if (m.status_id !== 2) return false;
-      const start = dayjs(m.available_from).startOf("day");
-      const end = m.available_to ? dayjs(m.available_to).endOf("day") : dayjs().endOf("day");
-      return date.isSameOrAfter(start) && date.isSameOrBefore(end);
+  const getDowntimeStart = (record) => record.start_time || record.available_from;
+  const isPlaceholderEnd = (raw) => {
+    if (!raw) return true;
+    const d = dayjs(raw);
+    if (d.year() <= 1970) return true;
+    // Backend sentinel for "no end set yet" — not a real calendar end date
+    if (d.format("YYYY-MM-DD") === "2026-01-01" && d.hour() === 0 && d.minute() === 0 && d.second() === 0) {
+      return true;
+    }
+    return false;
+  };
+  const getDowntimeEnd = (record) => {
+    const raw = record.end_time || record.available_to;
+    if (!raw || isPlaceholderEnd(raw)) return null;
+    return raw;
+  };
+  const isBreakdownRecord = (record) => {
+    const statusName = (record.status_name || "").toLowerCase().trim();
+    if (record.status_id === 1 || statusName === "on") return false;
+    if (statusName.includes("on") && !statusName.includes("off")) return false;
+    return record.status_id === 2 || statusName.includes("off");
+  };
+  const getMachineDisplayName = (record) =>
+    record.machine_make || record.machine_name || `Machine #${record.machine_id}`;
+
+  const isDateInBreakdownRange = (date, record) => {
+    const day = date.startOf("day");
+    const startRaw = getDowntimeStart(record);
+    if (!startRaw) return false;
+    const start = dayjs(startRaw).startOf("day");
+    if (day.isBefore(start, "day")) return false;
+
+    const endRaw = getDowntimeEnd(record);
+    if (!endRaw) {
+      return !day.isAfter(dayjs(), "day");
+    }
+
+    return !day.isAfter(dayjs(endRaw).endOf("day"));
+  };
+
+  const getDowntimesForDate = (date) => {
+    const seen = new Set();
+    return calendarDowntimes.filter((record) => {
+      if (!isBreakdownRecord(record)) return false;
+      if (!isDateInBreakdownRange(date, record)) return false;
+      const key = `${record.machine_id}-${getDowntimeStart(record)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
+  };
+
+  const formatBreakdownRange = (record) => {
+    const start = dayjs(getDowntimeStart(record)).format("DD MMM HH:mm");
+    const endRaw = getDowntimeEnd(record);
+    const end = endRaw ? dayjs(endRaw).format("DD MMM HH:mm") : "Ongoing";
+    return `${start} → ${end}`;
+  };
+
+  const renderBreakdownHoverCard = (downtimes) => (
+    <div className="sp-breakdown-hover">
+      <div className="sp-breakdown-hover__head">
+        <ExclamationCircleOutlined />
+        <span>Machine Breakdown</span>
+      </div>
+      {downtimes.map((m, idx) => (
+        <div key={`${m.machine_id}-${idx}`} className="sp-breakdown-hover__item">
+          <div className="sp-breakdown-hover__machine">{getMachineDisplayName(m)}</div>
+          <div className="sp-breakdown-hover__status">{m.description || m.status_name || "machine OFF"}</div>
+          <div className="sp-breakdown-hover__range">
+            <ClockCircleOutlined />
+            <span>{formatBreakdownRange(m)}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const fetchOperators = async () => {
+    try {
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/shift-hours/operators`);
+      if (res.ok) setOperators(await res.json());
+    } catch (err) { console.error("operators fetch error", err); }
+  };
+
+  const fetchAssignments = async (shiftConfigId) => {
+    if (!shiftConfigId) {
+      setAssignments([]);
+      return;
+    }
+    try {
+      setAssignmentLoading(true);
+      const res = await fetch(`${SCHEDULING_API_BASE_URL}/shift-hours/assignments/${shiftConfigId}`);
+      if (res.ok) setAssignments(await res.json());
+      else if (res.status === 404) setAssignments([]);
+    } catch (err) {
+      console.error("assignments fetch error", err);
+    } finally {
+      setAssignmentLoading(false);
+    }
+  };
 
   const handleDateSelect = (date) => {
     const dateStr = date.format("YYYY-MM-DD");
     setSelectedDate(date);
-    setSelectedDateDowntimes(getDowntimesForDate(date));
+    setCalendarMonth(date);
     const existing = shiftConfigs.find(c => dayjs(c.date).format("YYYY-MM-DD") === dateStr);
     if (existing) {
       setCurrentConfig(existing);
       setIsWorkingDay(existing.working_day);
       setSelectedShifts(existing.selected_shifts || ["GENERAL"]);
+      fetchAssignments(existing.id);
       const custom = existing.shift_timings?.find(t => t.shift_code === "CUSTOM");
       shiftForm.setFieldsValue({
         working_day: existing.working_day,
@@ -415,6 +562,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
       });
     } else {
       setCurrentConfig(null); setIsWorkingDay(true); setSelectedShifts(["GENERAL"]);
+      setAssignments([]);
       shiftForm.resetFields();
       shiftForm.setFieldsValue({ working_day: true, custom_start: null, custom_end: null });
     }
@@ -442,6 +590,7 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
         message.success("Shift configuration saved successfully");
         setShiftConfigs(prev => configToUpdate ? prev.map(c => c.id === configToUpdate.id ? saved : c) : [...prev, saved]);
         setCurrentConfig(saved); setOtModalVisible(false); setPendingFormValues(null);
+        fetchAssignments(saved.id);
       } else { const e = await res.json(); message.error(e.detail || "Failed to save shift configuration"); }
     } catch { message.error("Error saving shift configuration"); }
     finally { setShiftLoading(false); }
@@ -494,25 +643,143 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
     finally { setShiftLoading(false); }
   };
 
-  const dateCellRender = (value) => {
+  const MONTH_OPTIONS = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ].map((label, index) => ({ value: index, label }));
+
+  const renderCalendarHeader = ({ value, onChange }) => {
+    const yearOptions = Array.from({ length: 11 }, (_, i) => {
+      const y = value.year() - 5 + i;
+      return { value: y, label: String(y) };
+    });
+
+    return (
+      <div className="sp-cal-controls">
+        <div className="sp-cal-controls__selects">
+          <div className="sp-cal-select-wrap">
+            <CalendarOutlined className="sp-cal-select-wrap__icon" />
+            <Select
+              className="sp-cal-select sp-cal-select--year"
+              value={value.year()}
+              onChange={(y) => onChange(value.year(y))}
+              suffixIcon={<span className="sp-cal-select__arrow">▾</span>}
+              options={yearOptions}
+              bordered={false}
+              popupClassName="sp-cal-select-dropdown"
+            />
+          </div>
+          <div className="sp-cal-select-wrap">
+            <CalendarOutlined className="sp-cal-select-wrap__icon" />
+            <Select
+              className="sp-cal-select sp-cal-select--month"
+              value={value.month()}
+              onChange={(m) => onChange(value.month(m))}
+              suffixIcon={<span className="sp-cal-select__arrow">▾</span>}
+              options={MONTH_OPTIONS}
+              bordered={false}
+              popupClassName="sp-cal-select-dropdown"
+            />
+          </div>
+        </div>
+        <div className="sp-cal-mode-toggle">
+          <button
+            type="button"
+            className={`sp-cal-mode-toggle__btn${calendarMode === "month" ? " sp-cal-mode-toggle__btn--active" : ""}`}
+            onClick={() => setCalendarMode("month")}
+          >
+            Month
+          </button>
+          <button
+            type="button"
+            className={`sp-cal-mode-toggle__btn${calendarMode === "year" ? " sp-cal-mode-toggle__btn--active" : ""}`}
+            onClick={() => setCalendarMode("year")}
+          >
+            Year
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const fullCellRender = (value, info) => {
+    if (info.type !== "date") return info.originNode;
+
     const cfg = shiftConfigs.find(c => dayjs(c.date).format("YYYY-MM-DD") === value.format("YYYY-MM-DD"));
     const downtimes = getDowntimesForDate(value);
     const isSelected = selectedDate && value.isSame(selectedDate, "day");
-    return (
-      <div style={{ position: "relative", textAlign: "center", background: isSelected ? "#e6f7ff" : "transparent", borderRadius: "4px", padding: "2px", overflow: "hidden" }}>
+    const shiftCount = cfg?.number_of_shifts ?? 0;
+    const hasShiftConfig = Boolean(cfg && cfg.working_day && shiftCount > 0);
+    const dayOfWeek = value.day();
+    const isSunday = dayOfWeek === 0;
+    const isSaturday = dayOfWeek === 6;
+    const isWeekendWorking = (isSunday || isSaturday) && hasShiftConfig;
+
+    const dateClasses = [
+      "ant-picker-calendar-date",
+      "sp-cal-full-cell",
+      isSunday && "sp-cal-full-cell--sunday",
+      isSaturday && "sp-cal-full-cell--saturday",
+      isWeekendWorking && "sp-cal-full-cell--weekend-work",
+      isSelected && "sp-cal-full-cell--selected",
+      downtimes.length > 0 && "sp-cal-full-cell--breakdown",
+    ].filter(Boolean).join(" ");
+
+    const dateNumClasses = [
+      "sp-cal-date-num",
+      isSunday && !isWeekendWorking && "sp-cal-date-num--sunday",
+      isSaturday && !isWeekendWorking && "sp-cal-date-num--saturday",
+      isWeekendWorking && "sp-cal-date-num--weekend-work",
+    ].filter(Boolean).join(" ");
+
+    const cellContent = (
+      <div className={dateClasses}>
         {downtimes.length > 0 && (
-          <div style={{ position: "absolute", top: 0, left: 0, zIndex: 2 }}>
-            <Lottie animationData={warningAnimation} loop autoplay style={{ width: 28, height: 28 }} speed={3.0} />
+          <div className="sp-cal-downtime-flag" aria-label="Machine breakdown">
+            <Lottie
+              animationData={warningAnimation}
+              loop
+              autoplay
+              style={{ width: 30, height: 30 }}
+              speed={2}
+            />
           </div>
         )}
-        {cfg && (
-          <div style={{ fontSize: "11px", lineHeight: 1.4 }}>
-            <div style={{ color: cfg.working_day ? "#1890ff" : "#fa8c16", fontWeight: 600 }}>{cfg.working_day ? "Work" : "Off"}</div>
-            <div style={{ color: "#666" }}>{cfg.number_of_shifts} shift{cfg.number_of_shifts !== 1 ? "s" : ""}</div>
+        <div className="ant-picker-calendar-date-value">
+          <span className={dateNumClasses}>{value.date()}</span>
+        </div>
+        <div className="ant-picker-calendar-date-content">
+          <div className={`sp-cal-cell${isSelected ? " sp-cal-cell--selected" : ""}`}>
+            {isSelected && <span className="sp-cal-selected-dot" />}
+            {cfg ? (
+              <>
+                <span className={`sp-cal-badge ${cfg.working_day ? "sp-cal-badge--work" : "sp-cal-badge--off"}${isWeekendWorking ? " sp-cal-badge--weekend-work" : ""}`}>
+                  {cfg.working_day ? "Work" : "Off"}
+                </span>
+                <div className="sp-cal-shifts">{shiftCount} shift{shiftCount !== 1 ? "s" : ""}</div>
+              </>
+            ) : (
+              <div className="sp-cal-shifts sp-cal-shifts--muted">&nbsp;</div>
+            )}
           </div>
-        )}
+        </div>
       </div>
     );
+
+    if (downtimes.length > 0) {
+      return (
+        <Tooltip
+          title={renderBreakdownHoverCard(downtimes)}
+          placement="top"
+          mouseEnterDelay={0.2}
+          overlayClassName="sp-breakdown-hover-overlay"
+        >
+          {cellContent}
+        </Tooltip>
+      );
+    }
+
+    return cellContent;
   };
 
   // ── Breakdown Logs Tab ──────────────────────────────────────────────────
@@ -602,97 +869,219 @@ const MaintenanceSection = ({ activeTab, machineData }) => {
   if (activeTab === "shift-hours") {
     const isMobile = window.innerWidth < 768;
     const shiftOptions = isWorkingDay ? WORKING_DAY_SHIFTS : NON_WORKING_DAY_SHIFTS;
+    const machines = machineData?.statuses || [];
 
     return (
-      <div style={{ padding: isMobile ? "10px" : "20px" }}>
-        <Row gutter={[24, 24]}>
-          {/* Calendar */}
-          <Col xs={24} lg={16}>
-            <Card title="Shift Calendar" extra={<Button icon={<ReloadOutlined />} onClick={fetchShiftConfigs} loading={shiftLoading} size={isMobile ? "small" : "middle"}>{isMobile ? "" : "Refresh Data"}</Button>}>
-              {shiftLoading
-                ? <div style={{ textAlign: "center", padding: 50 }}><Spin size="large" /><p>Loading shift configurations...</p></div>
-                : <Calendar key={JSON.stringify(shiftConfigs)} onSelect={handleDateSelect} dateCellRender={dateCellRender} />}
-            </Card>
+      <div className="shift-planning" style={{ padding: isMobile ? "10px" : "16px" }}>
+        <Row gutter={[20, 20]}>
+          <Col xs={24} xl={14}>
+            <div
+              className="sp-cal-card"
+              data-selected-dow={selectedDate != null ? selectedDate.day() : ""}
+            >
+              <div className="sp-cal-card__head">
+                <div className="sp-cal-card__head-icon"><CalendarOutlined /></div>
+                <div className="sp-cal-card__head-text">
+                  <h3 className="sp-cal-card__title">Planning Calendar</h3>
+                  <p className="sp-cal-card__sub">View and manage shifts for each day</p>
+                </div>
+                <Button
+                  className="sp-cal-refresh-btn"
+                  icon={<ReloadOutlined />}
+                  onClick={() => { fetchShiftConfigs(); fetchCurrentBreakdowns(); }}
+                  loading={shiftLoading}
+                >
+                  {isMobile ? "" : "Refresh"}
+                </Button>
+              </div>
+
+              <div className="sp-cal-card__body">
+                {shiftLoading ? (
+                  <div className="sp-cal-loading">
+                    <Spin size="large" />
+                    <p>Loading schedule...</p>
+                  </div>
+                ) : (
+                  <Calendar
+                    key={`${JSON.stringify(shiftConfigs)}-${calendarMode}-${calendarDowntimes.length}`}
+                    className="sp-calendar"
+                    mode={calendarMode}
+                    value={calendarMonth}
+                    onPanelChange={(date, mode) => {
+                      setCalendarMonth(date);
+                      setCalendarMode(mode);
+                    }}
+                    onSelect={handleDateSelect}
+                    fullCellRender={fullCellRender}
+                    headerRender={renderCalendarHeader}
+                    fullscreen={!isMobile}
+                  />
+                )}
+              </div>
+            </div>
           </Col>
 
-          {/* Config Panel */}
-          <Col xs={24} lg={8}>
-            <Card title={selectedDate ? `Configure: ${selectedDate.format("DD MMM YYYY")}` : "Configure: Select Date"}>
+          <Col xs={24} xl={10}>
+            <div className="sp-right-stack">
               {selectedDate ? (
-                <>
-                  <Form form={shiftForm} layout="vertical" onFinish={handleSaveShiftConfig} initialValues={{ working_day: true, custom_start: null, custom_end: null }}>
-                    <Form.Item label="Day Type" name="working_day" rules={[{ required: true }]}>
-                      <Radio.Group onChange={handleWorkingDayChange} size={isMobile ? "small" : "middle"}>
-                        <Radio.Button value={true}><CheckCircleOutlined style={{ color: "#52c41a", marginRight: 8 }} />Working Day</Radio.Button>
-                        <Radio.Button value={false}><InfoCircleOutlined style={{ color: "#fa8c16", marginRight: 8 }} />Non-Working Day</Radio.Button>
-                      </Radio.Group>
-                    </Form.Item>
-
-                    <Form.Item label="Shift Selection" required help={validationError && <span style={{ color: "#ff4d4f" }}>{validationError}</span>}>
-                      <Card size="small" style={{ background: "#fafafa", border: validationError ? "1px solid #ff4d4f" : undefined }}>
-                        <Space direction="vertical" style={{ width: "100%" }}>
-                          {shiftOptions.map(opt => (
-                            <ShiftOption key={opt.code} option={opt} selected={selectedShifts.includes(opt.code)} onChange={handleShiftCheckboxChange} />
-                          ))}
-                          {isWorkingDay && selectedShifts.includes("GENERAL") && selectedShifts.includes("NEXT") && (
-                            <Alert message="Overtime (OT) Selected" description="Both General and Extended shifts selected. This will be marked as OT." type="warning" showIcon />
-                          )}
-                        </Space>
-                      </Card>
-                    </Form.Item>
-
-                    {selectedShifts.includes("CUSTOM") && (
-                      <>
-                        <Form.Item label="Custom Start Time" name="custom_start" rules={[{ required: true, message: "Please select start time" }]}>
-                          <DatePicker picker="time" format="HH:mm" style={{ width: "100%" }} placeholder="Select start time" />
-                        </Form.Item>
-                        <Form.Item label="Custom End Time" name="custom_end" rules={[{ required: true, message: "Please select end time" }]}>
-                          <DatePicker picker="time" format="HH:mm" style={{ width: "100%" }} placeholder="Select end time" />
-                        </Form.Item>
-                      </>
+                <div className="sp-date-hero">
+                  <div className="sp-date-hero__day">{selectedDate.format("DD")}</div>
+                  <div className="sp-date-hero__meta">
+                    <div className="sp-date-hero__weekday">{selectedDate.format("dddd")}</div>
+                    <div className="sp-date-hero__full">{selectedDate.format("MMMM YYYY")}</div>
+                    {currentConfig ? (
+                      <div className="sp-date-hero__tags">
+                        <span className="sp-date-hero__tag">
+                          {currentConfig.working_day ? "✓ Working Day" : "○ Non-Working"}
+                        </span>
+                        <span className="sp-date-hero__tag">
+                          {currentConfig.number_of_shifts} shift{currentConfig.number_of_shifts !== 1 ? "s" : ""}
+                        </span>
+                        {currentConfig.shift_timings?.slice(0, 2).map((timing) => (
+                          <span key={timing.shift_code} className="sp-date-hero__tag">
+                            {timing.shift_code} {String(timing.shift_start).slice(0, 5)}–{String(timing.shift_end).slice(0, 5)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="sp-date-hero__placeholder">Configure shift details below</div>
                     )}
-
-                    <Form.Item style={{ marginBottom: 0 }}>
-                      <Space direction={isMobile ? "vertical" : "horizontal"} style={{ width: "100%" }}>
-                        <Button type="primary" htmlType="submit" loading={shiftLoading} block={isMobile}>Save Changes</Button>
-                        {currentConfig && (
-                          <Popconfirm title="Cancel Shift Configuration?" description="This will set this date to 0 shifts." onConfirm={handleCancelShift} okText="Yes, Cancel" cancelText="No">
-                            <Button danger loading={shiftLoading} block={isMobile} icon={<DeleteOutlined />}>Cancel Shift</Button>
-                          </Popconfirm>
-                        )}
-                        <Button onClick={handleClearConfig} block={isMobile}>Clear</Button>
-                      </Space>
-                    </Form.Item>
-                  </Form>
-
-                  <Modal title="Overtime Confirmation" open={otModalVisible} onOk={handleOTConfirm} onCancel={handleOTCancel} okText="Yes, Confirm OT" cancelText="No, Cancel" centered>
-                    <div style={{ textAlign: "center", padding: "20px 0" }}>
-                      <ExclamationCircleOutlined style={{ fontSize: 48, color: "#fa8c16", marginBottom: 16 }} />
-                      <p style={{ fontSize: 16, marginBottom: 8 }}>Are you sure you want to do <strong>Overtime (OT)</strong>?</p>
-                      <p style={{ color: "#666" }}>You have selected both General (8:30 AM - 5:00 PM) and Extended (5:00 PM - 9:00 PM) shifts.</p>
-                    </div>
-                  </Modal>
-                </>
+                  </div>
+                </div>
               ) : (
-                <div style={{ textAlign: "center", padding: "40px 0", color: "#999" }}>
-                  <p>Please select a date from the calendar to configure shifts.</p>
+                <div className="sp-empty" style={{ background: "#fff", borderRadius: 14, border: "1px dashed #e2e8f0" }}>
+                  <div className="sp-empty__icon"><CalendarOutlined /></div>
+                  <div className="sp-empty__text">Pick a date from the calendar to begin</div>
                 </div>
               )}
-            </Card>
 
-            {selectedDateDowntimes.length > 0 && (
-              <Card title="Machine Breakdown" style={{ marginTop: 16, borderColor: "#ff4d4f" }}>
-                {selectedDateDowntimes.map((m, idx) => (
-                  <Card key={idx} size="small" style={{ marginBottom: 10, background: "#fff1f0", borderColor: "#ffccc7" }}>
-                    <b>{m.machine_make}</b>
-                    <p>Status: {m.status_name}</p>
-                    <p>{m.description}</p>
-                    <p><b>Start:</b> {dayjs(m.available_from).format("DD MMM YYYY HH:mm")}</p>
-                    <p><b>End:</b> {m.available_to ? dayjs(m.available_to).format("DD MMM YYYY HH:mm") : "Ongoing"}</p>
-                  </Card>
-                ))}
+              {selectedDate && (
+                <div className="sp-steps">
+                  <div className={`sp-step${!currentConfig ? " sp-step--active" : ""}`}>
+                    <span className="sp-step__num">1</span>
+                    <span>Configure Shift</span>
+                  </div>
+                  <div className={`sp-step${currentConfig ? " sp-step--active" : ""}`}>
+                    <span className="sp-step__num">2</span>
+                    <span>Assign Machines</span>
+                  </div>
+                </div>
+              )}
+
+              <Card
+                className="sp-card"
+                size="small"
+                title={
+                  <Space size={8}>
+                    <SettingOutlined style={{ color: "#3b82f6" }} />
+                    <span>Shift Configuration</span>
+                  </Space>
+                }
+                styles={{ body: { padding: selectedDate ? "14px 18px" : "24px 18px" } }}
+              >
+                {selectedDate ? (
+                  <>
+                    <div className="sp-section-label">Day &amp; timing</div>
+                    <Form form={shiftForm} layout="vertical" onFinish={handleSaveShiftConfig} initialValues={{ working_day: true, custom_start: null, custom_end: null }}>
+                      <Form.Item label="Day Type" name="working_day" rules={[{ required: true }]} style={{ marginBottom: 14 }}>
+                        <Radio.Group onChange={handleWorkingDayChange} size="small" style={{ width: "100%" }} buttonStyle="solid">
+                          <Tooltip title="Normal working day. Selected shifts define production hours and the calendar shows Work.">
+                            <Radio.Button value={true} style={{ width: "50%", textAlign: "center" }}>
+                              <CheckCircleOutlined style={{ marginRight: 4 }} />Working
+                            </Radio.Button>
+                          </Tooltip>
+                          <Tooltip title="Off or holiday. Calendar shows Off. You can still assign a partial shift (e.g. Non-working) that will be used in scheduling with reduced hours.">
+                            <Radio.Button value={false} style={{ width: "50%", textAlign: "center" }}>
+                              <InfoCircleOutlined style={{ marginRight: 4 }} />Off
+                            </Radio.Button>
+                          </Tooltip>
+                        </Radio.Group>
+                      </Form.Item>
+
+                      <Form.Item
+                        label={(
+                          <Space size={6}>
+                            <span>Shift Selection</span>
+                            <Tooltip title="Hover any shift option to see how it affects machine scheduling and capacity planning before you save.">
+                              <InfoCircleOutlined style={{ color: "#94a3b8", fontSize: 13, cursor: "help" }} />
+                            </Tooltip>
+                          </Space>
+                        )}
+                        required
+                        style={{ marginBottom: 14 }}
+                        help={validationError && <span style={{ color: "#dc2626" }}>{validationError}</span>}
+                      >
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {shiftOptions.map((opt) => (
+                            <ShiftOption
+                              key={opt.code}
+                              option={opt}
+                              selected={selectedShifts.includes(opt.code)}
+                              onChange={handleShiftCheckboxChange}
+                              isWorkingDay={isWorkingDay}
+                            />
+                          ))}
+                        </div>
+                        {isWorkingDay && selectedShifts.includes("GENERAL") && selectedShifts.includes("NEXT") && (
+                          <Alert message="Overtime (OT) will apply" type="warning" showIcon style={{ marginTop: 10, borderRadius: 10 }} />
+                        )}
+                      </Form.Item>
+
+                      {selectedShifts.includes("CUSTOM") && (
+                        <Row gutter={10}>
+                          <Col span={12}>
+                            <Form.Item label="Start" name="custom_start" rules={[{ required: true, message: "Required" }]}>
+                              <DatePicker picker="time" format="HH:mm" style={{ width: "100%" }} size="small" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item label="End" name="custom_end" rules={[{ required: true, message: "Required" }]}>
+                              <DatePicker picker="time" format="HH:mm" style={{ width: "100%" }} size="small" />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                      )}
+
+                      <Form.Item style={{ marginBottom: 0 }}>
+                        <Space wrap>
+                          <Button type="primary" htmlType="submit" loading={shiftLoading} style={{ borderRadius: 8 }}>
+                            Save Shift
+                          </Button>
+                          {currentConfig && (
+                            <Popconfirm title="Cancel shift for this date?" onConfirm={handleCancelShift} okText="Yes" cancelText="No">
+                              <Button danger loading={shiftLoading} icon={<DeleteOutlined />} style={{ borderRadius: 8 }}>Cancel</Button>
+                            </Popconfirm>
+                          )}
+                          <Button onClick={handleClearConfig} style={{ borderRadius: 8 }}>Clear</Button>
+                        </Space>
+                      </Form.Item>
+                    </Form>
+
+                    <Modal title="Overtime Confirmation" open={otModalVisible} onOk={handleOTConfirm} onCancel={handleOTCancel} okText="Confirm OT" cancelText="Cancel" centered>
+                      <div style={{ textAlign: "center", padding: "16px 0" }}>
+                        <ExclamationCircleOutlined style={{ fontSize: 44, color: "#d97706", marginBottom: 14 }} />
+                        <p style={{ margin: 0, color: "#475569" }}>General + Extended shifts selected. This date will be marked as <strong>overtime</strong>.</p>
+                      </div>
+                    </Modal>
+                  </>
+                ) : (
+                  <div className="sp-empty">
+                    <div className="sp-empty__icon"><SettingOutlined /></div>
+                    <div className="sp-empty__text">Select a date to configure shifts</div>
+                  </div>
+                )}
               </Card>
-            )}
+
+              <ShiftDayAssignmentsPanel
+                machines={machines}
+                operators={operators}
+                assignments={assignments}
+                assignmentLoading={assignmentLoading}
+                currentConfig={currentConfig}
+                selectedDate={selectedDate}
+                onAssignmentsChange={fetchAssignments}
+              />
+            </div>
           </Col>
         </Row>
       </div>

@@ -1,18 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Typography, Empty, Button, Table, Space, message, Modal, Input, Upload, Tooltip, Select, Tag } from 'antd';
-import { 
-  FileOutlined, 
-  FolderOutlined, 
-  DeleteOutlined, 
-  EyeOutlined, 
-  EditOutlined, 
+import {
+  FileOutlined,
+  FolderOutlined,
+  DeleteOutlined,
+  EyeOutlined,
+  EditOutlined,
   DownloadOutlined,
   LoadingOutlined,
   UploadOutlined,
   CloudUploadOutlined,
-  HistoryOutlined
 } from '@ant-design/icons';
-import config from '../Config/config';
+import config from '../../Config/config.js';
+import {
+  getInventoryOverviewTableProps,
+  InventoryOverviewTableStyles,
+} from '../../InventorySupervisor Components/Inventory/OverviewData/inventoryOverviewTable.jsx';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -81,6 +84,17 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   const [addUploading, setAddUploading] = useState(false);
   const [addDocType, setAddDocType] = useState('CNC');
   const [customDocType, setCustomDocType] = useState('');
+
+  const getUserId = () => {
+    try {
+      const s = localStorage.getItem('user');
+      if (!s) return null;
+      const u = JSON.parse(s);
+      return u && (u.id || u.user_id || u.userId) ? (u.id || u.user_id || u.userId) : null;
+    } catch {
+      return null;
+    }
+  };
 
   useEffect(() => {
     if (selectedNode) {
@@ -278,81 +292,64 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   const columns = [
     {
       title: 'Sl No',
-      key: 'slNo',
-      render: (_, record, index) => index + 1,
-      width: 60,
+      key: 'sl_no',
+      align: 'center',
+      render: (_, __, index) => index + 1,
     },
     ...(selectedNode && selectedNode.type === 'part-ipid' ? [
       {
         title: 'Operation No',
         dataIndex: 'operation_number',
         key: 'operation_number',
-        width: 120,
-        render: (text) => <Text strong style={{ color: '#595959' }}>{text || '-'}</Text>
+        minWidth: 100,
+        render: (text) => text || '-',
       },
       {
         title: 'Operation Name',
         dataIndex: 'operation_name',
         key: 'operation_name',
-        width: 180,
-        render: (text) => <Text style={{ color: '#595959' }}>{text || '-'}</Text>
+        minWidth: 130,
+        ellipsis: true,
+        render: (text) => text || '-',
       }
     ] : []),
     {
       title: 'Document Name',
       dataIndex: 'file_name',
       key: 'file_name',
-      render: (text, record) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ 
-            width: '32px', 
-            height: '32px', 
-            backgroundColor: '#e6f7ff', 
-            borderRadius: '4px', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center'
-          }}>
-            <FileOutlined style={{ color: '#1890ff', fontSize: '18px' }} />
-          </div>
-          <Text strong style={{ fontSize: '14px', color: '#262626' }}>{text}</Text>
-        </div>
+      minWidth: 180,
+      ellipsis: true,
+      render: (text) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <FileOutlined style={{ color: '#1677ff', fontSize: 13, flexShrink: 0 }} />
+          <span>{text || '-'}</span>
+        </span>
       ),
     },
     {
       title: 'Document Type',
       dataIndex: 'document_type',
       key: 'document_type',
-      width: 120,
+      minWidth: 110,
+      align: 'center',
       render: (text) => text ? (
-        <Tag style={{ 
-          fontSize: '11px',
-          padding: '2px 8px',
-          backgroundColor: '#f0f0f0',
-          color: '#595959',
-          border: '1px solid #d9d9d9'
-        }}>
-          {text.toUpperCase()}
-        </Tag>
+        <Tag style={{ fontSize: 10, margin: 0, lineHeight: '18px' }}>{text.toUpperCase()}</Tag>
       ) : '-'
     },
     {
       title: 'Version',
       key: 'version',
-      width: 220,
+      minWidth: 140,
+      align: 'center',
+      sorter: false,
       render: (_, record) => {
-        // Hide version options for maintenance documents
         if (record.document_type === 'maintenance') {
-          return (
-            <Text strong style={{ color: '#595959' }}>
-              {record.version}
-            </Text>
-          );
+          return record.version || '-';
         }
-        
+
         return (
           <Select
-            size="middle"
+            size="small"
             value={record.id}
             onChange={(value) => {
               setSelectedVersions(prev => ({
@@ -360,33 +357,13 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
                 [record.familyId]: value
               }));
             }}
-            className="version-select-custom"
             popupMatchSelectWidth={false}
-            bordered={true}
-            style={{ 
-              width: '180px', 
-              borderRadius: '6px',
-              border: '1px solid #d9d9d9'
-            }}
+            style={{ width: 120 }}
           >
             {record.allVersions.map(v => (
               <Option key={v.id} value={v.id}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 0' }}>
-                  <div style={{ 
-                    width: '8px', 
-                    height: '8px', 
-                    borderRadius: '50%', 
-                    backgroundColor: v.id === record.allVersions[0].id ? '#52c41a' : '#d9d9d9' 
-                  }} />
-                  <Text strong style={{ color: v.id === record.id ? '#1890ff' : '#595959' }}>
-                    {v.version}
-                  </Text>
-                  {v.created_at && (
-                    <Text type="secondary" style={{ fontSize: '12px', marginLeft: 'auto' }}>
-                      {new Date(v.created_at).toLocaleDateString('en-GB')}
-                    </Text>
-                  )}
-                </div>
+                v{v.version}
+                {v.created_at ? ` · ${new Date(v.created_at).toLocaleDateString('en-GB')}` : ''}
               </Option>
             ))}
           </Select>
@@ -396,9 +373,10 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
     {
       title: 'Actions',
       key: 'actions',
-      width: 250,
+      align: 'center',
+      sorter: false,
       render: (_, record) => (
-        <Space size="small">
+        <Space size={2}>
           <Tooltip title="Preview Document">
             <Button
               type="text"
@@ -723,11 +701,12 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
         formData.delete('file');
         formData.append('files', file, file.name);
       } else if (uploadingDocument.doc_source_type === 'folder' && selectedNode.category === 'Reports') {
+        const userId = getUserId();
         url = `${config.API_BASE_URL}/order-documents/upload/${selectedNode.orderId}`;
         formData.append('document_type', uploadingDocument.document_type || 'Other');
         formData.append('document_version', nextVersion);
         formData.append('parent_id', (uploadingDocument.parent_id || uploadingDocument.id).toString());
-        formData.append('user_id', userId.toString());
+        if (userId) formData.append('user_id', userId.toString());
       }
 
       if (!url) {
@@ -1015,20 +994,36 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
   };
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <div style={{ padding: '16px', borderBottom: '1px solid #f0f0f0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#fff' }}>
+      <div
+        style={{
+          padding: '10px 14px',
+          borderBottom: '1px solid #c5cdd8',
+          background: '#fff',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
             {getHeaderIcon()}
-            <Title level={4} style={{ margin: 0 }}>
+            <span
+              style={{
+                margin: 0,
+                fontSize: 15,
+                fontWeight: 700,
+                color: '#0d253f',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
               {getHeaderTitle()}
-            </Title>
+            </span>
           </div>
           {isSupportedNodeType && (
-            <Button 
-              type="primary" 
-              icon={<UploadOutlined />} 
+            <Button
+              type="primary"
+              size="small"
+              icon={<UploadOutlined />}
               onClick={() => {
                 setAddFileList([]);
                 setAddModalVisible(true);
@@ -1038,32 +1033,28 @@ const DocumentContent = ({ selectedNode, onDocumentsChange, documentTreeRef, doc
             </Button>
           )}
         </div>
-        <Text type="secondary">
-          {documents.length} document{documents.length !== 1 ? 's' : ''} in this folder
-        </Text>
       </div>
 
-      {/* Documents Table */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '10px 12px' }}>
+        <InventoryOverviewTableStyles />
         <Table
-          columns={columns}
-          dataSource={groupedDocuments}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showQuickJumper: true,
-            showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} documents`,
-          }}
-          size="small"
+          {...getInventoryOverviewTableProps({
+            columns,
+            dataSource: groupedDocuments,
+            rowKey: 'id',
+            loading,
+            scrollX: 900,
+            pagination: {
+              pageSize: 10,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
+            },
+          })}
           locale={{
             emptyText: documents.length === 0 && !loading ? (
-              <Empty
-                description="No documents in this folder"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              />
-            ) : 'No data'
+              <Empty description="No documents in this folder" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : 'No data',
           }}
         />
       </div>

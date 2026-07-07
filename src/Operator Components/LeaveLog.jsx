@@ -155,6 +155,7 @@ const LeaveLog = () => {
       dataIndex: 'from_date',
       key: 'from_date',
       width: 120,
+      sorter: (a, b) => moment(a.from_date).unix() - moment(b.from_date).unix(),
       render: (date, record) => {
         if (editingRow === record.id) {
           return (
@@ -175,6 +176,7 @@ const LeaveLog = () => {
       dataIndex: 'to_date',
       key: 'to_date',
       width: 120,
+      sorter: (a, b) => moment(a.to_date).unix() - moment(b.to_date).unix(),
       render: (date, record) => {
         if (editingRow === record.id) {
           return (
@@ -224,6 +226,11 @@ const LeaveLog = () => {
       dataIndex: 'status',
       key: 'status',
       width: 100,
+      filters: [
+        { text: 'Pending', value: 'pending' },
+        { text: 'Acknowledged', value: 'acknowledged' },
+      ],
+      onFilter: (value, record) => record.status?.toLowerCase() === value,
       render: (status) => {
         let color = 'default';
         if (status?.toLowerCase() === 'pending') color = 'orange';

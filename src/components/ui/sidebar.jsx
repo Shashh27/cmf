@@ -178,35 +178,30 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-      // Fetch production logs
+      const [productionResponse, pokayokeChecklistResponse] = await Promise.all([
+        fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`),
+        fetch(`${API_BASE_URL}/operation-checklists/submissions?operator=${operatorId}`),
+      ]);
 
-      const apiUrl = `${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true&operator_id=${operatorId}`;
+      let productionCount = 0;
+      let pokayokeChecklistCount = 0;
 
-
-
-      const response = await fetch(apiUrl);
-
-      if (response.ok) {
-
-        const data = await response.json();
-
-        // Count logs where supervisor has responded, produced_quantity > 0, and not acknowledged
-
-        const supervisorRespondedLogs = (data || []).filter(
-
+      if (productionResponse.ok) {
+        const data = await productionResponse.json();
+        productionCount = (data || []).filter(
           log => (log.supervisor_id !== null && log.supervisor_id !== undefined) &&
-
                  (log.produced_quantity || 0) > 0 &&
-
                  !log.operator_acknowledged_at &&
-
                  !log.acknowledged
-
-        );
-
-        setNotificationCount(supervisorRespondedLogs.length);
-
+        ).length;
       }
+
+      if (pokayokeChecklistResponse.ok) {
+        const data = await pokayokeChecklistResponse.json();
+        pokayokeChecklistCount = (data || []).filter((log) => !log.operator_ack_by).length;
+      }
+
+      setNotificationCount(productionCount + pokayokeChecklistCount);
 
     } catch (error) {
 
@@ -248,39 +243,35 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
 
 
-      // Fetch all production logs
-
-      const apiUrl = `${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`;
+      if (!supervisorId) return;
 
 
 
-      const response = await fetch(apiUrl);
+      const [productionResponse, pokayokeChecklistResponse] = await Promise.all([
+        fetch(`${SCHEDULING_API_BASE_URL}/production-logs/?hierarchical=true`),
+        fetch(`${API_BASE_URL}/operation-checklists/submissions`),
+      ]);
 
-      if (response.ok) {
+      let productionCount = 0;
+      let pokayokeChecklistCount = 0;
 
-        const data = await response.json();
-
-        // Count logs related to supervisor (both responded and not responded)
-
-        // where produced_quantity > 0 and not acknowledged
-
-        const supervisorLogs = (data || []).filter(
-
+      if (productionResponse.ok) {
+        const data = await productionResponse.json();
+        productionCount = (data || []).filter(
           log => ((log.supervisor_id === null || log.supervisor_id === undefined) ||
-
                  String(log.supervisor_id) === String(supervisorId)) &&
-
                  (log.produced_quantity || 0) > 0 &&
-
                  !log.supervisor_acknowledged_at &&
-
                  !log.acknowledged
-
-        );
-
-        setNotificationCount(supervisorLogs.length);
-
+        ).length;
       }
+
+      if (pokayokeChecklistResponse.ok) {
+        const data = await pokayokeChecklistResponse.json();
+        pokayokeChecklistCount = (data || []).filter((log) => !log.supervisor_ack_by).length;
+      }
+
+      setNotificationCount(productionCount + pokayokeChecklistCount);
 
     } catch (error) {
 
@@ -551,7 +542,15 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         icon: <DashboardOutlined />,
 
       },
+      {
 
+        key: `${prefix}/preventive-maintenance`,
+
+        label: <Link to={`${prefix}/preventive-maintenance`} onClick={() => setMobileDrawerOpen(false)}>Preventive Maintenance</Link>,
+
+        icon: <CarryOutOutlined />,
+
+      },
       {
 
         key: `${prefix}/inspection-results`,

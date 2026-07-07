@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Table, Button, Modal, Card, Tag, message, Typography, Space, Input, Select, DatePicker, Tooltip, Empty } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined, SafetyCertificateOutlined, SearchOutlined, ReloadOutlined, CheckSquareOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { API_BASE_URL } from '../Config/auth';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -45,8 +46,6 @@ const PokaYokeOperationChecklist = () => {
     action: '',
     remarks: '',
   });
-
-  const API_BASE_URL = 'http://172.18.7.89:8000/api/v1';
 
   const getSupervisorId = () => {
     const storedUser = localStorage.getItem('user');
@@ -327,6 +326,20 @@ const PokaYokeOperationChecklist = () => {
       render: (remarks) => <Text style={{ fontSize: 12 }}>{remarks || '-'}</Text>,
     },
     {
+      title: 'Approved At',
+      key: 'sup_action_at',
+      sorter: (a, b) => {
+        const aVal = a.sup_action_at ? dayjs(a.sup_action_at).valueOf() : 0;
+        const bVal = b.sup_action_at ? dayjs(b.sup_action_at).valueOf() : 0;
+        return aVal - bVal;
+      },
+      render: (_, record) => (
+        <Text style={{ fontSize: 12 }}>
+          {record.sup_action_at ? dayjs(record.sup_action_at).format('DD-MM-YYYY, HH:mm:ss') : 'N/A'}
+        </Text>
+      ),
+    },
+    {
       title: 'Actions',
       key: 'actions',
       fixed: 'right',
@@ -384,13 +397,13 @@ const PokaYokeOperationChecklist = () => {
       `}</style>
 
       <Card
-        title={
-          <Space>
-            <SafetyCertificateOutlined style={{ color: '#1890ff' }} />
-            <Title level={4} style={{ margin: 0 }}>PokaYoke Checklist</Title>
-            {refreshing && <ReloadOutlined spin />}
-          </Space>
-        }
+        // title={
+          // <Space>
+          //   <SafetyCertificateOutlined style={{ color: '#1890ff' }} />
+          //   <Title level={4} style={{ margin: 0 }}>PokaYoke Checklist</Title>
+          //   {refreshing && <ReloadOutlined spin />}
+          // </Space>
+        // }
         className="shadow-sm"
       >
         <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>

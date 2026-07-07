@@ -68,10 +68,6 @@ import ProductionMonitoring from "./Pages/ProductionMonitoring";
 
 import OperatorDashboard from "./Pages/OperatorDashboard";
 
-import ProductionLogsHistory from "./Operator Components/ProductionLogsHistory";
-
-import OperatorNotifications from "./Operator Components/Notifications";
-
 
 
 import MaintenanceManagement from "./Pages/MaintenanceManagement";
@@ -502,11 +498,13 @@ function App() {
 
           <Route path="/operator/documents" element={<OperatorDashboard />} />
 
-          <Route path="/operator/production-logs" element={<ProductionLogsHistory />} />
+          <Route path="/operator/production-logs" element={<OperatorDashboard />} />
 
-          <Route path="/operator/notifications" element={<OperatorNotifications />} />
+          <Route path="/operator/notifications" element={<OperatorDashboard />} />
 
           <Route path="/operator/leave-log" element={<OperatorDashboard />} />
+
+          <Route path="/operator/preventive-maintenance" element={<OperatorDashboard />} />
 
           </Route>
 

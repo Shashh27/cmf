@@ -6,8 +6,8 @@ const { TabPane } = Tabs;
 const { TextArea } = Input;
 const { Text } = Typography;
 const categoryOptions = ['Availability', 'Quality', 'Performance'];
-const oeeReasons = ['Machine Oeeissue', 'Tool Change', 'Setup/Adjustment', 'Power Failure', 'Material Shortage', 'Planned Maintenance'];
-const breakdownReasons = ['Machine Breakdown', 'Electrical Issue', 'Mechanical Issue', 'Hydraulic Issue', 'Pneumatic Issue', 'Software Issue', 'Emergency Stop'];
+const oeeReasons = ['Machine Oeeissue', 'Tool Change', 'Setup/Adjustment', 'Power Failure', 'Material Shortage', 'Planned Maintenance', 'Other'];
+const breakdownReasons = ['Machine Breakdown', 'Electrical Issue', 'Mechanical Issue', 'Hydraulic Issue', 'Pneumatic Issue', 'Software Issue', 'Emergency Stop', 'Other'];
 const componentStatusOpts = ['Available', 'Not Available'];
 const getUserId = () => {
   try {
@@ -34,26 +34,67 @@ const ReportIssue = ({ open, onClose, machineId }) => {
   const [activeTab, setActiveTab] = useState('oee');
   const [oeeCategory, setOeeCategory] = useState('Availability');
   const [oeeReasonsSel, setOeeReasonsSel] = useState([]);
+  const [oeeCustomReason, setOeeCustomReason] = useState('');
   const [oeeTimes, setOeeTimes] = useState([null, null]);
   const [machineStatus, setMachineStatus] = useState('ON');
   const [breakdownCategory, setBreakdownCategory] = useState('Availability');
   const [breakdownReasonsSel, setBreakdownReasonsSel] = useState([]);
+  const [breakdownCustomReason, setBreakdownCustomReason] = useState('');
   const [breakdownAdditional, setBreakdownAdditional] = useState('');
   const [componentStatus, setComponentStatus] = useState('Available');
   const [orders, setOrders] = useState([]);
   const [parts, setParts] = useState([]);
   const [orderId, setOrderId] = useState(null);
   const [partId, setPartId] = useState(null);
+  const [operations, setOperations] = useState([]);
+  const [operationId, setOperationId] = useState(null);
   const [componentDesc, setComponentDesc] = useState('');
   
   // Help & Support state variables
   const [helpOrderId, setHelpOrderId] = useState(null);
   const [helpPartId, setHelpPartId] = useState(null);
+  const [helpOperations, setHelpOperations] = useState([]);
+  const [helpOperationId, setHelpOperationId] = useState(null);
   const [helpDescription, setHelpDescription] = useState('');
   const [helpParts, setHelpParts] = useState([]);
+  
+  // Selected job from localStorage
+  const [selectedJob, setSelectedJob] = useState(null);
   const operatorId = useMemo(() => getUserId(), []);
   useEffect(() => {
     if (open) {
+      // Read selected job from localStorage
+      try {
+        const job = localStorage.getItem('selectedJob');
+        if (job) {
+          const parsedJob = JSON.parse(job);
+          setSelectedJob(parsedJob);
+          // Auto-fill component issue fields
+          setOrderId(parsedJob.sale_order_id);
+          setPartId(parsedJob.part_id);
+          setOperationId(parsedJob.operation_id);
+          // Auto-fill help support fields
+          setHelpOrderId(parsedJob.sale_order_id);
+          setHelpPartId(parsedJob.part_id);
+          setHelpOperationId(parsedJob.operation_id);
+          // Fetch operations for the part
+          fetch(`${API_BASE_URL}/operations/part/${parsedJob.part_id}`, { headers: { accept: 'application/json' } })
+            .then(async (r) => {
+              if (r.ok) {
+                const data = await r.json();
+                const arr = Array.isArray(data) ? data : [];
+                setOperations(arr);
+                setHelpOperations(arr);
+              }
+            })
+            .catch(() => {});
+        } else {
+          setSelectedJob(null);
+        }
+      } catch (e) {
+        setSelectedJob(null);
+      }
+      
       fetch(`${API_BASE_URL}/orders/`).then(async (r) => {
         if (r.ok) {
           const data = await r.json();
@@ -66,6 +107,8 @@ const ReportIssue = ({ open, onClose, machineId }) => {
     if (!orderId) {
       setParts([]);
       setPartId(null);
+      setOperations([]);
+      setOperationId(null);
       return;
     }
     const orderObj = orders.find(o => o.id === orderId);
@@ -103,11 +146,33 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       .catch(() => setParts([]));
   }, [orderId, orders]);
   
+  // Fetch operations when part is selected for Component Issue
+  useEffect(() => {
+    if (!partId) {
+      setOperations([]);
+      setOperationId(null);
+      return;
+    }
+    fetch(`${API_BASE_URL}/operations/part/${partId}`, { headers: { accept: 'application/json' } })
+      .then(async (r) => {
+        if (r.ok) {
+          const data = await r.json();
+          const arr = Array.isArray(data) ? data : [];
+          setOperations(arr);
+        } else {
+          setOperations([]);
+        }
+      })
+      .catch(() => setOperations([]));
+  }, [partId]);
+  
   // Help & Support parts fetch effect
   useEffect(() => {
     if (!helpOrderId) {
       setHelpParts([]);
       setHelpPartId(null);
+      setHelpOperations([]);
+      setHelpOperationId(null);
       return;
     }
     const orderObj = orders.find(o => o.id === helpOrderId);
@@ -144,24 +209,51 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       })
       .catch(() => setHelpParts([]));
   }, [helpOrderId, orders]);
+  
+  // Fetch operations when part is selected for Help & Support
+  useEffect(() => {
+    if (!helpPartId) {
+      setHelpOperations([]);
+      setHelpOperationId(null);
+      return;
+    }
+    fetch(`${API_BASE_URL}/operations/part/${helpPartId}`, { headers: { accept: 'application/json' } })
+      .then(async (r) => {
+        if (r.ok) {
+          const data = await r.json();
+          const arr = Array.isArray(data) ? data : [];
+          setHelpOperations(arr);
+        } else {
+          setHelpOperations([]);
+        }
+      })
+      .catch(() => setHelpOperations([]));
+  }, [helpPartId]);
   const resetAll = () => {
     setActiveTab('oee');
     setOeeCategory('Availability');
     setOeeReasonsSel([]);
+    setOeeCustomReason('');
     setOeeTimes([null, null]);
     setMachineStatus('ON');
     setBreakdownCategory('Availability');
     setBreakdownReasonsSel([]);
+    setBreakdownCustomReason('');
     setBreakdownAdditional('');
     setComponentStatus('Available');
     setOrderId(null);
     setPartId(null);
+    setOperationId(null);
+    setOperations([]);
     setComponentDesc('');
     // Reset Help & Support state
     setHelpOrderId(null);
     setHelpPartId(null);
+    setHelpOperationId(null);
+    setHelpOperations([]);
     setHelpDescription('');
     setHelpParts([]);
+    setSelectedJob(null);
   };
   const handleClose = () => {
     resetAll();
@@ -183,11 +275,20 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       message.error('Fill all required fields');
       return;
     }
+    if (oeeReasonsSel.includes('Other') && !oeeCustomReason.trim()) {
+      message.error('Please specify the custom issue reason');
+      return;
+    }
+    let finalReasons = [...oeeReasonsSel];
+    if (oeeReasonsSel.includes('Other') && oeeCustomReason.trim()) {
+      finalReasons = finalReasons.filter(r => r !== 'Other');
+      finalReasons.push(oeeCustomReason.trim());
+    }
     const payload = {
       machine_id: parseInt(machineId),
       reported_by: parseInt(operatorId),
       issue_category: oeeCategory,
-      issue_reason: oeeReasonsSel,
+      issue_reason: finalReasons,
       start_time: formatLocalNaive(oeeTimes[0]),
       end_time: formatLocalNaive(oeeTimes[1]),
       reported_at: formatLocalNaive(new Date()),
@@ -214,12 +315,21 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       message.error('Fill all required fields');
       return;
     }
+    if (breakdownReasonsSel.includes('Other') && !breakdownCustomReason.trim()) {
+      message.error('Please specify the custom issue reason');
+      return;
+    }
+    let finalReasons = [...breakdownReasonsSel];
+    if (breakdownReasonsSel.includes('Other') && breakdownCustomReason.trim()) {
+      finalReasons = finalReasons.filter(r => r !== 'Other');
+      finalReasons.push(breakdownCustomReason.trim());
+    }
     const payload = {
       machine_id: parseInt(machineId),
       reported_by: parseInt(operatorId),
       issue_category: breakdownCategory,
       machine_status: machineStatus,
-      issue_reason: breakdownReasonsSel,
+      issue_reason: finalReasons,
       additional_reason: breakdownAdditional || null,
       reported_at: formatLocalNaive(new Date()),
     };
@@ -241,7 +351,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       message.error('Machine or operator not found');
       return;
     }
-    if (!componentStatus || !orderId || !partId || !componentDesc) {
+    if (!componentStatus || !orderId || !partId || !operationId || !componentDesc) {
       message.error('Fill all required fields');
       return;
     }
@@ -251,6 +361,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       component_status: componentStatus,
       production_order_id: parseInt(orderId),
       part_id: parseInt(partId),
+      operation_id: parseInt(operationId),
       description: componentDesc,
       reported_at: formatLocalNaive(new Date()),
     };
@@ -273,7 +384,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       message.error('Machine or operator not found');
       return;
     }
-    if (!helpOrderId || !helpPartId || !helpDescription) {
+    if (!helpOrderId || !helpPartId || !helpOperationId || !helpDescription) {
       message.error('Fill all required fields');
       return;
     }
@@ -282,6 +393,7 @@ const ReportIssue = ({ open, onClose, machineId }) => {
       reported_by: parseInt(operatorId),
       production_order_id: parseInt(helpOrderId),
       part_id: parseInt(helpPartId),
+      operation_id: parseInt(helpOperationId),
       description: helpDescription,
       reported_at: formatLocalNaive(new Date()),
     };
@@ -362,6 +474,17 @@ const ReportIssue = ({ open, onClose, machineId }) => {
               style={{ width: '100%' }}
               options={oeeReasons.map((r) => ({ label: r, value: r }))}
             />
+            {oeeReasonsSel.includes('Other') && (
+              <>
+                <Text strong><span style={{ color: '#ef4444' }}>*</span> Please specify the issue</Text>
+                <TextArea 
+                  rows={2} 
+                  value={oeeCustomReason} 
+                  onChange={(e) => setOeeCustomReason(e.target.value)} 
+                  placeholder="Enter custom issue reason..."
+                />
+              </>
+            )}
             <Text strong><span style={{ color: '#ef4444' }}>*</span> Start and End Time</Text>
             <Space>
               <DatePicker
@@ -445,6 +568,17 @@ const ReportIssue = ({ open, onClose, machineId }) => {
               style={{ width: '100%' }}
               options={breakdownReasons.map((r) => ({ label: r, value: r }))}
             />
+            {breakdownReasonsSel.includes('Other') && (
+              <>
+                <Text strong><span style={{ color: '#ef4444' }}>*</span> Please specify the issue</Text>
+                <TextArea 
+                  rows={2} 
+                  value={breakdownCustomReason} 
+                  onChange={(e) => setBreakdownCustomReason(e.target.value)} 
+                  placeholder="Enter custom issue reason..."
+                />
+              </>
+            )}
             <Text strong>Additional Description (Optional)</Text>
             <TextArea rows={4} value={breakdownAdditional} onChange={(e) => setBreakdownAdditional(e.target.value)} />
             <Button
@@ -481,29 +615,70 @@ const ReportIssue = ({ open, onClose, machineId }) => {
               options={componentStatusOpts.map((s) => ({ label: s, value: s }))}
             />
             <Text strong><span style={{ color: '#ef4444' }}>*</span> Production Order</Text>
-            <Select
-              value={orderId}
-              onChange={(v) => { setOrderId(v); setPartId(null); }}
-              placeholder="Select production order"
-              style={{ width: '100%' }}
-              showSearch
-              optionFilterProp="label"
-              options={orders.map((o) => ({ label: o.sale_order_number ?? o.order_no ?? o.id, value: o.id }))}
-            />
+            {selectedJob ? (
+              <Input
+                value={selectedJob.sale_order_number || ''}
+                disabled
+                style={{ width: '100%', backgroundColor: '#f5f5f5' }}
+              />
+            ) : (
+              <Select
+                value={orderId}
+                onChange={(v) => { setOrderId(v); setPartId(null); }}
+                placeholder="Select production order"
+                style={{ width: '100%' }}
+                showSearch
+                optionFilterProp="label"
+                options={orders.map((o) => ({ label: o.sale_order_number ?? o.order_no ?? o.id, value: o.id }))}
+              />
+            )}
             <Text strong><span style={{ color: '#ef4444' }}>*</span> Part Name</Text>
-            <Select
-              value={partId}
-              onChange={setPartId}
-              placeholder="Select part"
-              style={{ width: '100%' }}
-              showSearch
-              optionFilterProp="label"
-              options={parts.map((p) => {
-                const pid = p?.part_id ?? p?.id;
-                const label = p.part_name || (pid ? `Part #${pid}` : 'Part');
-                return { label, value: pid };
-              })}
-            />
+            {selectedJob ? (
+              <Input
+                value={selectedJob.part_number ? `${selectedJob.part_name} (${selectedJob.part_number})` : selectedJob.part_name || ''}
+                disabled
+                style={{ width: '100%', backgroundColor: '#f5f5f5' }}
+              />
+            ) : (
+              <Select
+                value={partId}
+                onChange={(v) => { setPartId(v); setOperationId(null); }}
+                placeholder="Select part"
+                style={{ width: '100%' }}
+                showSearch
+                optionFilterProp="label"
+                options={parts.map((p) => {
+                  const pid = p?.part_id ?? p?.id;
+                  const partName = p.part_name || '';
+                  const partNum = p.part_number || '';
+                  const label = partNum ? `${partName} (${partNum})` : (partName || (pid ? `Part #${pid}` : 'Part'));
+                  return { label, value: pid };
+                })}
+              />
+            )}
+            <Text strong><span style={{ color: '#ef4444' }}>*</span> Operation</Text>
+            {selectedJob ? (
+              <Input
+                value={selectedJob.operation_number ? `${selectedJob.operation_name} (${selectedJob.operation_number})` : selectedJob.operation_name || ''}
+                disabled
+                style={{ width: '100%', backgroundColor: '#f5f5f5' }}
+              />
+            ) : (
+              <Select
+                value={operationId}
+                onChange={setOperationId}
+                placeholder="Select operation"
+                style={{ width: '100%' }}
+                showSearch
+                optionFilterProp="label"
+                options={operations.map((op) => {
+                  const opName = op.operation_name || '';
+                  const opNum = op.operation_number || '';
+                  const label = opNum ? `${opName} (${opNum})` : (opName || `Operation #${op.id}`);
+                  return { label, value: op.id };
+                })}
+              />
+            )}
             <Text strong><span style={{ color: '#ef4444' }}>*</span> Description</Text>
             <TextArea rows={4} value={componentDesc} onChange={(e) => setComponentDesc(e.target.value)} />
             <Button
@@ -533,29 +708,70 @@ const ReportIssue = ({ open, onClose, machineId }) => {
         >
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <Text strong><span style={{ color: '#ef4444' }}>*</span> Production Order</Text>
-            <Select
-              value={helpOrderId}
-              onChange={(v) => { setHelpOrderId(v); setHelpPartId(null); }}
-              placeholder="Select production order"
-              style={{ width: '100%' }}
-              showSearch
-              optionFilterProp="label"
-              options={orders.map((o) => ({ label: o.sale_order_number ?? o.order_no ?? o.id, value: o.id }))}
-            />
+            {selectedJob ? (
+              <Input
+                value={selectedJob.sale_order_number || ''}
+                disabled
+                style={{ width: '100%', backgroundColor: '#f5f5f5' }}
+              />
+            ) : (
+              <Select
+                value={helpOrderId}
+                onChange={(v) => { setHelpOrderId(v); setHelpPartId(null); }}
+                placeholder="Select production order"
+                style={{ width: '100%' }}
+                showSearch
+                optionFilterProp="label"
+                options={orders.map((o) => ({ label: o.sale_order_number ?? o.order_no ?? o.id, value: o.id }))}
+              />
+            )}
             <Text strong><span style={{ color: '#ef4444' }}>*</span> Part Name</Text>
-            <Select
-              value={helpPartId}
-              onChange={setHelpPartId}
-              placeholder="Select part"
-              style={{ width: '100%' }}
-              showSearch
-              optionFilterProp="label"
-              options={helpParts.map((p) => {
-                const pid = p?.part_id ?? p?.id;
-                const label = p.part_name || (pid ? `Part #${pid}` : 'Part');
-                return { label, value: pid };
-              })}
-            />
+            {selectedJob ? (
+              <Input
+                value={selectedJob.part_number ? `${selectedJob.part_name} (${selectedJob.part_number})` : selectedJob.part_name || ''}
+                disabled
+                style={{ width: '100%', backgroundColor: '#f5f5f5' }}
+              />
+            ) : (
+              <Select
+                value={helpPartId}
+                onChange={(v) => { setHelpPartId(v); setHelpOperationId(null); }}
+                placeholder="Select part"
+                style={{ width: '100%' }}
+                showSearch
+                optionFilterProp="label"
+                options={helpParts.map((p) => {
+                  const pid = p?.part_id ?? p?.id;
+                  const partName = p.part_name || '';
+                  const partNum = p.part_number || '';
+                  const label = partNum ? `${partName} (${partNum})` : (partName || (pid ? `Part #${pid}` : 'Part'));
+                  return { label, value: pid };
+                })}
+              />
+            )}
+            <Text strong><span style={{ color: '#ef4444' }}>*</span> Operation</Text>
+            {selectedJob ? (
+              <Input
+                value={selectedJob.operation_number ? `${selectedJob.operation_name} (${selectedJob.operation_number})` : selectedJob.operation_name || ''}
+                disabled
+                style={{ width: '100%', backgroundColor: '#f5f5f5' }}
+              />
+            ) : (
+              <Select
+                value={helpOperationId}
+                onChange={setHelpOperationId}
+                placeholder="Select operation"
+                style={{ width: '100%' }}
+                showSearch
+                optionFilterProp="label"
+                options={helpOperations.map((op) => {
+                  const opName = op.operation_name || '';
+                  const opNum = op.operation_number || '';
+                  const label = opNum ? `${opName} (${opNum})` : (opName || `Operation #${op.id}`);
+                  return { label, value: op.id };
+                })}
+              />
+            )}
             <Text strong><span style={{ color: '#ef4444' }}>*</span> Description</Text>
             <TextArea rows={4} value={helpDescription} onChange={(e) => setHelpDescription(e.target.value)} />
             <Button
