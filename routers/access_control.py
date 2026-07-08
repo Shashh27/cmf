@@ -5,11 +5,26 @@ from typing import List
 from DB.database import get_db
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.access_control import AccessUserResponse, AccessUserCreate, AccessUserUpdate
+from DB.utils.password import encrypt_password, decrypt_password
 
 router = APIRouter(
     prefix="/access-users",
     tags=["access-users"]
 )
+
+
+def _to_response(db_user: AccessUserModel) -> AccessUserResponse:
+    return AccessUserResponse(
+        id=db_user.id,
+        user_name=db_user.user_name,
+        gmail=db_user.gmail,
+        role=db_user.role,
+        center=db_user.center,
+        group=db_user.group,
+        password=decrypt_password(db_user.password),
+        createdAt=db_user.createdAt,
+        updatedAt=db_user.updatedAt,
+    )
 
 @router.post("/", response_model=AccessUserResponse, status_code=status.HTTP_201_CREATED)
 def create_access_user(user: AccessUserCreate, db: Session = Depends(get_db)):
@@ -30,19 +45,21 @@ def create_access_user(user: AccessUserCreate, db: Session = Depends(get_db)):
             detail=f"User with username {user.user_name} already exists"
         )
 
-    db_user = AccessUserModel(**user.model_dump())
+    user_data = user.model_dump()
+    user_data["password"] = encrypt_password(user_data["password"])
+    db_user = AccessUserModel(**user_data)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    return db_user
+    return _to_response(db_user)
 
 @router.get("/", response_model=List[AccessUserResponse])
 def get_access_users(db: Session = Depends(get_db)):
     """Get all access users (no limits)"""
     users = db.query(AccessUserModel).all()
-    return users
+    return [_to_response(user) for user in users]
 
-@router.get("/{user_id}", response_model=AccessUserResponse)
+@router.get("/{user_id}/", response_model=AccessUserResponse)
 def get_access_user(user_id: int, db: Session = Depends(get_db)):
     """Get a specific access user by ID"""
     user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()
@@ -51,9 +68,9 @@ def get_access_user(user_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with id {user_id} not found"
         )
-    return user
+    return _to_response(user)
 
-@router.put("/{user_id}", response_model=AccessUserResponse)
+@router.put("/{user_id}/", response_model=AccessUserResponse)
 def update_access_user(user_id: int, user: AccessUserUpdate, db: Session = Depends(get_db)):
     """Update an access user"""
     db_user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()
@@ -80,14 +97,18 @@ def update_access_user(user_id: int, user: AccessUserUpdate, db: Session = Depen
             )
 
     update_data = user.model_dump(exclude_unset=True)
+    if not update_data.get("password"):
+        update_data.pop("password", None)
+    elif "password" in update_data:
+        update_data["password"] = encrypt_password(update_data["password"])
     for field, value in update_data.items():
         setattr(db_user, field, value)
 
     db.commit()
     db.refresh(db_user)
-    return db_user
+    return _to_response(db_user)
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_id}/", status_code=status.HTTP_204_NO_CONTENT)
 def delete_access_user(user_id: int, db: Session = Depends(get_db)):
     """Delete an access user"""
     db_user = db.query(AccessUserModel).filter(AccessUserModel.id == user_id).first()

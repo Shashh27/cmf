@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from DB.database import get_db
 from DB.models.access_control import AccessUser as AccessUserModel
 from DB.schemas.access_control import LoginRequest, LoginResponse
+from DB.utils.password import verify_password
 
 router = APIRouter(
     prefix="/login",
@@ -18,10 +19,7 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     # Find user by username
     user = db.query(AccessUserModel).filter(AccessUserModel.user_name == login_data.user_name).first()
     
-    # Check if user exists and password matches
-    # Note: Currently using plain text passwords as per existing model. 
-    # Should upgrade to hashing in future.
-    if not user or user.password != login_data.password:
+    if not user or not verify_password(login_data.password, user.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",

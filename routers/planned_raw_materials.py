@@ -61,7 +61,8 @@ def batch_get_planned_raw_materials(
                 extracted_material_name=material_name,
                 extracted_dimensions_str=dimension_str,
                 min_score=0.3,
-                max_recommendations=5
+                max_recommendations=5,
+                required_length=entry.planned_length,
             )
         
         result.append({

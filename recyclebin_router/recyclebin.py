@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from typing import List, Optional
+from typing import List, Optional, Set
 from sqlalchemy import and_, text
 
 from DB.database import get_db
@@ -53,76 +53,115 @@ def _build_assembly_maps(db: Session):
     return product_map, parent_assembly_map, user_map
 
 
-def _build_hierarchical_assemblies(assemblies: list, db: Session, product_map: dict, parent_assembly_map: dict, user_map: dict, parts: list) -> list:
-    """Build hierarchical assembly structure with child_assemblies and parts"""
-    # Create a map of assemblies by id
-    assembly_map = {a.id: a for a in assemblies}
-    
-    # Group assemblies by parent_id
+def _build_hierarchical_assemblies(
+    assemblies: list,
+    db: Session,
+    product_map: dict,
+    parent_assembly_map: dict,
+    user_map: dict,
+    parts: list,
+    type_map: dict,
+    rm_map: dict,
+    vendor_map: dict,
+    assembly_map: dict,
+    order_map: dict,
+) -> list:
+    """Build hierarchical assembly structure with child_assemblies and recycled parts."""
+    assembly_ids = {assembly.id for assembly in assemblies}
+
     children_by_parent = {}
     for assembly in assemblies:
         parent_id = assembly.parent_id or None
-        if parent_id not in children_by_parent:
-            children_by_parent[parent_id] = []
-        children_by_parent[parent_id].append(assembly)
-    
-    # Group parts by assembly_id
+        children_by_parent.setdefault(parent_id, []).append(assembly)
+
     parts_by_assembly = {}
     for part in parts:
-        assembly_id = part.assembly_id
-        if assembly_id not in parts_by_assembly:
-            parts_by_assembly[assembly_id] = []
-        parts_by_assembly[assembly_id].append(part)
-    
-    # Recursive function to build hierarchy
+        if part.assembly_id:
+            parts_by_assembly.setdefault(part.assembly_id, []).append(
+                _part_to_dict(part, type_map, rm_map, user_map, vendor_map, product_map, assembly_map, order_map)
+            )
+
     def build_hierarchy(assembly):
-        children = children_by_parent.get(assembly.id, [])
-        child_assemblies = []
-        for child in children:
-            child_assemblies.append(build_hierarchy(child))
-        
-        # Get parts for this assembly
+        child_assemblies = [
+            build_hierarchy(child)
+            for child in children_by_parent.get(assembly.id, [])
+        ]
         assembly_parts = parts_by_assembly.get(assembly.id, [])
-        
-        return _assembly_to_dict(assembly, product_map, parent_assembly_map, user_map, db, child_assemblies, assembly_parts)
-    
-    # Build hierarchy for root assemblies (parent_id is None)
-    root_assemblies = children_by_parent.get(None, [])
-    hierarchical_assemblies = [build_hierarchy(assembly) for assembly in root_assemblies]
-    
-    return hierarchical_assemblies
+        return _assembly_to_dict(
+            assembly,
+            product_map,
+            parent_assembly_map,
+            user_map,
+            db,
+            child_assemblies,
+            assembly_parts,
+        )
+
+    root_assemblies = [
+        assembly for assembly in assemblies
+        if assembly.parent_id is None or assembly.parent_id not in assembly_ids
+    ]
+    return [build_hierarchy(assembly) for assembly in root_assemblies]
 
 
-def _check_and_update_assembly_recycle_bin_status(assembly_id: int, db: Session):
+def _check_assembly_recycle_bin_recursive(assembly_id: int, db: Session) -> Optional[str]:
     """
-    Update the assembly's recycle_bin status when a part is restored or permanently deleted.
-    When ANY part belonging to an assembly is restored or permanently deleted, 
-    the assembly should be removed from recycle bin (recycle_bin = false).
-    
-    This function also recursively updates parent assemblies.
-    
-    Returns True if the assembly was updated, False otherwise.
+    Return the name of the first assembly (self or ancestor) that is still in the recycle bin.
     """
-    # Check if the assembly itself is in recycle bin
+    current_assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
+    if not current_assembly:
+        return None
+
+    if current_assembly.recycle_bin:
+        return current_assembly.assembly_name
+
+    if current_assembly.parent_id:
+        return _check_assembly_recycle_bin_recursive(current_assembly.parent_id, db)
+
+    return None
+
+
+def _collect_ancestor_assembly_ids(assembly_ids: Set[int], db: Session) -> Set[int]:
+    """Include every parent assembly so deleted sub-assemblies still appear under their parent."""
+    expanded = set(assembly_ids)
+    changed = True
+
+    while changed:
+        changed = False
+        rows = db.query(AssemblyModel.id, AssemblyModel.parent_id).filter(
+            AssemblyModel.id.in_(expanded),
+            AssemblyModel.parent_id.isnot(None),
+        ).all()
+        for _, parent_id in rows:
+            if parent_id and parent_id not in expanded:
+                expanded.add(parent_id)
+                changed = True
+
+    return expanded
+
+
+def _maybe_clear_assembly_recycle_bin(assembly_id: int, db: Session):
+    """
+    Clear recycle_bin on an assembly only when it has no recycled parts or child assemblies left.
+    """
     assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
-    if not assembly:
-        return False
-    
-    # If assembly is in recycle bin, remove it immediately
-    if assembly.recycle_bin:
+    if not assembly or not assembly.recycle_bin:
+        return
+
+    recycled_parts = db.query(PartModel).filter(
+        PartModel.assembly_id == assembly_id,
+        PartModel.recycle_bin == True,
+    ).count()
+    recycled_children = db.query(AssemblyModel).filter(
+        AssemblyModel.parent_id == assembly_id,
+        AssemblyModel.recycle_bin == True,
+    ).count()
+
+    if recycled_parts == 0 and recycled_children == 0:
         assembly.recycle_bin = False
         db.commit()
-    
-    # Recursively update parent assemblies
-    if assembly.parent_id:
-        parent = db.query(AssemblyModel).filter(AssemblyModel.id == assembly.parent_id).first()
-        if parent and parent.recycle_bin:
-            parent.recycle_bin = False
-            db.commit()
-            # Continue recursively up the chain
-            _check_and_update_assembly_recycle_bin_status(assembly.parent_id, db)
-    
-    return True
+        if assembly.parent_id:
+            _maybe_clear_assembly_recycle_bin(assembly.parent_id, db)
 
 
 def _assembly_to_dict(assembly: AssemblyModel, product_map: dict, parent_assembly_map: dict, user_map: dict, db: Session, child_assemblies=None, parts=None) -> dict:
@@ -268,10 +307,29 @@ def get_recycle_bin_parts(
             assemblies_query = assemblies_query.filter(OrderModel.id == order_id)
     
     assemblies = assemblies_query.all()
-    product_map_asm, parent_assembly_map, user_map_asm = _build_assembly_maps(db)
-    
-    # Build hierarchical assembly structure with parts
-    assemblies_data = _build_hierarchical_assemblies(assemblies, db, product_map_asm, parent_assembly_map, user_map_asm, parts)
+    assembly_seed_ids = {assembly.id for assembly in assemblies}
+    assembly_seed_ids.update(part.assembly_id for part in parts if part.assembly_id)
+    if assembly_seed_ids:
+        expanded_assembly_ids = _collect_ancestor_assembly_ids(assembly_seed_ids, db)
+        assemblies = db.query(AssemblyModel).filter(AssemblyModel.id.in_(expanded_assembly_ids)).all()
+    else:
+        assemblies = []
+
+    product_map_asm, parent_assembly_map, _ = _build_assembly_maps(db)
+
+    assemblies_data = _build_hierarchical_assemblies(
+        assemblies,
+        db,
+        product_map_asm,
+        parent_assembly_map,
+        user_map,
+        parts,
+        type_map,
+        rm_map,
+        vendor_map,
+        assembly_map,
+        order_map,
+    )
     
     # If order_id is provided, return order info
     order_info = None
@@ -340,6 +398,106 @@ def soft_delete_part(part_id: int, db: Session = Depends(get_db)):
     return _part_to_dict(part, type_map, rm_map, user_map, vendor_map, product_map, assembly_map, order_map)
 
 
+def _raise_if_any_active_scheduled_parts(db: Session, part_ids: List[int], context: str):
+    if not part_ids:
+        return
+
+    active_parts = db.execute(
+        text("""
+            SELECT p.part_name
+            FROM oms.parts p
+            JOIN scheduling.part_schedule_status pss ON p.id = pss.part_id
+            WHERE p.id = ANY(:part_ids) AND LOWER(pss.status) = 'active'
+        """),
+        {"part_ids": part_ids},
+    ).fetchall()
+
+    if active_parts:
+        part_names = [row[0] for row in active_parts]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Sorry, {context} cannot be deleted because the following parts are "
+                f"currently scheduled for production: {', '.join(part_names)}. "
+                "Please inactivate the schedule status of these parts first."
+            ),
+        )
+
+
+@router.post("/products/{product_id}/soft-delete-parts")
+def soft_delete_all_parts_by_product(product_id: int, db: Session = Depends(get_db)):
+    """Move all parts for a product to the recycle bin."""
+    product = db.query(ProductModel).filter(ProductModel.id == product_id).first()
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with id {product_id} not found",
+        )
+
+    parts = db.query(PartModel).filter(
+        PartModel.product_id == product_id,
+        PartModel.recycle_bin == False,
+    ).all()
+
+    if not parts:
+        return {"product_id": product_id, "deleted_count": 0, "part_ids": []}
+
+    part_ids = [part.id for part in parts]
+    _raise_if_any_active_scheduled_parts(
+        db,
+        part_ids,
+        f"parts for product '{product.product_name}'",
+    )
+
+    for part in parts:
+        part.recycle_bin = True
+
+    db.commit()
+
+    return {
+        "product_id": product_id,
+        "deleted_count": len(part_ids),
+        "part_ids": part_ids,
+    }
+
+
+@router.post("/assemblies/{assembly_id}/soft-delete-parts")
+def soft_delete_all_parts_by_assembly(assembly_id: int, db: Session = Depends(get_db)):
+    """Move all parts directly linked to an assembly to the recycle bin."""
+    assembly = db.query(AssemblyModel).filter(AssemblyModel.id == assembly_id).first()
+    if not assembly:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Assembly with id {assembly_id} not found",
+        )
+
+    parts = db.query(PartModel).filter(
+        PartModel.assembly_id == assembly_id,
+        PartModel.recycle_bin == False,
+    ).all()
+
+    if not parts:
+        return {"assembly_id": assembly_id, "deleted_count": 0, "part_ids": []}
+
+    part_ids = [part.id for part in parts]
+    _raise_if_any_active_scheduled_parts(
+        db,
+        part_ids,
+        f"parts for assembly '{assembly.assembly_name}'",
+    )
+
+    for part in parts:
+        part.recycle_bin = True
+
+    db.commit()
+
+    return {
+        "assembly_id": assembly_id,
+        "deleted_count": len(part_ids),
+        "part_ids": part_ids,
+    }
+
+
 @router.post("/parts/{part_id}/restore")
 def restore_part(part_id: int, db: Session = Depends(get_db)):
     """Restore a part from recycle bin by setting recycle_bin=False"""
@@ -349,6 +507,18 @@ def restore_part(part_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Part with id {part_id} not found"
         )
+
+    if part.assembly_id:
+        blocked_assembly = _check_assembly_recycle_bin_recursive(part.assembly_id, db)
+        if blocked_assembly:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Cannot restore part '{part.part_name}' because its assembly "
+                    f"'{blocked_assembly}' (or a parent assembly) is still in the recycle bin. "
+                    "Please restore the parent assembly first."
+                ),
+            )
 
     part.recycle_bin = False
     db.commit()
@@ -371,10 +541,6 @@ def restore_part(part_id: int, db: Session = Depends(get_db)):
         user_role=user_role,
         details={"part_name": part.part_name, "part_number": part.part_number}
     )
-
-    # Check if parent assembly should be removed from recycle bin
-    if part.assembly_id:
-        _check_and_update_assembly_recycle_bin_status(part.assembly_id, db)
 
     type_map, rm_map, user_map, vendor_map, product_map, assembly_map, order_map = _build_part_maps(db)
     return _part_to_dict(part, type_map, rm_map, user_map, vendor_map, product_map, assembly_map, order_map)
@@ -612,9 +778,8 @@ def permanent_delete_part(part_id: int, db: Session = Depends(get_db)):
         if stock_id_to_update:
             StockAutoUpdateService.update_stock_status_from_units(db, stock_id_to_update)
 
-        # Check if parent assembly should be removed from recycle bin
         if assembly_id:
-            _check_and_update_assembly_recycle_bin_status(assembly_id, db)
+            _maybe_clear_assembly_recycle_bin(assembly_id, db)
 
         return {"message": f"Part with id {part_id} permanently deleted"}
         
@@ -745,10 +910,6 @@ def restore_assembly(assembly_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(assembly)
 
-    # Check if parent assembly should be removed from recycle bin
-    if assembly.parent_id:
-        _check_and_update_assembly_recycle_bin_status(assembly.parent_id, db)
-
     product_map, parent_assembly_map, user_map = _build_assembly_maps(db)
     return _assembly_to_dict(assembly, product_map, parent_assembly_map, user_map, db)
 
@@ -776,8 +937,7 @@ def permanent_delete_assembly(assembly_id: int, db: Session = Depends(get_db)):
     db.delete(assembly)
     db.commit()
 
-    # Check if parent assembly should be removed from recycle bin
     if parent_id:
-        _check_and_update_assembly_recycle_bin_status(parent_id, db)
+        _maybe_clear_assembly_recycle_bin(parent_id, db)
 
     return {"message": f"Assembly with id {assembly_id} permanently deleted"}

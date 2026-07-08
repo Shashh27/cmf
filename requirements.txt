@@ -30,3 +30,4 @@ charset-normalizer==3.3.2
 chardet==5.2.0
 websockets>=11.0.3
 pytz==2024.2
+cryptography==43.0.3

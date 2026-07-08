@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
-from typing import List
+from typing import List, Optional
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 
@@ -22,6 +22,18 @@ from services.stock_auto_update import StockAutoUpdateService
 from services.stock_recommendation_service import StockRecommendationService
 from services.raw_material_history_service import RawMaterialHistoryService
 
+# Valid unit statuses
+VALID_UNIT_STATUSES = ["available", "partially_used", "exhausted", "not_available"]
+
+def validate_unit_status(status: str) -> str:
+    """Validate unit status and return valid status or raise error"""
+    if status not in VALID_UNIT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid unit status '{status}'. Must be one of: {', '.join(VALID_UNIT_STATUSES)}"
+        )
+    return status
+
 router = APIRouter(
     prefix="/rawmaterials",
     tags=["rawmaterials"]
@@ -33,6 +45,7 @@ class StockRecommendationRequest(BaseModel):
     dimensions_str: str
     min_score: float = 0.3
     max_recommendations: int = 10
+    required_length: Optional[float] = None
 
 
 class BatchStockRecommendationRequest(BaseModel):
@@ -136,11 +149,20 @@ def get_raw_materials(
 
 
 @router.get("/inventory-view")
-def get_inventory_view(db: Session = Depends(get_db)):
+def get_inventory_view(
+    admin_id: int | None = None,
+    manufacturing_coordinator_id: int | None = None,
+    db: Session = Depends(get_db)
+):
     """
     Single endpoint returning full inventory hierarchy:
     materials -> stocks (general + order) -> units (with usages).
     Replaces multiple /stock/ and /stock/{id}/units calls.
+    
+    Filters stocks based on user role:
+    - If admin_id provided: shows general stocks + order stocks where admin is involved
+    - If manufacturing_coordinator_id provided: shows general stocks + order stocks where MC is involved
+    - If neither provided: shows all stocks (for superadmin or testing)
     """
     from DB.models.inventory import RawMaterialUnit, RawMaterialUsage
     from sqlalchemy.orm import joinedload
@@ -152,13 +174,50 @@ def get_inventory_view(db: Session = Depends(get_db)):
     if not material_ids:
         return []
 
-    # 2. All stocks for all materials (bulk)
-    stocks = (
-        db.query(RawMaterialStockModel)
-        .filter(RawMaterialStockModel.material_id.in_(material_ids))
-        .order_by(RawMaterialStockModel.material_id.asc(), RawMaterialStockModel.id.asc())
-        .all()
+    # 2. Build stock query with role-based filtering
+    stock_query = db.query(RawMaterialStockModel).filter(
+        RawMaterialStockModel.material_id.in_(material_ids)
     )
+    
+    # Apply role-based filtering for order-related stocks
+    if admin_id is not None or manufacturing_coordinator_id is not None:
+        # Always include general stocks (source_type = 'general')
+        from sqlalchemy import or_
+        
+        # Build conditions for order stocks
+        order_stock_conditions = []
+        
+        if admin_id is not None:
+            # Admin sees order stocks where they are the admin
+            order_stock_conditions.append(
+                (RawMaterialStockModel.source_type == 'order') & 
+                (RawMaterialStockModel.source_order_id.in_(
+                    db.query(OrderModel.id).filter(OrderModel.admin_id == admin_id)
+                ))
+            )
+        
+        if manufacturing_coordinator_id is not None:
+            # MC sees order stocks where they are the manufacturing coordinator
+            order_stock_conditions.append(
+                (RawMaterialStockModel.source_type == 'order') & 
+                (RawMaterialStockModel.source_order_id.in_(
+                    db.query(OrderModel.id).filter(OrderModel.manufacturing_coordinator_id == manufacturing_coordinator_id)
+                ))
+            )
+        
+        # Combine conditions: general stocks OR (order stocks matching role)
+        if order_stock_conditions:
+            stock_query = stock_query.filter(
+                or_(
+                    RawMaterialStockModel.source_type == 'general',
+                    *order_stock_conditions
+                )
+            )
+    
+    stocks = stock_query.order_by(
+        RawMaterialStockModel.material_id.asc(), 
+        RawMaterialStockModel.id.asc()
+    ).all()
     stock_ids = [s.id for s in stocks]
 
     # 3. All units for all stocks (bulk)
@@ -941,7 +1000,8 @@ def recommend_stocks(request: StockRecommendationRequest, db: Session = Depends(
         extracted_material_name=request.material_name,
         extracted_dimensions_str=request.dimensions_str,
         min_score=request.min_score,
-        max_recommendations=request.max_recommendations
+        max_recommendations=request.max_recommendations,
+        required_length=request.required_length,
     )
 
     return {
@@ -965,7 +1025,8 @@ def recommend_stocks_batch(request: BatchStockRecommendationRequest, db: Session
             extracted_material_name=req.material_name,
             extracted_dimensions_str=req.dimensions_str,
             min_score=req.min_score,
-            max_recommendations=req.max_recommendations
+            max_recommendations=req.max_recommendations,
+            required_length=req.required_length,
         )
         results[idx] = {
             "success": True,

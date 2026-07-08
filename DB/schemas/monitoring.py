@@ -40,6 +40,13 @@ class LiveMonitoringDisplay(BaseModel):
     machine_id: int
     machine_name: str
     machine_type: Optional[str] = None
+    work_center_name: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
+    cnc_controller: Optional[str] = None
+    year_of_installation: Optional[int] = None
+    remarks: Optional[str] = None
+    mhr: Optional[int] = None
     status: str
     last_updated: datetime
     sale_order_number: Optional[str] = None

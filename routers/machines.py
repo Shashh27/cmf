@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional
@@ -6,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
-from DB.database import get_db
+from DB.database import SessionLocal, get_db
 from DB.models.configuration import Machine as MachineModel, workcenter as workcenterModel
 from DB.schemas.configuration import (
     Machine,
@@ -23,6 +26,28 @@ router = APIRouter(
     prefix="/machines",
     tags=["machines"]
 )
+
+
+def build_machine_snapshot(db: Session):
+    query = text("""
+        SELECT
+            m.id, m.work_center_id, m.type, m.make, m.model,
+            m.year_of_installation, m.cnc_controller, m.cnc_controller_service,
+            m.remarks, m.mhr, m.calibration_date, m.calibration_due_date,
+            m.calibration_frequency,
+            CASE
+                WHEN mls.status IS NULL OR BTRIM(mls.status) = '' THEN 'OFF'
+                WHEN UPPER(BTRIM(mls.status)) = 'ON' THEN 'IDLE'
+                ELSE UPPER(BTRIM(mls.status))
+            END AS machine_state,
+            wc.work_center_name AS work_center_name
+        FROM configuration.machines m
+        LEFT JOIN production_monitoring.machine_live_status mls ON mls.machine_id = m.id
+        LEFT JOIN configuration.work_centers wc ON wc.id = m.work_center_id
+        ORDER BY m.id ASC
+    """)
+    rows = db.execute(query).mappings().all()
+    return [MachinePublicWithStatus(**dict(row)) for row in rows]
 
 
 def calculate_due_date(calibration_date: datetime, frequency: str) -> Optional[datetime]:
@@ -108,21 +133,25 @@ def create_machine(machine: MachineCreate, db: Session = Depends(get_db)):
 @router.get("/", response_model=List[MachinePublicWithStatus])
 def get_machines(db: Session = Depends(get_db)):
     """Get all machines with live status and work center name"""
-    query = text("""
-        SELECT
-            m.id, m.work_center_id, m.type, m.make, m.model,
-            m.year_of_installation, m.cnc_controller, m.cnc_controller_service,
-            m.remarks, m.mhr, m.calibration_date, m.calibration_due_date,
-            m.calibration_frequency,
-            UPPER(mls.status) AS machine_state,
-            wc.work_center_name AS work_center_name
-        FROM configuration.machines m
-        LEFT JOIN production_monitoring.machine_live_status mls ON mls.machine_id = m.id
-        LEFT JOIN configuration.work_centers wc ON wc.id = m.work_center_id
-        ORDER BY m.id ASC
-    """)
-    rows = db.execute(query).mappings().all()
-    return [MachinePublicWithStatus(**dict(row)) for row in rows]
+    return build_machine_snapshot(db)
+
+
+@router.websocket("/ws")
+async def machines_websocket(websocket: WebSocket):
+    await websocket.accept()
+
+    try:
+        while True:
+            db = SessionLocal()
+            try:
+                snapshot = build_machine_snapshot(db)
+            finally:
+                db.close()
+
+            await websocket.send_json(jsonable_encoder(snapshot))
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        return
 
 
 @router.get("/with-workcenter", response_model=List[MachineWithworkcenterPublic])

@@ -389,7 +389,7 @@ def list_machines(db: Session = Depends(get_db)):
     return [{"id": m.id, "machine_name": m.make} for m in machines]
 
 
-@router.get("/live_recent/{machine_id}")
+@router.get("/live_recent")
 def live_recent(machine_id: int, db: Session = Depends(get_db)):
     row = db.query(MachineEMSLive).filter(MachineEMSLive.machine_id == machine_id).first()
     if not row:
@@ -398,7 +398,6 @@ def live_recent(machine_id: int, db: Session = Depends(get_db)):
     return {
         "machine_id": machine_id,
         "machine_name": machine.make if machine else f"Machine-{machine_id}",
-        "current": row.avg_three_phase_current,
         "power": row.total_instantaneous_power,
         "energy": row.active_energy_delivered,
         "power_factor": row.power_factor,
@@ -408,15 +407,12 @@ def live_recent(machine_id: int, db: Session = Depends(get_db)):
         "phase_a_voltage": row.phase_a_voltage,
         "phase_b_voltage": row.phase_b_voltage,
         "phase_c_voltage": row.phase_c_voltage,
-        "avg_phase_voltage": row.avg_phase_voltage,
         "line_ab_voltage": row.line_ab_voltage,
         "line_bc_voltage": row.line_bc_voltage,
         "line_ca_voltage": row.line_ca_voltage,
-        "avg_line_voltage": row.avg_line_voltage,
         "phase_a_current": row.phase_a_current,
         "phase_b_current": row.phase_b_current,
         "phase_c_current": row.phase_c_current,
-        "avg_three_phase_current": row.avg_three_phase_current,
     }
 
 

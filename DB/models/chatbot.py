@@ -11,6 +11,7 @@ class ChatResponse(BaseModel):
     answer: str = Field(..., description="Human-readable answer from the LLM")
     sql: str = Field(..., description="Generated SQL query")
     data: List[Dict[str, Any]] = Field(default_factory=list, description="Query results as list of dictionaries")
+    suggestions: List[str] = Field(default_factory=list, description="Suggested follow-up questions")
 
 
 class ChatMessage(BaseModel):

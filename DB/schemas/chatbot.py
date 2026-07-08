@@ -1,6 +1,13 @@
 from sqlalchemy import inspect, text
+import warnings
 from DB.database import engine
 from typing import Dict, List
+
+RELEVANT_SCHEMAS = (
+    "oms", "scheduling", "inventory", "configuration", "maintenance",
+    "quality", "notifications", "production_monitoring", "documents",
+    "ems", "accesscontrol",
+)
 
 
 class SchemaService:
@@ -11,19 +18,8 @@ class SchemaService:
     @classmethod
     def load_schema(cls) -> Dict[str, Dict[str, List[str]]]:
         """
-        Load all table definitions from PostgreSQL and cache in memory.
-        
-        Returns:
-            Dictionary mapping schema names to table names to column names
-            Example: {
-                "oms": {
-                    "orders": ["order_id", "customer_id", "order_date", ...],
-                    "parts": ["part_id", "part_name", "part_number", ...]
-                },
-                "scheduling": {
-                    "part_schedule_status": ["id", "part_id", "status", ...]
-                }
-            }
+        Load table definitions from application PostgreSQL schemas only.
+        Skips system catalogs to avoid regtype/regrole SAWarnings.
         """
         if cls._schema_cache is not None:
             return cls._schema_cache
@@ -31,22 +27,23 @@ class SchemaService:
         inspector = inspect(engine)
         schema_info = {}
         
-        # Get all schemas
-        schemas = inspector.get_schema_names()
-        
-        # Filter out system schemas
-        public_schemas = [
-            s for s in schemas 
-            if s not in ['information_schema', 'pg_catalog', 'pg_toast']
-        ]
-        
-        for schema in public_schemas:
+        for schema in RELEVANT_SCHEMAS:
+            if schema not in inspector.get_schema_names():
+                continue
             schema_info[schema] = {}
             tables = inspector.get_table_names(schema=schema)
             
             for table in tables:
-                columns = inspector.get_columns(table_name=table, schema=schema)
-                column_names = [col['name'] for col in columns]
+                if table.startswith("pg_"):
+                    continue
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Did not recognize type",
+                        category=Warning,
+                    )
+                    columns = inspector.get_columns(table_name=table, schema=schema)
+                column_names = [col["name"] for col in columns]
                 schema_info[schema][table] = column_names
         
         cls._schema_cache = schema_info

@@ -24,16 +24,15 @@ class StockRecommendationService:
     def calculate_dimension_match_score(
         extracted_dims: Dict,
         stock_dims: Dict,
-        form_type: str
+        form_type: str,
+        check_stock_length: bool = True,
     ) -> float:
         """
         Calculate match score between extracted dimensions and stock dimensions.
         Returns a score between 0 and 1, where 1 is perfect match.
         
-        Algorithm:
-        - Stock must be >= extracted dimension for ALL dimensions for usable match
-        - If any dimension is less than required, return 0
-        - Score decreases as the difference increases
+        When check_stock_length is False, only cross-section dimensions are scored.
+        Required cut length should be validated against unit remaining_length separately.
         """
         if not extracted_dims or not stock_dims:
             return 0.0
@@ -42,63 +41,148 @@ class StockRecommendationService:
         total_dims = 0
 
         if form_type == "Round":
-            # Check diameter and length
             if "diameter" in extracted_dims and "diameter" in stock_dims:
                 extracted_dia = extracted_dims["diameter"]
                 stock_dia = stock_dims["diameter"]
                 if stock_dia < extracted_dia:
                     return 0.0
-                # Score based on how close the stock diameter is to extracted
                 diff_pct = (stock_dia - extracted_dia) / extracted_dia if extracted_dia > 0 else 1
-                # Allow up to 100% excess with linear penalty
                 score += max(0, 1 - (diff_pct / 1.0))
                 total_dims += 1
             else:
                 return 0.0
 
-            if "length" in extracted_dims and "length" in stock_dims:
+            if check_stock_length and "length" in extracted_dims and "length" in stock_dims:
                 extracted_len = extracted_dims["length"]
                 stock_len = stock_dims["length"]
                 if stock_len < extracted_len:
                     return 0.0
                 diff_pct = (stock_len - extracted_len) / extracted_len if extracted_len > 0 else 1
-                # Allow up to 100% excess with linear penalty
                 score += max(0, 1 - (diff_pct / 1.0))
                 total_dims += 1
-            else:
+            elif check_stock_length:
                 return 0.0
 
         elif form_type == "Square":
-            # Check breadth, height, and length
-            for dim in ["breadth", "height", "length"]:
+            for dim in ["breadth", "height"]:
                 if dim in extracted_dims and dim in stock_dims:
                     extracted_val = extracted_dims[dim]
                     stock_val = stock_dims[dim]
                     if stock_val < extracted_val:
                         return 0.0
                     diff_pct = (stock_val - extracted_val) / extracted_val if extracted_val > 0 else 1
-                    # Allow up to 100% excess with linear penalty
                     score += max(0, 1 - (diff_pct / 1.0))
                     total_dims += 1
                 else:
                     return 0.0
+
+            if check_stock_length and "length" in extracted_dims and "length" in stock_dims:
+                extracted_val = extracted_dims["length"]
+                stock_val = stock_dims["length"]
+                if stock_val < extracted_val:
+                    return 0.0
+                diff_pct = (stock_val - extracted_val) / extracted_val if extracted_val > 0 else 1
+                score += max(0, 1 - (diff_pct / 1.0))
+                total_dims += 1
+            elif check_stock_length:
+                return 0.0
 
         elif form_type == "Pipe":
-            # Check inner_diameter, outer_diameter, and length
-            for dim in ["inner_diameter", "outer_diameter", "length"]:
+            for dim in ["inner_diameter", "outer_diameter"]:
                 if dim in extracted_dims and dim in stock_dims:
                     extracted_val = extracted_dims[dim]
                     stock_val = stock_dims[dim]
                     if stock_val < extracted_val:
                         return 0.0
                     diff_pct = (stock_val - extracted_val) / extracted_val if extracted_val > 0 else 1
-                    # Allow up to 100% excess with linear penalty
                     score += max(0, 1 - (diff_pct / 1.0))
                     total_dims += 1
                 else:
                     return 0.0
 
+            if check_stock_length and "length" in extracted_dims and "length" in stock_dims:
+                extracted_val = extracted_dims["length"]
+                stock_val = stock_dims["length"]
+                if stock_val < extracted_val:
+                    return 0.0
+                diff_pct = (stock_val - extracted_val) / extracted_val if extracted_val > 0 else 1
+                score += max(0, 1 - (diff_pct / 1.0))
+                total_dims += 1
+            elif check_stock_length:
+                return 0.0
+
         return score / total_dims if total_dims > 0 else 0.0
+
+    @staticmethod
+    def _get_usable_units(
+        db: Session,
+        stock_id: int,
+        required_length: Optional[float] = None,
+    ) -> List[RawMaterialUnitModel]:
+        query = db.query(RawMaterialUnitModel).filter(
+            RawMaterialUnitModel.stock_id == stock_id,
+            RawMaterialUnitModel.status.in_(["available", "partially_used"]),
+        )
+        if required_length is not None and required_length > 0:
+            query = query.filter(RawMaterialUnitModel.remaining_length >= required_length)
+        return query.order_by(RawMaterialUnitModel.remaining_length.asc()).all()
+
+    @staticmethod
+    def _cross_section_meets_minimum(extracted_dims: Dict, stock_dims: Dict, form_type: str) -> bool:
+        """Stock cross-section must be >= planned. Larger stock is allowed; smaller is rejected."""
+        if form_type == "Round":
+            planned_dia = extracted_dims.get("diameter")
+            if planned_dia is None:
+                return False
+            return stock_dims.get("diameter", 0) >= planned_dia
+
+        if form_type == "Square":
+            planned_breadth = extracted_dims.get("breadth")
+            planned_height = extracted_dims.get("height")
+            if planned_breadth is None or planned_height is None:
+                return False
+            return (
+                stock_dims.get("breadth", 0) >= planned_breadth
+                and stock_dims.get("height", 0) >= planned_height
+            )
+
+        if form_type == "Pipe":
+            planned_outer = extracted_dims.get("outer_diameter")
+            planned_inner = extracted_dims.get("inner_diameter")
+            if planned_outer is None or planned_inner is None:
+                return False
+            return (
+                stock_dims.get("outer_diameter", 0) >= planned_outer
+                and stock_dims.get("inner_diameter", 0) >= planned_inner
+            )
+
+        return False
+
+    @staticmethod
+    def _nearest_fit_distance(extracted_dims: Dict, stock_dims: Dict, form_type: str) -> float:
+        """
+        Distance from nearest-fit stock. Lower is better.
+        Uses maximum excess across cross-section dimensions.
+        """
+        if not StockRecommendationService._cross_section_meets_minimum(extracted_dims, stock_dims, form_type):
+            return float("inf")
+
+        if form_type == "Round":
+            return stock_dims["diameter"] - extracted_dims["diameter"]
+
+        if form_type == "Square":
+            return max(
+                stock_dims["breadth"] - extracted_dims["breadth"],
+                stock_dims["height"] - extracted_dims["height"],
+            )
+
+        if form_type == "Pipe":
+            return max(
+                stock_dims["outer_diameter"] - extracted_dims["outer_diameter"],
+                stock_dims["inner_diameter"] - extracted_dims["inner_diameter"],
+            )
+
+        return float("inf")
 
     @staticmethod
     def parse_extracted_dimensions(stock_size: str) -> Tuple[Dict, str]:
@@ -227,20 +311,15 @@ class StockRecommendationService:
         extracted_material_name: str,
         extracted_dimensions_str: str,
         min_score: float = 0.3,
-        max_recommendations: int = 10
+        max_recommendations: int = 10,
+        required_length: Optional[float] = None,
     ) -> List[Dict]:
         """
         Recommend stocks based on extracted raw material dimensions.
 
-        Args:
-            db: Database session
-            extracted_material_name: Name of the extracted raw material
-            extracted_dimensions_str: String representation of dimensions (e.g., "140x30")
-            min_score: Minimum match score to include in recommendations (0-1)
-            max_recommendations: Maximum number of recommendations to return
-
-        Returns:
-            List of recommended stocks with match scores
+        When required_length is provided (planned cut length), recommendations only
+        include stocks that have at least one unit with remaining_length >= required_length.
+        Cross-section dimensions still must match; length is validated on live units.
         """
         # Normalize material name for matching
         normalized_material_name = StockRecommendationService.normalize_material_name(extracted_material_name)
@@ -267,9 +346,14 @@ class StockRecommendationService:
             RawMaterialStockModel.source_type == "general"
         ).all()
 
+        effective_required_length = required_length
+        if (effective_required_length is None or effective_required_length <= 0) and extracted_dims.get("length"):
+            effective_required_length = extracted_dims["length"]
+
+        use_unit_length_check = effective_required_length is not None and effective_required_length > 0
+
         recommendations = []
         for stock in stocks:
-            # Only recommend stocks with same form type (lenient: case-insensitive match, skip if form_type is null)
             if stock.form_type:
                 stock_form_type_normalized = stock.form_type.lower().strip()
                 form_type_normalized = form_type.lower().strip()
@@ -277,28 +361,59 @@ class StockRecommendationService:
                     continue
 
             stock_dims = StockRecommendationService.get_stock_dimensions(stock)
-            score = StockRecommendationService.calculate_dimension_match_score(extracted_dims, stock_dims, form_type)
 
-            if score >= min_score:
-                # Calculate available units
-                available_units = db.query(RawMaterialUnitModel).filter(
-                    RawMaterialUnitModel.stock_id == stock.id,
-                    RawMaterialUnitModel.status.in_(["available", "partially_used"])
-                ).count()
+            if not StockRecommendationService._cross_section_meets_minimum(extracted_dims, stock_dims, form_type):
+                continue
 
-                recommendations.append({
-                    "stock_id": stock.id,
-                    "material_id": stock.material_id,
-                    "material_name": stock.material.material_name if stock.material else "",
-                    "form_type": stock.form_type,
-                    "dimensions": stock_dims,
-                    "match_score": score,
-                    "available_quantity": stock.available_quantity,
-                    "available_units": available_units,
-                    "stock_size": f"{stock.diameter if stock.diameter else stock.breadth or stock.inner_diameter}x{stock.length}" if stock.length else "",
-                    "status": stock.status
-                })
+            score = StockRecommendationService.calculate_dimension_match_score(
+                extracted_dims,
+                stock_dims,
+                form_type,
+                check_stock_length=not use_unit_length_check,
+            )
 
-        # Sort by match score (descending) and return top recommendations
-        recommendations.sort(key=lambda x: x["match_score"], reverse=True)
+            if score <= 0:
+                continue
+
+            if not use_unit_length_check and score < min_score:
+                continue
+
+            usable_units = StockRecommendationService._get_usable_units(
+                db,
+                stock.id,
+                effective_required_length if use_unit_length_check else None,
+            )
+
+            if use_unit_length_check and not usable_units:
+                continue
+
+            if not use_unit_length_check and not usable_units:
+                usable_units = StockRecommendationService._get_usable_units(db, stock.id, None)
+                if not usable_units:
+                    continue
+
+            nearest_fit = StockRecommendationService._nearest_fit_distance(extracted_dims, stock_dims, form_type)
+            available_units = len(usable_units)
+            best_remaining = min((unit.remaining_length for unit in usable_units), default=0)
+            max_remaining_length = max((unit.remaining_length for unit in usable_units), default=0)
+
+            recommendations.append({
+                "stock_id": stock.id,
+                "material_id": stock.material_id,
+                "material_name": stock.material.material_name if stock.material else "",
+                "form_type": stock.form_type,
+                "dimensions": stock_dims,
+                "match_score": score,
+                "nearest_fit": nearest_fit,
+                "available_quantity": stock.available_quantity,
+                "available_units": available_units,
+                "usable_units": len(usable_units),
+                "best_remaining_length": best_remaining,
+                "max_remaining_length": max_remaining_length,
+                "required_length": effective_required_length,
+                "stock_size": f"{stock.diameter if stock.diameter else stock.breadth or stock.inner_diameter}x{stock.length}" if stock.length else "",
+                "status": "available",
+            })
+
+        recommendations.sort(key=lambda x: (x["nearest_fit"], -x["match_score"]))
         return recommendations[:max_recommendations]

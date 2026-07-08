@@ -1038,6 +1038,14 @@ class RawMaterialUnitBase(BaseModel):
     cost: Optional[float] = None
     status: str = "available"
 
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        valid_statuses = ["available", "partially_used", "exhausted", "not_available"]
+        if v not in valid_statuses:
+            raise ValueError(f"Invalid status '{v}'. Must be one of: {', '.join(valid_statuses)}")
+        return v
+
 
 class RawMaterialUnitCreate(RawMaterialUnitBase):
     pass
@@ -1052,6 +1060,15 @@ class RawMaterialUnitUpdate(BaseModel):
     weight: Optional[float] = None
     cost: Optional[float] = None
     status: Optional[str] = None
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        if v is not None:
+            valid_statuses = ["available", "partially_used", "exhausted", "not_available"]
+            if v not in valid_statuses:
+                raise ValueError(f"Invalid status '{v}'. Must be one of: {', '.join(valid_statuses)}")
+        return v
 
 
 class RawMaterialUnit(RawMaterialUnitBase):
